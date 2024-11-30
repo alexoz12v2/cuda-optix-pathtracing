@@ -1,0 +1,76 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_SCAN_FOR_MODULES": "ON"
+      }
+    },
+    {
+      "name": "Debug",
+      "inherits": "default",
+      "description": "Debug build with debug symbols.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "Release",
+      "inherits": "default",
+      "description": "Release build with optimizations.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "MinSizeRel",
+      "inherits": "default",
+      "description": "Minimal size release build.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel"
+      }
+    },
+    {
+      "name": "RelWithDebInfo",
+      "inherits": "default",
+      "description": "Release build with debug information.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "Debug",
+      "configurePreset": "Debug",
+      "description": "Build Debug configuration."
+    },
+    {
+      "name": "Release",
+      "configurePreset": "Release",
+      "description": "Build Release configuration."
+    },
+    {
+      "name": "MinSizeRel",
+      "configurePreset": "MinSizeRel",
+      "description": "Build MinSizeRel configuration."
+    },
+    {
+      "name": "RelWithDebInfo",
+      "configurePreset": "RelWithDebInfo",
+      "description": "Build RelWithDebInfo configuration."
+    }
+  ]
+}

@@ -135,6 +135,9 @@ fabric.properties
 cmake-build-*/
 
 
+### Visual Studio Stuff ###
+.vs/
+
 # -------------------------------- LaTex --------------------------------------
 ## Core latex/pdflatex auxiliary files:
 *.aux

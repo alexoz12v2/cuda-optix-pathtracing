@@ -164,19 +164,56 @@ macro(dmt_define_environment)
   endif()
 
   # -- compiler detection
+  message(STATUS "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
   if(MSVC)
     set(DMT_COMPILER_MSVC 1)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       set(DMT_COMPILER_CLANG_CL 1)
+      message(STATUS "Compiler Found: clang-cl.exe")
+    else()
+      message(STATUS "Compiler Found: cl.exe")
     endif()
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(DMT_COMPILER_CLANG 1)
+    message(STATUS "Compiler Found: clang++")
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     set(DMT_COMPILER_GCC 1)
+    message(STATUS "Compiler Found: g++")
   else()
     message(WARNING "Unrecognized compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
 endmacro()
+
+
+function(dmt_get_msvc_flags out_flags)
+  set(out_flags "")
+
+  # Warning flags from dmt_set_target_warnings
+  if(DMT_WARNINGS_AS_ERRORS) 
+    list(APPEND out_flags "/WX")
+  endif()
+
+  list(APPEND out_flags
+    "/w14242" "/w14254" "/w14263" "/w14265" "/w14287"
+    "/we4289" "/w14296" "/w14311" "/w14545" "/w14546"
+    "/w14547" "/w14549" "/w14555" "/w14619" "/w14640"
+    "/w14826" "/w14905" "/w14906" "/w14928" "/permissive-"
+    "/wd4068" "/wd4505" "/wd4800" "/wd4275"
+  )
+
+  # Optimization flags from dmt_set_target_optimization
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    list(APPEND out_flags "/Od" "/Zi")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    list(APPEND out_flags "/O2")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    list(APPEND out_flags "/O2" "/Zi")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    list(APPEND out_flags "/O1")
+  endif() 
+
+  return(PROPAGATE out_flags)
+endfunction()
 
 
 macro(dmt_set_target_warnings target)
@@ -287,6 +324,42 @@ function(dmt_set_target_optimization target)
 endfunction()
 
 
+function(dmt_debug_print_target_props target name)
+  get_target_property(dirs ${target} CXX_MODULE_DIRS)
+  get_target_property(sset ${target} CXX_MODULE_SET)
+  if(NOT name STREQUAL "")
+    get_target_property(sset_name ${target} "CXX_MODULE_SET_${name}")
+    get_target_property(dirs_name ${target} "CXX_MODULE_DIRS_${name}")
+  endif()
+  get_target_property(ssets ${target} CXX_MODULE_SETS)
+  get_target_property(sstd ${target} CXX_MODULE_STD)
+  get_target_property(scan ${target} CXX_SCAN_FOR_MODULES)
+  message(STATUS "[${target}] CXX_MODULE_DIRS: ${dirs}")
+  message(STATUS "[${target}] CXX_MODULE_SET: ${sset}")
+  if(NOT name STREQUAL "")
+    message(STATUS "[${target}] CXX_MODULE_SET_${name}: ${sset_name}")
+    message(STATUS "[${target}] CXX_MODULE_DIRS_${name}: ${dirs_name}")
+  endif()
+  message(STATUS "[${target}] CXX_MODULE_SETS: ${ssets}")
+  message(STATUS "[${target}] CXX_MODULE_STD: ${sstd}")
+  message(STATUS "[${target}] CXX_SCAN_FOR_MODULES: ${scan}")
+endfunction()
+
+
+function(dmt_debug_print_exec_target_props target)
+  get_target_property(icmcd ${target} IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS)
+  get_target_property(icmcf ${target} IMPORTED_CXX_MODULES_COMPILE_FEATURES)
+  get_target_property(icmco ${target} IMPORTED_CXX_MODULES_COMPILE_OPTIONS)
+  get_target_property(icmid ${target} IMPORTED_CXX_MODULES_INCLUDE_DIRECTORIES)
+  get_target_property(icmll ${target} IMPORTED_CXX_MODULES_LINK_LIBRARIES)
+  message(STATUS "[${target}] IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS: ${icmcd}")
+  message(STATUS "[${target}] IMPORTED_CXX_MODULES_COMPILE_FEATURES: ${icmcf}")
+  message(STATUS "[${target}] IMPORTED_CXX_MODULES_COMPILE_OPTIONS: ${icmco}")
+  message(STATUS "[${target}] IMPORTED_CXX_MODULES_INCLUDE_DIRECTORIES: ${icmcd}")
+  message(STATUS "[${target}] IMPORTED_CXX_MODULES_LINK_LIBRARIES: ${icmll}")
+endfunction()
+
+
 # helper function to tweak visibility of public symbols
 # ensure public symbols are hidden by default (exported ones are explicitly marked)
 function(dmt_set_public_symbols_hidden target)
@@ -300,6 +373,37 @@ endfunction()
 # create a c++20 module library, with no target_sources preset, just initialize the bare necessities
 # to have a fully functioning module
 function(dmt_add_module_library name module_name)
+  # parse arguments and extract the clean target path name
+  cmake_parse_arguments(THIS_ARGS
+    "" # no options
+    "MODULE_INTERAFACE;MODULE_IMPLEMENTATION" # single argument keys
+    "" # multiple arguments keys
+    ${ARGN}
+  )
+  if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
+    message(FATAL_ERROR "unexpected arguments while calling dmt_add_module_library: ${THIS_ARGS_UNPARSED_ARGUMENTS}")
+  endif()
+
+  string(REPLACE "dmt-" "" target_path ${name})
+  string(REPLACE "dmt-" "dmt::" alias_name ${name})
+  if(NOT target_path STREQUAL ${module_name})
+    message(WARNING "${target_path} not equal to ${module_name}")
+  endif()
+
+  message(STATUS "[${name}] MODULE_INTERFACE: ${THIS_ARGS_MODULE_INTERAFACE}")
+  message(STATUS "[${name}] MODULE_IMPLEMENTATION: ${THIS_ARGS_MODULE_IMPLEMENTATION}")
+  message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
+
+  set(interface_file_list "")
+  foreach(interface_file ${THIS_ARGS_MODULE_INTERAFACE})
+    string(PREPEND interface_file ${CMAKE_SOURCE_DIR}/include/${target_path}/)
+    list(APPEND interface_file_list ${interface_file})
+  endforeach()
+  message(STATUS "${name} target sources are MODULE_INTEFACE ${interface_file_list}\n"
+    "MODULE_IMPLEMENTATION ${THIS_ARGS_MODULE_IMPLEMENTATION}")
+
+
+  # add library target (static)
   add_library(${name})
 
   # may give problems if CUDA interfaces between modules are shared
@@ -307,17 +411,56 @@ function(dmt_add_module_library name module_name)
   # modules require C++20 support
   target_compile_features(${name} PUBLIC cxx_std_20)
 
+  # cuda specific
+  set_target_properties(${name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+  dmt_set_target_warnings(${name})
+  dmt_set_target_optimization(${name})
+
+  # Possible TODO: Pre Compiled Headers
+
   if(MSVC)
     # TODO correct
-    set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.ifc)
-    target_compile_options(${name}
-      PRIVATE /interface /ifcOutput ${BMI} # treat source as module interface unit https://www.modernescpp.com/index.php/c-20-module-interface-unit-and-module-implementation-unit/
-      INTERFACE /reference ${module_name}=${BMI} # the module can reference an external interface file called ${module_name} with path ${BMI}
-    )
+    #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.ifc)
+    #target_compile_options(${name}
+    #  PRIVATE /interface /ifcOutput ${BMI} # treat source as module interface unit https://www.modernescpp.com/index.php/c-20-module-interface-unit-and-module-implementation-unit/
+    #   INTERFACE /reference ${module_name}=${BMI} # the module can reference an external interface file called ${module_name} with path ${BMI}
+    # )
     # when the clean target is invoked, then remove all files in the ${BMI} path
-    set_target_properties(${name} PROPERTIES ADDITIONAL_CLEAN_FILES ${BMI})
+    #set_target_properties(${name} PROPERTIES ADDITIONAL_CLEAN_FILES ${BMI})
     # mark the files as generated such that cmake doesn't expect them to be already there
-    set_source_files_properties(${BMI} PROPERTIES GENERATED ON)
+    #set_source_files_properties(${BMI} PROPERTIES GENERATED ON)
+
+    # setup path for .ifc file
+    # set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${module_name}.ifc)
+    # message(STATUS "BMI we want to generate from target ${name} is ${BMI}")
+
+    # set flag implementation unit
+    #target_compile_options(${name} 
+    #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
+    #  PUBLIC /reference ${module_name}=${BMI}
+    #)
+
+    get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
+    message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
+
+    # precompile module interface with a custom target (excluded from all?)
+    # might not work with cuda interfaces
+    # dmt_get_msvc_flags(out_flags)
+    # get_target_property(target_flags ${name} COMPILE_FLAGS)
+    # if(target_flags STREQUAL "target_flags-NOTFOUND")
+    #  set(target_flags "")
+    # endif()
+    # message(STATUS ${out_flags})
+    # message(STATUS ${target_flags})
+    # add_custom_target("${name}_interface" 
+    #  BYPRODUCTS ${BMI_PROD}
+    #  COMMAND ${CMAKE_CXX_COMPILER} ${target_flags} ${out_flags} /std:c++20 /interface /ifcOutput ${BMI} /TP /c ${interface_file_list}
+    #  DEPENDS ${interfaces}
+    #)
+    # add_dependencies(${name} "${name}_interface")
+    # set_target_properties(${name} PROPERTIES ADDITIONAL_CLEAN_FILES ${BMI})
+    # set_source_files_properties(${BMI} PROPERTIES GENERATED ON)
   elseif(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
     set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.pcm)
     string(REPLACE "dmt-" "" dep_no_namespace ${BMI})
@@ -338,22 +481,13 @@ function(dmt_add_module_library name module_name)
     #)
   endif()
 
-  # cuda specific
-  set_target_properties(${name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-
-  dmt_set_target_warnings(${name})
-  dmt_set_target_optimization(${name})
-
-  # Possible TODO: Pre Compiled Headers
-
   # set the exported name of the target (the one you use to target_link_libraries) to dmt::{name}
   # I expect all targets to start with dmt. Replace all - with _,
   # define export symbol (for dlls, linking) as uppercase
-  string(REGEX REPLACE "^dmt-" "" CLEAN_TARGET_NAME "${name}")
-  string(REPLACE "-" "_" NAME_UPPER "${CLEAN_TARGET_NAME}")
+  string(REPLACE "-" "_" NAME_UPPER "${target_path}")
   string(TOUPPER "${NAME_UPPER}" NAME_UPPER)
   set_target_properties(${name} PROPERTIES DEFINE_SYMBOL ${NAME_UPPER}_EXPORTS)
-  set_target_properties(${name} PROPERTIES EXPORT_NAME dmt::${CLEAN_TARGET_NAME})
+  set_target_properties(${name} PROPERTIES EXPORT_NAME dmt::${target_path})
 
   # Possible todo: Handle Shared libraries (SFML)
 
@@ -370,17 +504,73 @@ function(dmt_add_module_library name module_name)
   endif()
   if(DMT_COMPILER_CLANG AND NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
     # TODO: handle dependencies
-    message(STATUS "clang-tidy requires me to manually setup the prebuilt-module-path,\n\tsetting path for ${name} to ${PROJECT_BINARY_DIR}/src/${CLEAN_TARGET_NAME}/CMakeFiles/${name}.dir")
+    message(STATUS "clang-tidy requires me to manually setup the prebuilt-module-path,\n\tsetting path for ${name} to ${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir")
     target_compile_options(${name} PRIVATE
-      -fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${CLEAN_TARGET_NAME}/CMakeFiles/${name}.dir
+      -fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir
     )
+  endif()
+
+  # construct the sources lists
+  target_sources(${name}
+    PUBLIC
+      FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+        FILES ${interface_file_list}
+    PRIVATE
+      ${THIS_ARGS_MODULE_IMPLEMENTATION}
+  )
+
+  # create alias
+  add_library(${alias_name} ALIAS ${name})
+  dmt_debug_print_target_props(${name} ${module_name})
+  
+  if(MSVC)
+    if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+      message(FATAL_ERROR "Windows with Ninja doesn't find the module interface from the module implementation unit. I don't know why.")
+      # module dependency between module interface unit and module implementation unit works fine on visual studio, 
+      # but not on ninja. Still have no idea why
+      #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${name}.dir/${module_name}.ifc)
+      #message("GENERATOR ------------------- ${CMAKE_GENERATOR}, different from VS. Trying to patch up module on ${BMI}")
+      #target_compile_options(${name}
+      #  PRIVATE /interface /ifcOutput ${BMI}
+      #  PUBLIC /reference ${module_name}=${BMI}
+      # )
+    endif()
   endif()
 endfunction()
 
 
 # usage: dmt_add_example creates an executable with no sources, configured and prepared to be
 function(dmt_add_example target)
+  set(multivalue PUBLIC_SOURCES PRIVATE_SOURCES PUBLIC_DEPS PRIVATE_DEPS)
+  cmake_parse_arguments(ARGS "" "" "${multivalue}" ${ARGN})
+
+  # Create the target (assuming it's an executable)
   add_executable(${target})
+
+  message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
+  message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
+  message(STATUS "${target} ARGS_PUBLIC_DEPS ${ARGS_PUBLIC_DEPS}")
+  message(STATUS "${target} ARGS_PRIVATE_DEPS ${ARGS_PRIVATE_DEPS}")
+
+  # Add public sources if provided
+  if(ARGS_PUBLIC_SOURCES)
+    target_sources(${target} PUBLIC ${ARGS_PUBLIC_SOURCES})
+  endif()
+
+  # Add private sources if provided
+  if(ARGS_PRIVATE_SOURCES)
+    target_sources(${target} PRIVATE ${ARGS_PRIVATE_SOURCES})
+  endif()
+
+  # Add public dependencies if provided
+  if(ARGS_PUBLIC_DEPS)
+    target_link_libraries(${target} PUBLIC ${ARGS_PUBLIC_DEPS})
+  endif()
+
+  # Add private dependencies if provided
+  if(ARGS_PRIVATE_DEPS)
+    target_link_libraries(${target} PRIVATE ${ARGS_PRIVATE_DEPS})
+  endif()
 
   # possible todo: PCH
 
@@ -392,6 +582,10 @@ function(dmt_add_example target)
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
+
+  if(MSVC)
+    #target_compile_options(${target} PRIVATE )
+  endif()
 
   # possible todo: Automatically include dependencies here
 endfunction()

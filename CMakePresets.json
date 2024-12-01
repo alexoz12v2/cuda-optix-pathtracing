@@ -13,14 +13,50 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
-        "CMAKE_C_COMPILER": "/usr/bin/clang",
         "CMAKE_CXX_SCAN_FOR_MODULES": "ON"
       }
     },
     {
-      "name": "Debug",
+      "name": "LinuxDefault",
       "inherits": "default",
+      "description": "Default settings for Linux",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_COMPILER": "/usr/bin/clang"
+      }
+    },
+    {
+      "name": "WindowsDefault",
+      "inherits": "default",
+      "description": "Default settings for Windows",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_C_COMPILER": "cl.exe"
+      }
+    },
+
+    {
+      "name": "Debug-VS",
+      "inherits": ["WindowsDefault"],
+      "generator": "Visual Studio 17 2022",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+
+    {
+      "name": "Debug",
+      "inherits": ["WindowsDefault", "LinuxDefault"],
       "description": "Debug build with debug symbols.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
@@ -28,7 +64,7 @@
     },
     {
       "name": "Release",
-      "inherits": "default",
+      "inherits": ["WindowsDefault", "LinuxDefault"],
       "description": "Release build with optimizations.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -36,7 +72,7 @@
     },
     {
       "name": "MinSizeRel",
-      "inherits": "default",
+      "inherits": ["WindowsDefault", "LinuxDefault"],
       "description": "Minimal size release build.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel"
@@ -44,7 +80,7 @@
     },
     {
       "name": "RelWithDebInfo",
-      "inherits": "default",
+      "inherits": ["WindowsDefault", "LinuxDefault"],
       "description": "Release build with debug information.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
@@ -55,7 +91,16 @@
     {
       "name": "Debug",
       "configurePreset": "Debug",
-      "description": "Build Debug configuration."
+      "verbose": true,
+      "description": "Build Debug configuration.",
+      "jobs": 4
+    },
+    {
+      "name": "Debug-ninja",
+      "inherits": "Debug",
+      "nativeToolOptions": [
+        "-d", "explain"
+      ]
     },
     {
       "name": "Release",
@@ -74,3 +119,4 @@
     }
   ]
 }
+

@@ -58,6 +58,9 @@ endmacro()
 # Build Type
 dmt_set_option(CMAKE_BUILD_TYPE Debug STRING "Choose the type of build (eg Debug, Release)")
 
+# docs generation
+dmt_set_option(DMT_GENERATE_DOCS ON BOOL "Generate Docs")
+
 ################################################################################
 # Other Global CMake Configuration
 ################################################################################
@@ -74,6 +77,7 @@ enable_language(CUDA)
 
 include(cmake/Config.cmake)
 include(cmake/Dependencies.cmake)
+include(cmake/SetupDoxygen.cmake)
 
 dmt_define_environment()
 dmt_setup_dependencies()
@@ -110,3 +114,7 @@ endif()
 
 dmt_set_option(CLANG_FORMAT_EXECUTABLE clang-format STRING "clang-format executable program")
 include(cmake/ClangFormat.cmake)
+
+if(DMT_GENERATE_DOCS)
+  dmt_setup_doxygen()
+endif()

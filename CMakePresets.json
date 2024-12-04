@@ -9,7 +9,6 @@
     {
       "name": "default",
       "hidden": true,
-      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
@@ -18,7 +17,9 @@
     },
     {
       "name": "LinuxDefault",
+      "hidden": true,
       "inherits": "default",
+      "generator": "Ninja",
       "description": "Default settings for Linux",
       "condition": {
         "type": "equals",
@@ -32,7 +33,9 @@
     },
     {
       "name": "WindowsDefault",
+      "hidden": true,
       "inherits": "default",
+      "generator": "Visual Studio 17 2022",
       "description": "Default settings for Windows",
       "condition": {
         "type": "equals",
@@ -44,43 +47,72 @@
         "CMAKE_C_COMPILER": "cl.exe"
       }
     },
-
     {
       "name": "Debug-VS",
+      "hidden": false,
       "inherits": ["WindowsDefault"],
-      "generator": "Visual Studio 17 2022",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
-
     {
-      "name": "Debug",
-      "inherits": ["WindowsDefault", "LinuxDefault"],
+      "name": "Debug-Linux",
+      "hidden": false,
+      "inherits": ["LinuxDefault"],
       "description": "Debug build with debug symbols.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
-      "name": "Release",
-      "inherits": ["WindowsDefault", "LinuxDefault"],
+      "name": "Release-Linux",
+      "hidden": false,
+      "inherits": ["LinuxDefault"],
       "description": "Release build with optimizations.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
-      "name": "MinSizeRel",
-      "inherits": ["WindowsDefault", "LinuxDefault"],
+      "name": "Release-VS",
+      "hidden": false,
+      "inherits": ["WindowsDefault"],
+      "description": "Release build with optimizations.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "MinSizeRel-Linux",
+      "hidden": false,
+      "inherits": ["LinuxDefault"],
       "description": "Minimal size release build.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel"
       }
     },
     {
-      "name": "RelWithDebInfo",
-      "inherits": ["WindowsDefault", "LinuxDefault"],
+      "name": "MinSizeRel-VS",
+      "hidden": false,
+      "inherits": ["WindowsDefault"],
+      "description": "Minimal size release build.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel"
+      }
+    },
+    {
+      "name": "RelWithDebInfo-Linux",
+      "hidden": false,
+      "inherits": ["LinuxDefault"],
+      "description": "Release build with debug information.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "RelWithDebInfo-VS",
+      "hidden": false,
+      "inherits": ["WindowsDefault"],
       "description": "Release build with debug information.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
@@ -89,32 +121,48 @@
   ],
   "buildPresets": [
     {
-      "name": "Debug",
-      "configurePreset": "Debug",
+      "name": "Debug-Linux",
+      "configurePreset": "Debug-Linux",
       "verbose": true,
       "description": "Build Debug configuration.",
-      "jobs": 4
-    },
-    {
-      "name": "Debug-ninja",
-      "inherits": "Debug",
       "nativeToolOptions": [
         "-d", "explain"
       ]
     },
     {
-      "name": "Release",
-      "configurePreset": "Release",
+      "name": "Debug-VS",
+      "configurePreset": "Debug-VS",
+      "verbose": true,
+      "description": "Build Debug configuration."
+    },
+    {
+      "name": "Release-Linux",
+      "configurePreset": "Release-Linux",
       "description": "Build Release configuration."
     },
     {
-      "name": "MinSizeRel",
-      "configurePreset": "MinSizeRel",
+      "name": "Release-VS",
+      "configurePreset": "Release-VS",
+      "description": "Build Release configuration."
+    },
+    {
+      "name": "MinSizeRel-Linux",
+      "configurePreset": "MinSizeRel-Linux",
       "description": "Build MinSizeRel configuration."
     },
     {
-      "name": "RelWithDebInfo",
-      "configurePreset": "RelWithDebInfo",
+      "name": "MinSizeRel-VS",
+      "configurePreset": "MinSizeRel-VS",
+      "description": "Build MinSizeRel configuration."
+    },
+    {
+      "name": "RelWithDebInfo-Linux",
+      "configurePreset": "RelWithDebInfo-Linux",
+      "description": "Build RelWithDebInfo configuration."
+    },
+    {
+      "name": "RelWithDebInfo-VS",
+      "configurePreset": "RelWithDebInfo-VS",
       "description": "Build RelWithDebInfo configuration."
     }
   ]

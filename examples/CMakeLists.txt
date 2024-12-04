@@ -1,1 +1,2 @@
-add_subdirectory(projtest)
+
+dmt_add_subdirectories()

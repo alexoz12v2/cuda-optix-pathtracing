@@ -11,9 +11,9 @@ get_target_property(CATCH2_INCLUDE_DIRS Catch2 INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(Catch2 SYSTEM INTERFACE ${CATCH2_INCLUDE_DIRS})
 
 # base target for tests
-add_library(dmt-test-main INTERFACE)
-target_sources(dmt-test-main INTERFACE FILE_SET HEADERS FILES shared/dmtutils.h)
-target_include_directories(dmt-test-main INTERFACE shared)
+add_library(dmt-test-main)
+target_sources(dmt-test-main INTERFACE FILE_SET HEADERS FILES shared/dmtutils.h PRIVATE shared/dmtutils.cpp)
+target_include_directories(dmt-test-main PUBLIC shared ${PROJECT_SOURCE_DIR}/extern)
 target_link_libraries(dmt-test-main INTERFACE Catch2::Catch2WithMain)
 
 # add tests
@@ -23,15 +23,18 @@ set(DMT_TEST_TARGETS_LIST "")
 set(COVERAGE_PREFIX "")
 
 # automatically creates ; lists
-set(PROJTEST_SRC
-  projtest/projtest.test.cpp
+dmt_add_test(dmt-test-testdmt
+  TARGET_LIST DMT_TEST_TARGETS_LIST
+  FILES testdmt/projtest.test.cpp
+  DEPENDENCIES dmt-test-main dmt::testdmt
 )
-set(PROJTEST_DEPS
-  dmt-test-main
-  dmt::projtest
+
+dmt_add_test(dmt-test-testdmtpartitions
+  TARGET_LIST DMT_TEST_TARGETS_LIST
+  FILES testdmtpartitions/testdmtpartitions.test.cpp testdmtpartitions/testdmtpartitions-implonly.test.cpp
+        testdmtpartitions/testdmtpartitions-moretrig.test.cpp testdmtpartitions/testdmtpartitions-trig.test.cpp
+  DEPENDENCIES dmt-test-main dmt::testdmtpartitions
 )
-# The "" around the lists are important!
-dmt_add_test(dmt-test-projtest "${PROJTEST_SRC}" "${PROJTEST_DEPS}" DMT_TEST_TARGETS_LIST)
 
 # run tests as soon as you build them
 dmt_set_option(DMT_RUN_TESTS ON BOOL "True to run tests as soon as you build them")

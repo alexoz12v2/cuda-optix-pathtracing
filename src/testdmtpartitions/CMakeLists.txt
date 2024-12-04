@@ -1,0 +1,6 @@
+dmt_add_module_library(dmt-testdmtpartitions testdmtpartitions
+  MODULE_INTERFACE testdmtpartitions.cppm
+  MODULE_IMPLEMENTATION testdmtpartitions.cpp
+  MODULE_PARTITION_INTERFACES testdmtpartitions-moretrig.cppm testdmtpartitions-trig.cppm testdmtpartitions-implonly.cppm
+  MODULE_PARTITION_IMPLEMENTATIONS testdmtpartitions-moretrig.cpp testdmtpartitions-trig.cpp testdmtpartitions-implonly.cpp
+)

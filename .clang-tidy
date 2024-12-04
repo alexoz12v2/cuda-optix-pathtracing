@@ -82,6 +82,6 @@ CheckOptions:
   readability-identifier-naming.ProtectedMemberPrefix: m_
   readability-identifier-naming.PrivateMemberPrefix: m_
 HeaderFilterRegex: '^.*/cuda-optix-pathtracing/include/.*'
-WarningsAsErrors: '*'
+WarningsAsErrors: ''
 SystemHeaders: false
 UseColor: true

@@ -376,8 +376,8 @@ function(dmt_add_module_library name module_name)
   # parse arguments and extract the clean target path name
   cmake_parse_arguments(THIS_ARGS
     "" # no options
-    "MODULE_INTERAFACE;MODULE_IMPLEMENTATION" # single argument keys
-    "" # multiple arguments keys
+    "MODULE_INTERFACE;MODULE_IMPLEMENTATION" # single argument keys
+    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS" # multiple arguments keys
     ${ARGN}
   )
   if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
@@ -387,20 +387,30 @@ function(dmt_add_module_library name module_name)
   string(REPLACE "dmt-" "" target_path ${name})
   string(REPLACE "dmt-" "dmt::" alias_name ${name})
   if(NOT target_path STREQUAL ${module_name})
-    message(WARNING "${target_path} not equal to ${module_name}")
+    message(WARNING "${target_path} not equal to ${module_name} (maybe target name is different from module name, and it shouldn't)")
   endif()
 
-  message(STATUS "[${name}] MODULE_INTERFACE: ${THIS_ARGS_MODULE_INTERAFACE}")
+  message(STATUS "[${name}] MODULE_INTERFACE: ${THIS_ARGS_MODULE_INTERFACE}")
   message(STATUS "[${name}] MODULE_IMPLEMENTATION: ${THIS_ARGS_MODULE_IMPLEMENTATION}")
+  message(STATUS "[${name}] MODULE_PARTITION_INTERFACES: ${THIS_ARGS_MODULE_PARTITION_INTERFACES}")
+  message(STATUS "[${name}] MODULE_PARTITION_IMPLEMENTATIONS: ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS}")
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
-  set(interface_file_list "")
-  foreach(interface_file ${THIS_ARGS_MODULE_INTERAFACE})
-    string(PREPEND interface_file ${CMAKE_SOURCE_DIR}/include/${target_path}/)
-    list(APPEND interface_file_list ${interface_file})
-  endforeach()
-  message(STATUS "${name} target sources are MODULE_INTEFACE ${interface_file_list}\n"
-    "MODULE_IMPLEMENTATION ${THIS_ARGS_MODULE_IMPLEMENTATION}")
+  set(interface_file_list "${CMAKE_SOURCE_DIR}/include/${target_path}/${THIS_ARGS_MODULE_INTERFACE}")
+  set(implementation_file_list "${THIS_ARGS_MODULE_IMPLEMENTATION}")
+  if(DEFINED THIS_ARGS_MODULE_PARTITION_INTERFACES)
+    foreach(interface_file ${THIS_ARGS_MODULE_PARTITION_INTERFACES})
+      string(PREPEND interface_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
+      list(APPEND interface_file_list "${interface_file}")
+    endforeach()
+  endif()
+  if(DEFINED THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS)
+    foreach(impl_file ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS})
+      list(APPEND implementation_file_list "${impl_file}")
+    endforeach()
+  endif()
+  message(STATUS "${name} target sources are\n\tinterfaces     ${interface_file_list}\n\t"
+    "implementation ${implementation_file_list}")
 
 
   # add library target (static)
@@ -441,8 +451,8 @@ function(dmt_add_module_library name module_name)
     #  PUBLIC /reference ${module_name}=${BMI}
     #)
 
-    get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
-    message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
+    #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
+    #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
 
     # precompile module interface with a custom target (excluded from all?)
     # might not work with cuda interfaces
@@ -462,12 +472,12 @@ function(dmt_add_module_library name module_name)
     # set_target_properties(${name} PROPERTIES ADDITIONAL_CLEAN_FILES ${BMI})
     # set_source_files_properties(${BMI} PROPERTIES GENERATED ON)
   elseif(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
-    set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.pcm)
-    string(REPLACE "dmt-" "" dep_no_namespace ${BMI})
-    if(NOT dep_no_namespace STREQUAL "")
-      set(BMI ${dep_no_namespace})
-    endif()
-    message("Compile Options for module target ${name} on BMI ${BMI}")
+    #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.pcm)
+    #string(REPLACE "dmt-" "" dep_no_namespace ${BMI})
+    #if(NOT dep_no_namespace STREQUAL "")
+    #  set(BMI ${dep_no_namespace})
+    #endif()
+    #message("Compile Options for module target ${name} on BMI ${BMI}")
     # specify prebuilt module dependencies with -fprebuilt-module-path (TODO)
 
     # precompile prevents BMI generation, that's because I will generate it by myself?
@@ -476,8 +486,8 @@ function(dmt_add_module_library name module_name)
     #add_custom_command(
     #  OUTPUT ${BMI}
     #  COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -x -c++module --precompile -c -o ${BMI}
-    #    ${CMAKE_SOURCE_DIR}/include/projtest/testImplementationUnit.cppm
-    #  DEPENDS ${CMAKE_SOURCE_DIR}/include/projtest/testImplementationUnit.cppm
+    #    ${CMAKE_SOURCE_DIR}/include/testdmt/testImplementationUnit.cppm
+    #  DEPENDS ${CMAKE_SOURCE_DIR}/include/testdmt/testImplementationUnit.cppm
     #)
   endif()
 
@@ -516,7 +526,7 @@ function(dmt_add_module_library name module_name)
       FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
         FILES ${interface_file_list}
     PRIVATE
-      ${THIS_ARGS_MODULE_IMPLEMENTATION}
+      ${implementation_file_list}
   )
 
   # create alias
@@ -593,10 +603,25 @@ endfunction()
 
 # usage: dmt_add_test target -> creates and adds a target which contains a test
 # doesn't add any source
-function(dmt_add_test target THE_SOURCES THE_DEPENDS OUT_LIST)
+function(dmt_add_test target)
+  cmake_parse_arguments(THIS_ARGS
+    "" # no options
+    "TARGET_LIST" # single argument keys
+    "FILES;DEPENDENCIES" # multiple arguments keys
+    ${ARGN}
+  )
+  message(STATUS "[dmt_add_test(${target})] TARGET_LIST ${THIS_ARGS_TARGET_LIST}")
+  message(STATUS "[dmt_add_test(${target})] FILES ${THIS_ARGS_FILES}")
+  message(STATUS "[dmt_add_test(${target})] DEPENDENCIES ${THIS_ARGS_DEPENDENCIES}")
+  if(NOT DEFINED THIS_ARGS_FILES)
+    message(FATAL_ERROR "[dmt_add_test] test target ${target} had no files: ${THIS_ARGS_FILES}")
+  endif()
+  if(NOT DEFINED ${THIS_ARGS_TARGET_LIST})
+    message(FATAL_ERROR "[dmt_add_test] target list wasn't passed ${THIS_ARGS_TARGET_LIST}")
+  endif()
+
   add_executable(${target})
-  target_sources(${target} PRIVATE ${THE_SOURCES})
-  message(STATUS "Adding test target ${target} with sources ${THE_SOURCES}")
+  target_sources(${target} PRIVATE ${THIS_ARGS_FILES})
   # possible TODO: PCH
 
   # showup folder on visual studio
@@ -645,12 +670,33 @@ function(dmt_add_test target THE_SOURCES THE_DEPENDS OUT_LIST)
   dmt_set_public_symbols_hidden(${target})
 
   # dependencies
-  target_link_libraries(dmt-test-projtest PRIVATE ${THE_DEPENDS})
+  if(DEFINED THIS_ARGS_DEPENDENCIES)
+    target_link_libraries(${target} PRIVATE ${THIS_ARGS_DEPENDENCIES})
+  endif()
+  target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/extern ${PROJECT_SOURCE_DIR}/test/shared)
 
   # possible todo: dependencies and proper code coverage
 
   catch_discover_tests(${target} WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
   message(STATUS "test: Discovered tests for target ${target} from directory ${CMAKE_CURRENT_LIST_DIR}")
-  set(${OUT_LIST} "${${OUT_LIST}} ${target}")
-  return(PROPAGATE ${OUT_LIST})
+  set(${THIS_ARGS_TARGET_LIST} "${${THIS_ARGS_TARGET_LIST}} ${target}")
+  return(PROPAGATE ${THIS_ARGS_TARGET_LIST})
 endfunction()
+
+
+macro(dmt_add_subdirectories)
+  set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
+  # Get all subdirectories in the current source directory
+  file(GLOB SUBDIRECTORIES RELATIVE ${BASE_DIR} ${BASE_DIR}/*)
+
+  # Iterate over each subdirectory
+  foreach(SUBDIR ${SUBDIRECTORIES})
+    # Check if it is a directory
+    if(IS_DIRECTORY ${BASE_DIR}/${SUBDIR})
+      # Add the subdirectory
+      message(STATUS "Adding subdirectory: ${SUBDIR}")
+      add_subdirectory(${SUBDIR})
+    endif()
+  endforeach()
+endmacro()

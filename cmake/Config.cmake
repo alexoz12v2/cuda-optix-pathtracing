@@ -450,6 +450,7 @@ function(dmt_add_module_library name module_name)
     #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
     #  PUBLIC /reference ${module_name}=${BMI}
     #)
+    target_compile_options(${name} PRIVATE /Zc:preprocessor)
 
     #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
     #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
@@ -594,6 +595,7 @@ function(dmt_add_example target)
   dmt_set_target_optimization(${target})
 
   if(MSVC)
+    target_compile_options(${target} PRIVATE /Zc:preprocessor)
     #target_compile_options(${target} PRIVATE )
   endif()
 
@@ -629,6 +631,10 @@ function(dmt_add_test target)
   # startup path for debugging in IDEs
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_features(${target} PUBLIC cxx_std_20)
+
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /Zc:preprocessor)
+  endif()
 
   # Iterate over dependencies to add their corresponding BMI paths
   #set(BMI "")

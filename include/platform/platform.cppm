@@ -34,6 +34,9 @@ public:
     [[nodiscard]] uint64_t getSize() const;
 
 private:
+    // Threadpool m_threadpool
+    // Display m_display
+    // ...
     unsigned char* m_buffer = nullptr;
     uint64_t       m_size;
 };

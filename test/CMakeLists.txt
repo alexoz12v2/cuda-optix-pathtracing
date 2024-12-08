@@ -36,6 +36,12 @@ dmt_add_test(dmt-test-testdmtpartitions
   DEPENDENCIES dmt-test-main dmt::testdmtpartitions
 )
 
+dmt_add_test(dmt-test-platform
+  TARGET_LIST DMT_TEST_TARGETS_LIST
+  FILES platform/platform.test.cpp
+  DEPENDENCIES dmt-test-main dmt::platform
+)
+
 # run tests as soon as you build them
 dmt_set_option(DMT_RUN_TESTS ON BOOL "True to run tests as soon as you build them")
 if(DMT_RUN_TESTS)

@@ -61,3 +61,31 @@ Dopo la generazione, devi fare la build del target `dmt-doxygen`
 ```
 cmake --build --preset Debug-Linux --target dmt-doxygen
 ```
+
+## Tasks
+- [ ] Completamento classe `Platform`
+  - [ ] Alessio: Logging
+  - [ ] Alessio: Memory Allocation
+  - [ ] Anto: ThreadPool = 1 Thread IO + N Workers, Workers ascolta una lock-free queue
+        [Job Scheduling Talk](https://www.youtube.com/watch?v=HIVBhKj7gQU), 
+        [Job Scheduling Slides](https://www.createursdemondes.fr/wp-content/uploads/2015/03/parallelizing_the_naughty_dog_engine_using_fibers.pdf)
+        [Atomics (Queue)](https://www.youtube.com/watch?v=ZQFzMfHIxng)
+  - [ ] Anto: Display = funzione OpenGL per mostrare una texture a schermo
+        [BufferDisplay](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/src/pbrt/gpu/cudagl.h#L64)
+  - [ ] Anto(*): integrare parsing della struttura `pbrt`, [Link al Parser](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/src/pbrt/parser.h#L109)
+- [ ] Modulo delle classi di modello (sia SoA che AoS)
+  - [ ] BVH Tree
+  - [ ] Surface Interaction
+  - [ ] classi base Ray, AABB, Vector, Matrix
+  - [ ] Funzioni Shading: BRDF, Texture Mapping, Mapping Spettro -> RGB
+- [ ] Alessio: Migliorie agli script di building
+  - [ ] `add_custom_target` per copiare cartella `assets/`
+  - [ ] supporto CUDA `add_cuda_library`
+  - [ ] supporto per librerie dinamiche `add_library(${target} SHARED)`
+  - [ ] far funzionare gli script su Windows su un altro build tool diverso da VS
+- [ ] Implementazione CPU con [Embree](https://www.embree.org/api.html)
+  - [ ] costruzione della `RTCScene` a partire dalla rappresentazione `pbrt`
+  - [ ] ...
+- [ ] Implementazione con OptiX
+  - [ ] Formazione
+- [ ] GUI imgui implot

@@ -13,6 +13,7 @@ macro(dmt_setup_dependencies)
   endif()
 
   if(NOT TARGET fmt::fmt)
+    message(STATUS "FMT should be imported with module support ${FMT_MODULE}")
     FetchContent_Declare(fmt
       GIT_REPOSITORY https://github.com/fmtlib/fmt.git
       GIT_TAG        10.1.1 # random version, should be fine

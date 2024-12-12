@@ -11,12 +11,10 @@ IndentCaseLabels: true
 IndentCaseBlocks: false
 IndentExternBlock: Indent
 IndentPPDirectives: None
-IndentRequires: true
 IndentWidth: 4
 IndentWrappedFunctionNames: true
 TabWidth: 4
 UseTab: Never
-
 # Alignment
 AlignAfterOpenBracket: Align
 AlignConsecutiveAssignments: Consecutive
@@ -165,7 +163,7 @@ UseCRLF: false
 
 # Qualifiers (const, volatile, static, etc)
 QualifierAlignment: Custom
-QualifierOrder: ['static', 'inline', 'constexpr', 'const', 'volatile', 'type']
+QualifierOrder: ['static', 'inline', 'volatile', 'constexpr', 'type', 'const']
 
 ---
 Language: ObjC

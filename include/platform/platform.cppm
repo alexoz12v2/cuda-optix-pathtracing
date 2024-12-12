@@ -15,6 +15,8 @@ module;
  */
 export module platform;
 
+import :logging;
+
 export namespace dmt
 {
 /**
@@ -25,9 +27,9 @@ class Platform
 {
 public:
     Platform();
-    Platform(const Platform&) = delete;
+    Platform(Platform const&) = delete;
     Platform(Platform&&) noexcept;
-    Platform& operator=(const Platform&) = delete;
+    Platform& operator=(Platform const&) = delete;
     Platform& operator=(Platform&&) noexcept;
     ~Platform() noexcept;
 

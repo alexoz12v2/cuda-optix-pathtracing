@@ -1,9 +1,28 @@
-#include <fmt/core.h>
+module;
 
-import platform;
+#include <iostream>
+#include <string_view>
+#include <numbers>
+
+module platform;
 
 int main()
 {
-    dmt::Platform platform;
-    fmt::print("platform size : {}", platform.getSize());
+    using namespace std::string_view_literals;
+    dmt::CircularOStringStream oss;
+    char const *formatStr = "this is a \\{} {} string. Pi: {}, 4 pi: {}, 1000 == {}, thuthy: {}\n";
+    float pi = std::numbers::pi_v<float>;
+    bool b = true;
+    int thou = 1000;
+    std::string_view arg{ "format"};
+    oss.logInitList(formatStr, { arg, pi, dmt::StrBuf(pi, "%.5f"), thou, b });
+    std::cout << oss.str() << std::endl;
+
+    dmt::ConsoleLogger logger{"[The prefix] "};
+    logger.log("Hello World from logger");
+    logger.warn("Hello Warn from logger");
+    logger.error("Hello error from logger");
+    logger.log("Hello World from logger");
+    logger.log("Hello {} from logger", { "world"sv });
+    logger.trace("I shall not be seen");
 }

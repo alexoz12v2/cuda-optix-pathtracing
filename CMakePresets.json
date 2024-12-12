@@ -12,7 +12,8 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_CXX_SCAN_FOR_MODULES": "ON"
+        "CMAKE_CXX_SCAN_FOR_MODULES": "ON",
+        "FMT_MODULE": "OFF"
       }
     },
     {

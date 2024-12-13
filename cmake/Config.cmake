@@ -701,7 +701,7 @@ function(dmt_add_test target)
 
   catch_discover_tests(${target} WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
   message(STATUS "test: Discovered tests for target ${target} from directory ${CMAKE_CURRENT_LIST_DIR}")
-  set(${THIS_ARGS_TARGET_LIST} "${${THIS_ARGS_TARGET_LIST}} ${target}")
+  list(APPEND ${THIS_ARGS_TARGET_LIST} ${target})
   return(PROPAGATE ${THIS_ARGS_TARGET_LIST})
 endfunction()
 

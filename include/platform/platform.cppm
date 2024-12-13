@@ -19,6 +19,10 @@ import :logging;
 
 export namespace dmt
 {
+
+struct StrBuf;
+class ConsoleLogger;
+
 /**
  * @class Platform
  * @brief Class whose constructor initializes all the necessary objects to bootstrap the application

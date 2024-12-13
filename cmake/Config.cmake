@@ -290,7 +290,7 @@ macro(dmt_set_target_warnings target)
     )
   endif()
 
-  if(XRP_COMPILER_CLANG OR XRP_COMPILER_CLANG_CL)
+  if(DMT_COMPILER_CLANG OR DMT_COMPILER_CLANG_CL)
     target_compile_options(${target} PRIVATE
       -Wno-unknown-warning-option # do not warn on GCC-specific warning diagnostic pragmas
     )
@@ -372,7 +372,13 @@ endfunction()
 
 
 function(dmt_add_compile_definitions target)
-  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${PROJECT_SOURCE_DIR}\"")
+  if(DMT_OS_WINDOWS)
+    set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
+    string(REGEX REPLACE "/" "\\\\\\\\" DMT_PROJ_PATH ${DMT_PROJ_PATH})
+  else()
+    set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
+  endif()
+  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"")
 endfunction()
 
 

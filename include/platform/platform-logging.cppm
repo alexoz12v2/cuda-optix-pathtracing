@@ -19,6 +19,7 @@
  */
 module;
 
+#include <array>
 #include <concepts>
 #include <format>
 #include <source_location>
@@ -254,7 +255,7 @@ template <typename Derived>
 class BaseLogger
 {
 public:
-    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
     void setLevel(ELogLevel level)
     {
@@ -347,10 +348,10 @@ public:
     // -- Constructors/Copy Control --
     ConsoleLogger(ELogLevel level = ELogLevel::LOG);
     // TODO maybe make it moveable?
-    ConsoleLogger(ConsoleLogger const &) = delete;
-    ConsoleLogger(ConsoleLogger &&) = delete;
+    ConsoleLogger(ConsoleLogger const&)            = delete;
+    ConsoleLogger(ConsoleLogger&&)                 = delete;
     ConsoleLogger& operator=(ConsoleLogger const&) = delete;
-    ConsoleLogger& operator=(ConsoleLogger &&) = delete;
+    ConsoleLogger& operator=(ConsoleLogger&&)      = delete;
     ~ConsoleLogger();
 
     // -- Functions  --
@@ -363,9 +364,9 @@ public:
 
 private:
     // -- Constants --
-    static inline constexpr uint32_t bufferSize       = 4096;
-    static inline constexpr uint32_t pathMax          = 256;
-    static inline constexpr uint32_t timestampMax     = 64;
+    static inline constexpr uint32_t bufferSize   = 4096;
+    static inline constexpr uint32_t pathMax      = 256;
+    static inline constexpr uint32_t timestampMax = 64;
 
     // -- Function Members --
     // Helper function to format and print the log message

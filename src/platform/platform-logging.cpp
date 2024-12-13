@@ -1,12 +1,21 @@
 module;
 
 #include <array>
+#include <chrono>
+#include <source_location>
 #include <string_view>
 
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+
+#if defined(DMT_OS_LINUX)
+#include <unistd.h>
+#elif defined(DMT_OS_WINDOWS)
+#include <winbase.h> // https://learn.microsoft.com/en-us/windows/win32/api/winbase/
+#endif
 
 // https://github.com/fmtlib/fmt/blob/master/include/fmt/format.h, line 4153
 
@@ -92,33 +101,94 @@ std::string_view CircularOStringStream::str()
     return {m_buffer, m_pos};
 }
 
-ConsoleLogger::ConsoleLogger(std::string_view const& prefix, ELogLevel level) :
-BaseLogger<ConsoleLogger>(level),
-m_prefix(prefix)
+ConsoleLogger::ConsoleLogger(std::string_view const& prefix, ELogLevel level) : BaseLogger<ConsoleLogger>(level)
 {
 }
 
-void ConsoleLogger::write(ELogLevel level, std::string_view const& str)
+void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::source_location const loc)
 {
-    // TODO: os specific IO, filename/line/module/datetime prefix
     if (enabled(level))
     {
-        std::printf("%s%s%s\n%s", logcolor::levelToColor(level).data(), m_prefix.data(), str.data(), logcolor::reset.data());
+        std::string_view date      = getCurrentTimestamp();
+        std::string_view file_name = getRelativeFileName(loc.file_name());
+        logMessage(level, date, file_name, loc.function_name(), loc.line(), stringFromLevel(level), str);
     }
 }
 
-void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::initializer_list<StrBuf> const& list)
+void ConsoleLogger::write(ELogLevel                            level,
+                          std::string_view const&              str,
+                          std::initializer_list<StrBuf> const& list,
+                          std::source_location const           loc)
 {
-    // TODO: os specific IO, filename/line/module/datetime prefix
     if (enabled(level))
     {
+        std::string_view date      = getCurrentTimestamp();
+        std::string_view file_name = getRelativeFileName(loc.file_name());
+
         m_oss.logInitList(str.data(), list);
-        std::printf("%s%s%s\n%s",
-                    logcolor::levelToColor(level).data(),
-                    m_prefix.data(),
-                    m_oss.str().data(),
-                    logcolor::reset.data());
+        logMessage(level, date, file_name, loc.function_name(), loc.line(), stringFromLevel(level), m_oss.str());
     }
+}
+
+// Helper function to format and print the log message
+void ConsoleLogger::logMessage(
+    ELogLevel               level,
+    std::string_view const& date,
+    std::string_view const& fileName,
+    std::string_view const& functionName,
+    uint32_t                line,
+    std::string_view const& levelStr,
+    std::string_view const& content)
+{
+    std::printf("%s[%s %s:%s:%u] %s <> %s\n%s",
+                logcolor::colorFromLevel(level).data(),
+                date.data(),
+                fileName.data(),
+                functionName.data(),
+                line,
+                levelStr.data(),
+                content.data(),
+                logcolor::reset.data());
+}
+
+// Helper function to get a relative file name
+std::string_view ConsoleLogger::getRelativeFileName(std::string_view fullPath)
+{
+    static constexpr std::string_view projPath = DMT_PROJ_PATH;
+    if (fullPath.starts_with(projPath))
+    {
+        fullPath.remove_prefix(projPath.size());
+        if (fullPath.starts_with('/'))
+        {
+            fullPath.remove_prefix(1); // Remove leading slash
+        }
+    }
+    return fullPath;
+}
+
+// Helper function to get the current timestamp
+std::string_view ConsoleLogger::getCurrentTimestamp()
+{
+    static thread_local char buf[timestampMax];
+    std::time_t              now     = std::time(nullptr);
+    std::tm                  tstruct = *std::localtime(&now);
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+    return buf;
+}
+
+std::string_view ConsoleLogger::cwd()
+{
+    static thread_local char buf[pathMax];
+#if defined(DMT_OS_LINUX)
+    char const* ptr = ::getcwd(buf, pathMax);
+    return ptr;
+#elif defined(DMT_OS_WINDOWS)
+    DWORD status = GetCurrentDirectory(pathMax, buf);
+    assert(status > 0 && "Could not get the current working directory");
+    return {buf, status};
+#else
+#error "Platform not expected"
+#endif
 }
 
 static_assert(LogDisplay<ConsoleLogger>);

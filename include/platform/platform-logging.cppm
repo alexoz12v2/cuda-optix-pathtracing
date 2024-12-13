@@ -21,6 +21,7 @@ module;
 
 #include <concepts>
 #include <format>
+#include <source_location>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -62,6 +63,14 @@ constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcep
     return toUnderlying(lhs) <=> toUnderlying(rhs);
 }
 
+constexpr std::string_view stringFromLevel(ELogLevel level)
+{
+    using namespace std::string_view_literals;
+    constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)>
+        strs{"TRACE"sv, "LOG  "sv, "WARN "sv, "ERROR"sv};
+    return strs[toUnderlying(level)];
+}
+
 namespace logcolor
 {
 inline constexpr std::string_view const reset        = "\033[0m";
@@ -74,7 +83,7 @@ inline constexpr std::string_view const magenta      = "\033[35m";
 inline constexpr std::string_view const cyan         = "\033[36m";
 inline constexpr std::string_view const brightWhite  = "\033[97m";
 
-inline constexpr std::string_view levelToColor(ELogLevel level)
+inline constexpr std::string_view colorFromLevel(ELogLevel level)
 {
     assert(level != ELogLevel::NONE);
     constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, brightYellow, red};
@@ -216,7 +225,7 @@ concept LogDisplay = requires(T t)
 {
     typename T::Traits;
     requires std::is_same_v<std::remove_cvref_t<decltype(T::Traits::displayType)>, ELogDisplay>;
-    requires requires (ELogLevel level, std::string_view str)
+    requires requires (ELogLevel level, std::string_view str, const std::source_location loc)
     {
         {t.setLevel(level)} -> std::same_as<void>;
         {t.enabled(level)} -> std::same_as<bool>;
@@ -224,18 +233,18 @@ concept LogDisplay = requires(T t)
         {t.errorEnabled()} -> std::same_as<bool>;
         {t.traceEnabled()} -> std::same_as<bool>;
         {t.warnEnabled()} -> std::same_as<bool>;
-        {t.write(level, str)} -> std::same_as<void>;
-        {t.log(str)} -> std::same_as<void>;
-        {t.error(str)} -> std::same_as<void>;
-        {t.warn(str)} -> std::same_as<void>;
-        {t.trace(str)} -> std::same_as<void>;
+        {t.write(level, str, loc)} -> std::same_as<void>;
+        {t.log(str, loc)} -> std::same_as<void>;
+        {t.error(str, loc)} -> std::same_as<void>;
+        {t.warn(str, loc)} -> std::same_as<void>;
+        {t.trace(str, loc)} -> std::same_as<void>;
         requires requires(std::initializer_list<StrBuf> const &list)
         {
-            {t.write(level, str, list)} -> std::same_as<void>;
-            {t.log(str, list)} -> std::same_as<void>;
-            {t.error(str, list)} -> std::same_as<void>;
-            {t.warn(str, list)} -> std::same_as<void>;
-            {t.trace(str, list)} -> std::same_as<void>;
+            {t.write(level, str, list, loc)} -> std::same_as<void>;
+            {t.log(str, list, loc)} -> std::same_as<void>;
+            {t.error(str, list, loc)} -> std::same_as<void>;
+            {t.warn(str, list, loc)} -> std::same_as<void>;
+            {t.trace(str, list, loc)} -> std::same_as<void>;
         };
     };
 };
@@ -245,7 +254,7 @@ template <typename Derived>
 class BaseLogger
 {
 public:
-    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
     void setLevel(ELogLevel level)
     {
@@ -277,38 +286,46 @@ public:
         return enabled(ELogLevel::WARN);
     }
 
-    void log(std::string_view const& str)
+    void log(std::string_view const& str, std::source_location const loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::LOG, str);
+        static_cast<Derived*>(this)->write(ELogLevel::LOG, str, loc);
     }
-    void error(std::string_view const& str)
+    void error(std::string_view const& str, std::source_location const loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::ERROR, str);
+        static_cast<Derived*>(this)->write(ELogLevel::ERROR, str, loc);
     }
-    void warn(std::string_view const& str)
+    void warn(std::string_view const& str, std::source_location const loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::WARN, str);
+        static_cast<Derived*>(this)->write(ELogLevel::WARN, str, loc);
     }
-    void trace(std::string_view const& str)
+    void trace(std::string_view const& str, std::source_location const loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::TRACE, str);
+        static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, loc);
     }
 
-    void log(std::string_view const& str, std::initializer_list<StrBuf> const& list)
+    void log(std::string_view const&              str,
+             std::initializer_list<StrBuf> const& list,
+             std::source_location const           loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::LOG, str, list);
+        static_cast<Derived*>(this)->write(ELogLevel::LOG, str, list, loc);
     }
-    void error(std::string_view const& str, std::initializer_list<StrBuf> const& list)
+    void error(std::string_view const&              str,
+               std::initializer_list<StrBuf> const& list,
+               std::source_location const           loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::ERROR, str, list);
+        static_cast<Derived*>(this)->write(ELogLevel::ERROR, str, list, loc);
     }
-    void warn(std::string_view const& str, std::initializer_list<StrBuf> const& list)
+    void warn(std::string_view const&              str,
+              std::initializer_list<StrBuf> const& list,
+              std::source_location const           loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::WARN, str, list);
+        static_cast<Derived*>(this)->write(ELogLevel::WARN, str, list, loc);
     }
-    void trace(std::string_view const& str, std::initializer_list<StrBuf> const& list)
+    void trace(std::string_view const&              str,
+               std::initializer_list<StrBuf> const& list,
+               std::source_location const           loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, list);
+        static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, list, loc);
     }
 
 protected:
@@ -325,14 +342,36 @@ public:
         static constexpr ELogDisplay displayType = ELogDisplay::Console;
     };
 
-    void write(ELogLevel level, std::string_view const& str);
+    void write(ELogLevel level, std::string_view const& str, std::source_location const loc);
 
-    void write(ELogLevel level, std::string_view const& str, std::initializer_list<StrBuf> const& list);
+    void write(ELogLevel                            level,
+               std::string_view const&              str,
+               std::initializer_list<StrBuf> const& list,
+               std::source_location const           loc);
 
 private:
+    static inline constexpr uint32_t pathMax      = 256;
+    static inline constexpr uint32_t timestampMax = 64;
+    // Helper function to format and print the log message
+    void logMessage(ELogLevel               level,
+                    std::string_view const& date,
+                    std::string_view const& fileName,
+                    std::string_view const& functionName,
+                    uint32_t                line,
+                    std::string_view const& levelStr,
+                    std::string_view const& content);
+
+    // TODO move to a filesystem/platform class
+    // Helper function to get a relative file name
+    [[nodiscard]] static std::string_view getRelativeFileName(std::string_view fullPath);
+
+    // Helper function to get the current timestamp
+    [[nodiscard]] static std::string_view getCurrentTimestamp();
+
+    // TODO move to a filesystem/platform class
+    [[nodiscard]] static std::string_view cwd();
+
     CircularOStringStream m_oss;
-    // TODO
-    std::string_view m_prefix = "";
 };
 
 } // namespace dmt

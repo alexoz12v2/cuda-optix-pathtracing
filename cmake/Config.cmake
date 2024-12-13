@@ -157,8 +157,10 @@ macro(dmt_define_environment)
   # -- OS Detection (Cmake Variable CMAKE_SYSTEM_NAME) --
   if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     set(DMT_OS_WINDOWS 1)
+    set(DMT_OS "DMT_OS_WINDOWS")
   elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
     set(DMT_OS_LINUX 1)
+    set(DMT_OS "DMT_OS_LINUX")
   else()
     message(FATAL_ERROR "We only support Linux and Windows based operating systems")
   endif()
@@ -369,6 +371,11 @@ function(dmt_set_public_symbols_hidden target)
 endfunction()
 
 
+function(dmt_add_compile_definitions target)
+  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${PROJECT_SOURCE_DIR}\"")
+endfunction()
+
+
 # usage: dmt_add_module_library(target sources...) -> sources in ARGN
 # create a c++20 module library, with no target_sources preset, just initialize the bare necessities
 # to have a fully functioning module
@@ -426,6 +433,7 @@ function(dmt_add_module_library name module_name)
 
   dmt_set_target_warnings(${name})
   dmt_set_target_optimization(${name})
+  dmt_add_compile_definitions(${name})
 
   # Possible TODO: Pre Compiled Headers
 
@@ -593,6 +601,7 @@ function(dmt_add_example target)
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
+  dmt_add_compile_definitions(${target})
 
   if(MSVC)
     target_compile_options(${target} PRIVATE /Zc:preprocessor)
@@ -674,6 +683,7 @@ function(dmt_add_test target)
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
   dmt_set_public_symbols_hidden(${target})
+  dmt_add_compile_definitions(${target})
 
   # dependencies
   if(DEFINED THIS_ARGS_DEPENDENCIES)

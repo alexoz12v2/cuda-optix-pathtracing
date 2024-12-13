@@ -281,7 +281,16 @@ private:
         len     = -sz;
     }
 };
+} // namespace dmt
 
+// not exported stuff the next classes need
+namespace dmt
+{
+
+} // namespace dmt
+
+export namespace dmt
+{
 /**
  * Class which formats all the given arguments into a local buffer
  */
@@ -391,7 +400,7 @@ public:
      * explicit constructor for the base logger starting from the desired level
      * @param level desired log level
      */
-    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
+    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
 
     /**
      * Setter for the `m_level`

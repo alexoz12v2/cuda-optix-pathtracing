@@ -84,6 +84,26 @@ TEST_CASE("[platform-logging] StrBuf Basic Functionality", "[StrBuf]")
     }
 }
 
+
+TEST_CASE("[platform-logging] CircularOStringStream Formatting", "[CircularOStringStream]") {
+    using namespace std::string_view_literals;
+
+    SECTION("Format string with arguments") {
+        dmt::CircularOStringStream stream;
+        stream.logInitList("{} {}", {"Hello"sv, "World"sv});
+
+        REQUIRE(stream.str() == "Hello World");
+    }
+
+    SECTION("Multiple format arguments") {
+        dmt::CircularOStringStream stream;
+        stream.logInitList("{} {} {}", {"One"sv, "Two"sv, "Three"sv});
+
+        REQUIRE(stream.str() == "One Two Three");
+    }
+}
+
+
 /*
 TEST_CASE("[platform-logging] ConsoleLogger Basic Functionality", "[ConsoleLogger]")
 {

@@ -18,7 +18,7 @@ int main()
     oss.logInitList(formatStr, {arg, pi, dmt::StrBuf(pi, "%.5f"), thou, b});
     std::cout << oss.str() << std::endl;
 
-    dmt::ConsoleLogger logger{"[The prefix] "};
+    dmt::ConsoleLogger logger;
     logger.log("Hello World from logger");
     logger.warn("Hello Warn from logger");
     logger.error("Hello error from logger");

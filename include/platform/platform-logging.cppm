@@ -254,7 +254,7 @@ template <typename Derived>
 class BaseLogger
 {
 public:
-    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
+    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
 
     void setLevel(ELogLevel level)
     {
@@ -335,13 +335,25 @@ protected:
 class ConsoleLogger : public BaseLogger<ConsoleLogger>
 {
 public:
-    ConsoleLogger(std::string_view const& prefix, ELogLevel level = ELogLevel::LOG);
+    // -- Constants --
+    static inline constexpr uint32_t asyncIOClassSize = 64;
 
+    // -- Types --
     struct Traits
     {
         static constexpr ELogDisplay displayType = ELogDisplay::Console;
     };
 
+    // -- Constructors/Copy Control --
+    ConsoleLogger(ELogLevel level = ELogLevel::LOG);
+    // TODO maybe make it moveable?
+    ConsoleLogger(ConsoleLogger const &) = delete;
+    ConsoleLogger(ConsoleLogger &&) = delete;
+    ConsoleLogger& operator=(ConsoleLogger const&) = delete;
+    ConsoleLogger& operator=(ConsoleLogger &&) = delete;
+    ~ConsoleLogger();
+
+    // -- Functions  --
     void write(ELogLevel level, std::string_view const& str, std::source_location const loc);
 
     void write(ELogLevel                            level,
@@ -350,8 +362,12 @@ public:
                std::source_location const           loc);
 
 private:
-    static inline constexpr uint32_t pathMax      = 256;
-    static inline constexpr uint32_t timestampMax = 64;
+    // -- Constants --
+    static inline constexpr uint32_t bufferSize       = 4096;
+    static inline constexpr uint32_t pathMax          = 256;
+    static inline constexpr uint32_t timestampMax     = 64;
+
+    // -- Function Members --
     // Helper function to format and print the log message
     void logMessage(ELogLevel               level,
                     std::string_view const& date,
@@ -360,6 +376,13 @@ private:
                     uint32_t                line,
                     std::string_view const& levelStr,
                     std::string_view const& content);
+    void logMessageAsync(ELogLevel               level,
+                         std::string_view const& date,
+                         std::string_view const& fileName,
+                         std::string_view const& functionName,
+                         uint32_t                line,
+                         std::string_view const& levelStr,
+                         std::string_view const& content);
 
     // TODO move to a filesystem/platform class
     // Helper function to get a relative file name
@@ -371,7 +394,9 @@ private:
     // TODO move to a filesystem/platform class
     [[nodiscard]] static std::string_view cwd();
 
+    // -- Members --
     CircularOStringStream m_oss;
+    alignas(16) unsigned char m_asyncIOClass[asyncIOClassSize]{};
 };
 
 } // namespace dmt

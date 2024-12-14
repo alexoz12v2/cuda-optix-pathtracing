@@ -12,7 +12,8 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_CXX_SCAN_FOR_MODULES": "ON"
+        "CMAKE_CXX_SCAN_FOR_MODULES": "ON",
+        "FMT_MODULE": "OFF"
       }
     },
     {
@@ -70,7 +71,8 @@
       "inherits": ["LinuxDefault"],
       "description": "Release build with optimizations.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "TRUE"
       }
     },
     {
@@ -79,7 +81,8 @@
       "inherits": ["WindowsDefault"],
       "description": "Release build with optimizations.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "TRUE"
       }
     },
     {
@@ -88,7 +91,8 @@
       "inherits": ["LinuxDefault"],
       "description": "Minimal size release build.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "MinSizeRel"
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "TRUE"
       }
     },
     {
@@ -97,7 +101,8 @@
       "inherits": ["WindowsDefault"],
       "description": "Minimal size release build.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "MinSizeRel"
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "TRUE"
       }
     },
     {

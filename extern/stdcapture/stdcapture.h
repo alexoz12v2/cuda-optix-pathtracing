@@ -1,0 +1,234 @@
+// https://github.com/dmikushin/stdcapture
+#ifndef STDCAPTURE_H
+#define STDCAPTURE_H
+
+#ifdef _MSC_VER
+#include <io.h>
+#define popen  _popen
+#define pclose _pclose
+#define stat   _stat
+#define dup    _dup
+#define dup2   _dup2
+#define fileno _fileno
+#define close  _close
+#define pipe   _pipe
+#define read   _read
+#define eof    _eof
+#else
+#include <unistd.h>
+#endif
+#include <chrono>
+#include <fcntl.h>
+#include <functional>
+#include <thread>
+
+#include <cstdio>
+
+#ifndef STD_OUT_FD
+#define STD_OUT_FD (fileno(stdout))
+#endif
+
+#ifndef STD_ERR_FD
+#define STD_ERR_FD (fileno(stderr))
+#endif
+
+namespace capture
+{
+
+class CaptureOutput
+{
+    FILE* stream;
+    int   fd;
+
+    enum PIPES
+    {
+        READ,
+        WRITE
+    };
+
+    int pipes[2];
+    int streamOld;
+
+    std::function<void(char const*, size_t)> callback;
+
+public:
+    CaptureOutput(FILE* stream_, int fd_, std::function<void(char const*, size_t)> callback_) :
+    stream(stream_),
+    fd(fd_),
+    callback(callback_)
+    {
+        // Make output stream unbuffered, so that we don't need to flush
+        // the streams before capture and after capture (fflush can cause a deadlock)
+        setvbuf(stream, nullptr, _IONBF, 0);
+
+        // Start capturing.
+        secure_pipe(pipes);
+        streamOld = secure_dup(fd);
+        secure_dup2(pipes[WRITE], fd);
+#ifndef _MSC_VER
+        secure_close(pipes[WRITE]);
+#endif
+    }
+
+    ~CaptureOutput()
+    {
+        // End capturing.
+        secure_dup2(streamOld, fd);
+
+        int const bufSize = 1025;
+        char      buf[bufSize];
+        int       bytesRead = 0;
+        bool      fd_blocked(false);
+        do
+        {
+            bytesRead  = 0;
+            fd_blocked = false;
+#ifdef _MSC_VER
+            if (!eof(pipes[READ]))
+                bytesRead = read(pipes[READ], buf, bufSize - 1);
+#else
+            bytesRead = read(pipes[READ], buf, bufSize - 1);
+#endif
+            if (bytesRead > 0)
+            {
+                buf[bytesRead] = 0;
+                callback(buf, bytesRead);
+            }
+            else if (bytesRead < 0)
+            {
+                fd_blocked = (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+                if (fd_blocked)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        } while (fd_blocked || bytesRead == (bufSize - 1));
+
+        secure_close(streamOld);
+        secure_close(pipes[READ]);
+#ifdef _MSC_VER
+        secure_close(pipes[WRITE]);
+#endif
+    }
+
+private:
+    int secure_dup(int src)
+    {
+        int  ret        = -1;
+        bool fd_blocked = false;
+        do
+        {
+            ret        = dup(src);
+            fd_blocked = (errno == EINTR || errno == EBUSY);
+            if (fd_blocked)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (ret < 0);
+        return ret;
+    }
+
+    void secure_pipe(int* pipes)
+    {
+        int  ret        = -1;
+        bool fd_blocked = false;
+        do
+        {
+#ifdef _MSC_VER
+            ret = pipe(pipes, 65536, O_BINARY);
+#else
+            ret = pipe(pipes) == -1;
+#endif
+            fd_blocked = (errno == EINTR || errno == EBUSY);
+            if (fd_blocked)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (ret < 0);
+    }
+
+    void secure_dup2(int src, int dest)
+    {
+        int  ret        = -1;
+        bool fd_blocked = false;
+        do
+        {
+            ret        = dup2(src, dest);
+            fd_blocked = (errno == EINTR || errno == EBUSY);
+            if (fd_blocked)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (ret < 0);
+    }
+
+    void secure_close(int& fd)
+    {
+        int  ret        = -1;
+        bool fd_blocked = false;
+        do
+        {
+            ret        = close(fd);
+            fd_blocked = (errno == EINTR);
+            if (fd_blocked)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (ret < 0);
+
+        fd = -1;
+    }
+};
+
+class CaptureStdout : public CaptureOutput
+{
+public:
+    CaptureStdout(std::function<void(char const*, size_t)> callback) : CaptureOutput(stdout, STD_OUT_FD, callback)
+    {
+    }
+};
+
+class CaptureStderr : public CaptureOutput
+{
+public:
+    CaptureStderr(std::function<void(char const*, size_t)> callback) : CaptureOutput(stderr, STD_ERR_FD, callback)
+    {
+    }
+};
+
+#if 0
+class MyCapture
+{
+public:
+    static constexpr uint32_t maxLen = 256;
+    MyCapture(std::function<void(char const*, uint32_t)> const& callback) : m_callback(callback)
+    {
+        std::ios::sync_with_stdio(true);
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        m_original  = dup(STDOUT_FILENO);
+        int32_t ret = pipe(m_pipe);
+        while (ret != 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            ret = pipe(m_pipe);
+        }
+        // redirect stdout to pipe and close the writing end to pipe
+        long flags = fcntl(m_pipe[0], F_GETFL); flags |= O_NONBLOCK; fcntl(m_pipe[0], F_SETFL, flags);
+        dup2(m_pipe[1], STDOUT_FILENO);
+        close(m_pipe[1]);
+    }
+
+    ~MyCapture()
+    {
+        fflush(stdout);
+        int32_t numBytes = read(m_pipe[0], m_buffer, maxLen);
+        if (numBytes > 0)
+        {
+            m_callback(m_buffer, static_cast<uint32_t>(numBytes));
+        }
+        // rewire stdout
+        dup2(m_original, STDOUT_FILENO);
+        close(m_pipe[0]);
+    }
+
+private:
+    std::function<void(char const*, uint32_t)> m_callback;
+    char                                       m_buffer[maxLen];
+    int32_t                                    m_pipe[2];
+    int32_t                                    m_original;
+};
+#endif
+
+} // namespace capture
+
+#endif // STDCAPTURE_H

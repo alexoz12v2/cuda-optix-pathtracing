@@ -15,8 +15,14 @@ module;
  */
 export module platform;
 
+import :logging;
+
 export namespace dmt
 {
+
+struct StrBuf;
+class ConsoleLogger;
+
 /**
  * @class Platform
  * @brief Class whose constructor initializes all the necessary objects to bootstrap the application
@@ -25,9 +31,9 @@ class Platform
 {
 public:
     Platform();
-    Platform(const Platform&) = delete;
+    Platform(Platform const&) = delete;
     Platform(Platform&&) noexcept;
-    Platform& operator=(const Platform&) = delete;
+    Platform& operator=(Platform const&) = delete;
     Platform& operator=(Platform&&) noexcept;
     ~Platform() noexcept;
 

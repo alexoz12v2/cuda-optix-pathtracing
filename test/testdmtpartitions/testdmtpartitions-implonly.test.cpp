@@ -16,9 +16,9 @@ public:
     {
         std::cout.rdbuf(m_mockCout.rdbuf());
     }
-    OutputRedirect(const OutputRedirect&)            = delete;
+    OutputRedirect(OutputRedirect const&)            = delete;
     OutputRedirect(OutputRedirect&&)                 = delete;
-    OutputRedirect& operator=(const OutputRedirect&) = delete;
+    OutputRedirect& operator=(OutputRedirect const&) = delete;
     OutputRedirect& operator=(OutputRedirect&&)      = delete;
     ~OutputRedirect()
     {
@@ -41,7 +41,7 @@ TEST_CASE("[testdmtpartitions:implonly]")
     SECTION("implOnlyHidden should print text")
     {
         auto              var      = OutputRedirect();
-        const std::string expected = "you can't see mee";
+        std::string const expected = "you can't see mee";
         dmt::implOnlyHidden();
         std::cout << std::flush;
         CHECK(var.getContent() == expected);

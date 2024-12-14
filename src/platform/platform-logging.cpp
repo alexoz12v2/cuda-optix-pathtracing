@@ -6,6 +6,7 @@ module;
 #include <mutex>
 #include <source_location>
 #include <string_view>
+#include <utility>
 
 #include <cassert>
 #include <cstdint>
@@ -101,59 +102,25 @@ std::string_view CircularOStringStream::str()
     return {m_buffer, m_pos};
 }
 
-// TODO refactor in a module handling platform OS issues
+/*
+ * ---------------------------------------OS SPECIFIC SECTION-------------------------------------------------
+ */
 #if defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO) // <- required macro
 static_assert(sizeof(aiocb) <= 168);
-struct alignas(256) PaddedAioCb
+struct PaddedAioCb
 {
-    aiocb acb;
+    aiocb         acb;
+    unsigned char padding[sizeof(AioSpace) - sizeof(aiocb)];
 };
+
+static_assert(sizeof(PaddedAioCb) == sizeof(AioSpace) && alignof(PaddedAioCb) == alignof(AioSpace));
 static_assert(sizeof(PaddedAioCb) == 256 && std::is_trivial_v<PaddedAioCb> && std::is_standard_layout_v<PaddedAioCb>);
 
-// TOOD add threaded IO management when thread IO branch is ready
 // TODO add proper memory management
-class LinuxAsyncIOManager
-{
-public:
-    static inline constexpr uint32_t numAios     = 4;
-    static inline constexpr uint32_t lineSize    = 2048;
-    static inline constexpr uint32_t maxAttempts = 10;
-    LinuxAsyncIOManager();
-    LinuxAsyncIOManager(LinuxAsyncIOManager const&)            = delete;
-    LinuxAsyncIOManager(LinuxAsyncIOManager&&)                 = delete;
-    LinuxAsyncIOManager& operator=(LinuxAsyncIOManager const&) = delete;
-    LinuxAsyncIOManager& operator=(LinuxAsyncIOManager&&)      = delete;
-    ~LinuxAsyncIOManager();
-
-    // Enqueue IO work to either STDOUT or STDERR
-    // teh work should NOT have the
-    bool     enqueue(uint32_t idx, size_t size);
-    uint32_t findFirstFreeBlocking(int32_t fildes);
-    char*    operator[](uint32_t idx);
-
-    // Poll for completion of IO operations
-    void sync() const;
-
-private:
-    struct Line
-    {
-        char buf[lineSize];
-    };
-    // Helper method to initialize the AIO control blocks
-    void initAio();
-
-    bool handleStatus(int32_t status, aiocb& outAio) const;
-
-    PaddedAioCb*  m_aioQueue;
-    Line*         m_lines;
-    unsigned char padding[44];
-};
-
-static_assert(std::is_standard_layout_v<LinuxAsyncIOManager> &&
-              sizeof(LinuxAsyncIOManager) == ConsoleLogger::asyncIOClassSize);
+static_assert(std::is_standard_layout_v<LinuxAsyncIOManager> && sizeof(LinuxAsyncIOManager) == asyncIOClassSize);
 
 LinuxAsyncIOManager::LinuxAsyncIOManager() :
-m_aioQueue(reinterpret_cast<PaddedAioCb*>(std::aligned_alloc(alignof(PaddedAioCb), numAios * sizeof(PaddedAioCb)))),
+m_aioQueue(reinterpret_cast<AioSpace*>(std::aligned_alloc(alignof(PaddedAioCb), numAios * sizeof(PaddedAioCb)))),
 m_lines(reinterpret_cast<Line*>(std::aligned_alloc(alignof(Line), numAios * sizeof(Line))))
 {
     if (!m_aioQueue || !m_lines)
@@ -167,22 +134,28 @@ void LinuxAsyncIOManager::initAio()
     // Initialize the aiocb structures
     for (uint32_t i = 0; i < numAios; ++i)
     {
+        PaddedAioCb& paddedAioCb = *reinterpret_cast<PaddedAioCb*>(&m_aioQueue[i]);
         std::memset(&m_aioQueue[i], 0, sizeof(PaddedAioCb));
-        m_aioQueue[i].acb.aio_fildes     = STDOUT_FILENO;
-        m_aioQueue[i].acb.aio_offset     = 0; // Default to write operation
-        m_aioQueue[i].acb.aio_buf        = reinterpret_cast<volatile void*>(m_lines[i].buf);
-        m_aioQueue[i].acb.aio_lio_opcode = LIO_WRITE; // Default to write operation
-        // m_aioQueue[i].aio_reqprio    =, scheduling priority. Requires additional macros
-        m_aioQueue[i].acb.aio_sigevent.sigev_notify = SIGEV_NONE; // SIGEV_NONE, SIGEV_SIGNAL -> sigev_signo, SIGEV_THREAD -> sigev_notify_attributes, specify thread: (linux only) sigev_notify_thread_id (used only by timers)
-        m_aioQueue[i].acb.aio_lio_opcode = LIO_WRITE; // only used by lio_listio when you schedule multiple operations
+        paddedAioCb.acb.aio_fildes     = STDOUT_FILENO;
+        paddedAioCb.acb.aio_offset     = 0; // Default to write operation
+        paddedAioCb.acb.aio_buf        = reinterpret_cast<volatile void*>(m_lines[i].buf);
+        paddedAioCb.acb.aio_lio_opcode = LIO_WRITE; // Default to write operation
+        //paddedAioCb.aio_reqprio    =, scheduling priority. Requires additional macros
+        paddedAioCb.acb.aio_sigevent.sigev_notify = SIGEV_NONE; // SIGEV_NONE, SIGEV_SIGNAL -> sigev_signo, SIGEV_THREAD -> sigev_notify_attributes, specify thread: (linux only) sigev_notify_thread_id (used only by timers)
+        paddedAioCb.acb.aio_lio_opcode = LIO_WRITE; // only used by lio_listio when you schedule multiple operations
     }
 }
 
-LinuxAsyncIOManager::~LinuxAsyncIOManager()
+void LinuxAsyncIOManager::cleanup()
 {
     sync();
     std::free(m_aioQueue);
     std::free(m_lines);
+}
+
+LinuxAsyncIOManager::~LinuxAsyncIOManager()
+{
+    cleanup();
 }
 
 char* LinuxAsyncIOManager::operator[](uint32_t idx)
@@ -190,7 +163,7 @@ char* LinuxAsyncIOManager::operator[](uint32_t idx)
     return m_lines[idx].buf;
 }
 
-uint32_t LinuxAsyncIOManager::findFirstFreeBlocking(int32_t fildes)
+uint32_t LinuxAsyncIOManager::findFirstFreeBlocking()
 {
     // Ensure we complete previous operations before starting a new one
     // necessary only if we are switching from STDOUT to STDERR
@@ -201,27 +174,16 @@ uint32_t LinuxAsyncIOManager::findFirstFreeBlocking(int32_t fildes)
     {
         for (uint32_t i = 0; i < numAios; ++i)
         {
-            if (aio_error(&m_aioQueue[i].acb) != EINPROGRESS)
+            PaddedAioCb& paddedAioCb = *reinterpret_cast<PaddedAioCb*>(&m_aioQueue[i]);
+            if (aio_error(&paddedAioCb.acb) != EINPROGRESS)
             {
-                m_aioQueue[i].acb.aio_fildes = fildes;
                 return i;
             }
         }
     }
 }
 
-bool LinuxAsyncIOManager::enqueue(uint32_t idx, size_t size)
-{
-    // no sync needed as handled by findFirstFreeBlocking
-    // the m_lines[idx].buf should be written externally
-    // Find an available aiocb slot (simple round-robin or any available slot)
-    assert(aio_error(&m_aioQueue[idx].acb) != EINPROGRESS);
-    m_aioQueue[idx].acb.aio_nbytes = size;
-    int status                     = aio_write(&m_aioQueue[idx].acb);
-    return handleStatus(status, m_aioQueue[idx].acb);
-}
-
-bool LinuxAsyncIOManager::handleStatus(int32_t status, aiocb& outAio) const
+bool handleStatus(int32_t status, aiocb& outAio, uint32_t maxAttempts)
 {
 
     assert(status != EBADF && "Asynchronous write File Descriptor invalid!");
@@ -235,11 +197,24 @@ bool LinuxAsyncIOManager::handleStatus(int32_t status, aiocb& outAio) const
     return attempt == maxAttempts;
 }
 
+bool LinuxAsyncIOManager::enqueue(uint32_t idx, size_t size)
+{
+    // no sync needed as handled by findFirstFreeBlocking
+    // the m_lines[idx].buf should be written externally
+    // Find an available aiocb slot (simple round-robin or any available slot)
+    PaddedAioCb& paddedAioCb = *reinterpret_cast<PaddedAioCb*>(&m_aioQueue[idx]);
+    assert(aio_error(&paddedAioCb.acb) != EINPROGRESS);
+    paddedAioCb.acb.aio_nbytes = size;
+    int status                 = aio_write(&paddedAioCb.acb);
+    return handleStatus(status, paddedAioCb.acb, maxAttempts);
+}
+
 void LinuxAsyncIOManager::sync() const
 {
     for (uint32_t i = 0; i != LinuxAsyncIOManager::numAios; ++i)
     {
-        while (aio_error(&m_aioQueue[i].acb) == EINPROGRESS)
+        PaddedAioCb& paddedAioCb = *reinterpret_cast<PaddedAioCb*>(&m_aioQueue[i]);
+        while (aio_error(&paddedAioCb.acb) == EINPROGRESS)
         {
             // busy waiting...
         }
@@ -250,53 +225,18 @@ void LinuxAsyncIOManager::sync() const
 // standard layout to be castable and memcopied from array of bytes + size requirement
 #elif defined(DMT_OS_WINDOWS)
 
-class WindowsAsyncIOManager
+struct OverlappedWrite
 {
-public:
-    static inline constexpr uint32_t numAios = 4;
-    static_assert(numAios < 5);
-    static inline constexpr uint32_t lineSize    = 2048;
-    static inline constexpr uint32_t maxAttempts = 10;
-
-    WindowsAsyncIOManager();
-    WindowsAsyncIOManager(WindowsAsyncIOManager const&)            = delete;
-    WindowsAsyncIOManager(WindowsAsyncIOManager&&)                 = delete;
-    WindowsAsyncIOManager& operator=(WindowsAsyncIOManager const&) = delete;
-    WindowsAsyncIOManager& operator=(WindowsAsyncIOManager&&)      = delete;
-    ~WindowsAsyncIOManager();
-
-    uint32_t findFirstFreeBlocking();
-    bool     enqueue(int32_t idx, size_t size);
-    char*    operator[](uint32_t idx);
-
-private:
-    void    sync();
-    void    initAio();
-    int32_t waitForEvents(DWORD timeout, bool waitAll);
-
-    struct Line
-    {
-        char buf[lineSize];
-    };
-
-    struct OverlappedWrite
-    {
-        OVERLAPPED overlapped;
-    };
-
-    HANDLE           m_hStdOut = nullptr;
-    HANDLE           m_hBuffer[numAios]{};
-    OverlappedWrite* m_aioQueue;
-    Line*            m_lines;
-    unsigned char    m_padding[8];
+    OVERLAPPED overlapped;
 };
 
+static_assert(sizeof(OverlappedWrite) == sizeof(AioSpace) && alignof(OverlappedWrite) == alignof(AioSpace));
 static_assert(std::is_standard_layout_v<WindowsAsyncIOManager> &&
               sizeof(WindowsAsyncIOManager) == ConsoleLogger::asyncIOClassSize);
 
 WindowsAsyncIOManager::WindowsAsyncIOManager() :
 m_hStdOut(GetStdHandle(STD_OUTPUT_HANDLE)),
-m_aioQueue(reinterpret_cast<OverlappedWrite*>(std::malloc(numAios * sizeof(OverlappedWrite)))),
+m_aioQueue(reinterpret_cast<AioSpace*>(std::malloc(numAios * sizeof(OverlappedWrite)))),
 m_lines(reinterpret_cast<Line*>(std::malloc(numAios * sizeof(Line))))
 {
     if (!m_aioQueue || !m_lines)
@@ -315,8 +255,9 @@ void WindowsAsyncIOManager::initAio()
 
     for (uint32_t i = 0; i != numAios; ++i)
     {
-        m_aioQueue[i].overlapped.hEvent = CreateEventA(&secAttrs, /*manualReset*/ true, /*startSignaled*/ true, /*name*/ nullptr);
-        assert(m_aioQueue[i].overlapped.hEvent != nullptr && "Couldn't create event!");
+        OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[i]);
+        aioStruct.overlapped.hEvent = CreateEventA(&secAttrs, /*manualReset*/ true, /*startSignaled*/ true, /*name*/ nullptr);
+        assert(aioStruct.overlapped.hEvent != nullptr && "Couldn't create event!");
     }
 }
 
@@ -343,10 +284,31 @@ uint32_t WindowsAsyncIOManager::findFirstFreeBlocking()
     // reset all events and pick the first one, hoping everything is fine :)
     for (uint32_t i = 0; i != numAios; ++i)
     {
-        ResetEvent(m_aioQueue[i].overlapped.hEvent);
+        OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[i]);
+        ResetEvent(aioStruct.overlapped.hEvent);
     }
 
     return 0;
+}
+
+WindowsAsyncIOManager::WindowsAsyncIOManager(WindowsAsyncIOManager&& other) :
+m_hStdOut(GetStdHandle(STD_OUTPUT_HANDLE)),
+m_hBuffer{std::exchange(other.m_hBuffer, nullptr)},
+m_aioQueue(std::exchange(other.m_aioQueue, nullptr)),
+m_lines(std::exchange(other.m_lines, nullptr))
+{
+}
+
+WindowsAsyncIOManager& WindowsAsyncIOManager::operator=(WindowsAsyncIOManager&&)
+{
+    if (this != &other)
+    {
+        cleanup();
+        m_hBuffer  = std::exchange(other.m_hBuffer, nullptr);
+        m_aioQueue = std::exchange(other.m_aioQueue, nullptr);
+        m_lines    = std::exchange(other.m_lines, nullptr);
+    }
+    return *this;
 }
 
 void WindowsAsyncIOManager::sync()
@@ -355,7 +317,7 @@ void WindowsAsyncIOManager::sync()
     // waitForEvents(INFINITE, /*waitForAll*/ true);
 }
 
-int32_t WindowsAsyncIOManager::waitForEvents(DWORD timeout, bool waitAll)
+int32_t WindowsAsyncIOManager::waitForEvents(uint32_t timeout, bool waitAll)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitformultipleobjects
     // try to find a free one with polling, ie WaitForSingleObject with timeout = 0
@@ -363,7 +325,8 @@ int32_t WindowsAsyncIOManager::waitForEvents(DWORD timeout, bool waitAll)
     // Prepare the buffer with event handles
     for (uint32_t i = 0; i < numAios; ++i)
     {
-        std::memcpy(&m_hBuffer[i], &m_aioQueue[i].overlapped.hEvent, sizeof(HANDLE));
+        OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[i]);
+        std::memcpy(&m_hBuffer[i], &aioStruct.overlapped.hEvent, sizeof(HANDLE));
     }
 
     // Wait for events
@@ -387,21 +350,28 @@ int32_t WindowsAsyncIOManager::waitForEvents(DWORD timeout, bool waitAll)
     return -2; // Unreachable, satisfies compiler
 }
 
-WindowsAsyncIOManager::~WindowsAsyncIOManager()
+void WindowsAsyncIOManager::cleanup()
 {
     sync();
 
     for (uint32_t i = 0; i != numAios; ++i)
     {
-        CloseHandle(m_aioQueue[i].overlapped.hEvent);
+        OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[i]);
+        CloseHandle(aioStruct.overlapped.hEvent);
     }
     std::free(m_aioQueue);
     std::free(m_lines);
 }
 
+WindowsAsyncIOManager::~WindowsAsyncIOManager()
+{
+    cleanup();
+}
+
 bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
 {
-    bool started = WriteFile(m_hStdOut, m_lines[idx].buf, size, nullptr, &m_aioQueue[idx].overlapped);
+    OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
+    bool             started   = WriteFile(m_hStdOut, m_lines[idx].buf, size, nullptr, &aioStruct.overlapped);
 
     if (started && GetLastError() == ERROR_IO_PENDING)
     {
@@ -415,29 +385,14 @@ bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
 }
 
 #endif
-
-#define DMT_ENABLE_ASYNC_LOG 1
-
-ConsoleLogger::ConsoleLogger(ELogLevel level) : BaseLogger<ConsoleLogger>(level)
-{
-#if DMT_ENABLE_ASYNC_LOG && defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO) // <- required macro
-    assert(reinterpret_cast<std::uintptr_t>(m_asyncIOClass) % alignof(LinuxAsyncIOManager) == 0);
-    std::construct_at<LinuxAsyncIOManager>(reinterpret_cast<LinuxAsyncIOManager*>(m_asyncIOClass));
-#elif DMT_ENABLE_ASYNC_LOG && defined(DMT_OS_WINDOWS)
-    assert(reinterpret_cast<std::uintptr_t>(m_asyncIOClass) % alignof(WindowsAsyncIOManager) == 0);
-    std::construct_at<WindowsAsyncIOManager>(reinterpret_cast<WindowsAsyncIOManager*>(m_asyncIOClass));
-#endif
-}
+/*
+ * -----------------------------------END OS SPECIFIC SECTION-------------------------------------------------
+ */
 
 ConsoleLogger::~ConsoleLogger()
 {
-#if DMT_ENABLE_ASYNC_LOG && defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO) // <- required macro
-    std::destroy_at<LinuxAsyncIOManager>(reinterpret_cast<LinuxAsyncIOManager*>(m_asyncIOClass));
-#elif DMT_ENABLE_ASYNC_LOG && defined(DMT_OS_WINDOWS)
-    std::destroy_at<WindowsAsyncIOManager>(reinterpret_cast<WindowsAsyncIOManager*>(m_asyncIOClass));
-#endif
+    m_IOClassInterface.destructor(m_asyncIOClass);
 }
-
 
 void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::source_location const& loc)
 {
@@ -447,11 +402,7 @@ void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::sou
         std::string_view            date     = getCurrentTimestamp();
         std::string_view            fileName = loc.file_name();
         carveRelativeFileName(fileName);
-#if DMT_ENABLE_ASYNC_LOG
         logMessageAsync(level, date, fileName, loc.function_name(), loc.line(), stringFromLevel(level), str);
-#else
-        logMessage(level, date, fileName, loc.function_name(), loc.line(), stringFromLevel(level), str);
-#endif
     }
 }
 
@@ -468,11 +419,7 @@ void ConsoleLogger::write(ELogLevel                            level,
         carveRelativeFileName(fileName);
 
         m_oss.logInitList(str.data(), list);
-#if DMT_ENABLE_ASYNC_LOG
         logMessageAsync(level, date, fileName, loc.function_name(), loc.line(), stringFromLevel(level), m_oss.str());
-#else
-        logMessage(level, date, fileName, loc.function_name(), loc.line(), stringFromLevel(level), m_oss.str());
-#endif
         m_oss.clear();
     }
 }
@@ -498,32 +445,6 @@ void ConsoleLogger::logMessage(
                 logcolor::reset.data());
 }
 
-static uint32_t logToBuffer(
-    char*                   buffer,
-    uint32_t                size,
-    ELogLevel               level,
-    std::string_view const& date,
-    std::string_view const& fileName,
-    std::string_view const& functionName,
-    uint32_t                line,
-    std::string_view const& levelStr,
-    std::string_view const& content)
-{
-    int32_t status = std::snprintf(buffer,
-                                   size,
-                                   "%s[%s %s:%s:%u] %s <> %s\n%s",
-                                   logcolor::colorFromLevel(level).data(),
-                                   date.data(),
-                                   fileName.data(),
-                                   functionName.data(),
-                                   line,
-                                   levelStr.data(),
-                                   content.data(),
-                                   logcolor::reset.data());
-    assert(status > 0 && "could not log to buffer");
-    return static_cast<uint32_t>(status);
-}
-
 void ConsoleLogger::logMessageAsync(
     ELogLevel               level,
     std::string_view const& date,
@@ -533,20 +454,9 @@ void ConsoleLogger::logMessageAsync(
     std::string_view const& levelStr,
     std::string_view const& content)
 {
-#if defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO) // <- required macro
-    // recover class
-    LinuxAsyncIOManager& clazz   = *reinterpret_cast<LinuxAsyncIOManager*>(&m_asyncIOClass);
-    uint32_t             freeIdx = clazz.findFirstFreeBlocking(STDOUT_FILENO);
-    uint32_t sz = logToBuffer(clazz[freeIdx], LinuxAsyncIOManager::lineSize, level, date, fileName, functionName, line, levelStr, content);
-    if (clazz.enqueue(freeIdx, sz))
-    {
-        logMessage(level, date, fileName, functionName, line, levelStr, content);
-    }
-#elif defined(DMT_OS_WINDOWS)
-    WindowsAsyncIOManager& clazz   = *reinterpret_cast<WindowsAsyncIOManager*>(&m_asyncIOClass);
-    uint32_t               freeIdx = clazz.findFirstFreeBlocking();
-    uint32_t sz = logToBuffer(clazz[freeIdx], WindowsAsyncIOManager::lineSize, level, date, fileName, functionName, line, levelStr, content);
-    if (clazz.enqueue(freeIdx, sz))
+#if (defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)
+    bool res = m_IOClassInterface.tryAsyncLog(m_asyncIOClass, level, date, fileName, functionName, line, levelStr, content);
+    if (res)
     {
         logMessage(level, date, fileName, functionName, line, levelStr, content);
     }
@@ -570,6 +480,36 @@ std::string_view ConsoleLogger::getCurrentTimestamp()
     std::tm     tstruct = *std::localtime(&now);
     std::strftime(m_timestampBuf, sizeof(m_timestampBuf), "%Y-%m-%d.%X", &tstruct);
     return m_timestampBuf;
+}
+
+ConsoleLogger::ConsoleLogger(ConsoleLogger&& other) : BaseLogger<ConsoleLogger>(other.m_level)
+{
+    std::lock_guard lock{other.m_writeMutex};
+    stealResourcesFrom(std::move(other));
+}
+
+ConsoleLogger& ConsoleLogger::operator=(ConsoleLogger&& other)
+{
+    if (this != &other)
+    {
+        std::unique_lock lock1{m_writeMutex, std::defer_lock};
+        std::unique_lock lock2(other.m_writeMutex, std::defer_lock);
+        std::lock(lock1, lock2);
+
+        // destroy my manager
+        m_IOClassInterface.destructor(m_asyncIOClass);
+        stealResourcesFrom(std::move(other));
+    }
+    return *this;
+}
+
+void ConsoleLogger::stealResourcesFrom(ConsoleLogger&& other)
+{
+    // m_oss doesn't need to be moved as it gets reset every time the lock is released
+    // m_timestampBuf[timestampMax] doesn't need any special handling as it is a local buffer whose state is useful within a single `write` call
+    memcpy(m_asyncIOClass, other.m_asyncIOClass, sizeof(m_asyncIOClass));
+    std::construct_at<NullAsyncIOManager>(reinterpret_cast<NullAsyncIOManager*>(other.m_asyncIOClass));
+    m_IOClassInterface = std::exchange(other.m_IOClassInterface, Table{});
 }
 
 static_assert(LogDisplay<ConsoleLogger>);

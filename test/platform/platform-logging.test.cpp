@@ -4,14 +4,20 @@ module;
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <fff/fff.h>
 #include <numbers>
 #include <source_location>
+#include <stdcapture/stdcapture.h>
+#include <string>
+#include <vector>
+
+#if defined(DMT_OS_LINUX)
+#include <unistd.h>
+#elif defined(DMT_OS_WINDOWS)
+#include <windows.h>
+#endif
 
 module platform;
-
-namespace dmt
-{
-}
 
 TEST_CASE("[platform-logging] General properties of logging utility")
 {
@@ -85,17 +91,20 @@ TEST_CASE("[platform-logging] StrBuf Basic Functionality", "[StrBuf]")
 }
 
 
-TEST_CASE("[platform-logging] CircularOStringStream Formatting", "[CircularOStringStream]") {
+TEST_CASE("[platform-logging] CircularOStringStream Formatting", "[CircularOStringStream]")
+{
     using namespace std::string_view_literals;
 
-    SECTION("Format string with arguments") {
+    SECTION("Format string with arguments")
+    {
         dmt::CircularOStringStream stream;
         stream.logInitList("{} {}", {"Hello"sv, "World"sv});
 
         REQUIRE(stream.str() == "Hello World");
     }
 
-    SECTION("Multiple format arguments") {
+    SECTION("Multiple format arguments")
+    {
         dmt::CircularOStringStream stream;
         stream.logInitList("{} {} {}", {"One"sv, "Two"sv, "Three"sv});
 
@@ -104,86 +113,129 @@ TEST_CASE("[platform-logging] CircularOStringStream Formatting", "[CircularOStri
 }
 
 
-/*
-TEST_CASE("[platform-logging] ConsoleLogger Basic Functionality", "[ConsoleLogger]")
+class alignas(8) MockAsyncIOManager : public dmt::BaseAsyncIOManager
 {
-    using namespace std::string_view_literals;
-    // Create an instance of ConsoleLogger
-    dmt::ConsoleLogger logger(dmt::ELogLevel::LOG);
-
-    // Test writing a simple log message
-    SECTION("Write simple log message")
+public:
+    uint32_t findFirstFreeBlocking()
     {
-        std::string message = "Test log message";
-        logger.write(dmt::ELogLevel::LOG, message, std::source_location::current());
-
-        // Verify the message is written correctly (Mock or check with the output)
-        // Since we don't have access to the actual console, consider mocking the output stream.
+        ++m_.findFirstFreeBlockingCnt;
+        return m_.findFirstFreeBlockingReturn;
     }
 
-    // Test writing a formatted log message
-    SECTION("Write formatted log message")
+    char* operator[](uint32_t idx)
     {
-        std::string format = "Formatted log message: {} {}";
-        logger.write(dmt::ELogLevel::LOG, format, {"arg1"sv, "arg2"sv}, std::source_location::current());
-
-        // Verify the formatted message is written correctly
+        ++m_.subscriptCnt;
+        return m_.buffers->operator[](idx).data();
     }
 
-    // Test invalid log level
-    SECTION("Ignore lower log levels")
+    char* get(uint32_t idx)
     {
-        std::string message = "This message should not appear";
-        logger.write(dmt::ELogLevel::TRACE, message, std::source_location::current());
-
-        // Verify that the message is not written
+        return m_.buffers->operator[](idx).data();
     }
 
-    // Test timestamp generation
-    SECTION("Timestamp generation")
+    bool enqueue(uint32_t idx, size_t sz)
     {
-        auto timestamp = logger.write;
-
-        REQUIRE_FALSE(timestamp.empty());
-        // Add more checks to validate the format if necessary
+        ++m_.enqueueCnt;
+        return m_.enqueueReturn;
     }
 
-    // Test relative file name carving
-    SECTION("Relative file name carving")
+    void setDestructorCalled(bool* p)
     {
+        m_.destructorCalled = p;
+    }
+
+    ~MockAsyncIOManager()
+    {
+        if (m_.destructorCalled)
+        {
+            *m_.destructorCalled = true;
+        }
+        delete m_.buffers;
+    }
+
+    struct T
+    {
+        std::array<std::array<char, 4096>, numAios>* buffers = new std::array<std::array<char, 4096>, numAios>({});
+        uint32_t                                     findFirstFreeBlockingReturn = 0;
+        bool                                         enqueueReturn               = false;
+        uint8_t                                      enqueueCnt                  = 0;
+        uint8_t                                      findFirstFreeBlockingCnt    = 0;
+        uint8_t                                      subscriptCnt                = 0;
+        bool*                                        destructorCalled            = nullptr;
+    };
+    T             m_;
+    unsigned char m_padding[dmt::asyncIOClassSize - sizeof(m_)];
+};
+static_assert(dmt::AsyncIOManager<MockAsyncIOManager>);
+
+#if defined(DMT_OS_LINUX)
+#elif defined(DMT_OS_WINDOWS)
+#endif
+
+#define DMT_ASYNC 0
+
+TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLogger]")
+{
+    SECTION("when loglevel not enabled, it shouldn't perform any logging")
+    {
+        auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>(dmt::ELogLevel::WARN);
+        MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
+#if DMT_ASYNC && ((defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)) // logMessageAsync
+        logger.log("fdsjkafhdslafjl");
+        CHECK(manager.m_.findFirstFreeBlockingCnt == 0);
+#else // logMessage
+        std::string captureBuffer;
+        {
+            capture::CaptureStdout cap([&](char const* buf, size_t sz) { captureBuffer += std::string(buf, sz); });
+            logger.log("fdsjkafhdslafjl");
+        }
+        CHECK(captureBuffer.empty());
+#endif
+    }
+
+    SECTION("should perform logging with no arguments")
+    {
+        auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>();
+        MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
+        char const*         ptr     = "aaaaaaa";
+#if DMT_ASYNC && ((defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)) // logMessageAsync
+        logger.log(ptr);
+        CHECK(std::strcmp(manager[manager.m_.findFirstFreeBlockingReturn], ptr) == 0);
+#else // logMessage
+        std::string captureBuffer;
+        {
+            capture::CaptureStdout cap([&](char const* buf, size_t sz) { captureBuffer += std::string(buf, sz); });
+            logger.log("fdsjkafhdslafjl");
+        }
+        CHECK(captureBuffer == "fdsjkafhdslafjl");
+#endif
+    }
+
+    SECTION("should perform logging with arguments")
+    {
+        auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>();
+        MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
+#if DMT_ASYNC && ((defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)) // logMessageAsync
+        logger.log("LOG {}", {"log"});
+        CHECK(std::strcmp(manager[manager.m_.findFirstFreeBlockingReturn], "LOG log") == 0);
+#else // logMessage
+        std::string captureBuffer;
+        {
+            capture::CaptureStdout cap([&](char const* buf, size_t sz) { captureBuffer += std::string(buf, sz); });
+            logger.log("LOG {}", {"log"});
+        }
+        CHECK(captureBuffer == "LOG log");
+#endif
+    }
+
+    SECTION("should call the internal class' destructor")
+    {
+        bool value = false;
+        {
+            auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>(dmt::ELogLevel::WARN);
+            MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
+            manager.setDestructorCalled(&value);
+        }
+        CHECK(value);
     }
 }
-
-TEST_CASE("[platform-logging]ConsoleLogger Thread Safety", "[ConsoleLogger][Multithreading]")
-{
-    ConsoleLogger logger(ELogLevel::LOG);
-
-    SECTION("Concurrent writes")
-    {
-        size_t const threadCount = 10;
-        size_t const iterations  = 100;
-
-        std::vector<std::thread> threads;
-        for (size_t i = 0; i < threadCount; ++i)
-        {
-            threads.emplace_back(
-                [&logger, iterations, i]()
-                {
-                    for (size_t j = 0; j < iterations; ++j)
-                    {
-                        logger.write(ELogLevel::LOG,
-                                     "Thread " + std::to_string(i) + " message " + std::to_string(j),
-                                     std::source_location::current());
-                    }
-                });
-        }
-
-        for (auto& thread : threads)
-        {
-            thread.join();
-        }
-
-        // Verify that all messages are logged without corruption (requires mocking output)
-    }
-}
- */

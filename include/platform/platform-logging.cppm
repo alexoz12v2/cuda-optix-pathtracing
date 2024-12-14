@@ -287,6 +287,107 @@ private:
 namespace dmt
 {
 
+
+class BaseAsyncIOManager
+{
+public:
+    static inline constexpr uint32_t numAios = 4;
+    static_assert(numAios < 5);
+    static inline constexpr uint32_t lineSize    = 2048;
+    static inline constexpr uint32_t maxAttempts = 10;
+
+protected:
+    struct Line
+    {
+        char buf[lineSize];
+    };
+};
+
+#if defined(DMT_OS_LINUX)
+
+struct alignas(8) AioSpace
+{
+    unsigned char bytes[256];
+};
+
+class LinuxAsyncIOManager : public BaseAsyncIOManager
+{
+public:
+    LinuxAsyncIOManager();
+    LinuxAsyncIOManager(LinuxAsyncIOManager const&) = delete;
+    LinuxAsyncIOManager(LinuxAsyncIOManager&& other) :
+    m_aioQueue(std::exchange(other.m_aioQueue, nullptr)),
+    m_lines(std::exchange(other.m_lines, nullptr))
+    {
+    }
+
+    LinuxAsyncIOManager& operator=(LinuxAsyncIOManager const&) = delete;
+    LinuxAsyncIOManager& operator=(LinuxAsyncIOManager&& other)
+    {
+        if (this != &other)
+        {
+            cleanup();
+            m_aioQueue = std::exchange(other.m_aioQueue, nullptr);
+            m_lines    = std::exchange(other.m_lines, nullptr);
+        }
+        return *this;
+    }
+    ~LinuxAsyncIOManager();
+
+    // Enqueue IO work to either STDOUT or STDERR
+    // teh work should NOT have the
+    bool     enqueue(uint32_t idx, size_t size);
+    uint32_t findFirstFreeBlocking();
+    char*    operator[](uint32_t idx);
+
+    // Poll for completion of IO operations
+    void sync() const;
+
+private:
+    // Helper method to initialize the AIO control blocks
+    void initAio();
+    void cleanup();
+
+    AioSpace*     m_aioQueue;
+    Line*         m_lines;
+    unsigned char padding[44];
+};
+
+#elif defined(DMT_OS_WINDOWS)
+
+struct alignas(8) AioSpace
+{
+    unsigned char bytes[32];
+};
+
+class WindowsAsyncIOManager : BaseAsyncIOManager
+{
+public:
+    WindowsAsyncIOManager();
+    WindowsAsyncIOManager(WindowsAsyncIOManager const&)            = delete;
+    WindowsAsyncIOManager& operator=(WindowsAsyncIOManager const&) = delete;
+    WindowsAsyncIOManager(WindowsAsyncIOManager&&);
+    WindowsAsyncIOManager& operator=(WindowsAsyncIOManager&&);
+    ~WindowsAsyncIOManager();
+
+    uint32_t findFirstFreeBlocking();
+    bool     enqueue(int32_t idx, size_t size);
+    char*    operator[](uint32_t idx);
+
+private:
+    void    sync();
+    void    initAio();
+    int32_t waitForEvents(uint32_t timeout, bool waitAll);
+    void    cleanup();
+
+    void*         m_hStdOut = nullptr;
+    void*         m_hBuffer[numAios]{};
+    AioSpace*     m_aioQueue;
+    Line*         m_lines;
+    unsigned char m_padding[8];
+};
+#endif
+
 } // namespace dmt
 
 export namespace dmt
@@ -561,6 +662,56 @@ protected:
 };
 
 /**
+  * Size of the type erased encapsulated class `m_asyncIOClass`
+  */
+inline constexpr uint32_t asyncIOClassSize = 64;
+
+// clang-format off
+template <typename T>
+concept AsyncIOManager = requires(T t) {
+    requires std::is_constructible_v<T>;
+    requires std::derived_from<T, BaseAsyncIOManager>;
+    requires std::is_standard_layout_v<T>;
+    requires std::movable<T>;
+    requires sizeof(T) == asyncIOClassSize;
+    requires alignof(T) == 8;
+    { t[3u] } -> std::convertible_to<char *>;
+    { t.findFirstFreeBlocking() } -> std::convertible_to<uint32_t>;
+    { t.enqueue(3u, 3u) } -> std::same_as<bool>;
+};
+// clang-format on
+
+class alignas(8) NullAsyncIOManager : public BaseAsyncIOManager
+{
+public:
+    char* operator[](uint32_t i)
+    {
+        return m_padding;
+    }
+
+    uint32_t findFirstFreeBlocking() const
+    {
+        return 0;
+    }
+
+    bool enqueue(uint32_t idx, size_t sz) const
+    {
+        return true;
+    }
+
+private:
+    char m_padding[asyncIOClassSize]{};
+};
+
+
+#if defined(DMT_OS_LINUX)
+static_assert(AsyncIOManager<LinuxAsyncIOManager>);
+#elif defined(DMT_OS_WINDOWS)
+static_assert(AsyncIOManager<WindowsAsyncIOManager>);
+#endif
+static_assert(AsyncIOManager<NullAsyncIOManager>);
+
+/**
  * Class implementing basic console logging while making use of the async IO facilities of the Windows and Linux
  * Operating system.
  * Note: OS API usage is not beneficial to performance here, but it's for learning and reference
@@ -568,12 +719,6 @@ protected:
 class ConsoleLogger : public BaseLogger<ConsoleLogger>
 {
 public:
-    // -- Constants --
-    /**
-     * Size of the type erased encapsulated class `m_asyncIOClass`
-     */
-    static inline constexpr uint32_t asyncIOClassSize = 64;
-
     // -- Types --
     /**
      * defining some properties as mandated by the `LogDisplay` concept
@@ -583,18 +728,77 @@ public:
         static constexpr ELogDisplay displayType = ELogDisplay::Console;
     };
 
+
     // -- Constructors/Copy Control --
     /**
-     * Constructor which runs the base class constructor and constructs the OS specific encapsulated class with
-     * a placement new
-     * @param level desired log level
+     * Factory Method to create a logger. This allows us to have a default template parameter on
+     * construction while still being able to modify it in scenarios like testing
+     * @tparam T `AsyncIOManager` implementation class
+     * @param level minimum log level
+     * @return `ConsoleLogger` instance
      */
-    ConsoleLogger(ELogLevel level = ELogLevel::LOG);
+    template <AsyncIOManager T =
+#if defined(DMT_OS_LINUX)
+                  LinuxAsyncIOManager
+#elif defined(DMT_OS_WINDOWS)
+                  WindowsAsyncIOManager
+#else
+#error "what"
+#endif
+              >
+    static ConsoleLogger create(ELogLevel level = ELogLevel::LOG)
+    {
+        ConsoleLogger logger{level};
+        assert(reinterpret_cast<std::uintptr_t>(logger.m_asyncIOClass) % alignof(T) == 0);
+        std::construct_at<T>(reinterpret_cast<T*>(logger.m_asyncIOClass));
+        logger.m_IOClassInterface.tryAsyncLog =
+            [](unsigned char*          pClazz,
+               ELogLevel               level,
+               std::string_view const& date,
+               std::string_view const& fileName,
+               std::string_view const& functionName,
+               uint32_t                line,
+               std::string_view const& levelStr,
+               std::string_view const& content)
+        {
+            T&       clazz   = *reinterpret_cast<T*>(pClazz);
+            uint32_t freeIdx = clazz.findFirstFreeBlocking();
+            int32_t  sz      = std::snprintf(clazz[freeIdx],
+                                       T::lineSize,
+                                       "%s[%s %s:%s:%u] %s <> %s\n%s",
+                                       logcolor::colorFromLevel(level).data(),
+                                       date.data(),
+                                       fileName.data(),
+                                       functionName.data(),
+                                       line,
+                                       levelStr.data(),
+                                       content.data(),
+                                       logcolor::reset.data());
+            assert(sz > 0 && "could not log to buffer");
+            return clazz.enqueue(freeIdx, static_cast<uint32_t>(sz));
+        };
+        logger.m_IOClassInterface.destructor = [](unsigned char* pClazz)
+        { std::destroy_at<T>(reinterpret_cast<T*>(pClazz)); };
+        return logger;
+    }
 
     ConsoleLogger(ConsoleLogger const&)            = delete;
-    ConsoleLogger(ConsoleLogger&&)                 = delete;
     ConsoleLogger& operator=(ConsoleLogger const&) = delete;
-    ConsoleLogger& operator=(ConsoleLogger&&)      = delete;
+
+    /**
+     * Move constructor which locks the mutes of the passed parameter and acquires the interface
+     * and bytes of the implementation class
+     * @param other
+     */
+    ConsoleLogger(ConsoleLogger&& other);
+
+    /**
+     * Move assignment which frees the current implementation class,
+     * locks the mutes of the passed parameter and acquires the interface
+     * and bytes of the implementation class
+     * @param other
+     */
+    ConsoleLogger& operator=(ConsoleLogger&& other);
 
     /**
      * Destructor which is manually calling the encapsulated class' destructor
@@ -622,7 +826,40 @@ public:
                std::initializer_list<StrBuf> const& list,
                std::source_location const&          loc);
 
+    template <AsyncIOManager T>
+    std::remove_cvref_t<T>& getInteralAs()
+    {
+        return *reinterpret_cast<std::remove_cvref_t<T>*>(&m_asyncIOClass);
+    }
+
 private:
+    // -- Constructors --
+    explicit ConsoleLogger(ELogLevel level) : BaseLogger<ConsoleLogger>(level)
+    {
+    }
+
+    // -- Types --
+    struct Table
+    {
+        bool (*tryAsyncLog)(unsigned char*          pClazz,
+                            ELogLevel               level,
+                            std::string_view const& date,
+                            std::string_view const& fileName,
+                            std::string_view const& functionName,
+                            uint32_t                line,
+                            std::string_view const& levelStr,
+                            std::string_view const& content) =
+            [](unsigned char*          pClazz,
+               ELogLevel               level,
+               std::string_view const& date,
+               std::string_view const& fileName,
+               std::string_view const& functionName,
+               uint32_t                line,
+               std::string_view const& levelStr,
+               std::string_view const& content) { return true; };
+        void (*destructor)(unsigned char* pClazz) = [](unsigned char* pClazz) {};
+    };
+
     // -- Constants --
     /**
      * length of the buffer used to create
@@ -630,6 +867,13 @@ private:
     static inline constexpr uint32_t timestampMax = 64;
 
     // -- Function Members --
+    /**
+     * Private function member used to implement move semantics. It takes the interface and
+     * bytes of the io manager internal class
+     * @param other
+     */
+    void stealResourcesFrom(ConsoleLogger&& other);
+
     /**
      * Helper function to format and print the log message
      * @param level desired log level. Used to determine the color of the console output
@@ -691,18 +935,23 @@ private:
      * buffer used to hold an instance of the timestamp when printing
      * @warning this is to remove and dynamically allocate when multithreading this
      */
-    char m_timestampBuf[timestampMax];
+    char m_timestampBuf[timestampMax]{};
 
     /**
      * type erased class to access OS-specific functionalities
      * @warning this is to remove and synamically allocate when multithreading this
      */
-    alignas(16) unsigned char m_asyncIOClass[asyncIOClassSize]{};
+    alignas(8) mutable unsigned char m_asyncIOClass[asyncIOClassSize]{};
+
+    /**
+     * Table of functions to handle the type erased class `m_asyncIOClass`
+     */
+    Table m_IOClassInterface;
 
     /**
      * Mutex to ensure thread-safety for write methods
      */
-    std::mutex m_writeMutex;
+    mutable std::mutex m_writeMutex;
 };
 
 } // namespace dmt

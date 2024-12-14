@@ -62,7 +62,6 @@ void testLoggingInMultithreadedEnvironment(dmt::ConsoleLogger& logger,
     logger.log("All threads completed logging. Total threads: {}", {completedThreads.load()});
 }
 
-
 } // namespace
 
 int main()
@@ -75,7 +74,7 @@ int main()
     std::string_view           arg{"format"};
     oss.logInitList(formatStr, {arg, pi, dmt::StrBuf(pi, "%.5f"), thou, b});
     std::cout << oss.str() << std::endl;
-    dmt::ConsoleLogger logger;
+    dmt::ConsoleLogger logger = dmt::ConsoleLogger::create();
     printSome(logger);
     testLoggingInMultithreadedEnvironment(logger);
     logger.trace("I shall not be seen");

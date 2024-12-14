@@ -1,3 +1,4 @@
+// https://github.com/dmikushin/stdcapture
 #ifndef STDCAPTURE_H
 #define STDCAPTURE_H
 
@@ -58,7 +59,7 @@ public:
     {
         // Make output stream unbuffered, so that we don't need to flush
         // the streams before capture and after capture (fflush can cause a deadlock)
-        setvbuf(stream, NULL, _IONBF, 0);
+        setvbuf(stream, nullptr, _IONBF, 0);
 
         // Start capturing.
         secure_pipe(pipes);
@@ -184,6 +185,49 @@ public:
     {
     }
 };
+
+#if 0
+class MyCapture
+{
+public:
+    static constexpr uint32_t maxLen = 256;
+    MyCapture(std::function<void(char const*, uint32_t)> const& callback) : m_callback(callback)
+    {
+        std::ios::sync_with_stdio(true);
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        m_original  = dup(STDOUT_FILENO);
+        int32_t ret = pipe(m_pipe);
+        while (ret != 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            ret = pipe(m_pipe);
+        }
+        // redirect stdout to pipe and close the writing end to pipe
+        long flags = fcntl(m_pipe[0], F_GETFL); flags |= O_NONBLOCK; fcntl(m_pipe[0], F_SETFL, flags);
+        dup2(m_pipe[1], STDOUT_FILENO);
+        close(m_pipe[1]);
+    }
+
+    ~MyCapture()
+    {
+        fflush(stdout);
+        int32_t numBytes = read(m_pipe[0], m_buffer, maxLen);
+        if (numBytes > 0)
+        {
+            m_callback(m_buffer, static_cast<uint32_t>(numBytes));
+        }
+        // rewire stdout
+        dup2(m_original, STDOUT_FILENO);
+        close(m_pipe[0]);
+    }
+
+private:
+    std::function<void(char const*, uint32_t)> m_callback;
+    char                                       m_buffer[maxLen];
+    int32_t                                    m_pipe[2];
+    int32_t                                    m_original;
+};
+#endif
 
 } // namespace capture
 

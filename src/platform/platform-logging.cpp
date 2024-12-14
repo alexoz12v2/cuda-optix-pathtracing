@@ -146,16 +146,33 @@ void LinuxAsyncIOManager::initAio()
     }
 }
 
-void LinuxAsyncIOManager::cleanup()
+void LinuxAsyncIOManager::cleanup() noexcept
 {
     sync();
     std::free(m_aioQueue);
     std::free(m_lines);
 }
 
-LinuxAsyncIOManager::~LinuxAsyncIOManager()
+LinuxAsyncIOManager::LinuxAsyncIOManager(LinuxAsyncIOManager&& other) noexcept :
+m_aioQueue(std::exchange(other.m_aioQueue, nullptr)),
+m_lines(std::exchange(other.m_lines, nullptr))
+{
+}
+
+LinuxAsyncIOManager::~LinuxAsyncIOManager() noexcept
 {
     cleanup();
+}
+
+LinuxAsyncIOManager& LinuxAsyncIOManager::operator=(LinuxAsyncIOManager&& other) noexcept
+{
+    if (this != &other)
+    {
+        cleanup();
+        m_aioQueue = std::exchange(other.m_aioQueue, nullptr);
+        m_lines    = std::exchange(other.m_lines, nullptr);
+    }
+    return *this;
 }
 
 char* LinuxAsyncIOManager::operator[](uint32_t idx)
@@ -231,8 +248,7 @@ struct OverlappedWrite
 };
 
 static_assert(sizeof(OverlappedWrite) == sizeof(AioSpace) && alignof(OverlappedWrite) == alignof(AioSpace));
-static_assert(std::is_standard_layout_v<WindowsAsyncIOManager> &&
-              sizeof(WindowsAsyncIOManager) == ConsoleLogger::asyncIOClassSize);
+static_assert(std::is_standard_layout_v<WindowsAsyncIOManager> && sizeof(WindowsAsyncIOManager) == asyncIOClassSize);
 
 WindowsAsyncIOManager::WindowsAsyncIOManager() :
 m_hStdOut(GetStdHandle(STD_OUTPUT_HANDLE)),
@@ -291,20 +307,22 @@ uint32_t WindowsAsyncIOManager::findFirstFreeBlocking()
     return 0;
 }
 
-WindowsAsyncIOManager::WindowsAsyncIOManager(WindowsAsyncIOManager&& other) :
+WindowsAsyncIOManager::WindowsAsyncIOManager(WindowsAsyncIOManager&& other) noexcept :
 m_hStdOut(GetStdHandle(STD_OUTPUT_HANDLE)),
-m_hBuffer{std::exchange(other.m_hBuffer, nullptr)},
 m_aioQueue(std::exchange(other.m_aioQueue, nullptr)),
 m_lines(std::exchange(other.m_lines, nullptr))
 {
+    std::memcpy(m_hBuffer, other.m_hBuffer, sizeof(m_hBuffer));
+    std::memset(other.m_hBuffer, 0, sizeof(m_hBuffer));
 }
 
-WindowsAsyncIOManager& WindowsAsyncIOManager::operator=(WindowsAsyncIOManager&&)
+WindowsAsyncIOManager& WindowsAsyncIOManager::operator=(WindowsAsyncIOManager&& other) noexcept
 {
     if (this != &other)
     {
         cleanup();
-        m_hBuffer  = std::exchange(other.m_hBuffer, nullptr);
+        std::memcpy(m_hBuffer, other.m_hBuffer, sizeof(m_hBuffer));
+        std::memset(other.m_hBuffer, 0, sizeof(m_hBuffer));
         m_aioQueue = std::exchange(other.m_aioQueue, nullptr);
         m_lines    = std::exchange(other.m_lines, nullptr);
     }
@@ -350,7 +368,7 @@ int32_t WindowsAsyncIOManager::waitForEvents(uint32_t timeout, bool waitAll)
     return -2; // Unreachable, satisfies compiler
 }
 
-void WindowsAsyncIOManager::cleanup()
+void WindowsAsyncIOManager::cleanup() noexcept
 {
     sync();
 
@@ -363,7 +381,7 @@ void WindowsAsyncIOManager::cleanup()
     std::free(m_lines);
 }
 
-WindowsAsyncIOManager::~WindowsAsyncIOManager()
+WindowsAsyncIOManager::~WindowsAsyncIOManager() noexcept
 {
     cleanup();
 }

@@ -5,6 +5,7 @@ module;
 #include <catch2/catch_test_macros.hpp>
 
 #include <fff/fff.h>
+#include <iostream>
 #include <numbers>
 #include <source_location>
 #include <stdcapture/stdcapture.h>
@@ -25,25 +26,25 @@ TEST_CASE("[platform-logging] General properties of logging utility")
     SECTION("Log levels should be in ascending importance ")
     {
         STATIC_CHECK(dmt::ELogLevel::TRACE < dmt::ELogLevel::LOG);
-        STATIC_CHECK(dmt::ELogLevel::LOG < dmt::ELogLevel::WARN);
-        STATIC_CHECK(dmt::ELogLevel::WARN < dmt::ELogLevel::ERROR);
-        STATIC_CHECK(dmt::ELogLevel::ERROR < dmt::ELogLevel::NONE);
+        STATIC_CHECK(dmt::ELogLevel::LOG < dmt::ELogLevel::WARNING);
+        STATIC_CHECK(dmt::ELogLevel::WARNING < dmt::ELogLevel::ERR);
+        STATIC_CHECK(dmt::ELogLevel::ERR < dmt::ELogLevel::NONE);
     }
 
     SECTION("Log Levels should have correct string representatiohn")
     {
         STATIC_CHECK(dmt::stringFromLevel(dmt::ELogLevel::TRACE) == "TRACE"sv);
         STATIC_CHECK(dmt::stringFromLevel(dmt::ELogLevel::LOG) == "LOG  "sv);
-        STATIC_CHECK(dmt::stringFromLevel(dmt::ELogLevel::WARN) == "WARN "sv);
-        STATIC_CHECK(dmt::stringFromLevel(dmt::ELogLevel::ERROR) == "ERROR"sv);
+        STATIC_CHECK(dmt::stringFromLevel(dmt::ELogLevel::WARNING) == "WARN "sv);
+        STATIC_CHECK(dmt::stringFromLevel(dmt::ELogLevel::ERR) == "ERROR"sv);
     }
 
     SECTION("Log colors should be correctly assigned")
     {
         STATIC_CHECK(dmt::logcolor::colorFromLevel(dmt::ELogLevel::TRACE) == dmt::logcolor::greyGreen);
         STATIC_CHECK(dmt::logcolor::colorFromLevel(dmt::ELogLevel::LOG) == dmt::logcolor::brightWhite);
-        STATIC_CHECK(dmt::logcolor::colorFromLevel(dmt::ELogLevel::WARN) == dmt::logcolor::brightYellow);
-        STATIC_CHECK(dmt::logcolor::colorFromLevel(dmt::ELogLevel::ERROR) == dmt::logcolor::red);
+        STATIC_CHECK(dmt::logcolor::colorFromLevel(dmt::ELogLevel::WARNING) == dmt::logcolor::brightYellow);
+        STATIC_CHECK(dmt::logcolor::colorFromLevel(dmt::ELogLevel::ERR) == dmt::logcolor::red);
     }
 }
 
@@ -136,6 +137,8 @@ public:
     bool enqueue(uint32_t idx, size_t sz)
     {
         ++m_.enqueueCnt;
+        if (m_.useStdout)
+            printf("%s", this->operator[](idx));
         return m_.enqueueReturn;
     }
 
@@ -153,6 +156,11 @@ public:
         delete m_.buffers;
     }
 
+    void setUseStdOut(bool b)
+    {
+        m_.useStdout = b;
+    }
+
     struct T
     {
         std::array<std::array<char, 4096>, numAios>* buffers = new std::array<std::array<char, 4096>, numAios>({});
@@ -162,23 +170,28 @@ public:
         uint8_t                                      findFirstFreeBlockingCnt    = 0;
         uint8_t                                      subscriptCnt                = 0;
         bool*                                        destructorCalled            = nullptr;
+        bool                                         useStdout                   = false;
     };
     T             m_;
     unsigned char m_padding[dmt::asyncIOClassSize - sizeof(m_)];
 };
 static_assert(dmt::AsyncIOManager<MockAsyncIOManager>);
 
-#if defined(DMT_OS_LINUX)
-#elif defined(DMT_OS_WINDOWS)
-#endif
-
-#define DMT_ASYNC 0
+#define DMT_ASYNC 1
 
 TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLogger]")
 {
+    constexpr auto lambda = [](std::string& captureBuffer)
+    {
+        size_t idx = captureBuffer.find("<> ");
+        CHECK(idx != std::string::npos);
+        captureBuffer = captureBuffer.substr(idx + 3);                                // count length of "<> "
+        captureBuffer.resize(captureBuffer.size() - dmt::logcolor::reset.size() - 1); // remove newline too
+    };
+
     SECTION("when loglevel not enabled, it shouldn't perform any logging")
     {
-        auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>(dmt::ELogLevel::WARN);
+        auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>(dmt::ELogLevel::WARNING);
         MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
 #if DMT_ASYNC && ((defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)) // logMessageAsync
         logger.log("fdsjkafhdslafjl");
@@ -186,7 +199,10 @@ TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLog
 #else // logMessage
         std::string captureBuffer;
         {
-            capture::CaptureStdout cap([&](char const* buf, size_t sz) { captureBuffer += std::string(buf, sz); });
+            capture::CaptureStdout cap(           //
+                [&](char const* buf, size_t sz) { //
+                    captureBuffer += std::string(buf, sz);
+                });
             logger.log("fdsjkafhdslafjl");
         }
         CHECK(captureBuffer.empty());
@@ -197,16 +213,23 @@ TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLog
     {
         auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>();
         MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
-        char const*         ptr     = "aaaaaaa";
+        std::string         ptr     = "aaaaaaa";
 #if DMT_ASYNC && ((defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)) // logMessageAsync
         logger.log(ptr);
-        CHECK(std::strcmp(manager[manager.m_.findFirstFreeBlockingReturn], ptr) == 0);
+        std::string res = manager[manager.m_.findFirstFreeBlockingReturn];
+        lambda(res);
+        CHECK(res == ptr);
 #else // logMessage
+        manager.setUseStdOut(true);
         std::string captureBuffer;
         {
-            capture::CaptureStdout cap([&](char const* buf, size_t sz) { captureBuffer += std::string(buf, sz); });
+            capture::CaptureStdout cap(           //
+                [&](char const* buf, size_t sz) { //
+                    captureBuffer += std::string(buf, sz);
+                });
             logger.log("fdsjkafhdslafjl");
         }
+        lambda(captureBuffer);
         CHECK(captureBuffer == "fdsjkafhdslafjl");
 #endif
     }
@@ -217,13 +240,18 @@ TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLog
         MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
 #if DMT_ASYNC && ((defined(DMT_OS_LINUX) && defined(_POSIX_ASYNCHRONOUS_IO)) || defined(DMT_OS_WINDOWS)) // logMessageAsync
         logger.log("LOG {}", {"log"});
-        CHECK(std::strcmp(manager[manager.m_.findFirstFreeBlockingReturn], "LOG log") == 0);
+        std::string expected = "LOG log";
+        std::string actual   = manager[manager.m_.findFirstFreeBlockingReturn];
+        lambda(actual);
+        CHECK(actual == expected);
 #else // logMessage
         std::string captureBuffer;
+        manager.setUseStdOut(true);
         {
             capture::CaptureStdout cap([&](char const* buf, size_t sz) { captureBuffer += std::string(buf, sz); });
             logger.log("LOG {}", {"log"});
         }
+        lambda(captureBuffer);
         CHECK(captureBuffer == "LOG log");
 #endif
     }
@@ -232,7 +260,7 @@ TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLog
     {
         bool value = false;
         {
-            auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>(dmt::ELogLevel::WARN);
+            auto                logger  = dmt::ConsoleLogger::create<MockAsyncIOManager>(dmt::ELogLevel::WARNING);
             MockAsyncIOManager& manager = logger.getInteralAs<MockAsyncIOManager>();
             manager.setDestructorCalled(&value);
         }

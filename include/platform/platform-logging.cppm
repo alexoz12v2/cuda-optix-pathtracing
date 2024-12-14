@@ -47,11 +47,11 @@ export namespace dmt
  */
 enum class ELogLevel : uint8_t
 {
-    TRACE = 0, /** <Debug log level> */
-    LOG   = 1, /** <Info log level> */
-    WARN  = 2, /** <Warning log level> */
-    ERROR = 3, /** <Error log level> */
-    NONE  = 4, /** <Log disabled> */
+    TRACE   = 0, /** <Debug log level> */
+    LOG     = 1, /** <Info log level> */
+    WARNING = 2, /** <Warning log level> */
+    ERR     = 3, /** <Error log level> */
+    NONE    = 4, /** <Log disabled> */
 };
 
 /**
@@ -315,24 +315,11 @@ class LinuxAsyncIOManager : public BaseAsyncIOManager
 public:
     LinuxAsyncIOManager();
     LinuxAsyncIOManager(LinuxAsyncIOManager const&) = delete;
-    LinuxAsyncIOManager(LinuxAsyncIOManager&& other) :
-    m_aioQueue(std::exchange(other.m_aioQueue, nullptr)),
-    m_lines(std::exchange(other.m_lines, nullptr))
-    {
-    }
+    LinuxAsyncIOManager(LinuxAsyncIOManager&& other) noexcept;
 
     LinuxAsyncIOManager& operator=(LinuxAsyncIOManager const&) = delete;
-    LinuxAsyncIOManager& operator=(LinuxAsyncIOManager&& other)
-    {
-        if (this != &other)
-        {
-            cleanup();
-            m_aioQueue = std::exchange(other.m_aioQueue, nullptr);
-            m_lines    = std::exchange(other.m_lines, nullptr);
-        }
-        return *this;
-    }
-    ~LinuxAsyncIOManager();
+    LinuxAsyncIOManager& operator=(LinuxAsyncIOManager&& other) noexcept;
+    ~LinuxAsyncIOManager() noexcept;
 
     // Enqueue IO work to either STDOUT or STDERR
     // teh work should NOT have the
@@ -346,7 +333,7 @@ public:
 private:
     // Helper method to initialize the AIO control blocks
     void initAio();
-    void cleanup();
+    void cleanup() noexcept;
 
     AioSpace*     m_aioQueue;
     Line*         m_lines;
@@ -360,15 +347,15 @@ struct alignas(8) AioSpace
     unsigned char bytes[32];
 };
 
-class WindowsAsyncIOManager : BaseAsyncIOManager
+class WindowsAsyncIOManager : public BaseAsyncIOManager
 {
 public:
     WindowsAsyncIOManager();
     WindowsAsyncIOManager(WindowsAsyncIOManager const&)            = delete;
     WindowsAsyncIOManager& operator=(WindowsAsyncIOManager const&) = delete;
-    WindowsAsyncIOManager(WindowsAsyncIOManager&&);
-    WindowsAsyncIOManager& operator=(WindowsAsyncIOManager&&);
-    ~WindowsAsyncIOManager();
+    WindowsAsyncIOManager(WindowsAsyncIOManager&&) noexcept;
+    WindowsAsyncIOManager& operator=(WindowsAsyncIOManager&&) noexcept;
+    ~WindowsAsyncIOManager() noexcept;
 
     uint32_t findFirstFreeBlocking();
     bool     enqueue(int32_t idx, size_t size);
@@ -378,7 +365,7 @@ private:
     void    sync();
     void    initAio();
     int32_t waitForEvents(uint32_t timeout, bool waitAll);
-    void    cleanup();
+    void    cleanup() noexcept;
 
     void*         m_hStdOut = nullptr;
     void*         m_hBuffer[numAios]{};
@@ -537,7 +524,7 @@ public:
      */
     [[nodiscard]] bool errorEnabled() const
     {
-        return enabled(ELogLevel::ERROR);
+        return enabled(ELogLevel::ERR);
     }
 
     /**
@@ -555,7 +542,7 @@ public:
      */
     [[nodiscard]] bool warnEnabled() const
     {
-        return enabled(ELogLevel::WARN);
+        return enabled(ELogLevel::WARNING);
     }
 
     /**
@@ -575,7 +562,7 @@ public:
      */
     void error(std::string_view const& str, std::source_location const& loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::ERROR, str, loc);
+        static_cast<Derived*>(this)->write(ELogLevel::ERR, str, loc);
     }
 
     /**
@@ -585,7 +572,7 @@ public:
      */
     void warn(std::string_view const& str, std::source_location const& loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::WARN, str, loc);
+        static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, loc);
     }
 
     /**
@@ -623,7 +610,7 @@ public:
                std::initializer_list<StrBuf> const& list,
                std::source_location const&          loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::ERROR, str, list, loc);
+        static_cast<Derived*>(this)->write(ELogLevel::ERR, str, list, loc);
     }
 
     /**
@@ -637,7 +624,7 @@ public:
               std::initializer_list<StrBuf> const& list,
               std::source_location const&          loc = std::source_location::current())
     {
-        static_cast<Derived*>(this)->write(ELogLevel::WARN, str, list, loc);
+        static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, list, loc);
     }
 
     /**
@@ -681,6 +668,10 @@ concept AsyncIOManager = requires(T t) {
 };
 // clang-format on
 
+/**
+ * Implementation of the `AsyncIOManager` concept which does nothing. Used to fill moved-from
+ * `ConsoleLogger` objects
+ */
 class alignas(8) NullAsyncIOManager : public BaseAsyncIOManager
 {
 public:
@@ -753,7 +744,7 @@ public:
         std::construct_at<T>(reinterpret_cast<T*>(logger.m_asyncIOClass));
         logger.m_IOClassInterface.tryAsyncLog =
             [](unsigned char*          pClazz,
-               ELogLevel               level,
+               ELogLevel               levell,
                std::string_view const& date,
                std::string_view const& fileName,
                std::string_view const& functionName,
@@ -766,7 +757,7 @@ public:
             int32_t  sz      = std::snprintf(clazz[freeIdx],
                                        T::lineSize,
                                        "%s[%s %s:%s:%u] %s <> %s\n%s",
-                                       logcolor::colorFromLevel(level).data(),
+                                       logcolor::colorFromLevel(levell).data(),
                                        date.data(),
                                        fileName.data(),
                                        functionName.data(),
@@ -839,6 +830,9 @@ private:
     }
 
     // -- Types --
+    /**
+     * Interface type calling into the type erased class implementation
+     */
     struct Table
     {
         bool (*tryAsyncLog)(unsigned char*          pClazz,

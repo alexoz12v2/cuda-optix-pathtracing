@@ -79,9 +79,10 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
   - [ ] classi base Ray, AABB, Vector, Matrix
   - [ ] Funzioni Shading: BRDF, Texture Mapping, Mapping Spettro -> RGB
 - [ ] Alessio: Migliorie agli script di building (vedi [Link](https://cmake.org/cmake/help/latest/module/FindCUDA.html))
-  - [ ] Link Time Optimization
+  - [x] Link Time Optimization
   - [ ] `add_custom_target` per copiare cartella `assets/`
-  - [ ] supporto CUDA `add_cuda_library` (deprecato da cmake 3.27, ora CUDA first class citizen)
+  - [x] supporto CUDA `add_cuda_library` (deprecato da cmake 3.27, ora CUDA first class citizen)
+  - [ ] integrazione CUDA check compatibility with cmake, [link](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/cmake/checkcuda.cu#L4)
   - [ ] supporto per librerie dinamiche `add_library(${target} SHARED)`
   - [ ] far funzionare gli script su Windows su un altro build tool diverso da VS
 - [ ] Implementazione CPU con [Embree](https://www.embree.org/api.html)

@@ -159,6 +159,8 @@ enum class ELogDisplay : uint8_t
 {
     Console,
     WindowPanel,
+    Forward,
+    Count,
 };
 
 /**
@@ -513,9 +515,44 @@ public:
      * Checks if the `LOG` log level is enabled
      * @return boolean indicating whether the `LOG` log level is enabled
      */
+    [[nodiscard]] bool logEnabled()
+    {
+        return static_cast<Derived*>(this)->enabled(ELogLevel::LOG);
+    }
+
+    /**
+     * Checks if the `ERROR` log level is enabled
+     * @return boolean indicating whether the `ERROR` log level is enabled
+     */
+    [[nodiscard]] bool errorEnabled()
+    {
+        return static_cast<Derived*>(this)->enabled(ELogLevel::ERR);
+    }
+
+    /**
+     * Checks if the `TRACE` log level is enabled
+     * @return boolean indicating whether the `TRACE` log level is enabled
+     */
+    [[nodiscard]] bool traceEnabled()
+    {
+        return static_cast<Derived*>(this)->enabled(ELogLevel::TRACE);
+    }
+
+    /**
+     * Checks if the `WARN` log level is enabled
+     * @return boolean indicating whether the `WARN` log level is enabled
+     */
+    [[nodiscard]] bool warnEnabled()
+    {
+        return static_cast<Derived*>(this)->enabled(ELogLevel::WARNING);
+    }
+    /**
+     * Checks if the `LOG` log level is enabled
+     * @return boolean indicating whether the `LOG` log level is enabled
+     */
     [[nodiscard]] bool logEnabled() const
     {
-        return enabled(ELogLevel::LOG);
+        return static_cast<Derived const*>(this)->enabled(ELogLevel::LOG);
     }
 
     /**
@@ -524,7 +561,7 @@ public:
      */
     [[nodiscard]] bool errorEnabled() const
     {
-        return enabled(ELogLevel::ERR);
+        return static_cast<Derived const*>(this)->enabled(ELogLevel::ERR);
     }
 
     /**
@@ -533,7 +570,7 @@ public:
      */
     [[nodiscard]] bool traceEnabled() const
     {
-        return enabled(ELogLevel::TRACE);
+        return static_cast<Derived const*>(this)->enabled(ELogLevel::TRACE);
     }
 
     /**
@@ -542,7 +579,7 @@ public:
      */
     [[nodiscard]] bool warnEnabled() const
     {
-        return enabled(ELogLevel::WARNING);
+        return static_cast<Derived const*>(this)->enabled(ELogLevel::WARNING);
     }
 
     /**
@@ -945,7 +982,7 @@ private:
     /**
      * Mutex to ensure thread-safety for write methods
      */
-    mutable std::mutex m_writeMutex;
+    static inline std::mutex s_writeMutex;
 };
 
 } // namespace dmt

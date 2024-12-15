@@ -7,6 +7,8 @@ module;
 #include <thread>
 #include <vector>
 
+#include <cstring>
+
 module platform;
 
 namespace // all functions declared in an anonymous namespace (from the global namespace) are static by default
@@ -78,4 +80,8 @@ int main()
     printSome(logger);
     testLoggingInMultithreadedEnvironment(logger);
     logger.trace("I shall not be seen");
+
+    dmt::Platform platform;
+    if (platform.ctx().logEnabled())
+        platform.ctx().log("We are in the platform now");
 }

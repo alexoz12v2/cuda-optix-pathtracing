@@ -416,7 +416,7 @@ void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::sou
 {
     if (enabled(level))
     {
-        std::lock_guard<std::mutex> lock(m_writeMutex);
+        std::lock_guard<std::mutex> lock(s_writeMutex);
         std::string_view            date     = getCurrentTimestamp();
         std::string_view            fileName = loc.file_name();
         carveRelativeFileName(fileName);
@@ -431,7 +431,7 @@ void ConsoleLogger::write(ELogLevel                            level,
 {
     if (enabled(level))
     {
-        std::lock_guard<std::mutex> lock(m_writeMutex);
+        std::lock_guard<std::mutex> lock(s_writeMutex);
         std::string_view            date     = getCurrentTimestamp();
         std::string_view            fileName = loc.file_name();
         carveRelativeFileName(fileName);
@@ -502,7 +502,7 @@ std::string_view ConsoleLogger::getCurrentTimestamp()
 
 ConsoleLogger::ConsoleLogger(ConsoleLogger&& other) : BaseLogger<ConsoleLogger>(other.m_level)
 {
-    std::lock_guard lock{other.m_writeMutex};
+    std::lock_guard lock{s_writeMutex};
     stealResourcesFrom(std::move(other));
 }
 
@@ -510,9 +510,7 @@ ConsoleLogger& ConsoleLogger::operator=(ConsoleLogger&& other)
 {
     if (this != &other)
     {
-        std::unique_lock lock1{m_writeMutex, std::defer_lock};
-        std::unique_lock lock2(other.m_writeMutex, std::defer_lock);
-        std::lock(lock1, lock2);
+        std::lock_guard lock{s_writeMutex};
 
         // destroy my manager
         m_IOClassInterface.destructor(m_asyncIOClass);

@@ -153,6 +153,7 @@ macro(dmt_define_environment)
     message(FATAL_ERROR "Only architecture supported is x86_64")
     return()
   endif()
+  set(DMT_ARCH "DMT_ARCH_X86_64")
 
   # -- OS Detection (Cmake Variable CMAKE_SYSTEM_NAME) --
   if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
@@ -184,9 +185,21 @@ macro(dmt_define_environment)
   else()
     message(WARNING "Unrecognized compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
+
+  # -- build type definition
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(DMT_BUILD_TYPE "DMT_DEBUG")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(DMT_BUILD_TYPE "DMT_RELEASE")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    set(DMT_BUILD_TYPE "DMT_DEBUG")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    set(DMT_BUILD_TYPE "DMT_RELEASE")
+  endif()
 endmacro()
 
 
+# Unused for now
 function(dmt_get_msvc_flags out_flags)
   set(out_flags "")
 
@@ -378,7 +391,7 @@ function(dmt_add_compile_definitions target)
   else()
     set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
   endif()
-  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"")
+  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH})
 endfunction()
 
 
@@ -432,7 +445,7 @@ function(dmt_add_module_library name module_name)
   # may give problems if CUDA interfaces between modules are shared
   set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX)
   # modules require C++20 support
-  target_compile_features(${name} PUBLIC cxx_std_20)
+  target_compile_features(${name} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   # cuda specific
   set_target_properties(${name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
@@ -604,6 +617,7 @@ function(dmt_add_example target)
   set_target_properties(${target} PROPERTIES FOLDER "Examples")
   # visual studio startup path for debugging
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
@@ -645,7 +659,7 @@ function(dmt_add_test target)
   set_target_properties(${target} PROPERTIES FOLDER "Tests")
   # startup path for debugging in IDEs
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_features(${target} PUBLIC cxx_std_20)
+  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   if(MSVC)
     target_compile_options(${target} PRIVATE /Zc:preprocessor)

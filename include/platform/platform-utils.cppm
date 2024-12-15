@@ -17,7 +17,7 @@ export module platform:utils;
 
 import :logging;
 
-namespace dmt
+export namespace dmt
 {
 
 /**

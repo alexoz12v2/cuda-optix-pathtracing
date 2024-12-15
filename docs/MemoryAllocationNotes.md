@@ -269,3 +269,334 @@ cat /sys/kernel/mm/transparent_hugepage/enabled
 ``` 
 [always] madvise never
 ```
+## Windows Huge Pages
+- You can obtain the handle to the current process with `GetCurrentProcess`
+  ```c
+  HANDLE GetCurrentProcess();
+  ```
+- To use large page allocation with `VirtualAlloc2`, a process must have the `PROCESS_VM_OPERATION` right.
+  When a User logs it, windows collects all its right in a structure called *Access Token*, which describes
+  what processes spawned by that user are allowed to do.
+  From the token associated to a user, you can spawn a process by specifying the token as parameter, and that 
+  will determine the struct *Process Security Descriptor* (token can be the default one of the user or a subset 
+  of its rights).
+  To retrieve a process security descriptor, call the `GetSecurityInfo` function
+  ```c
+  // ERROR_SUCCESS if no problems
+  DWORD GetSecurityInfo(
+    [in]            HANDLE               handle,                 // (process handle)
+    [in]            SE_OBJECT_TYPE       ObjectType,             // (SE_KERNEL_OBJECT for processes)
+    [in]            SECURITY_INFORMATION SecurityInfo,           // (DACL_SECURITY_INFORMATION)
+    [out, optional] PSID                 *ppsidOwner,
+    [out, optional] PSID                 *ppsidGroup,
+    [out, optional] PACL                 *ppDacl,               // can you take the DACL directly from here?
+    [out, optional] PACL                 *ppSacl,
+    [out, optional] PSECURITY_DESCRIPTOR *ppSecurityDescriptor   // (output we want, has to be freed with LocalFree)
+  );
+  ```
+- Once you retrieved the process security descriptor, you need to get the list of the access rights associated
+  to the process security descriptor. If it contains `PSECURITY_DESCRIPTOR`,  we are happy
+  ```c
+  // success if 0, else call GetLastError
+  BOOL GetSecurityDescriptorDacl(
+    [in]  PSECURITY_DESCRIPTOR pSecurityDescriptor,            // security descriptor from before
+    [out] LPBOOL               lpbDaclPresent,                 // check if dacl is present
+    [out] PACL                 *pDacl,                         // then retrieve the list
+    [out] LPBOOL               lpbDaclDefaulted                // if false, the dacl was specified by the user
+  );
+  ```
+- iterate over the DACL to find whether or not you have the `PROCESS_VM_OPERATION` *access control entry* (ACE)
+  ```c
+  for (DWORD i = 0; i < pDACL->AceCount; i++) {
+    PACE_HEADER pAce = NULL;
+    if (GetAce(pDACL, i, (LPVOID*)&pAce)) {
+      if (HasProcessVmOperationPermission(pAce)) {
+        LocalFree(pSD);
+        return true; // PROCESS_VM_OPERATION permission is granted
+      }
+    }
+  }
+
+  // Function to check if the ACE grants PROCESS_VM_OPERATION permission
+  bool HasProcessVmOperationPermission(PACE_HEADER pAce) {
+    // The ACCESS_MASK for PROCESS_VM_OPERATION permission is 0x0008
+    // Check if the ACE grants the necessary permission
+    DWORD dwAccessMask = ((ACCESS_ALLOWED_ACE*)pAce)->Mask;
+    return (dwAccessMask & PROCESS_VM_OPERATION) != 0;
+  }
+  ```
+
+- If you have the `PROCESS_VM_OPERATION`, then you are allowed to use `VirtualAlloc2`, which is the only one that
+  can allocate 1GB pages. Otherwise, you are stuck with 2MB Large Pages.
+
+- the `VirtualAlloc2` function is supported from Windows 10. To check its support you need to check whether the 
+  Kernel32.dll (specified by [docs.](https://learn.microsoft.com/it-it/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc)) contains the `VirtualAlloc2`, we can use the `GetProcAddress` function
+  ```c
+  typedef LPVOID(WINAPI* pVirtualAlloc2)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD, SIZE_T, DWORD);
+  bool IsVirtualAlloc2Available() {
+    // Get the function pointer for VirtualAlloc2
+    HMODULE hKernel32 = GetModuleHandle(L"kernel32.dll");
+    if (!hKernel32) {
+      return false;
+    }
+
+    pVirtualAlloc2 pAlloc = (pVirtualAlloc2)GetProcAddress(hKernel32, "VirtualAlloc2");
+    return pAlloc != nullptr;
+  }
+  ```
+- Onto the steps to add the priviledge to allocate large pages
+  1. Obtain the `"SeLockMemoryPrivilege"` by calling the `AdjustTokenPrivileges` function (large pages are locked to 
+     memory by windows, they cannot be swapped).
+     The string can be taken by the macro `SE_LOCK_MEMORY_NAME`
+     ```c 
+     // returns ERROR_SUCCESS if success, otherwise 0, and GetLastError tells you what went wrong
+     BOOL AdjustTokenPrivileges(
+       [in]            HANDLE            TokenHandle,          // token handle of the current process (see next step)
+       [in]            BOOL              DisableAllPrivileges, // false
+       [in, optional]  PTOKEN_PRIVILEGES NewState,         // pointer TOKEN_PRIVILEDGES struct = count+VLA (see below)
+       [in]            DWORD             BufferLength,         // length of buffer pointed by PreviousState (0 if NULL)
+       [out, optional] PTOKEN_PRIVILEGES PreviousState,        // NULL
+       [out, optional] PDWORD            ReturnLength          // returns length of Previous State (<= BufferLength>)
+     );
+
+    // newState = list of { privilege, enableOrDisable } we want to add(SE_PRIVIEGE_ENABLED)/remove(SE_PRIVIEGE_REMOVED)
+    // reference to TOKEN_PRIVILEGES
+    typedef struct _TOKEN_PRIVILEGES {
+      DWORD               PrivilegeCount;
+      LUID_AND_ATTRIBUTES Privileges[ANYSIZE_ARRAY];
+    } TOKEN_PRIVILEGES, *PTOKEN_PRIVILEGES;
+
+    // each LUID_AND_ATTRIBUTE is a pair LUID, Attributes, in which the attributes meaning depends on LUID
+    typedef struct _LUID_AND_ATTRIBUTES {
+      LUID  Luid;
+      DWORD Attributes;
+    } LUID_AND_ATTRIBUTES, *PLUID_AND_ATTRIBUTES;
+
+    // LUID = locally unique identifier = 64 pit number, split into 2 32 bit parts (predates win 64 bit)
+    typedef struct _LUID {
+      DWORD LowPart;
+      LONG  HighPart;
+    } LUID, *PLUID;
+    // the LUID is used to represent privileges in the PRIVILEGE_SET structure
+     ```
+- You can check whether an *access token* has a certain `PRIVILEGE_SET` by using the `PrivilegeCheck` functiom
+  ```c
+  BOOL PrivilegeCheck(
+    [in]      HANDLE         ClientToken, 
+    [in, out] PPRIVILEGE_SET RequiredPrivileges,
+    [out]     LPBOOL         pfResult
+  );
+
+  typedef struct _PRIVILEGE_SET {
+    DWORD               PrivilegeCount; // count
+    DWORD               Control;       // PRIVILEGE_SET_ALL_NECESSARY
+    LUID_AND_ATTRIBUTES Privilege[ANYSIZE_ARRAY];
+  } PRIVILEGE_SET, *PPRIVILEGE_SET;
+  ```
+  Example of token retrieval
+  ```c
+  #include <windows.h>
+  #include <iostream>
+
+  int main() {
+      HANDLE hToken = NULL;
+
+      // Get a handle to the current process
+      HANDLE hProcess = GetCurrentProcess();
+
+      // Open the access token associated with the current process
+      // second parameter is the access rights, ie what you want to be able to do with the token
+      // TOKEN_QUERY or TOKEN_ADJUST_PRIVILEGES
+      if (!OpenProcessToken(hProcess, TOKEN_QUERY, &hToken)) { 
+          std::cerr << "Failed to open process token. Error: " << GetLastError() << std::endl;
+          return 1;
+      }
+
+      std::cout << "Successfully retrieved the access token." << std::endl;
+
+      // Use the token (e.g., query information)...
+
+      // Close the token handle when done
+      CloseHandle(hToken);
+
+      return 0;
+  }
+  ```
+- Therefore, you 
+  - get the *token handle* associated to the *current process*, 
+  - open such token in `TOKEN_ADJUST_PRIVILEDGES` DesiredAccessMode,
+  - check whether it already contains a `PRIVILEGE_SET` containing `SeLockMemoryPrivilege`, by using
+    the function `GetTokenInformation` with the enum value `TokenPrivileges` (enum name = `TOKEN_INFORMATION_CLASS`).
+    - with `TokenPrivileges`, the output untyped buffer is actually a pointer to `TOKEN_PRIVILEGES` struct
+    - You actually need to call the function twice, the first time to get the required size of the outuput buffer, 
+      the second time to actually do something (Vulkan Style)
+      ```c
+      #include <windows.h>
+      #include <iostream>
+
+      void PrintPrivilegeAttributes(DWORD attributes) {
+        if (attributes & SE_PRIVILEGE_ENABLED) {
+          std::cout << "Privilege is enabled." << std::endl;
+        } else {
+          std::cout << "Privilege is disabled." << std::endl;
+        }
+
+        if (attributes & SE_PRIVILEGE_ENABLED_BY_DEFAULT) {
+          std::cout << "Privilege is enabled by default." << std::endl;
+        }
+
+        if (attributes & SE_PRIVILEGE_REMOVED) {
+          std::cout << "Privilege has been removed." << std::endl;
+        }
+      }
+
+      int main() {
+        HANDLE hToken = NULL;
+
+        // Open the current process token
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+          std::cerr << "Failed to open process token. Error: " << GetLastError() << std::endl;
+          return 1;
+        }
+
+        // Get the size of the buffer needed for privileges
+        DWORD dwSize = 0;
+        GetTokenInformation(hToken, TokenPrivileges, NULL, 0, &dwSize);
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+          std::cerr << "Failed to get token privileges size. Error: " << GetLastError() << std::endl;
+          CloseHandle(hToken);
+          return 1;
+        }
+
+        // Allocate buffer for privileges
+        TOKEN_PRIVILEGES* pTokenPrivileges = (TOKEN_PRIVILEGES*)malloc(dwSize);
+        if (!pTokenPrivileges) {
+          std::cerr << "Memory allocation failed." << std::endl;
+          CloseHandle(hToken);
+          return 1;
+        }
+
+        // Retrieve the privileges
+        if (!GetTokenInformation(hToken, TokenPrivileges, pTokenPrivileges, dwSize, &dwSize)) {
+          std::cerr << "Failed to get token privileges. Error: " << GetLastError() << std::endl;
+          free(pTokenPrivileges);
+          CloseHandle(hToken);
+          return 1;
+        }
+
+        // Iterate through the privileges
+        for (DWORD i = 0; i < pTokenPrivileges->PrivilegeCount; ++i) {
+          LUID luid = pTokenPrivileges->Privileges[i].Luid;
+          DWORD attributes = pTokenPrivileges->Privileges[i].Attributes;
+
+          // Lookup the privilege name
+          char name[256];
+          DWORD nameLen = sizeof(name);
+          if (LookupPrivilegeNameA(NULL, &luid, name, &nameLen)) {
+              std::cout << "Privilege: " << name << std::endl;
+          } else {
+              std::cerr << "Failed to lookup privilege name. Error: " << GetLastError() << std::endl;
+          }
+
+          // Print the privilege attributes
+          PrintPrivilegeAttributes(attributes);
+        }
+
+        // Clean up
+        free(pTokenPrivileges);
+        CloseHandle(hToken);
+
+        return 0;
+      }
+      ```
+    - `LookupPriviegeValue(nullptr/*on local system*/, privName, &outLUID)` to get the privilege LUID
+    - from the LUID, you can construct a `TOKEN_PRIVILEGES` struct 
+      ```c
+      TOKEN_PRIVILEGES tp;
+      tp.PrivilegeCount = 1;
+      tp.Privileges[0].Luid = luid;
+      tp.Privileges[0].Attributes = SE_PRIVIEGE_ENABLED; // 0 if you wnat to remove the privilege
+      ```
+  - if not, retrieve (`PreviousState`) the current `PRIVILEGE_SET` of the token
+
+### Retrieving the SID (Security IDentifier) from a token
+```c
+#include <windows.h>
+#include <iostream>
+
+int main() {
+    HANDLE hToken = NULL;
+    DWORD dwSize = 0;
+
+    // Get a handle to the current process
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        std::cerr << "Failed to open process token. Error: " << GetLastError() << std::endl;
+        return 1;
+    }
+
+    // Get the size of the buffer required for the token information
+    GetTokenInformation(hToken, TokenUser, NULL, 0, &dwSize);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        std::cerr << "Failed to get token information size. Error: " << GetLastError() << std::endl;
+        CloseHandle(hToken);
+        return 1;
+    }
+
+    // Allocate buffer for token information
+    TOKEN_USER* pTokenUser = (TOKEN_USER*)malloc(dwSize);
+    if (!pTokenUser) {
+        std::cerr << "Memory allocation failed." << std::endl;
+        CloseHandle(hToken);
+        return 1;
+    }
+
+    // Retrieve the token information
+    if (!GetTokenInformation(hToken, TokenUser, pTokenUser, dwSize, &dwSize)) {
+        std::cerr << "Failed to get token information. Error: " << GetLastError() << std::endl;
+        free(pTokenUser);
+        CloseHandle(hToken);
+        return 1;
+    }
+
+    // Convert the SID to a string
+    char* sidString = NULL;
+    if (!ConvertSidToStringSidA(pTokenUser->User.Sid, &sidString)) {
+        std::cerr << "Failed to convert SID to string. Error: " << GetLastError() << std::endl;
+    } else {
+        std::cout << "User SID: " << sidString << std::endl;
+        LocalFree(sidString);
+    }
+
+    // Clean up
+    free(pTokenUser);
+    CloseHandle(hToken);
+
+    return 0;
+}
+```
+
+### Windows Exaples
+[Link](https://learn.microsoft.com/it-it/windows/win32/Memory/reserving-and-committing-memory)
+
+### Windows Terms
+- access control entry
+  (ACE) An entry in an access control list (ACL). An ACE contains a set of access rights and a security identifier 
+  (SID) that identifies a trustee for whom the rights are allowed, denied, or audited.
+
+- access control list
+  (ACL) A list of security protections that applies to an object. (An object can be a file, process, event, or 
+  anything else having a security descriptor.) An entry in an access control list (ACL) is an access control 
+  entry (ACE). There are two types of access control list, discretionary and system.
+
+### Windows Considerations on Large Pages
+- Large-page memory regions may be difficult to obtain after the system has been running for a long time because 
+  the physical space for each large page must be contiguous, but the memory may have become fragmented. 
+  Allocating large pages under these conditions can significantly affect system performance. Therefore, 
+  applications should avoid making repeated large-page allocations and instead *allocate all large pages one time*, 
+  at startup.
+- The memory is always read/write and nonpageable (*always resident in physical memory*).
+- The memory is part of the process private bytes but not part of the working set, because the working set 
+  by definition contains only pageable memory.
+- Large-page allocations are not subject to job limits.
+- Large-page memory must be reserved and committed as a single operation. In other words, 
+  *large pages cannot be used to commit a previously reserved range of memory*.

@@ -560,7 +560,8 @@ function(dmt_add_module_library name module_name)
   # create alias
   add_library(${alias_name} ALIAS ${name})
   dmt_debug_print_target_props(${name} ${module_name})
-  
+  target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/extern)
+
   if(MSVC)
     if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
       message(FATAL_ERROR "Windows with Ninja doesn't find the module interface from the module implementation unit. I don't know why.")

@@ -84,4 +84,19 @@ int main()
     dmt::Platform platform;
     if (platform.ctx().logEnabled())
         platform.ctx().log("We are in the platform now");
+
+    dmt::PageAllocator pageAllocator{platform.ctx()};
+    auto               pageAlloc = pageAllocator.allocatePage(platform.ctx());
+    if (pageAlloc.address)
+    {
+        platform.ctx().log("Allocated page at {}, frame number {} of size {}",
+                           {pageAlloc.address, pageAlloc.pageNum, (void*)dmt::toUnderlying(pageAlloc.pageSize)});
+    }
+    else
+    {
+        platform.ctx().error("Couldn't allocate memory");
+    }
+    pageAllocator.deallocatePage(platform.ctx(), pageAlloc);
+
+    platform.ctx().log("Completed");
 }

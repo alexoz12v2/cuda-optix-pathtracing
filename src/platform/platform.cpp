@@ -20,6 +20,7 @@ Platform::Platform(Platform&&) noexcept
 
 Platform& Platform::operator=(Platform&&) noexcept
 {
+    return *this;
 }
 
 Platform::~Platform() noexcept

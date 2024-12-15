@@ -9,4 +9,5 @@ target_link_libraries(dmt-platform
   PRIVATE 
     $<$<BOOL:${DMT_OS_LINUX}>:rt pthread > # needed by async io linux
     $<$<BOOL:${DMT_OS_WINDOWS}>:Kernel32.lib> # needed by fileapi.h (does it automatically with dll, clarity)
+    Backward::Backward
 ) 

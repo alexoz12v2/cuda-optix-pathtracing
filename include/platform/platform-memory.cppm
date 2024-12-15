@@ -291,37 +291,60 @@ enum class EPageSize : uint32_t
     Count = 3
 };
 
-uint32_t toUnderlying(EPageSize ePageSize)
+constexpr uint32_t toUnderlying(EPageSize ePageSize)
 {
     return static_cast<uint32_t>(ePageSize);
 }
 
-struct PageAllocation
+#if defined(_MSC_VER)
+#pragma pack(1)
+#endif
+struct alignas(8) PageAllocation
 {
     void*     address;
-    uint32_t  pageNum;
+    int64_t   pageNum; // in linux, 55 bits
     EPageSize pageSize;
+    uint32_t bits : 24; /** OS specific information, eg was this allocated with mmap or aligned_alloc? */
+    uint32_t count : 8;
 };
+#if defined(_MSC_VER)
+#pragma pack()
+#endif
+static_assert(sizeof(PageAllocation) == 24 && alignof(PageAllocation) == 8);
 
-class PageAllocator
+class alignas(8) PageAllocator
 {
 public:
     // -- Types --
 
     // -- Construtors/Copy Control --
-    PageAllocator(PlatformContext &ctx, EPageSize preference = EPageSize::e2MB);
-    PageAllocator(PageAllocator const&)            = delete;
+    PageAllocator(PlatformContext& ctx);
+    PageAllocator(PageAllocator const&)            = default;
     PageAllocator(PageAllocator&&) noexcept        = default;
-    PageAllocator& operator=(PageAllocator const&) = delete;
+    PageAllocator& operator=(PageAllocator const&) = default;
     PageAllocator& operator=(PageAllocator&&)      = default;
     ~PageAllocator();
 
-    // -- Functions-
-    PageAllocation allocatePages(PlatformContext &ctx, uint32_t numPages);
+    // -- Functions --
+    PageAllocation allocatePage(PlatformContext& ctx);
+    void           deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
 
 private:
-    EPageSize m_enabledPageSize = EPageSize::e4KB;
+    //-- Members --
+#if defined(DMT_OS_LINUX)
+    int32_t   m_mmap2MBHugepages   = 0;
+    int32_t   m_mmap1GBHugepages   = 0;
+    EPageSize m_enabledPageSize    = EPageSize::e4KB;
+    uint32_t  m_thpSize            = 0;
+    bool      m_thpEnabled         = false;
+    bool      m_mmapHugeTlbEnabled = false;
+    bool      m_hugePageEnabled    = false;
+#elif defined(DMT_OS_WINDOWS)
+    unsigned char m_padding[24];
+#endif
 };
+
+static_assert(alignof(PageAllocator) == 8 && sizeof(PageAllocator) == 24);
 
 } // namespace dmt
 /** @} */

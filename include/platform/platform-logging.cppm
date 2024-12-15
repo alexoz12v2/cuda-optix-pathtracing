@@ -29,6 +29,7 @@ module;
 #include <utility>
 
 #include <cassert>
+#include <cinttypes>
 #include <compare>
 #include <cstdint>
 #include <cstring>
@@ -215,6 +216,18 @@ struct StrBuf
     constexpr StrBuf(F f, char const* fstr = "%.3f")
     {
         initialize(f, fstr);
+    }
+
+    /**
+     * Constructor from an address in memory
+     * @tparam P pointer type
+     * @param f pointer value
+     */
+    template <typename P>
+        requires std::is_pointer_v<P>
+    constexpr StrBuf(P f)
+    {
+        initialize(reinterpret_cast<uintptr_t>(f), "0x%" PRIXPTR);
     }
 
     /**
@@ -490,7 +503,7 @@ public:
      * explicit constructor for the base logger starting from the desired level
      * @param level desired log level
      */
-    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+    explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
     /**
      * Setter for the `m_level`

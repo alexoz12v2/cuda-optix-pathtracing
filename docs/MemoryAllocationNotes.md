@@ -79,3 +79,193 @@ Lazy load the scene data from disk as needed, using asynchronous I/O and efficie
 Cache frequently accessed data to avoid redundant disk reads.
 Use CUDA streams to overlap GPU computation with disk I/O, ensuring that the GPU is not idle while waiting for data.
 This approach allows you to handle large scenes that cannot fit entirely in memory, enabling efficient path tracing even with complex and large-scale scenes.
+
+## Linux Huge Pages
+Guide: [Link](https://www.baeldung.com/linux/huge-pages-management)
+Relevant is the folder `/sys/kernel/mm/hugepages`, containing various text files which give us information about the configuration of the huge page allocation
+There are two ways in which we can allocate huge pages in linux (2MB and 1GB)
+- Explicit Huge Pages with `mmap`
+- Transparent Huge Pages with `madvise`
+### Commands in which we find relevant information
+- Virtual Memory Parameters from `/proc/vmstat` (Linux >2.6)
+  ```sh 
+  cat /proc/vmstat | grep -e 'thp' -e 'huge*page'
+  ```
+  ```
+  nr_shmem_hugepages 0
+  nr_file_hugepages 0
+  nr_anon_transparent_hugepages 12
+  thp_migration_success 0
+  thp_migration_fail 0
+  thp_migration_split 0
+  thp_fault_alloc 79
+  thp_fault_fallback 0
+  thp_fault_fallback_charge 0
+  thp_collapse_alloc 6
+  thp_collapse_alloc_failed 0
+  thp_file_alloc 0
+  thp_file_fallback 0
+  thp_file_fallback_charge 0
+  thp_file_mapped 0
+  thp_split_page 10
+  thp_split_page_failed 0
+  thp_deferred_split_page 13
+  thp_split_pmd 28
+  thp_split_pud 0
+  thp_zero_page_alloc 1
+  thp_zero_page_alloc_failed 0
+  thp_swpout 0
+  thp_swpout_fallback 0
+  ```
+- Huge Page data utilization with `/proc/meminfo`
+  ```sh 
+  cat /proc/meminfo | grep --ignore-case -e 'huge' -e 'filepmd' | grep --invert-match 'Shmem'
+  ```
+  ``` 
+  AnonHugePages:     10666 kB
+  FileHugePages:         0 kB
+  FilePmdMapped:         0 kB
+  HugePages_Total:       0
+  HugePages_Free:        0
+  HugePages_Rsvd:        0
+  HugePages_Surp:        0
+  Hugepagesize:       2048 kB
+  Hugetlb:               0 kB
+  ```
+- CPU parameters in `/proc/cpuinfo`, in particular `pse`(2M page support) and `pdpe1gb` (1G page support)
+  This prints information for each logical core, and we want that `flags` contains 
+  (CPU support should be present on most x86_64 CPUs, so this step is not that relevant)
+  ```sh 
+  cat /proc/cpuinfo | grep flag
+  ```
+- OS configuration relevant to huge pages with the `sysctl` command
+  ```sh 
+  sudo sysctl -a | grep 'huge*page'
+  ```
+  ```
+  vm.nr_hugepages = 0
+  vm.nr_hugepages_mempolicy = 0
+  vm.nr_overcommit_hugepages = 0
+  ```
+- To check how many huge page related settings are in the pseudo file system `/sys` (pseudo 
+  because if you check `cat /proc/mounts` you'll see it is a `sysfs`, hence they are actually parameters/memory stuff)
+  ```sh
+  sudo find /sys -name '*huge*page*'
+  ```
+  ``` 
+  /sys/kernel/mm/hugepages/hugepages-2048kB
+  /sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages
+  /sys/kernel/mm/hugepages/hugepages-2048kB/resv_hugepages
+  /sys/kernel/mm/hugepages/hugepages-2048kB/surplus_hugepages
+  /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages_mempolicy
+  /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+  /sys/kernel/mm/hugepages/hugepages-2048kB/nr_overcommit_hugepages
+  ...
+  ```
+  Note that there exist settings for each hugepage size, in particular
+  ```sh
+  sudo tree /sys/kernel/mm/hugepages /sys/kernel/mm/transparent_hugepage
+  ```
+  ``` 
+  /sys/kernel/mm/hugepages
+  ├── hugepages-1048576kB
+  │   ├── free_hugepages
+  │   ├── nr_hugepages
+  │   ├── nr_hugepages_mempolicy
+  │   ├── nr_overcommit_hugepages
+  │   ├── resv_hugepages
+  │   └── surplus_hugepages
+  └── hugepages-2048kB
+       ├── free_hugepages
+       ├── nr_hugepages
+       ├── nr_hugepages_mempolicy
+       ├── nr_overcommit_hugepages
+       ├── resv_hugepages
+       └── surplus_hugepages
+  /sys/kernel/mm/transparent_hugepage
+  ├── defrag
+  ├── enabled
+  ├── hpage_pmd_size
+  ├── khugepaged
+  │   ├── alloc_sleep_millisecs
+  │   ├── defrag
+  │   ├── full_scans
+  │   ├── max_ptes_none
+  │   ├── max_ptes_shared
+  │   ├── max_ptes_swap
+  │   ├── pages_collapsed
+  │   ├── pages_to_scan
+  │   └── scan_sleep_millisecs
+  ├── shmem_enabled
+  └── use_zero_page
+  ```
+### Standard Huge Pages and Transparent Huge Pages
+Notes before starting:
+- the kernel needs to be built with the CONFIG_HUGETLBFS and CONFIG_HUGETLB_PAGE options
+- standard huge pages (HP) pre-allocate memory at startup
+- transparent huge pages (THP) need dynamic memory allocation at runtime via the khugepaged kernel thread
+- THP currently only works for anonymous memory mappings and tmpfs or shmem
+- best practices in many production environments, such as database servers, suggest disabling THP, but leaving standard HP
+### Explicit Huge Pages
+[Link to Documentation](https://www.kernel.org/doc/html/v5.1/admin-guide/mm/hugetlbpage.html)
+
+- Check CPU support with the flags `pse` and/or `pdpe1gb` or by using `cat /proc/filesystems | grep hugetlbfs`
+- Command to check relevant information from `/proc/meminfo` (with an example output)
+  ```shell
+  cat /proc/meminfo | grep --ignore-case -e 'huge' -e 'filepmd' | grep --invert-match 'Shmem'
+  AnonHugePages:     10666 kB
+  FileHugePages:         0 kB
+  FilePmdMapped:         0 kB
+  HugePages_Total:       0
+  HugePages_Free:        0
+  HugePages_Rsvd:        0
+  HugePages_Surp:        0
+  Hugepagesize:       2048 kB
+  Hugetlb:               0 kB
+  ```
+  In particular, we want `HugePages_Total` to be a positive integer
+- check if you have huge pages enabled, you can by checking
+  - `cat /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages` for 2MB pages
+  - `cat /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages` for 1GB pages
+  - `cat /proc/meminfo | grep Huge` to see the state of explicit huge pages
+- for each supported page size you have a folder on `hugepages` folder in which we take
+  interest on the files `nr_hugepages` and `nr_overcommit_hugepages`. The system will 
+  be allowed to allocated between `nr_hugepages` and `nr_hugepages+nr_overcommit_hugepages`
+  frames.
+  this configuration can be manipulated before booting the application with an `sudo echo` 
+
+If, with the `/proc/meminfo` output, we see `HugePages_Total` to 0, then we can enable it with either
+```
+sudo echo 128 > /proc/sys/vm/nr_hugepages
+```
+or 
+```
+sudo sysctl -w vm.nr_hugepages=128
+```
+(using 128 hugepages as an example). The `vm` hugepages are of the size indicated by 
+`HugePagessize` in the `/proc/meminfo` output.
+After that, check again the `/proc/meminfo` to confirm that you allocated some huge pages
+- To free the memory, you need to set the number back to zero.
+- To select another huge page size, you need to change your boot configuration, which 
+  varies depending on your boot loader and therefore depending on your linux distribution.
+  More information on [Link](https://www.intel.com/content/www/us/en/docs/programmable/683840/1-2-1/enabling-hugepages.html)
+- To make the huge page allocation persistent over reboots, you need to change the 
+  boot configuration
+
+### Transparent Huge Pages
+*They Require Standard Huge Pages to be enabled to be used*
+Useful information about thp on `cat /proc/vmstat`, in particular
+```sh
+cat /proc/vmstat | grep -e 'thp' -e 'huge*page'
+```
+gives us the information about THP.
+
+To check whether transparent huge pages are enabled or not, we need to check the file
+`/sys/kernel/mm/transparent_hugepage/enabled` and see that its "[]" marked setting is
+either `always` or `madvice`
+```sh 
+cat /sys/kernel/mm/transparent_hugepage/enabled
+```
+``` 
+[always] madvise never
+```

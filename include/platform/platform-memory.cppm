@@ -137,14 +137,6 @@ module;
 #include <cassert>
 #include <cstdint>
 
-#if defined(DMT_OS_WINDOWS)
-#pragma comment(lib, "mincore")
-#include <AclAPI.h>
-#include <Windows.h>
-#include <securitybaseapi.h>
-#include <sysinfoapi.h>
-#endif
-
 export module platform:memory;
 
 import :utils;
@@ -344,10 +336,10 @@ protected:
      * Check whether the current process token has "SeLockMemoryPrivilege". If it has it, 
      * then enabled it if not enabled. If there's no privilege or cannot enable it, false
      */
-    static bool checkAndAdjustPrivileges(PlatformContext& ctx, HANDLE hProcessToken, LUID const & seLockMemoryPrivilegeLUID, void* pData);
-    static bool enableLockPrivilege(PlatformContext& ctx, HANDLE hProcessToken, LUID const & seLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData);
+    static bool checkAndAdjustPrivileges(PlatformContext& ctx, void *hProcessToken, void const* seLockMemoryPrivilegeLUID, void* pData);
+    static bool enableLockPrivilege(PlatformContext& ctx, void*hProcessToken, void const* seLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData);
     static bool checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx);
-    static HANDLE createImpersonatingThreadToken(PlatformContext& ctx, HANDLE hProcessToken, void* pData);
+    static void* createImpersonatingThreadToken(PlatformContext& ctx, void *hProcessToken, void* pData);
 
 private:
     //-- Members --

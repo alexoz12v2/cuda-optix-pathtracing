@@ -434,9 +434,11 @@ public:
 	HANDLE               hImpersonationToken = nullptr;
 };
 
-bool PageAllocator::checkAndAdjustPrivileges(PlatformContext &ctx, HANDLE hProcessToken, const LUID &seLockMemoryPrivilegeLUID, void* pData) 
+bool PageAllocator::checkAndAdjustPrivileges(PlatformContext &ctx, void* phProcessToken, void const *pseLockMemoryPrivilegeLUID, void* pData) 
 {
+    HANDLE      hProcessToken             = reinterpret_cast<HANDLE>(phProcessToken);
     Janitor& janitor = *reinterpret_cast<Janitor*>(pData);
+    LUID const& seLockMemoryPrivilegeLUID = *reinterpret_cast<LUID const *>(pseLockMemoryPrivilegeLUID);
     // 1. Get count of bytes for the TokenPrivileges TOKEN_INFORMATION_CLASS for this token handle
     DWORD requiredSize = 0;
     if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize) &&
@@ -512,7 +514,7 @@ bool PageAllocator::checkAndAdjustPrivileges(PlatformContext &ctx, HANDLE hProce
     // If the SeLockMemoryPrivilege is not enabled, then try to enable it
     if (!seLockMemoryPrivilegeEnabled)
     {
-        return enableLockPrivilege(ctx, hProcessToken, seLockMemoryPrivilegeLUID, seLockMemoryPrivilegeIndex, pData);
+        return enableLockPrivilege(ctx, hProcessToken, pseLockMemoryPrivilegeLUID, seLockMemoryPrivilegeIndex, pData);
     }
 
     return true;
@@ -545,8 +547,10 @@ bool PageAllocator::checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx)
     return true;
 }
 
-bool PageAllocator::enableLockPrivilege(PlatformContext& ctx, HANDLE hProcessToken, LUID const& seLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData)
+bool PageAllocator::enableLockPrivilege(PlatformContext& ctx, void* phProcessToken, void const* pseLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData)
 {
+    HANDLE      hProcessToken             = reinterpret_cast<HANDLE>(phProcessToken);
+    LUID const& seLockMemoryPrivilegeLUID = *reinterpret_cast<LUID const*>(pseLockMemoryPrivilegeLUID);
 	// write into a new entry if we didn't find it at all
 	// we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
 	if (seLockMemoryPrivilegeIndex < 0)
@@ -611,8 +615,9 @@ bool PageAllocator::enableLockPrivilege(PlatformContext& ctx, HANDLE hProcessTok
 	}
 }
 
-HANDLE PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, HANDLE hProcessToken, void* pData)
+void *PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, void* phProcessToken, void* pData)
 {
+    HANDLE   hProcessToken       = reinterpret_cast<HANDLE>(phProcessToken);
     Janitor& janitor = *reinterpret_cast<Janitor*>(pData);
     HANDLE hImpersonationToken = nullptr;
     if (!DuplicateToken(hProcessToken, SecurityImpersonation, &hImpersonationToken))
@@ -691,7 +696,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     // iterate over the existing priviledges on the user token, and if you find SE_LOCK_MEMORY_NAME with
     // attribute SE_PRIVILEGE_ENABLED, then you are good to go
-    bool seLockMemoryPrivilegeEnabled = checkAndAdjustPrivileges(ctx, hProcessToken, seLockMemoryPrivilegeLUID, (void*)&janitor);
+    bool seLockMemoryPrivilegeEnabled = checkAndAdjustPrivileges(ctx, hProcessToken, &seLockMemoryPrivilegeLUID, (void*)&janitor);
 
     // still not enabled? Fail.
     if (!seLockMemoryPrivilegeEnabled)
@@ -802,7 +807,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     //}
     //janitor.bRevertToSelf = true;
     // source: https://blog.aaronballman.com/2011/08/how-to-check-access-rights/
-    HANDLE hImpersonationToken = createImpersonatingThreadToken(ctx, hProcessToken, (void*)&janitor);
+    HANDLE hImpersonationToken = reinterpret_cast<HANDLE>(createImpersonatingThreadToken(ctx, hProcessToken, (void*)&janitor));
     if (hImpersonationToken == INVALID_HANDLE_VALUE) 
     {
         return;

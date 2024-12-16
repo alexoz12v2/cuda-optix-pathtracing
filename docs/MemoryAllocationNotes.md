@@ -627,3 +627,13 @@ SIZE_T VirtualQuery(
     (italian `Impostazioni Sicurezza` -> `Criteri Locali` -> `Asegnazione diritti utente`) 
   - Locate `Lock pages in memory` (italian `Blocco di pagine in memoria`)
   - Add the group `Administrators` and your own user to the list of allowed users
+- Open "edit group policy"
+  - Navigate to `Conpuuter Configuration` -> `Windows Settings` 
+    -> `Security Settings` -> `Local Policies` -> `User Rights Assignment` 
+    and check that you find the edits you did in `secpol.msc`
+- `WIN+R` and write "`regedit`"
+  - Navigate to 
+    ```
+    HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\MemoryManagement
+    ```
+    to check for more memory management parameters (this is the equivalent of the `/sys/kernel/mm` and `/proc/meminfo`)

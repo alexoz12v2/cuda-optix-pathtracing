@@ -486,12 +486,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     // Retrieve the LUID associated with the SE_LOCK_MEMORY_NAME = "SeLockMemoryPrivilege"
     LUID seLockMemoryPrivilegeLUID{};
-    if (!LookupPrivilegeValueA(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
+    if (!LookupPrivilegeValue(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Could not retrieve the LUID for the SeLockMemoryPrivilege. Error: {}", {view});
-        // TODO error handling
+        return;
     }
 
     // get the pseudo handle (fixed to -1) of the current process (you call a
@@ -503,7 +503,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // Open it in DesiredAccessMode = TOKEN_ADJUST_PRIVILEDGES, NOT TOKEN_QUERY, such that, if we need
     // we can add some access control entries into it
     // see https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-for-access-token-objects
-    HANDLE hProcessToken = nullptr;
+    HANDLE hProcessToken   = nullptr;
     DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES;
     if (!OpenProcessToken(hCurrentProc, tokenAccessMode, &hProcessToken))
     {
@@ -521,8 +521,8 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // attribute SE_PRIVILEGE_ENABLED, then you are good to go
     // 1. Get count of bytes for the TokenPrivileges TOKEN_INFORMATION_CLASS for this token handle
     DWORD requiredSize = 0;
-    if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize)
-        && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+    if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize) &&
+        GetLastError() != ERROR_INSUFFICIENT_BUFFER)
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
@@ -597,10 +597,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         // write into a new entry if we didn't find it at all
         // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
         if (seLockMemoryPrivilegeIndex < 0)
-        { 
-            // also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can 
+        {
+            // also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can
             // tell if you disabled it
-            ctx.error("SeLockMemoryPrivilege is absent in the current user token. Try to run as admin or use cudaAllocHost");
+            ctx.error(
+                "SeLockMemoryPrivilege is absent in the current user token. "
+                "Try to run as admin, check `secpol.msc` or use cudaAllocHost");
         }
         else
         {
@@ -608,15 +610,16 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
             privs.PrivilegeCount           = 1;
             privs.Privileges[0].Luid       = seLockMemoryPrivilegeLUID;
             privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-            if (AdjustTokenPrivileges(hProcessToken, false, &privs, 0, nullptr, nullptr) != ERROR_SUCCESS)
+            if (!AdjustTokenPrivileges(hProcessToken, false, &privs, sizeof(TOKEN_PRIVILEGES), nullptr, nullptr))
             {
                 uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
                 std::string_view view{sErrorBuffer.data(), length};
                 ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
                 return;
             }
-            else
+
+            int32_t errCode = GetLastError();
+            if (errCode == ERROR_NOT_ALL_ASSIGNED)
             {
                 // Sanity check
                 PRIVILEGE_SET privilegeSet;
@@ -641,6 +644,14 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
                 }
 
                 seLockMemoryPrivilegeEnabled = true;
+            }
+            else if (errCode == ERROR_SUCCESS)
+            {
+                seLockMemoryPrivilegeEnabled = true;
+            }
+            else 
+            {
+                ctx.error("`AdjustTokenPrivilege` returned an unexpected error code: {}", {errCode});
             }
         }
     }
@@ -838,9 +849,9 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
         reinterpret_cast<unsigned char*>(ret.address)[0] = 0;
 
         // bookkeeping
-        ret.count    = 1;
-        ret.pageSize = pageSize;
-        bool     isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
+        ret.count             = 1;
+        ret.pageSize          = pageSize;
+        bool isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
 
         // if you allocated the page with MEM_LARGE_PAGES, then it is locked to memory, and hence, like AWE,
         // is NOT part of the working set of the process.

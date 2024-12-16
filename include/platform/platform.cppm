@@ -25,6 +25,7 @@ import :utils;
 export namespace dmt
 {
 
+// TODO boot up request sudo access
 // TODO log level should be owned by the Platform class only
 /**
  * @class Platform

@@ -619,3 +619,11 @@ SIZE_T VirtualQuery(
 - *Committed Memory* = memory allocated which is currently backed by physical RAM memory (a frame).
                        Memory can First be *Reserved* (virtual address space reservation) and then *committed*
 - *Resident Memory* = Refers to non locked pages (hence not large) currently in physical memory
+
+### If the `SeLockMemoryPrivileges` isn't found on the token, even as Administrator
+- Check Group Policy Settings
+  - `WIN+R` and write "`secpol.msc`"
+  - Navigate to `Security Settings` -> `Local Policies` -> `User Rights Assigmnent`
+    (italian `Impostazioni Sicurezza` -> `Criteri Locali` -> `Asegnazione diritti utente`) 
+  - Locate `Lock pages in memory` (italian `Blocco di pagine in memoria`)
+  - Add the group `Administrators` and your own user to the list of allowed users

@@ -596,58 +596,52 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     {
         // write into a new entry if we didn't find it at all
         // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
-#if 0
         if (seLockMemoryPrivilegeIndex < 0)
-        { // TODO test this separately
-            pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Luid       = seLockMemoryPrivilegeLUID;
-            pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Attributes = SE_PRIVILEGE_ENABLED;
-            ++tokenPrivilegeStruct.PrivilegeCount;
+        { 
+            // also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can 
+            // tell if you disabled it
+            ctx.error("SeLockMemoryPrivilege is absent in the current user token. Try to run as admin or use cudaAllocHost");
         }
         else
         {
-            pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Luid       = seLockMemoryPrivilegeLUID;
-            pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Attributes = SE_PRIVILEGE_ENABLED;
-        }
+            TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
+            privs.PrivilegeCount           = 1;
+            privs.Privileges[0].Luid       = seLockMemoryPrivilegeLUID;
+            privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
-        // 4. try to enable the AjustTokenPrivileges
-        // Link: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges
-        if (!AdjustTokenPrivileges(hProcessToken, false, &tokenPrivilegeStruct, 0, nullptr, nullptr))
-#else
-        TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
-        privs.PrivilegeCount = 1;
-        privs.Privileges[0].Luid = seLockMemoryPrivilegeLUID;
-        privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-        if (!AdjustTokenPrivileges(hProcessToken, false, &privs, 0, nullptr, nullptr))
-#endif
-        {
-            uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
-            ctx.error("Could not add SeLockMemoryTokenPrivilege to the user token, error: {}", {view});
-            return;
-        }
-        else
-        {
-            // Sanity check
-			PRIVILEGE_SET privilegeSet;
-			privilegeSet.PrivilegeCount = 1;
-			privilegeSet.Control = PRIVILEGE_SET_ALL_NECESSARY;
-			privilegeSet.Privilege[0].Luid = seLockMemoryPrivilegeLUID;
-			privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
-            BOOL result = false;
-            if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
+            if (AdjustTokenPrivileges(hProcessToken, false, &privs, 0, nullptr, nullptr) != ERROR_SUCCESS)
             {
-				uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-				std::string_view view{sErrorBuffer.data(), length};
-				ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
-				return;
+                uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                std::string_view view{sErrorBuffer.data(), length};
+                ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
+                return;
             }
-            if (!result)
+            else
             {
-				ctx.error("Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to be found");
-				return;
-            }
+                // Sanity check
+                PRIVILEGE_SET privilegeSet;
+                privilegeSet.PrivilegeCount          = 1;
+                privilegeSet.Control                 = PRIVILEGE_SET_ALL_NECESSARY;
+                privilegeSet.Privilege[0].Luid       = seLockMemoryPrivilegeLUID;
+                privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+                BOOL result                          = false;
+                if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
+                {
+                    uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                    std::string_view view{sErrorBuffer.data(), length};
+                    ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
+                    return;
+                }
+                if (!result)
+                {
+                    ctx.error(
+                        "Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to "
+                        "be found");
+                    return;
+                }
 
-            seLockMemoryPrivilegeEnabled = true;
+                seLockMemoryPrivilegeEnabled = true;
+            }
         }
     }
 

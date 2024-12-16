@@ -331,7 +331,9 @@ public:
     PageAllocation allocatePage(PlatformContext& ctx);
     void           deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
 
+    // TODO should test drive design?
 protected:
+#if defined(DMT_OS_WINDOWS)
     /**
      * Check whether the current process token has "SeLockMemoryPrivilege". If it has it, 
      * then enabled it if not enabled. If there's no privilege or cannot enable it, false
@@ -340,6 +342,7 @@ protected:
     static bool enableLockPrivilege(PlatformContext& ctx, void*hProcessToken, void const* seLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData);
     static bool checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx);
     static void* createImpersonatingThreadToken(PlatformContext& ctx, void *hProcessToken, void* pData);
+#endif
 
 private:
     //-- Members --

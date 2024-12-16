@@ -302,16 +302,18 @@ constexpr uint32_t toUnderlying(EPageSize ePageSize)
 struct alignas(8) PageAllocation
 {
     void*     address;
-    int64_t   pageNum; // in linux, 55 bits
+    int64_t   pageNum; // in linux, 55 bits, windows void pointer, but it should be at least 4KB aligned
     EPageSize pageSize;
-    uint32_t bits : 24; /** OS specific information, eg was this allocated with mmap or aligned_alloc? */
-    uint32_t count : 8;
+    uint32_t  bits  : 24; /** OS specific information, eg was this allocated with mmap or aligned_alloc? */
+    uint32_t  count : 8;
 };
 #if defined(_MSC_VER)
 #pragma pack()
 #endif
 static_assert(sizeof(PageAllocation) == 24 && alignof(PageAllocation) == 8);
 
+// TODO make OS specific protected functions which handle parts of the logic, such
+// TODO that we can test them individually by subclassing this
 class alignas(8) PageAllocator
 {
 public:
@@ -340,9 +342,11 @@ private:
     bool      m_mmapHugeTlbEnabled = false;
     bool      m_hugePageEnabled    = false;
 #elif defined(DMT_OS_WINDOWS)
-    unsigned char m_padding[22];
-    bool          m_largePage1GB = false;
-    bool          m_largePageEnabled = false;
+    uint32_t      m_allocationGranularity = 0;
+    uint32_t      m_systemPageSize        = 0;
+    bool          m_largePage1GB          = false;
+    bool          m_largePageEnabled      = false;
+    unsigned char m_padding[14];
 #endif
 };
 

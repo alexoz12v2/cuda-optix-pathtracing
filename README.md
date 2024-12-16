@@ -82,6 +82,7 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
   - [x] Link Time Optimization
   - [ ] `add_custom_target` per copiare cartella `assets/`
   - [x] supporto CUDA `add_cuda_library` (deprecato da cmake 3.27, ora CUDA first class citizen)
+  - [ ] di default cmake setta il CUDA compiler per compute capability 5.2. Settare la 6.1
   - [ ] integrazione CUDA check compatibility with cmake, [link](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/cmake/checkcuda.cu#L4)
   - [ ] supporto per librerie dinamiche `add_library(${target} SHARED)`
   - [ ] far funzionare gli script su Windows su un altro build tool diverso da VS

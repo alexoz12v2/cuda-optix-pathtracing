@@ -477,7 +477,7 @@ function(dmt_add_module_library name module_name)
     #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
     #  PUBLIC /reference ${module_name}=${BMI}
     #)
-    target_compile_options(${name} PRIVATE /Zc:preprocessor)
+    target_compile_options(${name} PRIVATE /Zc:preprocessor PUBLIC /std:c17)
 
     #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
     #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
@@ -625,7 +625,7 @@ function(dmt_add_example target)
   dmt_add_compile_definitions(${target})
 
   if(MSVC)
-    target_compile_options(${target} PRIVATE /Zc:preprocessor)
+    target_compile_options(${target} PRIVATE /Zc:preprocessor PUBLIC /std:c17)
     #target_compile_options(${target} PRIVATE )
   endif()
 
@@ -663,7 +663,7 @@ function(dmt_add_test target)
   target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   if(MSVC)
-    target_compile_options(${target} PRIVATE /Zc:preprocessor)
+    target_compile_options(${target} PRIVATE /Zc:preprocessor PUBLIC /std:c17)
   endif()
 
   # Iterate over dependencies to add their corresponding BMI paths

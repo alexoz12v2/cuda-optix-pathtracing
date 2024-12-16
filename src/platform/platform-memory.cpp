@@ -1,8 +1,9 @@
 module;
 
 // NOLINTBEGIN
-#include <string_view>
 #include <array>
+#include <string_view>
+#include <type_traits>
 
 #include <cassert>
 #include <cstdint>
@@ -25,9 +26,13 @@ module;
 #include <cerrno>
 #include <cstdlib>
 #elif defined(DMT_OS_WINDOWS)
+// Link against `VirtualAlloc2` Manually
+// https://learn.microsoft.com/en-us/answers/questions/129563/how-to-use-virtualalloc2-memory-api
+#pragma comment(lib, "mincore")
+#include <AclAPI.h>
 #include <Windows.h>
 #include <securitybaseapi.h>
-#include <AclAPI.h>
+#include <sysinfoapi.h>
 #endif
 // NOLINTEND
 
@@ -41,16 +46,18 @@ inline constexpr uint32_t     howMany4KBsIn1GB = toUnderlying(EPageSize::e1GB) /
 static thread_local page_info pageInfoPool[howMany4KBsIn1GB];
 static thread_local uint64_t  bitsPool[howMany4KBsIn1GB];
 #elif defined(DMT_OS_WINDOWS)
-inline constexpr uint32_t tokenPrivilegesBytes = 2048;
+inline constexpr uint32_t                                           tokenPrivilegesBytes = 2048;
 static thread_local std::array<unsigned char, tokenPrivilegesBytes> sTokenPrivileges;
 using PVirtualAlloc = PVOID (*)(
-    HANDLE Process, 
-    PVOID BaseAddress, 
-    SIZE_T Size, 
-    ULONG AllocationType,
-    ULONG PageProtection, 
-    MEM_EXTENDED_PARAMETER *ExtendedParameters, 
-    ULONG ParameterCount);
+    HANDLE                  Process,
+    PVOID                   BaseAddress,
+    SIZE_T                  Size,
+    ULONG                   AllocationType,
+    ULONG                   PageProtection,
+    MEM_EXTENDED_PARAMETER* ExtendedParameters,
+    ULONG                   ParameterCount);
+static constexpr uint32_t                              sErrorBufferSize = 256;
+static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 #endif
 
 #if defined(DMT_DEBUG)
@@ -66,83 +73,6 @@ enum PageAllocationFlags : uint32_t
     DMT_OS_LINUX_MMAP_ALLOCATED          = 1 << 0, // Use bit 0
     DMT_OS_LINUX_ALIGNED_ALLOC_ALLOCATED = 1 << 1  // Use bit 1
 };
-
-#if 0
-PageAllocator::PageAllocator(PlatformContext& ctx, EPageSize preference)
-{
-    // 0. how many eager huge page allocations can we perform with mmap?
-#define hugePagesPathBase "/sys/kernel/mm/hugepages/"
-    char const* hugePagesPaths[] = {hugePagesPathBase "hugepages-2048kB/nr_hugepages",
-                                    hugePagesPathBase "hugepages-1048576kB/nr_hugepages"};
-#undef hugePagesPathBase
-
-    FILE* file = nullptr;
-    file       = fopen(hugePagesPaths[0], "r");
-    if (file)
-    {
-        int32_t num;
-        fscanf(file, "%d", &num);
-        m_mmap2MBHugepages = num;
-        fclose(file);
-    }
-    file = fopen(hugePagesPaths[1], "r");
-    if (file)
-    {
-        int32_t num;
-        fscanf(file, "%d", &num);
-        m_mmap1GBHugepages = num;
-        fclose(file);
-    }
-
-
-    // 1. for lazy, madvised style allocations, make sure transparent huge pages are enabled
-    // TODO add if only there are at least some huge pages
-    char const* path = "/sys/kernel/mm/transparent_hugepage/enabled";
-    char        buffer[256];
-    file = fopen(path, "r");
-    if (!file || !fgets(buffer, sizeof(buffer), file))
-    {
-        ctx.warn("Couldn't read from file {}, using default 4KB page size", {path});
-        return;
-    }
-
-    fclose(file);
-    if (strstr(buffer, "[always]") || strstr(buffer, "[madvise]"))
-    {
-        // TODO Check size from /sys/kernel/mm/transparent_hugepage/hpage_pmd_size
-        m_enabledPageSize = preference;
-        if (ctx.logEnabled())
-            ctx.log("Using {} as page size", {toUnderlying(preference)});
-    }
-    else
-    {
-        ctx.warn("Transparent Huge Pages are not enabled, check \"/sys/kernel/mm/transparent_hugepage/enabled\"");
-        m_enabledPageSize = EPageSize::e4KB;
-    }
-
-    ssize_t pageSize = sysconf(_SC_PAGESIZE);
-    ctx.trace("system default page size is {}", {pageSize});
-
-    m_pagemapFd    = open("/proc/self/pagemap", O_RDONLY);
-    m_kpageflagsFd = open("/proc/kpageflags", O_RDONLY);
-    assert(m_pagemapFd >= 0 && "Couldn't open /proc/self/pagemap");
-    if (m_kpageflagsFd < 0)
-    {
-        int32_t err = errno;
-        switch (err)
-        {
-            case EACCES:
-                [[fallthrough]];
-            case EPERM:
-                ctx.error("Could not open /proc/kgetflags, you didn't run the program as root");
-                break;
-            default:
-                ctx.error("Could not open /proc/kgetflags for whatever reason");
-                break;
-        }
-    }
-}
-#else
 
 // My own version from page-info which doesn't allocate
 static page_info_array getInfoForFirstNInRange(void* start, void* end, page_info* pool, uint64_t* bitmapPool, size_t poolSize)
@@ -325,14 +255,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         }
     }
 }
-#endif
 
 PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
 {
     PageAllocation ret{};
     uint32_t const size     = toUnderlying(EPageSize::e4KB);
     uint32_t const pageSize = toUnderlying(m_enabledPageSize); // used as alignment
-    auto const     smallNum = static_cast<uint8_t>(size / toUnderlying(m_enabledPageSize));
 
     if (m_mmapHugeTlbEnabled)
     {
@@ -390,12 +318,15 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
                                                               howMany4KBsIn1GB);
         flag_count const      thpCount = get_flag_count(pinfo, KPF_THP); // 0 if not root
 
+        assert(pinfo.num_pages == 1);
         int64_t proposedFrameNum = pinfo.info ? static_cast<int64_t>(pinfo.info[0].pfn) : 0;
         ret.pageNum              = proposedFrameNum != 0 ? proposedFrameNum : -1;
         ret.pageSize             = pinfo.num_pages == 1 ? m_enabledPageSize : EPageSize::e4KB;
-        ret.count                = pinfo.num_pages == 1 ? 1 : smallNum;
+        ret.count                = 1;
     }
 
+    // TODO print if allocation failed
+    // TODO refactor common bits of functionality/logging among operating systems
 #if defined(DMT_DEBUG)
     ctx.trace(
         "Called allocatePage, allocated "
@@ -440,9 +371,23 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
         free(alloc.address);
         alloc.address = nullptr;
     }
-
+    else // TODO add unreachable or something
+    {
 #if defined(DMT_DEBUG)
-    ctx.trace("You called deallocatePage, but nothing done. Printing Stacktrace");
+        ctx.trace("You called deallocatePage, but nothing done. Printing Stacktrace");
+        if (ctx.traceEnabled())
+        {
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#else
+        ctx.trace("You called deallocatePage, but nothing done.");
+#endif
+    }
+#if defined(DMT_DEBUG)
+    ctx.trace("Deallocated memory at {} size {}, Printing stacktrace", {alloc.address, toUnderlying(alloc.pageSize)});
     if (ctx.traceEnabled())
     {
         backward::Printer    p;
@@ -451,7 +396,7 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
         p.print(st);
     }
 #else
-    ctx.trace("You called deallocatePage, but nothing done.");
+    ctx.trace("Deallocated memory at {} size {}", {alloc.address, toUnderlying(alloc.pageSize)});
 #endif
 }
 
@@ -463,29 +408,35 @@ PageAllocator::~PageAllocator()
 
 // TODO refactor in utils
 //Returns the last Win32 error, in string format. Returns an empty string if there is no error.
-static uint32_t getLastErrorAsString(char * buffer, uint32_t maxSize)
+static uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize)
 {
     //Get the error message ID, if any.
     DWORD errorMessageID = ::GetLastError();
-    if(errorMessageID == 0) {
+    if (errorMessageID == 0)
+    {
         buffer[0] = '\n';
         return 0;
     }
     else
     {
-    
+
         LPSTR messageBuffer = nullptr;
 
         //Ask Win32 to give us the string version of that message ID.
         //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
         size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                     NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
-        
+                                     NULL,
+                                     errorMessageID,
+                                     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                     (LPSTR)&messageBuffer,
+                                     0,
+                                     NULL);
+
         //Copy the error message into a std::string.
         size_t actual = std::min(static_cast<size_t>(maxSize - 1), size);
         std::memcpy(buffer, messageBuffer, actual);
         buffer[actual] = '\0';
-        
+
         //Free the Win32's string's buffer.
         LocalFree(messageBuffer);
         return actual;
@@ -496,15 +447,16 @@ static uint32_t getLastErrorAsString(char * buffer, uint32_t maxSize)
 // the Process Security Descriptor, the Token -> Close
 PageAllocator::PageAllocator(PlatformContext& ctx)
 {
-    class Janitor 
+    class Janitor
     {
     public:
-        Janitor() = default;
-        Janitor(Janitor const &) = delete;
-        Janitor(Janitor &&) noexcept = delete;
-        Janitor &operator=(Janitor const &) = delete;
-        Janitor &operator=(Janitor &&) noexcept = delete;
-        ~Janitor() noexcept {
+        Janitor()                              = default;
+        Janitor(Janitor const&)                = delete;
+        Janitor(Janitor&&) noexcept            = delete;
+        Janitor& operator=(Janitor const&)     = delete;
+        Janitor& operator=(Janitor&&) noexcept = delete;
+        ~Janitor() noexcept
+        {
             if (hProcessToken)
                 CloseHandle(hProcessToken);
             if (mallocatedMem)
@@ -513,26 +465,36 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
                 LocalFree(pSecDescriptor);
         }
 
-        HANDLE hProcessToken = nullptr;
-        void*  mallocatedMem = nullptr;
-        SECURITY_DESCRIPTOR* pSecDescriptor = nullptr;
+        HANDLE               hProcessToken  = nullptr;
+        void*                mallocatedMem  = nullptr;
+        PSECURITY_DESCRIPTOR pSecDescriptor = nullptr;
     };
+    constexpr auto luidComparator = [](LUID const& luid0, LUID const& luid1) -> bool { //
+        return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
+    };
+
     Janitor janitor;
 
-    static constexpr uint32_t sErrorBufferSize = 256;
-    static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
+    // Get some of the system information relevant to memory allocation, eg
+    // - when `VirtualAlloc` is called with MEM_RESERVE, the allocation is aligned to the `allocation granularity`
+    // - when `VirtualAlloc` it called with MEM_COMMIT, the allocation is aligned to a page boundary
+    SYSTEM_INFO sysInfo{};
+    GetSystemInfo(&sysInfo);
+    m_systemPageSize        = sysInfo.dwPageSize;
+    m_allocationGranularity = sysInfo.dwAllocationGranularity;
+    assert(m_systemPageSize == toUnderlying(EPageSize::e4KB));
 
-	// Retrieve the LUID associated with the SE_LOCK_MEMORY_NAME = "SeLockMemoryPrivilege"
-    LUID seLockMemoryPrivilegeLUID = 0;
-	if (!LookupPrivilegeValueA(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
-	{
-        uint32_t length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+    // Retrieve the LUID associated with the SE_LOCK_MEMORY_NAME = "SeLockMemoryPrivilege"
+    LUID seLockMemoryPrivilegeLUID{};
+    if (!LookupPrivilegeValueA(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
+    {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Could not retrieve the LUID for the SeLockMemoryPrivilege. Error: {}", {view});
         // TODO error handling
-	}
+    }
 
-    // get the pseudo handle (fixed to -1) of the current process (you call a 
+    // get the pseudo handle (fixed to -1) of the current process (you call a
     // function anyways for compatibility with the future)
     // pseudo handles need not to be `Closehandle`d
     HANDLE hCurrentProc = GetCurrentProcess();
@@ -544,10 +506,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     HANDLE hProcessToken = nullptr;
     if (!OpenProcessToken(hCurrentProc, TOKEN_ADJUST_PRIVILEGES, &hProcessToken))
     {
-        uint32_t length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Couldn't open in TOKEN_ADJUST_PRIVILEDGES "
-            "mode the user access token. Error: {}", {view});
+        ctx.error(
+            "Couldn't open in TOKEN_ADJUST_PRIVILEDGES "
+            "mode the user access token. Error: {}",
+            {view});
         // TODO error handling
     }
     janitor.hProcessToken = hProcessToken;
@@ -558,10 +522,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     DWORD requiredSize = 0;
     if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize))
     {
-        uint32_t length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not get the required size for the "
-            "`TokenPrivileges` Token Information, error: {}", {view});
+        ctx.error(
+            "Could not get the required size for the "
+            "`TokenPrivileges` Token Information, error: {}",
+            {view});
     }
 
     // hoping we fit into the statically allocated buffer
@@ -577,10 +543,10 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         pTokenPrivilegesInformation = std::malloc(requiredSize + sizeof(LUID_AND_ATTRIBUTES));
         if (pTokenPrivilegesInformation)
         {
-			janitor.mallocatedMem = pTokenPrivilegesInformation;
+            janitor.mallocatedMem = pTokenPrivilegesInformation;
         }
     }
-    else 
+    else
     {
         pTokenPrivilegesInformation = sTokenPrivileges.data();
     }
@@ -600,21 +566,21 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     }
 
     // 3. Iterate over the list of TOKEN_PRIVILEGES and find the one with the SeLockMemoryPrivilege LUID
-    TOKEN_PRIVILEGES& tokenPrivilegeStruct = *reinterpret_cast<TOKEN_PRIVILEGE*>(&sTokenPrivileges[0]);
+    TOKEN_PRIVILEGES& tokenPrivilegeStruct = *reinterpret_cast<TOKEN_PRIVILEGES*>(&sTokenPrivileges[0]);
     auto*             pPrivilegeLUIDs      = reinterpret_cast<LUID_AND_ATTRIBUTES*>(
         sTokenPrivileges.data() + offsetof(TOKEN_PRIVILEGES, Privileges));
-    bool seLockMemoryPrivilegeEnabled = false;
-    int64_t seLockMemoryPrivilegeIndex = -1;
+    bool    seLockMemoryPrivilegeEnabled = false;
+    int64_t seLockMemoryPrivilegeIndex   = -1;
     for (uint32_t i = 0; i < tokenPrivilegeStruct.PrivilegeCount; ++i)
     {
         LUID  luid       = pPrivilegeLUIDs[i].Luid;
         DWORD attributes = pPrivilegeLUIDs[i].Attributes;
-        if (luid == seLockMemoryPrivilegeLUID)
+        if (luidComparator(luid, seLockMemoryPrivilegeLUID))
         {
             // possible attributes: E_PRIVILEGE_ENABLED_BY_DEFAULT, SE_PRIVILEGE_ENABLED,
             // SE_PRIVILEGE_REMOVED, SE_PRIVILEGE_USED_FOR_ACCESS
-            if ((attributes & SE_PRIVILEGE_ENABLED) != 0) 
-                seLockMemoryPrivilegeLUID = true;
+            if ((attributes & SE_PRIVILEGE_ENABLED) != 0)
+                seLockMemoryPrivilegeEnabled = true;
 
             seLockMemoryPrivilegeIndex = i;
             break;
@@ -626,28 +592,28 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     {
         // write into a new entry if we didn't find it at all
         // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
-        if (seLockMemoryPrivilegeIndex < 0) 
+        if (seLockMemoryPrivilegeIndex < 0)
         { // TODO test this separately
-            pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Luid = seLockMemoryPrivilegeLUID;
+            pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Luid       = seLockMemoryPrivilegeLUID;
             pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Attributes = SE_PRIVILEGE_ENABLED;
             ++tokenPrivilegeStruct.PrivilegeCount;
         }
         else
         {
-            pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Luid = seLockMemoryPrivilegeLUID;
+            pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Luid       = seLockMemoryPrivilegeLUID;
             pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Attributes = SE_PRIVILEGE_ENABLED;
         }
-        
-        // 4. try to enable the AjustTokenPrivileges 
+
+        // 4. try to enable the AjustTokenPrivileges
         // Link: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges
-        if (!AdjustTokenPrivileges(hProcessToken, false, &tokenPrivilegeStruct, 0, nullptr, nullptr)) 
+        if (!AdjustTokenPrivileges(hProcessToken, false, &tokenPrivilegeStruct, 0, nullptr, nullptr))
         {
             uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), length};
             ctx.error("Could not add SeLockMemoryTokenPrivilege to the user token, error: {}", {view});
             // TODO error handling (or do it later)
         }
-        else 
+        else
         {
             seLockMemoryPrivilegeEnabled = true;
         }
@@ -663,9 +629,16 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // Phase 2: Retrieve the minimum large page the processor supports. if 0, then the processor doesn't support them
     // since we are on x86_64, it should always be different than 0
     size_t minimumPageSize = GetLargePageMinimum();
-    if (minimumPageSize == 0) 
+    if (minimumPageSize == 0)
     {
         ctx.error("For some reason, the current CPU architecture doesn't support large TLB entries");
+        return;
+    }
+
+    // The size and alignment must be a multiple of the large-page minimum
+    if (static_cast<size_t>(toUnderlying(EPageSize::e2MB)) % minimumPageSize != 0)
+    {
+        ctx.error("Page Size we support (2MB) is not a multiple of the MinimumPageSize, {} B", {minimumPageSize});
         return;
     }
 
@@ -677,10 +650,10 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // - 2MB is allowed by default
     // - 1GB requires 1) support for `VirtualAlloc2`, 2) `PROCESS_VM_OPERATION` Access Right
     // 1. Check whether we support VirtualAlloc2 (Windows 10 and above)
-    // to seach for a module specifically, take a look to AddDllDirectory. Usually you can use this 
+    // to seach for a module specifically, take a look to AddDllDirectory. Usually you can use this
     // only on `LoadLibrary` DLLs. If you didn't allocate the library, don't free it (hence why it is called "Get")
     HMODULE hKernel32Dll = GetModuleHandleA("kernel32.dll");
-    if (!hKernel32Dll) 
+    if (!hKernel32Dll)
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
@@ -688,8 +661,8 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         return;
     }
 
-    auto *functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
-    if (!functionPointer) 
+    auto* functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
+    if (!functionPointer)
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
@@ -700,89 +673,33 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // 2. Look into the DACL of the current process to see whether you have the `PROCESS_VM_OPERATION` access right
     // Docs: https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
     // 2.1 First retrieve the Process Security Descriptor (to then free With LocalFree)
-    SECURITY_DESCRIPTOR *securityDescriptor = nullptr;
-    DWORD status = GetSecurityInfo(
-        hCurrentProc, // the current process HANDLE
-        SE_KERNEL_OBJECT, // a process is classified as a kernel object
-        DACL_SECURITY_INFORMATION, // bits of the info to retrieve. we want process specific (discretionary)
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        &securityDescriptor);
-    if (status != ERROR_SUCCESS) {
+    PSECURITY_DESCRIPTOR securityDescriptor = nullptr;
+    DWORD                status             = GetSecurityInfo(hCurrentProc, // the current process HANDLE
+                                   SE_KERNEL_OBJECT, // a process is classified as a kernel object
+                                   DACL_SECURITY_INFORMATION, // bits of the info to retrieve. we want process specific (discretionary)
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   &securityDescriptor);
+    if (status != ERROR_SUCCESS)
+    {
         ctx.error("Could not retrieve the Process Security Descriptor, error code {}", {status});
         return;
     }
 
-	janitor.pSecDescriptor = securityDescriptor;
-
-#if 0
-    // TODO maybe you need to call LocalFree on the DACL too
-    bool daclPresent = false;
-    bool daclDefault = false;
-    ACL *pDacl = nullptr;
-    if (!GetSecurityDescriptorDacl(&securityDescriptor, &daclPresent, &pDacl, &daclDefault))
-    {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not Get the security descriptor DACL, error: {}", {view});
-        // TODO error handling. NOTE: this is not a definitive failure, as we can use 2MB large pages 
-    }
-
-    // See `GetAce`, `AddAce` to manipulate this lists
-    // for the structure see https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-acl
-    bool bProcessVmOperationEnabled = false;
-    int64_t processVmOperationIndex = -1;
-    for (uint32_t i = 0; i < pDacl->AceCount; ++i) 
-    {
-        // the access list entry is a struct containing an header and a type specific fields
-        ACE_HEADER *pAce = nullptr;
-        // TODO Ignore failures here 
-        if (GetAce(pDacl, i, reinterpret_cast<void**>(&pAce)) && pAce->AceType == ACCESS_ALLOWED_ACE_TYPE)
-        {
-            auto *pAllowedAce = reinterpret_cast<ACCESS_ALLOWED_ACE*>(pAce);
-            processVmOperationIndex = static_cast<int64_t>(i);
-
-            // Link to mask: https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask
-            if (pAllowedAce->Mask)
-            // General Docs for access rights: https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-and-access-masks
-            // we need to recove the access mask, which has a bit for each write, and check
-            // the bit associated to PROCESS_VM_OPERATION
-        }
-    }
-#endif
-
-#if 0
-    // Try to duplicate the process handle with the PROCESS_VM_OPERATION as desired access. This indirectly tells us 
-    // that the original process has that
-    // Duplicate the pseudo-handle to create a real handle
-    HANDLE hRealHandle = nullptr;
-    if (!DuplicateHandle(hPseudoHandle, hPseudoHandle, GetCurrentProcess(), &hRealHandle, PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, FALSE, 0)) 
-    {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not duplicate the current process handle with deisred access"
-                  " PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, error: {}", {view});
-        // TODO error handling. NOTE: this is not a definitive failure, as we can use 2MB large pages 
-    }
-    else 
-    {
-        CloseHandle(hRealHandle);
-
-        // TODO check the fact that you can use 1GB pages
-    }
-#endif
+    janitor.pSecDescriptor = securityDescriptor;
 
     // GENERIC_MAPPING = r?w?x?. Each member is an int, ACCESS_MASK, https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask
-	GENERIC_MAPPING genericMapping = {
-		PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,   // GENERIC_READ
-		PROCESS_VM_WRITE | PROCESS_VM_OPERATION,       // GENERIC_WRITE
-		PROCESS_CREATE_THREAD,                         // GENERIC_EXECUTE
-		PROCESS_ALL_ACCESS                             // GENERIC_ALL
-	};
+    GENERIC_MAPPING genericMapping = {
+        PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, // GENERIC_READ (required for QueryWorkingSet)
+        PROCESS_VM_WRITE | PROCESS_VM_OPERATION,     // GENERIC_WRITE
+        PROCESS_CREATE_THREAD,                       // GENERIC_EXECUTE
+        PROCESS_ALL_ACCESS                           // GENERIC_ALL
+    };
     ACCESS_MASK outAccessMask = 0;
-    bool        bAccessStatus = false;
+
+    std::remove_cvref_t<decltype(*std::declval<LPBOOL>())> bAccessStatus = false;
 
     // `AccessCheck` function to see whether the process security descriptor has a predefined
     // set of access rights
@@ -793,7 +710,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
                      nullptr,
                      0,
                      &outAccessMask,
-                     &bAccessStatus)) 
+                     &bAccessStatus))
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
@@ -801,7 +718,8 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         return;
     }
 
-    if (!bAccessStatus) {
+    if (!bAccessStatus)
+    {
         ctx.error("The Process doesn't own the PROCESS_VM_OPERATION access rights, using 2MB large pages");
         return;
     }
@@ -809,14 +727,244 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     m_largePage1GB = true;
 }
 
-PageAllocation PageAllocator::allocatePage(PlatformContext& ctx) 
+enum PageAllocationFlags : uint32_t
 {
-    PageAllocation ret{};
+    DMT_OS_WINDOWS_SMALL_PAGE    = 0,
+    DMT_OS_WINDOWS_LARGE_PAGE    = 1 << 0, // Use bit 0
+    DMT_OS_WINDOWS_VIRTUALALLOC2 = 1 << 1  // Use bit 1
+};
+
+// NOTE: Only Pinned memory can be mapped to CUDA device memory, hence you need to
+// check that the page size is not 4KB. Mapping is carried out with cudaHostRegister
+// reserve = take virtual address space. commit = when you write to it, it will be backed by physical memory
+// TODO see Address Windowing Extension pages (AWE)
+PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
+{
+    static constexpr uint32_t log4KB = 12u;
+    PageAllocation            ret{};
+    ret.pageNum               = -1;
+    uint32_t  errorLength     = 0;
+    DWORD     allocationFlags = MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES;
+    DWORD     protectionFlags = PAGE_READWRITE;
+    EPageSize pageSize        = EPageSize::e1GB;
+
+    if (m_largePageEnabled)
+    {
+        if (m_largePage1GB)
+        {
+            // necessary additional parameter to perform 1GB allocation attempt
+            MEM_EXTENDED_PARAMETER extended{};
+            extended.Type    = MemExtendedParameterAttributeFlags;
+            extended.ULong64 = MEM_EXTENDED_PARAMETER_NONPAGED_HUGE;
+
+            ret.address = VirtualAlloc2( //
+                nullptr /*current process*/,
+                nullptr /*no base hint*/,
+                toUnderlying(pageSize),
+                allocationFlags,
+                protectionFlags,
+                &extended,
+                1);
+            ret.bits    = DMT_OS_WINDOWS_VIRTUALALLOC2;
+            if (!ret.address)
+            {
+                errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                std::string_view view{sErrorBuffer.data(), errorLength};
+                ctx.error("Failed call to `VirtualAlloc2`, trying `VirtualAlloc`, error: {}", {view});
+            }
+        }
+
+        // If you are allowed to perform 1GB large page allocation, but failed for some
+        // reason, fall back to 2MB allocation
+        if (!ret.address)
+        { // https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc
+            pageSize = EPageSize::e2MB;
+
+            // call VirtualAlloc. How is this memory aligned? See this link
+            // https://stackoverflow.com/questions/20023446/is-virtualalloc-alignment-consistent-with-size-of-allocation
+            ret.address = VirtualAlloc(nullptr, toUnderlying(pageSize), allocationFlags, protectionFlags);
+            ret.bits    = DMT_OS_WINDOWS_LARGE_PAGE;
+            if (!ret.address)
+            {
+                errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                std::string_view view{sErrorBuffer.data(), errorLength};
+                ctx.error("`VirtualAlloc` with MEM_LARGE_PAGES, trying without it, error: {}", {view});
+            }
+        }
+    }
+    else
+    {
+        allocationFlags &= ~MEM_LARGE_PAGES;
+        pageSize    = EPageSize::e4KB;
+        ret.address = VirtualAlloc(nullptr, toUnderlying(pageSize), allocationFlags, protectionFlags);
+        ret.bits    = DMT_OS_WINDOWS_SMALL_PAGE;
+        if (!ret.address)
+        {
+            errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), errorLength};
+            ctx.error("`VirtualAlloc` failed, couldn't allocate memory, error: {}", {view});
+        }
+    }
+
+    if (ret.address)
+    {
+        // touch first byte to make sure committed memory is backed to physical memory
+        reinterpret_cast<unsigned char*>(ret.address)[0] = 0;
+
+        // bookkeeping
+        ret.count    = 1;
+        ret.pageSize = pageSize;
+
+        // if you allocated the page with MEM_LARGE_PAGES, then it is locked to memory, and hence, like AWE,
+        // is NOT part of the working set of the process.
+        // Therefore you can get the physical frame nubmber with `QueryWorkingSetEx`
+        // if instead you didn't allocate with MEM_LARGE_PAGES, then the allocated block is part of
+        // the working set, and therefore you can use `QueryWorkingSet`
+        // (Requires PROCESS_QUERY_INFORMATION and PROCESS_VM_READ access right to the process)
+        size_t                   numMemoryInfos = ret.count;
+        MEMORY_BASIC_INFORMATION memoryInfo{};
+
+        bool     isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
+        uint32_t inputSize        = 1;
+
+        // VirtualAddress = input, VirtualAttributes = output
+        PSAPI_WORKING_SET_EX_INFORMATION input{};
+        input.VirtualAddress = ret.address;
+        if (!QueryWorkingSetEx(GetCurrentProcess(), &input, inputSize))
+        {
+            errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), errorLength};
+            ctx.error("Call to `QueryWorkingSetEx` failed, hence cannot check page status, error: {}", {view});
+        }
+        else if (!input.VirtualAttributes.Valid)
+        {
+            ctx.error("Call to `QueryWorkingSetEx` succeeded, but for some reason attributes are invalid, {}",
+                      {input.VirtualAttributes.Flags});
+        }
+        else
+        {
+            // POSSIBLE TODO = use `VirtualLock` to lock a page even if not large
+            bool effectivelyLarge = input.VirtualAttributes.LargePage;
+            bool locked           = input.VirtualAttributes.Locked;
+            if (isLargePageAlloc != effectivelyLarge)
+            {
+                ctx.error("Allocation should be large? {}. But found value {}", {isLargePageAlloc, effectivelyLarge});
+            }
+
+            if (isLargePageAlloc && !locked)
+            {
+                ctx.error("Allocation should be large, but its not locked");
+            }
+        }
+
+        size_t numBytes = VirtualQuery(ret.address, &memoryInfo, numMemoryInfos);
+        if (numBytes == 0)
+        {
+            errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), errorLength};
+            ctx.error("Call to `VirtualQuery` failed, hence cannot acquire virtual page number, error: {}", {view});
+        }
+        else
+        {
+            size_t   expectedSize = toUnderlying(ret.pageSize);
+            void*    pRegion      = memoryInfo.BaseAddress;
+            uint64_t region       = (uint64_t)pRegion;
+            uint64_t mask         = toUnderlying(EPageSize::e4KB) - 1;
+            if (expectedSize != memoryInfo.RegionSize)
+            {
+                ctx.error("Expected region at {} size to be {} B but found {} B",
+                          {pRegion, expectedSize, memoryInfo.RegionSize});
+            }
+
+            if ((memoryInfo.State & MEM_COMMIT) == 0)
+            {
+                ctx.error("Expected memory region at {} to be committed, but it's not", {pRegion});
+            }
+
+            if ((region & mask) != 0)
+            {
+                ctx.error("Expected memory region at {} to be aligned to a 4KB boundary. It's not.", {pRegion});
+            }
+            else
+            {
+                ret.pageNum = region >> log4KB;
+            }
+        }
+
+#if defined(DMT_DEBUG)
+        ctx.trace(
+            "Called allocatePage, allocated "
+            "at {} page of {} B. Printing Stacktrace",
+            {ret.address, (void*)toUnderlying(ret.pageSize)});
+        if (ctx.traceEnabled())
+        {
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#else
+        ctx.trace(
+            "Called allocatePage, allocated "
+            "at {} page of {}",
+            {ret.address, (void*)toUnderlying(ret.pageSize)});
+#endif
+    }
+    else
+    {
+#if defined(DMT_DEBUG)
+        ctx.error("Printing stacktrace");
+        if (ctx.errorEnabled())
+        {
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#endif
+    }
+
     return ret;
 }
 
 void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
 {
+    // decommit = get out of memory, but leave the virtual address space reserved
+    // POSSIBLE TODO. The other type, release, will decommit + free up the virtual address space
+    DWORD freeType = MEM_RELEASE;
+    if (!VirtualFree(alloc.address, toUnderlying(alloc.pageSize), freeType))
+    {
+        uint32_t         errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), errorLength};
+#if defined(DMT_DEBUG)
+        ctx.error("Failed to Free memory at {}, error {}, Printing Stacktrace", {alloc.address, view});
+        if (ctx.errorEnabled())
+        {
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#else
+#endif
+    }
+    else
+    {
+#if defined(DMT_DEBUG)
+        ctx.trace("Deallocated memory at {} size {}, Printing stacktrace", {alloc.address, toUnderlying(alloc.pageSize)});
+        if (ctx.traceEnabled())
+        {
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#else
+        ctx.trace("Deallocated memory at {} size {}", {alloc.address, toUnderlying(alloc.pageSize)});
+#endif
+    }
+
+    alloc.address = nullptr;
 }
 
 PageAllocator::~PageAllocator()

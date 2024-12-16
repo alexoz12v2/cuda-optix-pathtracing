@@ -600,3 +600,22 @@ int main() {
 - Large-page allocations are not subject to job limits.
 - Large-page memory must be reserved and committed as a single operation. In other words, 
   *large pages cannot be used to commit a previously reserved range of memory*.
+
+### Windows Tracing Page Allocations
+The memory tracing utilities in windows are explained at 
+[Process Status API Link](https://learn.microsoft.com/en-us/windows/win32/psapi/collecting-memory-usage-information-for-a-process).
+
+Let us examine the `VirtualQuery` function, [Link](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualquery)
+```c
+// zero if fails
+SIZE_T VirtualQuery(
+  [in, optional] LPCVOID                   lpAddress, // pointer to the beginning of a page (or of a range of pages)
+  [out]          PMEMORY_BASIC_INFORMATION lpBuffer,  // pointer to MEMORY_BASIC_INFORMATION struct
+  [in]           SIZE_T                    dwLength   // size of the `lpBuffer` (numPages * sizeof(MEMORY_BASIC_INFORMATION))
+);
+```
+
+### Windows Memory Terms
+- *Committed Memory* = memory allocated which is currently backed by physical RAM memory (a frame).
+                       Memory can First be *Reserved* (virtual address space reservation) and then *committed*
+- *Resident Memory* = Refers to non locked pages (hence not large) currently in physical memory

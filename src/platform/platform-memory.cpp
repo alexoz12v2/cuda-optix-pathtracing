@@ -40,6 +40,14 @@ static thread_local uint64_t  bitsPool[howMany4KBsIn1GB];
 #elif defined(DMT_OS_WINDOWS)
 inline constexpr uint32_t tokenPrivilegesBytes = 2048;
 static thread_local std::array<unsigned char, tokenPrivilegesBytes> sTokenPrivileges;
+using PVirtualAlloc = PVOID (*)(
+    HANDLE Process, 
+    PVOID BaseAddress, 
+    SIZE_T Size, 
+    ULONG AllocationType,
+    ULONG PageProtection, 
+    MEM_EXTENDED_PARAMETER *ExtendedParameters, 
+    ULONG ParameterCount);
 #endif
 
 #if defined(DMT_DEBUG)
@@ -546,53 +554,186 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         pTokenPrivilegesInformation = sTokenPrivileges.data();
     }
 
-    if (pTokenPrivilegesInformation)
+    if (!pTokenPrivilegesInformation)
     {
-        // 2. actually get the TokenPrivileges TOKEN_INFORMATION_CLASS
-        if (!GetTokenInformation(hProcessToken, TokenPrivileges, pTokenPrivilegesInformation, requiredSize, &requiredSize))
+        // TODO error handling
+    }
+
+    // 2. actually get the TokenPrivileges TOKEN_INFORMATION_CLASS
+    if (!GetTokenInformation(hProcessToken, TokenPrivileges, pTokenPrivilegesInformation, requiredSize, &requiredSize))
+    {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not get the `TokenPrivileges` Token Information, error: {}", {view});
+        // TODO error handling
+    }
+
+    // 3. Iterate over the list of TOKEN_PRIVILEGES and find the one with the SeLockMemoryPrivilege LUID
+    TOKEN_PRIVILEGES& tokenPrivilegeStruct = *reinterpret_cast<TOKEN_PRIVILEGE*>(&sTokenPrivileges[0]);
+    auto*             pPrivilegeLUIDs      = reinterpret_cast<LUID_AND_ATTRIBUTES*>(
+        sTokenPrivileges.data() + offsetof(TOKEN_PRIVILEGES, Privileges));
+    bool seLockMemoryPrivilegeEnabled = false;
+    int64_t seLockMemoryPrivilegeIndex = -1;
+    for (uint32_t i = 0; i < tokenPrivilegeStruct.PrivilegeCount; ++i)
+    {
+        LUID  luid       = pPrivilegeLUIDs[i].Luid;
+        DWORD attributes = pPrivilegeLUIDs[i].Attributes;
+        if (luid == seLockMemoryPrivilegeLUID)
+        {
+            // possible attributes: E_PRIVILEGE_ENABLED_BY_DEFAULT, SE_PRIVILEGE_ENABLED,
+            // SE_PRIVILEGE_REMOVED, SE_PRIVILEGE_USED_FOR_ACCESS
+            if ((attributes & SE_PRIVILEGE_ENABLED) != 0) 
+                seLockMemoryPrivilegeLUID = true;
+
+            seLockMemoryPrivilegeIndex = i;
+            break;
+        }
+    }
+
+    // If the SeLockMemoryPrivilege is not enabled, then try to enable it
+    if (!seLockMemoryPrivilegeEnabled)
+    {
+        // write into a new entry if we didn't find it at all
+        // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
+        if (seLockMemoryPrivilegeIndex < 0) 
+        { // TODO test this separately
+            pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Luid = seLockMemoryPrivilegeLUID;
+            pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Attributes = SE_PRIVILEGE_ENABLED;
+            ++tokenPrivilegeStruct.PrivilegeCount;
+        }
+        else
+        {
+            pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Luid = seLockMemoryPrivilegeLUID;
+            pPrivilegeLUIDs[seLockMemoryPrivilegeIndex].Attributes = SE_PRIVILEGE_ENABLED;
+        }
+        
+        // 4. try to enable the AjustTokenPrivileges 
+        // Link: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges
+        if (!AdjustTokenPrivileges(hProcessToken, false, &tokenPrivilegeStruct, 0, nullptr, nullptr)) 
         {
             uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), length};
-            ctx.error("Could not get the `TokenPrivileges` Token Information, error: {}", {view});
-            // TODO error handling
+            ctx.error("Could not add SeLockMemoryTokenPrivilege to the user token, error: {}", {view});
+            // TODO error handling (or do it later)
         }
-
-        // 3. Iterate over the list of TOKEN_PRIVILEGES and find the one with the SeLockMemoryPrivilege LUID
-        TOKEN_PRIVILEGES& tokenPrivilegeStruct = *reinterpret_cast<TOKEN_PRIVILEGE*>(&sTokenPrivileges[0]);
-        auto*             pPrivilegeLUIDs      = reinterpret_cast<LUID_AND_ATTRIBUTES*>(
-            sTokenPrivileges.data() + offsetof(TOKEN_PRIVILEGES, Privileges));
-        bool seLockMemoryPrivilegeLUID = false;
-        for (uint32_t i = 0; i < tokenPrivilegeStruct.PrivilegeCount; ++i)
+        else 
         {
-            LUID  luid       = pPrivilegeLUIDs[i].Luid;
-            DWORD attributes = pPrivilegeLUIDs[i].Attributes;
-            if (luid == seLockMemoryPrivilegeLUID)
-            {
-                // possible attributes: E_PRIVILEGE_ENABLED_BY_DEFAULT, SE_PRIVILEGE_ENABLED,
-                // SE_PRIVILEGE_REMOVED, SE_PRIVILEGE_USED_FOR_ACCESS
-                if ((attributes & SE_PRIVILEGE_ENABLED) != 0)
-                    seLockMemoryPrivilegeLUID = true;
-
-                break;
-            }
+            seLockMemoryPrivilegeEnabled = true;
         }
+    }
 
-        // If the SeLockMemoryPrivilege is not enabled, then try to enable it
-        if (!seLockMemoryPrivilegeLUID)
+    // still not enabled? Fail.
+    if (!seLockMemoryPrivilegeEnabled)
+    {
+        // TODO error handling
+    }
+
+    // Phase 2: Retrieve the minimum large page the processor supports. if 0, then the processor doesn't support them
+    // since we are on x86_64, it should always be different than 0
+    size_t minimumPageSize = GetLargePageMinimum();
+    if (minimumPageSize == 0) 
+    {
+        // TODO error handling
+    }
+
+    // At this point, we know that we can use Large Page Allocation. We need to decide among 2MB and 1GB
+    // - 2MB is allowed by default
+    // - 1GB requires 1) support for `VirtualAlloc2`, 2) `PROCESS_VM_OPERATION` Access Right
+    // 1. Check whether we support VirtualAlloc2 (Windows 10 and above)
+    // to seach for a module specifically, take a look to AddDllDirectory. Usually you can use this 
+    // only on `LoadLibrary` DLLs. If you didn't allocate the library, don't free it (hence why it is called "Get")
+    HMODULE hKernel32Dll = GetModuleHandleA("Kernel32.dll");
+    if (!hKernel32Dll) {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not load the Kernel32.dll into an HMODULE, error: {}", {view});
+        // TODO error handling
+    }
+
+    auto *functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
+    if (!hKernel32Dll) {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not load the Kernel32.dll into an HMODULE, error: {}", {view});
+        // TODO error handling. NOTE: this is not a definitive failure, as we can use 2MB large pages 
+    }
+
+#if 0
+    // 2. Look into the DACL of the current process to see whether you have the `PROCESS_VM_OPERATION` access right
+    // Docs: https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
+    // 2.1 First retrieve the Process Security Descriptor (to then free With LocalFree)
+    SECURITY_DESCRIPTOR securityDescriptor;
+    DWORD status = GetSecurityInfo(
+        hCurrentProc, // the current process HANDLE
+        SE_KERNEL_OBJECT, // a process is classified as a kernel object
+        DACL_SECURITY_INFORMATION, // bits of the info to retrieve. we want process specific (discretionary)
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        &securityDescriptor);
+    if (status != ERROR_SUCCESS) {
+        // TODO interpret error code and set page size to 2MB
+    }
+
+    // TODO maybe you need to call LocalFree on the DACL too
+    bool daclPresent = false;
+    bool daclDefault = false;
+    ACL *pDacl = nullptr;
+    if (!GetSecurityDescriptorDacl(&securityDescriptor, &daclPresent, &pDacl, &daclDefault))
+    {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not Get the security descriptor DACL, error: {}", {view});
+        // TODO error handling. NOTE: this is not a definitive failure, as we can use 2MB large pages 
+    }
+
+    // See `GetAce`, `AddAce` to manipulate this lists
+    // for the structure see https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-acl
+    bool bProcessVmOperationEnabled = false;
+    int64_t processVmOperationIndex = -1;
+    for (uint32_t i = 0; i < pDacl->AceCount; ++i) 
+    {
+        // the access list entry is a struct containing an header and a type specific fields
+        ACE_HEADER *pAce = nullptr;
+        // TODO Ignore failures here 
+        if (GetAce(pDacl, i, reinterpret_cast<void**>(&pAce)) && pAce->AceType == ACCESS_ALLOWED_ACE_TYPE)
         {
-            // 4.
-        }
+            auto *pAllowedAce = reinterpret_cast<ACCESS_ALLOWED_ACE*>(pAce);
+            processVmOperationIndex = static_cast<int64_t>(i);
 
-        // if it is still not enabled, then fail
-
-		if (mallocated)
-        {
-            std::free(pTokenPrivilegesInformation);
+            // Link to mask: https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask
+            if (pAllowedAce->Mask)
+            // General Docs for access rights: https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-and-access-masks
+            // we need to recove the access mask, which has a bit for each write, and check
+            // the bit associated to PROCESS_VM_OPERATION
         }
+    }
+#endif
+
+    // Try to duplicate the process handle with the PROCESS_VM_OPERATION as desired access. This indirectly tells us 
+    // that the original process has that
+     // Duplicate the pseudo-handle to create a real handle
+    HANDLE hRealHandle = nullptr;
+    if (!DuplicateHandle(hPseudoHandle, hPseudoHandle, GetCurrentProcess(), &hRealHandle, PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, FALSE, 0)) 
+    {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not duplicate the current process handle with deisred access"
+                  " PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, error: {}", {view});
+        // TODO error handling. NOTE: this is not a definitive failure, as we can use 2MB large pages 
     }
     else 
     {
-        // TOOO error handling
+        CloseHandle(hRealHandle);
+
+        // TODO check the fact that you can use 1GB pages
+    }
+
+    // TODO refactor cleaning
+    if (mallocated)
+    {
+        std::free(pTokenPrivilegesInformation);
     }
 }
 

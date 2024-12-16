@@ -504,7 +504,8 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // we can add some access control entries into it
     // see https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-for-access-token-objects
     HANDLE hProcessToken = nullptr;
-    if (!OpenProcessToken(hCurrentProc, TOKEN_ADJUST_PRIVILEGES, &hProcessToken))
+    DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES;
+    if (!OpenProcessToken(hCurrentProc, tokenAccessMode, &hProcessToken))
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
@@ -520,14 +521,16 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // attribute SE_PRIVILEGE_ENABLED, then you are good to go
     // 1. Get count of bytes for the TokenPrivileges TOKEN_INFORMATION_CLASS for this token handle
     DWORD requiredSize = 0;
-    if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize))
+    if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize)
+        && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error(
-            "Could not get the required size for the "
+            "Could not get the required size {} for the "
             "`TokenPrivileges` Token Information, error: {}",
-            {view});
+            {requiredSize, view});
+        return;
     }
 
     // hoping we fit into the statically allocated buffer
@@ -553,7 +556,8 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     if (!pTokenPrivilegesInformation)
     {
-        // TODO error handling
+        ctx.error("Couldn't reserve memory to hold the token information");
+        return;
     }
 
     // 2. actually get the TokenPrivileges TOKEN_INFORMATION_CLASS
@@ -562,7 +566,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Could not get the `TokenPrivileges` Token Information, error: {}", {view});
-        // TODO error handling
+        return;
     }
 
     // 3. Iterate over the list of TOKEN_PRIVILEGES and find the one with the SeLockMemoryPrivilege LUID
@@ -592,6 +596,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     {
         // write into a new entry if we didn't find it at all
         // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
+#if 0
         if (seLockMemoryPrivilegeIndex < 0)
         { // TODO test this separately
             pPrivilegeLUIDs[tokenPrivilegeStruct.PrivilegeCount].Luid       = seLockMemoryPrivilegeLUID;
@@ -607,14 +612,41 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         // 4. try to enable the AjustTokenPrivileges
         // Link: https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-adjusttokenprivileges
         if (!AdjustTokenPrivileges(hProcessToken, false, &tokenPrivilegeStruct, 0, nullptr, nullptr))
+#else
+        TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
+        privs.PrivilegeCount = 1;
+        privs.Privileges[0].Luid = seLockMemoryPrivilegeLUID;
+        privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        if (!AdjustTokenPrivileges(hProcessToken, false, &privs, 0, nullptr, nullptr))
+#endif
         {
             uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), length};
             ctx.error("Could not add SeLockMemoryTokenPrivilege to the user token, error: {}", {view});
-            // TODO error handling (or do it later)
+            return;
         }
         else
         {
+            // Sanity check
+			PRIVILEGE_SET privilegeSet;
+			privilegeSet.PrivilegeCount = 1;
+			privilegeSet.Control = PRIVILEGE_SET_ALL_NECESSARY;
+			privilegeSet.Privilege[0].Luid = seLockMemoryPrivilegeLUID;
+			privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+            BOOL result = false;
+            if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
+            {
+				uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+				std::string_view view{sErrorBuffer.data(), length};
+				ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
+				return;
+            }
+            if (!result)
+            {
+				ctx.error("Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to be found");
+				return;
+            }
+
             seLockMemoryPrivilegeEnabled = true;
         }
     }
@@ -814,6 +846,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
         // bookkeeping
         ret.count    = 1;
         ret.pageSize = pageSize;
+        bool     isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
 
         // if you allocated the page with MEM_LARGE_PAGES, then it is locked to memory, and hence, like AWE,
         // is NOT part of the working set of the process.
@@ -821,15 +854,13 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
         // if instead you didn't allocate with MEM_LARGE_PAGES, then the allocated block is part of
         // the working set, and therefore you can use `QueryWorkingSet`
         // (Requires PROCESS_QUERY_INFORMATION and PROCESS_VM_READ access right to the process)
-        size_t                   numMemoryInfos = ret.count;
         MEMORY_BASIC_INFORMATION memoryInfo{};
-
-        bool     isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
-        uint32_t inputSize        = 1;
+        size_t                   memoryInfoBytes = ret.count * sizeof(MEMORY_BASIC_INFORMATION);
 
         // VirtualAddress = input, VirtualAttributes = output
         PSAPI_WORKING_SET_EX_INFORMATION input{};
         input.VirtualAddress = ret.address;
+        uint32_t inputSize   = sizeof(PSAPI_WORKING_SET_EX_INFORMATION);
         if (!QueryWorkingSetEx(GetCurrentProcess(), &input, inputSize))
         {
             errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
@@ -857,7 +888,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
             }
         }
 
-        size_t numBytes = VirtualQuery(ret.address, &memoryInfo, numMemoryInfos);
+        size_t numBytes = VirtualQuery(ret.address, &memoryInfo, memoryInfoBytes);
         if (numBytes == 0)
         {
             errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
@@ -932,7 +963,7 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
     // decommit = get out of memory, but leave the virtual address space reserved
     // POSSIBLE TODO. The other type, release, will decommit + free up the virtual address space
     DWORD freeType = MEM_RELEASE;
-    if (!VirtualFree(alloc.address, toUnderlying(alloc.pageSize), freeType))
+    if (!VirtualFree(alloc.address, 0 /*size 0 if MEM_RELEASE*/, freeType))
     {
         uint32_t         errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), errorLength};

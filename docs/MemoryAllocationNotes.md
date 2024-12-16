@@ -647,3 +647,20 @@ Either
     dumpbin /EXPORTS C:\Windows\System32\kernel32.dll | findstr VirtualAlloc2
     dumpbin /EXPORTS C:\Windows\System32\kernelbase.dll | findstr VirtualAlloc2
     ```
+  - When you first try to use `VirtualAlloc2`, most likely it will fail with error
+    ```red
+    insufficient system resources exist to complete the requested service
+    ```
+    If, from the `Task Manager` you verify that you indeed have sufficient free memory to complete the allocation, then
+    this has to do with the Memory Management configuration in the registry. Therefore, open
+    ```
+    HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\MemoryManagement
+    ```
+    We are interested in the `PagedPoolSize` (which should be there) and `PoolUsageMaximum` (which is not 
+    there by default.).
+    ([Reference link](https://support.arcserve.com/s/article/202808835?language=en_US)). We need to fiddle with 
+    these values (and then reboot) to force windows to allocate large pages.
+    - To make sure the computer doesn't explode, it is advised to enable Swapping and increase the swapfile size
+      [Link](https://danigta.de/tutorial/operating/system/windows/setup-swap-file)
+    - setting `PagedPoolSize` to -1 will make windows allocate whatever it can to memory
+    - The safest option is to just set `PoolUsageMaximum` (`DWORD`) to some percentage, like 60, as [Docs reccomend](https://learn.microsoft.com/it-it/troubleshoot/windows-server/performance/unable-allocate-memory-system-paged-pool)

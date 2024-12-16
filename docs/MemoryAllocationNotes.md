@@ -637,3 +637,13 @@ SIZE_T VirtualQuery(
     HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\MemoryManagement
     ```
     to check for more memory management parameters (this is the equivalent of the `/sys/kernel/mm` and `/proc/meminfo`)
+
+### checking support for VIrtualAlloc2 (basically if you are on windows or not)
+Either
+  - check windows version and make sure it's the correct one
+  - check that the `C:\Windows\System32\kernel.dll` (`extern C`) exports that function
+    first you can check yourself if you have that function by running on cmd
+    ```cmd
+    dumpbin /EXPORTS C:\Windows\System32\kernel32.dll | findstr VirtualAlloc2
+    dumpbin /EXPORTS C:\Windows\System32\kernelbase.dll | findstr VirtualAlloc2
+    ```

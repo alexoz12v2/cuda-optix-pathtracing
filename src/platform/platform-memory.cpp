@@ -463,11 +463,17 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
                 std::free(mallocatedMem);
             if (pSecDescriptor)
                 LocalFree(pSecDescriptor);
+            if (bRevertToSelf)
+                RevertToSelf();
+            if (hImpersonationToken)
+                CloseHandle(hImpersonationToken);
         }
 
         HANDLE               hProcessToken  = nullptr;
         void*                mallocatedMem  = nullptr;
         PSECURITY_DESCRIPTOR pSecDescriptor = nullptr;
+        bool                 bRevertToSelf  = false;
+        HANDLE               hImpersonationToken = nullptr;
     };
     constexpr auto luidComparator = [](LUID const& luid0, LUID const& luid1) -> bool { //
         return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
@@ -502,9 +508,11 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // Retrieve the user access token associated to the user of the current process.
     // Open it in DesiredAccessMode = TOKEN_ADJUST_PRIVILEDGES, NOT TOKEN_QUERY, such that, if we need
     // we can add some access control entries into it
+    // TOKEN_DUPLICATE and TOKEN_IMPOERSONATION for AccessCheck, as they allow me 
+    // to duplicate the process token to impersonate the user with a thread token
     // see https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-for-access-token-objects
     HANDLE hProcessToken   = nullptr;
-    DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES;
+    DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_DUPLICATE | TOKEN_IMPERSONATE;
     if (!OpenProcessToken(hCurrentProc, tokenAccessMode, &hProcessToken))
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
@@ -649,7 +657,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
             {
                 seLockMemoryPrivilegeEnabled = true;
             }
-            else 
+            else
             {
                 ctx.error("`AdjustTokenPrivilege` returned an unexpected error code: {}", {errCode});
             }
@@ -689,12 +697,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // 1. Check whether we support VirtualAlloc2 (Windows 10 and above)
     // to seach for a module specifically, take a look to AddDllDirectory. Usually you can use this
     // only on `LoadLibrary` DLLs. If you didn't allocate the library, don't free it (hence why it is called "Get")
-    HMODULE hKernel32Dll = GetModuleHandleA("kernel32.dll");
+    HMODULE hKernel32Dll = LoadLibraryA("kernelbase.dll");
     if (!hKernel32Dll)
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not load the Kernel32.dll into an HMODULE, error: {}", {view});
+        ctx.error("Could not load the kernelbase.dll into an HMODULE, error: {}", {view});
         return;
     }
 
@@ -703,7 +711,11 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not load the `VirtualAlloc2` from Kernel32.dll, using VirtualAlloc, error: {}", {view});
+        ctx.error("Could not load the `VirtualAlloc2` from kernelbase.dll, using VirtualAlloc, error: {}", {view});
+        ctx.error(
+            "If you are unsure whether you support `VirtualAlloc2` "
+            "or not, you can check the command `dumpbin /EXPORTS C:\\Windows\\System32\\kernelbase.dll | findstr "
+            "VirtualAlloc2`");
         return;
     }
 
@@ -711,14 +723,26 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // Docs: https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
     // 2.1 First retrieve the Process Security Descriptor (to then free With LocalFree)
     PSECURITY_DESCRIPTOR securityDescriptor = nullptr;
-    DWORD                status             = GetSecurityInfo(hCurrentProc, // the current process HANDLE
-                                   SE_KERNEL_OBJECT, // a process is classified as a kernel object
-                                   DACL_SECURITY_INFORMATION, // bits of the info to retrieve. we want process specific (discretionary)
-                                   nullptr,
-                                   nullptr,
-                                   nullptr,
-                                   nullptr,
-                                   &securityDescriptor);
+
+    // left comments for future reference
+    SECURITY_INFORMATION securityInfo = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION  |
+                                        DACL_SECURITY_INFORMATION /*| SACL_SECURITY_INFORMATION|
+                                        LABEL_SECURITY_INFORMATION | ATTRIBUTE_SECURITY_INFORMATION |
+                                        SCOPE_SECURITY_INFORMATION | PROCESS_TRUST_LABEL_SECURITY_INFORMATION |
+                                        ACCESS_FILTER_SECURITY_INFORMATION | BACKUP_SECURITY_INFORMATION
+                                        */
+        ;
+    DWORD status = GetSecurityInfo(
+        hCurrentProc, // the current process HANDLE
+        SE_KERNEL_OBJECT, // a process is classified as a kernel object
+        securityInfo, // bits of the info to retrieve. we want process specific (discretionary)
+        nullptr, // Owner SID
+        nullptr, // Group SID
+        nullptr, // DACL
+        nullptr, // SACL
+        &securityDescriptor
+    );
+
     if (status != ERROR_SUCCESS)
     {
         ctx.error("Could not retrieve the Process Security Descriptor, error code {}", {status});
@@ -727,25 +751,76 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     janitor.pSecDescriptor = securityDescriptor;
 
+    if (!IsValidSecurityDescriptor(securityDescriptor)) 
+    {
+        ctx.error("The retrieved security descriptor at {} is not valid", { securityDescriptor });
+        return;
+    }
+
     // GENERIC_MAPPING = r?w?x?. Each member is an int, ACCESS_MASK, https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask
     GENERIC_MAPPING genericMapping = {
-        PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, // GENERIC_READ (required for QueryWorkingSet)
+        PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, // GENERIC_READ
         PROCESS_VM_WRITE | PROCESS_VM_OPERATION,     // GENERIC_WRITE
         PROCESS_CREATE_THREAD,                       // GENERIC_EXECUTE
         PROCESS_ALL_ACCESS                           // GENERIC_ALL
     };
-    ACCESS_MASK outAccessMask = 0;
 
-    std::remove_cvref_t<decltype(*std::declval<LPBOOL>())> bAccessStatus = false;
+    ACCESS_MASK outAccessMask = 0;
+    DWORD       desiredAccess = PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION;
+    BOOL        bAccessStatus = false;
+    PRIVILEGE_SET privilegeSet;
+    DWORD         privilegeSetSize = sizeof(PRIVILEGE_SET);
+    // https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-mapgenericmask
+    MapGenericMask(&desiredAccess, &genericMapping);
 
     // `AccessCheck` function to see whether the process security descriptor has a predefined
     // set of access rights
+    // `AccessCheck` requires a *Client Token*, which is a token associated to some entity (local user or client-server), derived from a primary token
+    // But `OpenProcessToken` returns a *Primary Token*, which represents the user account under which the process is running
+    // To Impersonate a client token from a primary token, use `ImpersonateSelf`
+    // source: https://stackoverflow.com/questions/35027524/whats-the-difference-between-a-primary-token-and-an-impersonation-token
+    // basically, AccessCheck works with thread tokens, not process tokens, so we need to 
+    // fetch the association user - process and map it onto the current thread
+    // source: book "Programming Windows Security"
+    //if (!ImpersonateSelf(SecurityImpersonation))
+    //{
+    //    uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+    //    std::string_view view{sErrorBuffer.data(), length};
+    //    ctx.error("Failed call to `ImpersonateSelf`, error: {}", {view});
+    //    return;
+    //}
+    //janitor.bRevertToSelf = true;
+
+    // source: https://blog.aaronballman.com/2011/08/how-to-check-access-rights/
+    HANDLE hImpersonationToken = nullptr;
+#if 0
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &hImpersonationToken))
+#else
+    if (!DuplicateToken(hProcessToken, SecurityImpersonation, &hImpersonationToken))
+#endif
+    {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Failed call to `OpenThreadToken`, error: {}", {view});
+        return;
+    }
+    janitor.hImpersonationToken = hImpersonationToken;
+    HANDLE hThread              = GetCurrentThread();
+    if (!SetThreadToken(&hThread, hImpersonationToken)) 
+    {
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Failed call to `SetThreadToken`, error: {}", {view});
+        return;
+    }
+    janitor.bRevertToSelf = true;
+
     if (!AccessCheck(securityDescriptor, // security descriptor against which access is checked
-                     hProcessToken,      // impersonation token representing the user attempting the access
-                     PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, // desired access rights
+                     hImpersonationToken,      // impersonation token representing the user attempting the access
+                     desiredAccess,      // desired access rights
                      &genericMapping,
-                     nullptr,
-                     0,
+                     &privilegeSet,
+                     &privilegeSetSize,
                      &outAccessMask,
                      &bAccessStatus))
     {
@@ -757,7 +832,12 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     if (!bAccessStatus)
     {
-        ctx.error("The Process doesn't own the PROCESS_VM_OPERATION access rights, using 2MB large pages");
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error(
+            "The Process doesn't own the"
+            " PROCESS_VM_OPERATION access rights, using 2MB large pages. Error: {}",
+            {view});
         return;
     }
 

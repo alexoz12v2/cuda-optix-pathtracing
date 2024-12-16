@@ -2,6 +2,7 @@ module;
 
 // NOLINTBEGIN
 #include <string_view>
+#include <array>
 
 #include <cassert>
 #include <cstdint>
@@ -25,6 +26,8 @@ module;
 #include <cstdlib>
 #elif defined(DMT_OS_WINDOWS)
 #include <Windows.h>
+#include <securitybaseapi.h>
+#include <AclAPI.h>
 #endif
 // NOLINTEND
 
@@ -493,6 +496,29 @@ static uint32_t getLastErrorAsString(char * buffer, uint32_t maxSize)
 // the Process Security Descriptor, the Token -> Close
 PageAllocator::PageAllocator(PlatformContext& ctx)
 {
+    class Janitor 
+    {
+    public:
+        Janitor() = default;
+        Janitor(Janitor const &) = delete;
+        Janitor(Janitor &&) noexcept = delete;
+        Janitor &operator=(Janitor const &) = delete;
+        Janitor &operator=(Janitor &&) noexcept = delete;
+        ~Janitor() noexcept {
+            if (hProcessToken)
+                CloseHandle(hProcessToken);
+            if (mallocatedMem)
+                std::free(mallocatedMem);
+            if (pSecDescriptor)
+                LocalFree(pSecDescriptor);
+        }
+
+        HANDLE hProcessToken = nullptr;
+        void*  mallocatedMem = nullptr;
+        SECURITY_DESCRIPTOR* pSecDescriptor = nullptr;
+    };
+    Janitor janitor;
+
     static constexpr uint32_t sErrorBufferSize = 256;
     static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 
@@ -524,6 +550,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
             "mode the user access token. Error: {}", {view});
         // TODO error handling
     }
+    janitor.hProcessToken = hProcessToken;
 
     // iterate over the existing priviledges on the user token, and if you find SE_LOCK_MEMORY_NAME with
     // attribute SE_PRIVILEGE_ENABLED, then you are good to go
@@ -548,6 +575,10 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     {
         ctx.warn("Allocating on the Heap token information");
         pTokenPrivilegesInformation = std::malloc(requiredSize + sizeof(LUID_AND_ATTRIBUTES));
+        if (pTokenPrivilegesInformation)
+        {
+			janitor.mallocatedMem = pTokenPrivilegesInformation;
+        }
     }
     else 
     {
@@ -625,7 +656,8 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // still not enabled? Fail.
     if (!seLockMemoryPrivilegeEnabled)
     {
-        // TODO error handling
+        ctx.error("Found SeLockMemoryPrivilege not enabled, hence no large page allocation");
+        return;
     }
 
     // Phase 2: Retrieve the minimum large page the processor supports. if 0, then the processor doesn't support them
@@ -633,8 +665,13 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     size_t minimumPageSize = GetLargePageMinimum();
     if (minimumPageSize == 0) 
     {
-        // TODO error handling
+        ctx.error("For some reason, the current CPU architecture doesn't support large TLB entries");
+        return;
     }
+
+    // ------------ ENABLE LARGE PAGES ------------------------------------------------------------------
+    // TODO check miminum page size better
+    m_largePageEnabled = true;
 
     // At this point, we know that we can use Large Page Allocation. We need to decide among 2MB and 1GB
     // - 2MB is allowed by default
@@ -642,27 +679,28 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // 1. Check whether we support VirtualAlloc2 (Windows 10 and above)
     // to seach for a module specifically, take a look to AddDllDirectory. Usually you can use this 
     // only on `LoadLibrary` DLLs. If you didn't allocate the library, don't free it (hence why it is called "Get")
-    HMODULE hKernel32Dll = GetModuleHandleA("Kernel32.dll");
-    if (!hKernel32Dll) {
+    HMODULE hKernel32Dll = GetModuleHandleA("kernel32.dll");
+    if (!hKernel32Dll) 
+    {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Could not load the Kernel32.dll into an HMODULE, error: {}", {view});
-        // TODO error handling
+        return;
     }
 
     auto *functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
-    if (!hKernel32Dll) {
+    if (!functionPointer) 
+    {
         uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not load the Kernel32.dll into an HMODULE, error: {}", {view});
-        // TODO error handling. NOTE: this is not a definitive failure, as we can use 2MB large pages 
+        ctx.error("Could not load the `VirtualAlloc2` from Kernel32.dll, using VirtualAlloc, error: {}", {view});
+        return;
     }
 
-#if 0
     // 2. Look into the DACL of the current process to see whether you have the `PROCESS_VM_OPERATION` access right
     // Docs: https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
     // 2.1 First retrieve the Process Security Descriptor (to then free With LocalFree)
-    SECURITY_DESCRIPTOR securityDescriptor;
+    SECURITY_DESCRIPTOR *securityDescriptor = nullptr;
     DWORD status = GetSecurityInfo(
         hCurrentProc, // the current process HANDLE
         SE_KERNEL_OBJECT, // a process is classified as a kernel object
@@ -673,9 +711,13 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         nullptr,
         &securityDescriptor);
     if (status != ERROR_SUCCESS) {
-        // TODO interpret error code and set page size to 2MB
+        ctx.error("Could not retrieve the Process Security Descriptor, error code {}", {status});
+        return;
     }
 
+	janitor.pSecDescriptor = securityDescriptor;
+
+#if 0
     // TODO maybe you need to call LocalFree on the DACL too
     bool daclPresent = false;
     bool daclDefault = false;
@@ -711,9 +753,10 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     }
 #endif
 
+#if 0
     // Try to duplicate the process handle with the PROCESS_VM_OPERATION as desired access. This indirectly tells us 
     // that the original process has that
-     // Duplicate the pseudo-handle to create a real handle
+    // Duplicate the pseudo-handle to create a real handle
     HANDLE hRealHandle = nullptr;
     if (!DuplicateHandle(hPseudoHandle, hPseudoHandle, GetCurrentProcess(), &hRealHandle, PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, FALSE, 0)) 
     {
@@ -729,12 +772,41 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
         // TODO check the fact that you can use 1GB pages
     }
+#endif
 
-    // TODO refactor cleaning
-    if (mallocated)
+    // GENERIC_MAPPING = r?w?x?. Each member is an int, ACCESS_MASK, https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask
+	GENERIC_MAPPING genericMapping = {
+		PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,   // GENERIC_READ
+		PROCESS_VM_WRITE | PROCESS_VM_OPERATION,       // GENERIC_WRITE
+		PROCESS_CREATE_THREAD,                         // GENERIC_EXECUTE
+		PROCESS_ALL_ACCESS                             // GENERIC_ALL
+	};
+    ACCESS_MASK outAccessMask = 0;
+    bool        bAccessStatus = false;
+
+    // `AccessCheck` function to see whether the process security descriptor has a predefined
+    // set of access rights
+    if (!AccessCheck(securityDescriptor, // security descriptor against which access is checked
+                     hProcessToken,      // impersonation token representing the user attempting the access
+                     PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION, // desired access rights
+                     &genericMapping,
+                     nullptr,
+                     0,
+                     &outAccessMask,
+                     &bAccessStatus)) 
     {
-        std::free(pTokenPrivilegesInformation);
+        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Failed call to AccessCheck, error: {}", {view});
+        return;
     }
+
+    if (!bAccessStatus) {
+        ctx.error("The Process doesn't own the PROCESS_VM_OPERATION access rights, using 2MB large pages");
+        return;
+    }
+
+    m_largePage1GB = true;
 }
 
 PageAllocation PageAllocator::allocatePage(PlatformContext& ctx) 

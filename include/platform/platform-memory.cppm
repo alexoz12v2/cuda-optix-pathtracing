@@ -340,7 +340,9 @@ private:
     bool      m_mmapHugeTlbEnabled = false;
     bool      m_hugePageEnabled    = false;
 #elif defined(DMT_OS_WINDOWS)
-    unsigned char m_padding[24];
+    unsigned char m_padding[22];
+    bool          m_largePage1GB = false;
+    bool          m_largePageEnabled = false;
 #endif
 };
 

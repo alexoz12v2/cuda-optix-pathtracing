@@ -20,7 +20,7 @@ export module platform;
 
 export import :logging;
 export import :memory;
-import :utils;
+export import :utils; /** Note: Utils contains private, possibly OS specific, functionality + PlatformContext */
 
 export namespace dmt
 {

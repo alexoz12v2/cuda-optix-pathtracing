@@ -405,140 +405,50 @@ PageAllocator::~PageAllocator()
 }
 
 #elif defined(DMT_OS_WINDOWS)
-
-// TODO refactor in utils
-//Returns the last Win32 error, in string format. Returns an empty string if there is no error.
-static uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize)
+class Janitor
 {
-    //Get the error message ID, if any.
-    DWORD errorMessageID = ::GetLastError();
-    if (errorMessageID == 0)
-    {
-        buffer[0] = '\n';
-        return 0;
-    }
-    else
-    {
+public:
+	Janitor()                              = default;
+	Janitor(Janitor const&)                = delete;
+	Janitor(Janitor&&) noexcept            = delete;
+	Janitor& operator=(Janitor const&)     = delete;
+	Janitor& operator=(Janitor&&) noexcept = delete;
+	~Janitor() noexcept
+	{
+		if (hProcessToken)
+			CloseHandle(hProcessToken);
+		if (mallocatedMem)
+			std::free(mallocatedMem);
+		if (pSecDescriptor)
+			LocalFree(pSecDescriptor);
+		if (bRevertToSelf)
+			RevertToSelf();
+		if (hImpersonationToken)
+			CloseHandle(hImpersonationToken);
+	}
 
-        LPSTR messageBuffer = nullptr;
+	HANDLE               hProcessToken       = nullptr;
+	void*                mallocatedMem       = nullptr;
+	PSECURITY_DESCRIPTOR pSecDescriptor      = nullptr;
+	bool                 bRevertToSelf       = false;
+	HANDLE               hImpersonationToken = nullptr;
+};
 
-        //Ask Win32 to give us the string version of that message ID.
-        //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
-        size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                     NULL,
-                                     errorMessageID,
-                                     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                     (LPSTR)&messageBuffer,
-                                     0,
-                                     NULL);
-
-        //Copy the error message into a std::string.
-        size_t actual = std::min(static_cast<size_t>(maxSize - 1), size);
-        std::memcpy(buffer, messageBuffer, actual);
-        buffer[actual] = '\0';
-
-        //Free the Win32's string's buffer.
-        LocalFree(messageBuffer);
-        return actual;
-    }
-}
-
-// TODO error handing with the Janitor Pattern
-// the Process Security Descriptor, the Token -> Close
-PageAllocator::PageAllocator(PlatformContext& ctx)
+bool PageAllocator::checkAndAdjustPrivileges(PlatformContext &ctx, HANDLE hProcessToken, const LUID &seLockMemoryPrivilegeLUID, void* pData) 
 {
-    class Janitor
-    {
-    public:
-        Janitor()                              = default;
-        Janitor(Janitor const&)                = delete;
-        Janitor(Janitor&&) noexcept            = delete;
-        Janitor& operator=(Janitor const&)     = delete;
-        Janitor& operator=(Janitor&&) noexcept = delete;
-        ~Janitor() noexcept
-        {
-            if (hProcessToken)
-                CloseHandle(hProcessToken);
-            if (mallocatedMem)
-                std::free(mallocatedMem);
-            if (pSecDescriptor)
-                LocalFree(pSecDescriptor);
-            if (bRevertToSelf)
-                RevertToSelf();
-            if (hImpersonationToken)
-                CloseHandle(hImpersonationToken);
-        }
-
-        HANDLE               hProcessToken  = nullptr;
-        void*                mallocatedMem  = nullptr;
-        PSECURITY_DESCRIPTOR pSecDescriptor = nullptr;
-        bool                 bRevertToSelf  = false;
-        HANDLE               hImpersonationToken = nullptr;
-    };
-    constexpr auto luidComparator = [](LUID const& luid0, LUID const& luid1) -> bool { //
-        return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
-    };
-
-    Janitor janitor;
-
-    // Get some of the system information relevant to memory allocation, eg
-    // - when `VirtualAlloc` is called with MEM_RESERVE, the allocation is aligned to the `allocation granularity`
-    // - when `VirtualAlloc` it called with MEM_COMMIT, the allocation is aligned to a page boundary
-    SYSTEM_INFO sysInfo{};
-    GetSystemInfo(&sysInfo);
-    m_systemPageSize        = sysInfo.dwPageSize;
-    m_allocationGranularity = sysInfo.dwAllocationGranularity;
-    assert(m_systemPageSize == toUnderlying(EPageSize::e4KB));
-
-    // Retrieve the LUID associated with the SE_LOCK_MEMORY_NAME = "SeLockMemoryPrivilege"
-    LUID seLockMemoryPrivilegeLUID{};
-    if (!LookupPrivilegeValue(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
-    {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not retrieve the LUID for the SeLockMemoryPrivilege. Error: {}", {view});
-        return;
-    }
-
-    // get the pseudo handle (fixed to -1) of the current process (you call a
-    // function anyways for compatibility with the future)
-    // pseudo handles need not to be `Closehandle`d
-    HANDLE hCurrentProc = GetCurrentProcess();
-
-    // Retrieve the user access token associated to the user of the current process.
-    // Open it in DesiredAccessMode = TOKEN_ADJUST_PRIVILEDGES, NOT TOKEN_QUERY, such that, if we need
-    // we can add some access control entries into it
-    // TOKEN_DUPLICATE and TOKEN_IMPOERSONATION for AccessCheck, as they allow me 
-    // to duplicate the process token to impersonate the user with a thread token
-    // see https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-for-access-token-objects
-    HANDLE hProcessToken   = nullptr;
-    DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_DUPLICATE | TOKEN_IMPERSONATE;
-    if (!OpenProcessToken(hCurrentProc, tokenAccessMode, &hProcessToken))
-    {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error(
-            "Couldn't open in TOKEN_ADJUST_PRIVILEDGES "
-            "mode the user access token. Error: {}",
-            {view});
-        // TODO error handling
-    }
-    janitor.hProcessToken = hProcessToken;
-
-    // iterate over the existing priviledges on the user token, and if you find SE_LOCK_MEMORY_NAME with
-    // attribute SE_PRIVILEGE_ENABLED, then you are good to go
+    Janitor& janitor = *reinterpret_cast<Janitor*>(pData);
     // 1. Get count of bytes for the TokenPrivileges TOKEN_INFORMATION_CLASS for this token handle
     DWORD requiredSize = 0;
     if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize) &&
         GetLastError() != ERROR_INSUFFICIENT_BUFFER)
     {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error(
             "Could not get the required size {} for the "
             "`TokenPrivileges` Token Information, error: {}",
             {requiredSize, view});
-        return;
+        return false;
     }
 
     // hoping we fit into the statically allocated buffer
@@ -565,16 +475,16 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     if (!pTokenPrivilegesInformation)
     {
         ctx.error("Couldn't reserve memory to hold the token information");
-        return;
+        return false;
     }
 
     // 2. actually get the TokenPrivileges TOKEN_INFORMATION_CLASS
     if (!GetTokenInformation(hProcessToken, TokenPrivileges, pTokenPrivilegesInformation, requiredSize, &requiredSize))
     {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Could not get the `TokenPrivileges` Token Information, error: {}", {view});
-        return;
+        return false;
     }
 
     // 3. Iterate over the list of TOKEN_PRIVILEGES and find the one with the SeLockMemoryPrivilege LUID
@@ -587,7 +497,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     {
         LUID  luid       = pPrivilegeLUIDs[i].Luid;
         DWORD attributes = pPrivilegeLUIDs[i].Attributes;
-        if (luidComparator(luid, seLockMemoryPrivilegeLUID))
+        if (win32::luidCompare(luid, seLockMemoryPrivilegeLUID))
         {
             // possible attributes: E_PRIVILEGE_ENABLED_BY_DEFAULT, SE_PRIVILEGE_ENABLED,
             // SE_PRIVILEGE_REMOVED, SE_PRIVILEGE_USED_FOR_ACCESS
@@ -602,67 +512,186 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // If the SeLockMemoryPrivilege is not enabled, then try to enable it
     if (!seLockMemoryPrivilegeEnabled)
     {
-        // write into a new entry if we didn't find it at all
-        // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
-        if (seLockMemoryPrivilegeIndex < 0)
-        {
-            // also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can
-            // tell if you disabled it
-            ctx.error(
-                "SeLockMemoryPrivilege is absent in the current user token. "
-                "Try to run as admin, check `secpol.msc` or use cudaAllocHost");
-        }
-        else
-        {
-            TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
-            privs.PrivilegeCount           = 1;
-            privs.Privileges[0].Luid       = seLockMemoryPrivilegeLUID;
-            privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-            if (!AdjustTokenPrivileges(hProcessToken, false, &privs, sizeof(TOKEN_PRIVILEGES), nullptr, nullptr))
-            {
-                uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                std::string_view view{sErrorBuffer.data(), length};
-                ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
-                return;
-            }
-
-            int32_t errCode = GetLastError();
-            if (errCode == ERROR_NOT_ALL_ASSIGNED)
-            {
-                // Sanity check
-                PRIVILEGE_SET privilegeSet;
-                privilegeSet.PrivilegeCount          = 1;
-                privilegeSet.Control                 = PRIVILEGE_SET_ALL_NECESSARY;
-                privilegeSet.Privilege[0].Luid       = seLockMemoryPrivilegeLUID;
-                privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
-                BOOL result                          = false;
-                if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
-                {
-                    uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                    std::string_view view{sErrorBuffer.data(), length};
-                    ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
-                    return;
-                }
-                if (!result)
-                {
-                    ctx.error(
-                        "Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to "
-                        "be found");
-                    return;
-                }
-
-                seLockMemoryPrivilegeEnabled = true;
-            }
-            else if (errCode == ERROR_SUCCESS)
-            {
-                seLockMemoryPrivilegeEnabled = true;
-            }
-            else
-            {
-                ctx.error("`AdjustTokenPrivilege` returned an unexpected error code: {}", {errCode});
-            }
-        }
+        return enableLockPrivilege(ctx, hProcessToken, seLockMemoryPrivilegeLUID, seLockMemoryPrivilegeIndex, pData);
     }
+
+    return true;
+}
+
+bool PageAllocator::checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx)
+{
+    HMODULE hKernel32Dll = LoadLibraryA("kernelbase.dll");
+    if (!hKernel32Dll)
+    {
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not load the kernelbase.dll into an HMODULE, error: {}", {view});
+        return false;
+    }
+
+    auto* functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
+    if (!functionPointer)
+    {
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not load the `VirtualAlloc2` from kernelbase.dll, using VirtualAlloc, error: {}", {view});
+        ctx.error(
+            "If you are unsure whether you support `VirtualAlloc2` "
+            "or not, you can check the command `dumpbin /EXPORTS C:\\Windows\\System32\\kernelbase.dll | findstr "
+            "VirtualAlloc2`");
+        return false;
+    }
+
+    return true;
+}
+
+bool PageAllocator::enableLockPrivilege(PlatformContext& ctx, HANDLE hProcessToken, LUID const& seLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData)
+{
+	// write into a new entry if we didn't find it at all
+	// we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
+	if (seLockMemoryPrivilegeIndex < 0)
+	{
+		// also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can
+		// tell if you disabled it
+		ctx.error(
+			"SeLockMemoryPrivilege is absent in the current user token. "
+			"Try to run as admin, check `secpol.msc` or use cudaAllocHost");
+        return false;
+	}
+	else
+	{
+		TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
+		privs.PrivilegeCount           = 1;
+		privs.Privileges[0].Luid       = seLockMemoryPrivilegeLUID;
+		privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+		if (!AdjustTokenPrivileges(hProcessToken, false, &privs, sizeof(TOKEN_PRIVILEGES), nullptr, nullptr))
+		{
+			uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+			std::string_view view{sErrorBuffer.data(), length};
+			ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
+			return false;
+		}
+
+		int32_t errCode = GetLastError();
+		if (errCode == ERROR_NOT_ALL_ASSIGNED)
+		{
+			// Sanity check
+			PRIVILEGE_SET privilegeSet;
+			privilegeSet.PrivilegeCount          = 1;
+			privilegeSet.Control                 = PRIVILEGE_SET_ALL_NECESSARY;
+			privilegeSet.Privilege[0].Luid       = seLockMemoryPrivilegeLUID;
+			privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+			BOOL result                          = false;
+			if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
+			{
+				uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+				std::string_view view{sErrorBuffer.data(), length};
+				ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
+				return false;
+			}
+			if (!result)
+			{
+				ctx.error(
+					"Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to "
+					"be found");
+				return false;
+			}
+
+            return true;
+		}
+		else if (errCode == ERROR_SUCCESS)
+		{
+            return true;
+		}
+		else
+		{
+			ctx.error("`AdjustTokenPrivilege` returned an unexpected error code: {}", {errCode});
+            return false;
+		}
+	}
+}
+
+HANDLE PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, HANDLE hProcessToken, void* pData)
+{
+    Janitor& janitor = *reinterpret_cast<Janitor*>(pData);
+    HANDLE hImpersonationToken = nullptr;
+    if (!DuplicateToken(hProcessToken, SecurityImpersonation, &hImpersonationToken))
+    {
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Failed call to `OpenThreadToken`, error: {}", {view});
+		return INVALID_HANDLE_VALUE;
+    }
+    janitor.hImpersonationToken = hImpersonationToken;
+    HANDLE hThread              = GetCurrentThread();
+    if (!SetThreadToken(&hThread, hImpersonationToken))
+    {
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Failed call to `SetThreadToken`, error: {}", {view});
+		return INVALID_HANDLE_VALUE;
+    }
+    janitor.bRevertToSelf = true;
+    return hImpersonationToken;
+}
+
+// TODO error handing with the Janitor Pattern
+// the Process Security Descriptor, the Token -> Close
+PageAllocator::PageAllocator(PlatformContext& ctx)
+{
+    Janitor janitor;
+
+    // Get some of the system information relevant to memory allocation, eg
+    // - when `VirtualAlloc` is called with MEM_RESERVE, the allocation is aligned to the `allocation granularity`
+    // - when `VirtualAlloc` it called with MEM_COMMIT, the allocation is aligned to a page boundary
+    SYSTEM_INFO sysInfo{};
+    GetSystemInfo(&sysInfo);
+    m_systemPageSize        = sysInfo.dwPageSize;
+    m_allocationGranularity = sysInfo.dwAllocationGranularity;
+    if (m_systemPageSize == 0)
+    {
+        ctx.error("The current system does not support large pages for some reason");
+        return;
+    }
+
+    // Retrieve the LUID associated with the SE_LOCK_MEMORY_NAME = "SeLockMemoryPrivilege"
+    LUID seLockMemoryPrivilegeLUID{};
+    if (!LookupPrivilegeValue(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
+    {
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error("Could not retrieve the LUID for the SeLockMemoryPrivilege. Error: {}", {view});
+        return;
+    }
+
+    // get the pseudo handle (fixed to -1) of the current process (you call a
+    // function anyways for compatibility with the future)
+    // pseudo handles need not to be `Closehandle`d
+    HANDLE hCurrentProc = GetCurrentProcess();
+
+    // Retrieve the user access token associated to the user of the current process.
+    // Open it in DesiredAccessMode = TOKEN_ADJUST_PRIVILEDGES, NOT TOKEN_QUERY, such that, if we need
+    // we can add some access control entries into it
+    // TOKEN_DUPLICATE and TOKEN_IMPOERSONATION for AccessCheck, as they allow me
+    // to duplicate the process token to impersonate the user with a thread token
+    // see https://learn.microsoft.com/en-us/windows/win32/secauthz/access-rights-for-access-token-objects
+    HANDLE hProcessToken   = nullptr;
+    DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_DUPLICATE | TOKEN_IMPERSONATE;
+    if (!OpenProcessToken(hCurrentProc, tokenAccessMode, &hProcessToken))
+    {
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), length};
+        ctx.error(
+            "Couldn't open in TOKEN_ADJUST_PRIVILEDGES "
+            "mode the user access token. Error: {}",
+            {view});
+        // TODO error handling
+    }
+    janitor.hProcessToken = hProcessToken;
+
+    // iterate over the existing priviledges on the user token, and if you find SE_LOCK_MEMORY_NAME with
+    // attribute SE_PRIVILEGE_ENABLED, then you are good to go
+    bool seLockMemoryPrivilegeEnabled = checkAndAdjustPrivileges(ctx, hProcessToken, seLockMemoryPrivilegeLUID, (void*)&janitor);
 
     // still not enabled? Fail.
     if (!seLockMemoryPrivilegeEnabled)
@@ -697,25 +726,9 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // 1. Check whether we support VirtualAlloc2 (Windows 10 and above)
     // to seach for a module specifically, take a look to AddDllDirectory. Usually you can use this
     // only on `LoadLibrary` DLLs. If you didn't allocate the library, don't free it (hence why it is called "Get")
-    HMODULE hKernel32Dll = LoadLibraryA("kernelbase.dll");
-    if (!hKernel32Dll)
+    bool bVirtualAlloc2Supported = checkVirtualAlloc2InKernelbaseDll(ctx);
+    if (!bVirtualAlloc2Supported)
     {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not load the kernelbase.dll into an HMODULE, error: {}", {view});
-        return;
-    }
-
-    auto* functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
-    if (!functionPointer)
-    {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Could not load the `VirtualAlloc2` from kernelbase.dll, using VirtualAlloc, error: {}", {view});
-        ctx.error(
-            "If you are unsure whether you support `VirtualAlloc2` "
-            "or not, you can check the command `dumpbin /EXPORTS C:\\Windows\\System32\\kernelbase.dll | findstr "
-            "VirtualAlloc2`");
         return;
     }
 
@@ -725,23 +738,21 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     PSECURITY_DESCRIPTOR securityDescriptor = nullptr;
 
     // left comments for future reference
-    SECURITY_INFORMATION securityInfo = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION  |
+    SECURITY_INFORMATION securityInfo = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
                                         DACL_SECURITY_INFORMATION /*| SACL_SECURITY_INFORMATION|
                                         LABEL_SECURITY_INFORMATION | ATTRIBUTE_SECURITY_INFORMATION |
                                         SCOPE_SECURITY_INFORMATION | PROCESS_TRUST_LABEL_SECURITY_INFORMATION |
                                         ACCESS_FILTER_SECURITY_INFORMATION | BACKUP_SECURITY_INFORMATION
                                         */
         ;
-    DWORD status = GetSecurityInfo(
-        hCurrentProc, // the current process HANDLE
-        SE_KERNEL_OBJECT, // a process is classified as a kernel object
-        securityInfo, // bits of the info to retrieve. we want process specific (discretionary)
-        nullptr, // Owner SID
-        nullptr, // Group SID
-        nullptr, // DACL
-        nullptr, // SACL
-        &securityDescriptor
-    );
+    DWORD status = GetSecurityInfo(hCurrentProc,     // the current process HANDLE
+                                   SE_KERNEL_OBJECT, // a process is classified as a kernel object
+                                   securityInfo, // bits of the info to retrieve. we want process specific (discretionary)
+                                   nullptr,      // Owner SID
+                                   nullptr,      // Group SID
+                                   nullptr,      // DACL
+                                   nullptr,      // SACL
+                                   &securityDescriptor);
 
     if (status != ERROR_SUCCESS)
     {
@@ -751,9 +762,9 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     janitor.pSecDescriptor = securityDescriptor;
 
-    if (!IsValidSecurityDescriptor(securityDescriptor)) 
+    if (!IsValidSecurityDescriptor(securityDescriptor))
     {
-        ctx.error("The retrieved security descriptor at {} is not valid", { securityDescriptor });
+        ctx.error("The retrieved security descriptor at {} is not valid", {securityDescriptor});
         return;
     }
 
@@ -765,9 +776,9 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
         PROCESS_ALL_ACCESS                           // GENERIC_ALL
     };
 
-    ACCESS_MASK outAccessMask = 0;
-    DWORD       desiredAccess = PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION;
-    BOOL        bAccessStatus = false;
+    ACCESS_MASK   outAccessMask = 0;
+    DWORD         desiredAccess = PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION;
+    BOOL          bAccessStatus = false;
     PRIVILEGE_SET privilegeSet;
     DWORD         privilegeSetSize = sizeof(PRIVILEGE_SET);
     // https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-mapgenericmask
@@ -779,52 +790,34 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     // But `OpenProcessToken` returns a *Primary Token*, which represents the user account under which the process is running
     // To Impersonate a client token from a primary token, use `ImpersonateSelf`
     // source: https://stackoverflow.com/questions/35027524/whats-the-difference-between-a-primary-token-and-an-impersonation-token
-    // basically, AccessCheck works with thread tokens, not process tokens, so we need to 
+    // basically, AccessCheck works with thread tokens, not process tokens, so we need to
     // fetch the association user - process and map it onto the current thread
     // source: book "Programming Windows Security"
     //if (!ImpersonateSelf(SecurityImpersonation))
     //{
-    //    uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+    //    uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
     //    std::string_view view{sErrorBuffer.data(), length};
     //    ctx.error("Failed call to `ImpersonateSelf`, error: {}", {view});
     //    return;
     //}
     //janitor.bRevertToSelf = true;
-
     // source: https://blog.aaronballman.com/2011/08/how-to-check-access-rights/
-    HANDLE hImpersonationToken = nullptr;
-#if 0
-    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &hImpersonationToken))
-#else
-    if (!DuplicateToken(hProcessToken, SecurityImpersonation, &hImpersonationToken))
-#endif
+    HANDLE hImpersonationToken = createImpersonatingThreadToken(ctx, hProcessToken, (void*)&janitor);
+    if (hImpersonationToken == INVALID_HANDLE_VALUE) 
     {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Failed call to `OpenThreadToken`, error: {}", {view});
         return;
     }
-    janitor.hImpersonationToken = hImpersonationToken;
-    HANDLE hThread              = GetCurrentThread();
-    if (!SetThreadToken(&hThread, hImpersonationToken)) 
-    {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), length};
-        ctx.error("Failed call to `SetThreadToken`, error: {}", {view});
-        return;
-    }
-    janitor.bRevertToSelf = true;
 
-    if (!AccessCheck(securityDescriptor, // security descriptor against which access is checked
-                     hImpersonationToken,      // impersonation token representing the user attempting the access
-                     desiredAccess,      // desired access rights
+    if (!AccessCheck(securityDescriptor,  // security descriptor against which access is checked
+                     hImpersonationToken, // impersonation token representing the user attempting the access
+                     desiredAccess,       // desired access rights
                      &genericMapping,
                      &privilegeSet,
                      &privilegeSetSize,
                      &outAccessMask,
                      &bAccessStatus))
     {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Failed call to AccessCheck, error: {}", {view});
         return;
@@ -832,7 +825,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 
     if (!bAccessStatus)
     {
-        uint32_t         length = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error(
             "The Process doesn't own the"
@@ -885,7 +878,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
             ret.bits    = DMT_OS_WINDOWS_VIRTUALALLOC2;
             if (!ret.address)
             {
-                errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
                 std::string_view view{sErrorBuffer.data(), errorLength};
                 ctx.error("Failed call to `VirtualAlloc2`, trying `VirtualAlloc`, error: {}", {view});
             }
@@ -903,7 +896,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
             ret.bits    = DMT_OS_WINDOWS_LARGE_PAGE;
             if (!ret.address)
             {
-                errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
                 std::string_view view{sErrorBuffer.data(), errorLength};
                 ctx.error("`VirtualAlloc` with MEM_LARGE_PAGES, trying without it, error: {}", {view});
             }
@@ -917,7 +910,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
         ret.bits    = DMT_OS_WINDOWS_SMALL_PAGE;
         if (!ret.address)
         {
-            errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), errorLength};
             ctx.error("`VirtualAlloc` failed, couldn't allocate memory, error: {}", {view});
         }
@@ -948,7 +941,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
         uint32_t inputSize   = sizeof(PSAPI_WORKING_SET_EX_INFORMATION);
         if (!QueryWorkingSetEx(GetCurrentProcess(), &input, inputSize))
         {
-            errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), errorLength};
             ctx.error("Call to `QueryWorkingSetEx` failed, hence cannot check page status, error: {}", {view});
         }
@@ -976,7 +969,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
         size_t numBytes = VirtualQuery(ret.address, &memoryInfo, memoryInfoBytes);
         if (numBytes == 0)
         {
-            errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), errorLength};
             ctx.error("Call to `VirtualQuery` failed, hence cannot acquire virtual page number, error: {}", {view});
         }
@@ -1050,7 +1043,7 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
     DWORD freeType = MEM_RELEASE;
     if (!VirtualFree(alloc.address, 0 /*size 0 if MEM_RELEASE*/, freeType))
     {
-        uint32_t         errorLength = getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        uint32_t         errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), errorLength};
 #if defined(DMT_DEBUG)
         ctx.error("Failed to Free memory at {}, error {}, Printing Stacktrace", {alloc.address, view});

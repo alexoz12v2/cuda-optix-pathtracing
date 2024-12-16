@@ -664,3 +664,9 @@ Either
       [Link](https://danigta.de/tutorial/operating/system/windows/setup-swap-file)
     - setting `PagedPoolSize` to -1 will make windows allocate whatever it can to memory
     - The safest option is to just set `PoolUsageMaximum` (`DWORD`) to some percentage, like 60, as [Docs reccomend](https://learn.microsoft.com/it-it/troubleshoot/windows-server/performance/unable-allocate-memory-system-paged-pool)
+      The smaller the percentage the easier it is to allocate large pages
+
+### Useful windows tool
+```
+winget install --id=Microsoft.Sysinternals.ProcessExplorer  -e
+```

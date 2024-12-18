@@ -20,4 +20,22 @@ macro(dmt_setup_dependencies)
     )
     FetchContent_MakeAvailable(fmt)
   endif()
+  if(NOT TARGET glfw)
+    find_package(OpenGL REQUIRED) 
+    FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG        3.3.4
+    )
+    FetchContent_MakeAvailable(glfw)
+  endif()
+
+  if(NOT TARGET glad)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glad)
+  endif()
+
+  if(NOT TARGET imgui)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
+  endif()
+
 endmacro()

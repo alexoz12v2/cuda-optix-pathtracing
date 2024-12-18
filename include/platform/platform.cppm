@@ -14,7 +14,7 @@ module;
  * @brief Module `platform`
  */
 export module platform;
-
+export import :threadPool;
 import :logging;
 
 export namespace dmt
@@ -48,4 +48,4 @@ private:
 };
 
 } // namespace dmt
-/** @} */
+  /** @} */

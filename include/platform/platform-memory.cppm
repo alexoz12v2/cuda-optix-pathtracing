@@ -134,9 +134,9 @@ module;
 
 #include <array>
 #include <string_view>
-#include <compare>
 
 #include <cassert>
+#include <compare>
 #include <cstdint>
 
 export module platform:memory;
@@ -172,6 +172,16 @@ using sid_t = uint64_t;
 // not exported
 namespace dmt
 {
+
+void* alignTo(void* address, uint32_t alignment)
+{
+    // Ensure alignment is a power of two (required for bitwise operations).
+    assert((alignment & (alignment - 1)) == 0 && "Alignment must be a power of two.");
+
+    uintptr_t addr        = reinterpret_cast<uintptr_t>(address);
+    uintptr_t alignedAddr = (addr + alignment - 1) & ~(alignment - 1);
+    return reinterpret_cast<void*>(alignedAddr);
+}
 
 /**
  * Compile time lookup table used to perform the CRC algorithm on a string_view to get an id
@@ -314,7 +324,7 @@ EPageSize scaleDownPageSize(EPageSize pageSize)
         case EPageSize::e1GB:
             return EPageSize::e2MB;
         case EPageSize::e2MB:
-            return EPageSize::e4KB; 
+            return EPageSize::e4KB;
         default:
             return EPageSize::e4KB;
     }
@@ -358,7 +368,7 @@ public:
     // -- Types --
 
     // -- Construtors/Copy Control --
-    PageAllocator(PlatformContext& ctx);
+    explicit PageAllocator(PlatformContext& ctx);
     PageAllocator(PageAllocator const&)            = default;
     PageAllocator(PageAllocator&&) noexcept        = default;
     PageAllocator& operator=(PageAllocator const&) = default;
@@ -367,8 +377,16 @@ public:
 
     // -- Functions --
     // there's no alignment requirement being passed because we are allocating pages
-    [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize);
-    EPageSize      allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
+    [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(
+        PlatformContext& ctx,
+        size_t           numBytes,
+        PageAllocation*  pOut,
+        uint32_t         inNum,
+        EPageSize        pageSize);
+    EPageSize      allocatePagesForBytesQuery(PlatformContext&            ctx,
+                                              size_t                      numBytes,
+                                              uint32_t&                   inOutNum,
+                                              EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
     bool           checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize);
     PageAllocation allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
     void           deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
@@ -414,6 +432,81 @@ private:
 };
 
 static_assert(alignof(PageAllocator) == 8 && sizeof(PageAllocator) == 24);
+
+struct AllocationInfo 
+{
+    uint64_t allocTime; // millieconds from start of app
+    uint64_t freeTime;
+    size_t   size;
+    sid_t    sid;
+    uint32_t alignment;
+    //TODO handle source location
+};
+
+class PageAllocatorWithTracking 
+{
+public:
+    explicit PageAllocatorWithTracking(PlatformContext& ctx);
+
+    // start simple: Handle embedded free list inside bootstrap page with allocation and deallocation functions
+    PageAllocation allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
+    void           deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
+
+    // TODO destructor
+
+    PageAllocator pageAllocator;
+
+private:
+    union Node 
+    {
+        struct PageTrackData
+        {
+            PageAllocation alloc;
+            PageTrackData* next;
+        };
+        struct Free
+        {
+            uint64_t magic;
+            Node* nextFree;
+        };
+        PageTrackData data;
+        Free          free;
+    };
+    static constexpr uint64_t theMagic = static_cast<uint64_t>(-1);
+    static constexpr uint32_t nodeNum = toUnderlying(EPageSize::e4KB) / sizeof(Node);
+    static_assert(sizeof(Node) == 32 && alignof(Node) == 8 && toUnderlying(EPageSize::e4KB) % sizeof(Node) == 0);
+
+    // TODO = for now it works with 1 page, then write a per-platform method to reserve virtual address space and
+    // commit on usage
+    // with a single 4KB bootstrap page, you can allocate 128 nodes (ie pages), which corresponds to 512 KB if all 
+    // pages are of 4KB. Theferore we need more memory. A good strategy would be to allocate a big enough portion
+    // of the virtual address space.
+    PageAllocation m_bootstrapPage;
+    Node*          m_firstFree;
+    Node*          m_firstOccupied;
+};
+
+class StackAllocator
+{
+private:
+    struct alignas(8) StackHeader
+    {
+        uintptr_t bp;
+        uintptr_t sp;
+        size_t    sz;
+        StackHeader* next;
+    };
+    static_assert(sizeof(StackHeader) == 32 && alignof(StackHeader) == 8);
+
+    // cleanup: until last is different than first, give back the buffer to the page tracker, which will be
+    // allocated in the "bootstrap memory page", which is a minimuum (4KB) page containing whathever data the 
+    // application needs to track in order to start
+    // the bootstrap page should contain, as last member, the allocation tracking data, because it is variable length
+    // there might be the possibility we have to track 2 variable length arrays, eg
+
+	StackHeader *m_pFirst;
+	StackHeader *m_pLast; 
+};
 
 } // namespace dmt
 /** @} */

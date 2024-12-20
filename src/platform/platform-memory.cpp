@@ -12,8 +12,8 @@ module;
 
 #if defined(DMT_DEBUG)
 #include <backward.hpp> // TODO incapsulare nel logger
-#include <memory_resource>
 #include <map>
+#include <memory_resource>
 #include <thread>
 #endif
 
@@ -63,41 +63,47 @@ static constexpr uint32_t                              sErrorBufferSize = 256;
 static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 #endif
 
+// StringTable --------------------------------------------------------------------------------------------------------
 #if defined(DMT_DEBUG)
 
-// m_pool represents the Debug Memory. If there is a need to store something else 
+// m_pool represents the Debug Memory. If there is a need to store something else
 // inside debug memory other than the string table, refactor this class
-class StringTable {
+class StringTable
+{
 public:
     static constexpr uint32_t MAX_SID_LEN = 256;
 
-	StringTable() : m_pool(opts)
+    StringTable() : m_pool(opts)
     {
         std::construct_at<decltype(U::stringTable)>(&u.stringTable, &m_pool);
     }
-    StringTable(StringTable const&) = delete;
-    StringTable(StringTable&&) noexcept = delete;
-    StringTable &operator=(StringTable const&) = delete;
-    StringTable &operator=(StringTable&&) noexcept = delete;
-    ~StringTable() noexcept 
+    StringTable(StringTable const&)                = delete;
+    StringTable(StringTable&&) noexcept            = delete;
+    StringTable& operator=(StringTable const&)     = delete;
+    StringTable& operator=(StringTable&&) noexcept = delete;
+    ~StringTable() noexcept
     {
         std::destroy_at<decltype(U::stringTable)>(&u.stringTable);
     }
 
-	void intern(sid_t sid, char const* str, uint64_t sz);
+    void intern(sid_t sid, char const* str, uint64_t sz);
 
     union U
     {
-        U() {}
-        ~U() {}
-		std::pmr::map<sid_t, std::array<char, MAX_SID_LEN>> stringTable;
+        U()
+        {
+        }
+        ~U()
+        {
+        }
+        std::pmr::map<sid_t, std::array<char, MAX_SID_LEN>> stringTable;
     };
     U u;
 
 private:
-    static inline std::pmr::pool_options const opts {
-        .max_blocks_per_chunk = 8,
-        .largest_required_pool_block = 256, 
+    static inline std::pmr::pool_options const opts{
+        .max_blocks_per_chunk        = 8,
+        .largest_required_pool_block = 256,
     };
     std::pmr::synchronized_pool_resource m_pool;
     std::mutex                           m_mtx;
@@ -105,13 +111,13 @@ private:
 
 static StringTable s_stringTable;
 
-void StringTable::intern(sid_t sid, char const* str, uint64_t sz) 
+void StringTable::intern(sid_t sid, char const* str, uint64_t sz)
 {
     assert(sz < MAX_SID_LEN);
     std::lock_guard lock{m_mtx};
 
-    auto const &[it, wasInserted] = s_stringTable.u.stringTable.try_emplace(sid);
-    if (wasInserted) 
+    auto const& [it, wasInserted] = s_stringTable.u.stringTable.try_emplace(sid);
+    if (wasInserted)
     {
         std::memcpy(it->second.data(), str, sz);
         it->second[sz] = '\0';
@@ -124,19 +130,23 @@ void internStringToCurrent(sid_t sid, char const* str, uint64_t sz)
 }
 #endif
 
-std::string_view lookupInternedStr(sid_t sid) {
+std::string_view lookupInternedStr(sid_t sid)
+{
     using namespace std::string_view_literals;
     static std::string_view empty = "NOT FOUND"sv;
 #if defined(DMT_DEBUG)
     auto it = s_stringTable.u.stringTable.find(sid);
-    if (it != s_stringTable.u.stringTable.cend()) {
-        std::string_view str{ it->second.data() };
+    if (it != s_stringTable.u.stringTable.cend())
+    {
+        std::string_view str{it->second.data()};
         return str;
-    } 
+    }
 #endif
 
-	return empty;
+    return empty;
 }
+
+// PageAllocator ------------------------------------------------------------------------------------------------------
 
 #if defined(DMT_OS_LINUX)
 enum PageAllocationFlags : uint32_t
@@ -330,7 +340,7 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
 PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
 {
     PageAllocation ret{};
-    uint32_t const size     = toUnderlying(EPageSize::e4KB);
+    uint32_t const size = toUnderlying(EPageSize::e4KB);
     uint32_t const pageSize = std::min(toUnderlying(m_enabledPageSize), toUnderlying(sizeOverride)); // used as alignment
 
     if (m_mmapHugeTlbEnabled)
@@ -1166,11 +1176,16 @@ PageAllocator::~PageAllocator()
 
 #endif // DMT_OS_LINUX, DMT_OS_WINDOWS
 
-AllocatePageForBytesResult PageAllocator::allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize)
+AllocatePageForBytesResult PageAllocator::allocatePagesForBytes(
+    PlatformContext& ctx,
+    size_t           numBytes,
+    PageAllocation*  pOut,
+    uint32_t         inNum,
+    EPageSize        pageSize)
 {
-    static constexpr uint32_t maxAttempts = 2048;
-    uint32_t totalPagesAllocated = 0;
-    uint32_t numPages = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
+    static constexpr uint32_t maxAttempts         = 2048;
+    uint32_t                  totalPagesAllocated = 0;
+    uint32_t numPages  = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
     uint32_t allocated = 0;
     uint32_t index     = 0;
     for (uint32_t i = 0; allocated < numBytes && i < maxAttempts; ++i)
@@ -1188,10 +1203,13 @@ AllocatePageForBytesResult PageAllocator::allocatePagesForBytes(PlatformContext&
         }
     }
 
-    return { .numBytes = allocated, .numPages = totalPagesAllocated };
+    return {.numBytes = allocated, .numPages = totalPagesAllocated};
 }
 
-EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, EPageAllocationQueryOptions opts)
+EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext&            ctx,
+                                                    size_t                      numBytes,
+                                                    uint32_t&                   inOutNum,
+                                                    EPageAllocationQueryOptions opts)
 {
 #if defined(DMT_OS_WINDOWS)
     EPageSize pageSize = m_largePageEnabled ? (m_largePage1GB ? EPageSize::e1GB : EPageSize::e2MB) : EPageSize::e4KB;
@@ -1225,22 +1243,126 @@ EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t
         }
     }
 
-	inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(EPageSize::e4KB))));
-	return pageSize;
+    inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(EPageSize::e4KB))));
+    return pageSize;
 }
 
 bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize)
 { // TODO: don't commit memory or save it into a cache
+    ctx.warning("Don't use me");
     // Attempt a small test allocation to verify if the page size is supported
     bool           supported = false;
     PageAllocation testAlloc = allocatePage(ctx, pageSize);
     if (testAlloc.address && testAlloc.pageSize == pageSize)
         supported = true;
 
-	if (testAlloc.address)
-		deallocatePage(ctx, testAlloc);
+    if (testAlloc.address)
+        deallocatePage(ctx, testAlloc);
 
     return supported;
+}
+
+// PageAllocator ------------------------------------------------------------------------------------------------------
+
+PageAllocatorWithTracking::PageAllocatorWithTracking(PlatformContext& ctx) : pageAllocator(ctx)
+{
+    m_bootstrapPage = pageAllocator.allocatePage(ctx, EPageSize::e4KB);
+    if (!m_bootstrapPage.address)
+    {
+        ctx.error("Couldn't allocate the 4KB bootstrap page for page allocation tracking, aborting...");
+        std::abort();
+    }
+    assert(alignTo(m_bootstrapPage.address, alignof(Node)) == m_bootstrapPage.address);
+
+    // populate the free list
+    m_firstFree = Node* curr = reinterpret_cast<Node*>(m_bootstrapPage.address);
+    m_firstOccupied          = nullptr;
+    Node* prev = m_firstFree;
+    prev.free.magic = theMagic;
+    for (Node* curr = m_firstFree + 1; curr != m_firstFree + nodeNum; ++curr)
+    {
+        prev.free.nextFree = curr;
+        curr.free.magic    = theMagic;
+        prev          = curr;
+    }
+    prev.free.nextFree = nullptr;
+}
+
+PageAllocation PageAllocatorWithTracking::allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB)
+{
+    PageAllocation ret = pageAllocator.allocatePage(ctx, sizeOverride);
+    Node*          node = m_firstFree;
+    if (node == nullptr)
+    {
+        ctx.error("Memory exhausted");
+        std::abort();
+    }
+
+    m_firstFree = node.nextFree;
+
+    // occupied are kept unorderd. don't care
+    Node* tmp = m_firstOccupied;
+    m_firstOccupied = node;
+    m_firstOccupied.data = ret;
+    m_firstOccupied.next = tmp;
+
+    return ret;
+}
+
+void PageAllocatorWithTracking::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
+{
+    // find alloc.address in free list
+    Node* node = m_firstOccupied;
+    uint54_t index = theMagic;
+    uint64_t i     = 0;
+    while (node != nullptr)
+    {
+        if (node.data.address == alloc.address)
+        {
+            index = i;
+            break;
+        }
+
+        ++i;
+        node = node.next;
+    }
+
+    if (index == theMagic)
+    {
+        ctx.error("couldn't find the page you wanted to free in the tracker, aborting...");
+        std::abort();
+    }
+
+    pageAllocator.deallocatePage(ctx, alloc);
+    node.magic = theMagic;
+    node.nextFree = nullptr;
+    if (m_firstFree == nullptr)
+    {
+        m_firstFree = node;
+    }
+    else
+    {
+        // find the previous and next comparing addresses
+        Node *prev = m_firstFree, *next = m_firstFree.nextFree;
+
+        while (node < prev && next != nullptr)
+        {
+            prev = next;
+            next = next.nextFree;
+        }
+        
+        // swap prev and next if they are in disorder
+        if (next != nullptr && prev > next)
+        {
+            Node* tmp = next;
+            next      = prev;
+            prev      = tmp;
+        }
+
+        // perform the rewiring
+        prev.nextFree = node;
+        node.nextFree = next;
+    }
 }
 
 } // namespace dmt

@@ -2,11 +2,11 @@ module;
 
 #include <atomic>
 #include <iostream>
+#include <memory>
 #include <numbers>
 #include <string_view>
 #include <thread>
 #include <vector>
-#include <memory>
 
 #include <cstring>
 
@@ -104,17 +104,18 @@ int main()
     platform.ctx().log("Completed");
 
     std::string_view str = "thishtisdfasdf"sv;
-    dmt::sid_t  sid = dmt::operator""_sid(str.data(), str.size());
+    dmt::sid_t       sid = dmt::operator""_sid(str.data(), str.size());
     platform.ctx().log("{}", {dmt::lookupInternedStr(sid)});
 
-    size_t numBytes = dmt::toUnderlying(dmt::EPageSize::e1GB);
+    size_t   numBytes       = dmt::toUnderlying(dmt::EPageSize::e1GB);
     uint32_t numAllocations = 0;
-    ctx.log("Attempting request to allocate {} Bytes, {} GB", {numBytes, numBytes >> 30u });
+    ctx.log("Attempting request to allocate {} Bytes, {} GB", {numBytes, numBytes >> 30u});
 
-    auto pageSize = pageAllocator.allocatePagesForBytesQuery(platform.ctx(), numBytes, numAllocations);
+    auto pageSize    = pageAllocator.allocatePagesForBytesQuery(platform.ctx(), numBytes, numAllocations);
     auto allocations = std::make_unique<dmt::PageAllocation[]>(numAllocations);
     auto allocInfo = pageAllocator.allocatePagesForBytes(platform.ctx(), numBytes, allocations.get(), numAllocations, pageSize);
-    ctx.log("Actually allocated {} Bytes, {} MB, {} GB", { allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u });
+    ctx.log("Actually allocated {} Bytes, {} MB, {} GB",
+            {allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u});
 
     for (uint32_t i = 0; i != allocInfo.numPages; ++i)
     {

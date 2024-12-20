@@ -1274,95 +1274,67 @@ PageAllocatorWithTracking::PageAllocatorWithTracking(PlatformContext& ctx) : pag
     }
     assert(alignTo(m_bootstrapPage.address, alignof(Node)) == m_bootstrapPage.address);
 
-    // populate the free list
-    m_firstFree = Node* curr = reinterpret_cast<Node*>(m_bootstrapPage.address);
-    m_firstOccupied          = nullptr;
-    Node* prev = m_firstFree;
-    prev.free.magic = theMagic;
-    for (Node* curr = m_firstFree + 1; curr != m_firstFree + nodeNum; ++curr)
+    // Populate the free list
+    m_firstFree     = reinterpret_cast<Node*>(m_bootstrapPage.address);
+    m_firstOccupied = nullptr;
+
+    Node* curr = m_firstFree;
+    for (Node* next = curr + 1; curr < m_firstFree + nodeNum; ++curr, ++next)
     {
-        prev.free.nextFree = curr;
-        curr.free.magic    = theMagic;
-        prev          = curr;
+        curr->free.nextFree = (next < m_firstFree + nodeNum) ? next : nullptr;
+        curr->free.magic    = theMagic;
     }
-    prev.free.nextFree = nullptr;
 }
 
-PageAllocation PageAllocatorWithTracking::allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB)
+PageAllocation PageAllocatorWithTracking::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
 {
-    PageAllocation ret = pageAllocator.allocatePage(ctx, sizeOverride);
-    Node*          node = m_firstFree;
-    if (node == nullptr)
+    if (!m_firstFree)
     {
-        ctx.error("Memory exhausted");
+        ctx.error("No free nodes available for allocation.");
         std::abort();
     }
 
-    m_firstFree = node.nextFree;
+    PageAllocation ret  = pageAllocator.allocatePage(ctx, sizeOverride);
+    Node*          node = m_firstFree;
+    m_firstFree         = node->free.nextFree;
 
-    // occupied are kept unorderd. don't care
-    Node* tmp = m_firstOccupied;
-    m_firstOccupied = node;
-    m_firstOccupied.data = ret;
-    m_firstOccupied.next = tmp;
+    node->data.alloc = ret;
+    node->data.next  = m_firstOccupied;
+    m_firstOccupied  = node;
 
     return ret;
 }
 
 void PageAllocatorWithTracking::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
 {
-    // find alloc.address in free list
-    Node* node = m_firstOccupied;
-    uint54_t index = theMagic;
-    uint64_t i     = 0;
-    while (node != nullptr)
+    Node* prev = nullptr;
+    Node* curr = m_firstOccupied;
+
+    // Locate the node to deallocate
+    while (curr)
     {
-        if (node.data.address == alloc.address)
+        if (curr->data.alloc.address == alloc.address)
         {
-            index = i;
-            break;
+            if (prev)
+                prev->data.next = curr->data.next;
+            else
+                m_firstOccupied = curr->data.next;
+
+            pageAllocator.deallocatePage(ctx, alloc);
+
+            // Return node to free list
+            curr->free.magic    = theMagic;
+            curr->free.nextFree = m_firstFree;
+            m_firstFree         = curr;
+
+            return;
         }
-
-        ++i;
-        node = node.next;
+        prev = curr;
+        curr = curr->data.next;
     }
 
-    if (index == theMagic)
-    {
-        ctx.error("couldn't find the page you wanted to free in the tracker, aborting...");
-        std::abort();
-    }
-
-    pageAllocator.deallocatePage(ctx, alloc);
-    node.magic = theMagic;
-    node.nextFree = nullptr;
-    if (m_firstFree == nullptr)
-    {
-        m_firstFree = node;
-    }
-    else
-    {
-        // find the previous and next comparing addresses
-        Node *prev = m_firstFree, *next = m_firstFree.nextFree;
-
-        while (node < prev && next != nullptr)
-        {
-            prev = next;
-            next = next.nextFree;
-        }
-        
-        // swap prev and next if they are in disorder
-        if (next != nullptr && prev > next)
-        {
-            Node* tmp = next;
-            next      = prev;
-            prev      = tmp;
-        }
-
-        // perform the rewiring
-        prev.nextFree = node;
-        node.nextFree = next;
-    }
+    ctx.error("Attempted to deallocate a page that was not tracked.");
+    std::abort();
 }
 
 } // namespace dmt

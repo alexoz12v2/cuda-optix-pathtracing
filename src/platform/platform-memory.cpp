@@ -1166,45 +1166,32 @@ PageAllocator::~PageAllocator()
 
 #endif // DMT_OS_LINUX, DMT_OS_WINDOWS
 
-uint32_t PageAllocator::allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize)
+AllocatePageForBytesResult PageAllocator::allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize)
 {
-        uint32_t totalPagesAllocated = 0;
-
-        while (pageSize != EPageSize::e4KB)
+    static constexpr uint32_t maxAttempts = 2048;
+    uint32_t totalPagesAllocated = 0;
+    uint32_t numPages = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
+    uint32_t allocated = 0;
+    uint32_t index     = 0;
+    for (uint32_t i = 0; allocated < numBytes && i < maxAttempts; ++i)
+    {
+        pOut[index] = allocatePage(ctx, pageSize);
+        if (!pOut[index].address)
         {
-            uint32_t numPages = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
-
-            for (uint32_t i = totalPagesAllocated; i < numPages; ++i)
-            {
-                pOut[i] = allocatePage(ctx, pageSize);
-                if (!pOut[i].address)
-                {
-                    // Clean up partially allocated pages before falling back
-                    for (uint32_t j = totalPagesAllocated; j < i; ++j)
-                    {
-                        deallocatePage(ctx, pOut[j]);
-                    }
-
-                    // Fall back to smaller page size
-                    pageSize = scaleDownPageSize(pageSize);
-                    break;
-                }
-                ++totalPagesAllocated;
-            }
-
-            if (totalPagesAllocated == numPages)
-            {
-                return totalPagesAllocated;
-            }
-
-            // Recalculate remaining memory and pages
-            numBytes -= totalPagesAllocated * toUnderlying(pageSize);
+            pageSize = scaleDownPageSize(pageSize);
         }
+        else
+        {
+            ++index;
+            allocated += toUnderlying(pageSize);
+            ++totalPagesAllocated;
+        }
+    }
 
-        return totalPagesAllocated;
+    return { .numBytes = allocated, .numPages = totalPagesAllocated };
 }
 
-EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, bool no1GB)
+EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, EPageAllocationQueryOptions opts)
 {
 #if defined(DMT_OS_WINDOWS)
     EPageSize pageSize = m_largePageEnabled ? (m_largePage1GB ? EPageSize::e1GB : EPageSize::e2MB) : EPageSize::e4KB;
@@ -1214,7 +1201,7 @@ EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t
     size_t pageSize = EPageSize::e4KB;
 #endif
 
-    if (pageSize == EPageSize::e1GB && no1GB)
+    if (pageSize == EPageSize::e1GB && opts != EPageAllocationQueryOptions::eNone)
     {
         pageSize = scaleDownPageSize(pageSize);
     }
@@ -1224,16 +1211,19 @@ EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t
         pageSize = scaleDownPageSize(pageSize);
     }
 
-	while (pageSize != EPageSize::e4KB)
-	{
-		if (checkPageSizeAvailability(ctx, pageSize))
-		{
-			inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
-			return pageSize;
-		}
+    if (opts != EPageAllocationQueryOptions::eForce4KB)
+    {
+        while (pageSize != EPageSize::e4KB)
+        {
+            if (checkPageSizeAvailability(ctx, pageSize))
+            {
+                inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
+                return pageSize;
+            }
 
-		pageSize = scaleDownPageSize(pageSize);
-	}
+            pageSize = scaleDownPageSize(pageSize);
+        }
+    }
 
 	inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(EPageSize::e4KB))));
 	return pageSize;

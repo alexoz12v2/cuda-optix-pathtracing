@@ -320,6 +320,14 @@ EPageSize scaleDownPageSize(EPageSize pageSize)
     }
 }
 
+enum class EPageAllocationQueryOptions : uint8_t
+{
+    eNone = 0,
+    eNo1GB,
+    eForce4KB,
+    Count,
+};
+
 #if defined(_MSC_VER)
 #pragma pack(1)
 #endif
@@ -335,6 +343,12 @@ struct alignas(8) PageAllocation
 #pragma pack()
 #endif
 static_assert(sizeof(PageAllocation) == 24 && alignof(PageAllocation) == 8);
+
+struct AllocatePageForBytesResult
+{
+    size_t   numBytes;
+    uint32_t numPages;
+};
 
 // TODO make OS specific protected functions which handle parts of the logic, such
 // TODO that we can test them individually by subclassing this
@@ -353,8 +367,8 @@ public:
 
     // -- Functions --
     // there's no alignment requirement being passed because we are allocating pages
-    uint32_t allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize);
-    EPageSize      allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, bool no1GB);
+    [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize);
+    EPageSize      allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
     bool           checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize);
     PageAllocation allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
     void           deallocatePage(PlatformContext& ctx, PageAllocation& alloc);

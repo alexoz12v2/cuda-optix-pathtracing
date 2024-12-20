@@ -111,18 +111,12 @@ int main()
     uint32_t numAllocations = 0;
     ctx.log("Attempting request to allocate {} Bytes, {} GB", {numBytes, numBytes >> 30u });
 
-    auto pageSize = pageAllocator.allocatePagesForBytesQuery(platform.ctx(), numBytes, numAllocations, false);
+    auto pageSize = pageAllocator.allocatePagesForBytesQuery(platform.ctx(), numBytes, numAllocations);
     auto allocations = std::make_unique<dmt::PageAllocation[]>(numAllocations);
-    uint32_t num = pageAllocator.allocatePagesForBytes(platform.ctx(), numBytes, allocations.get(), numAllocations, pageSize);
-    size_t allocatedBytes = 0;
-    for (uint32_t i = 0; i != num; ++i)
-    {
-        dmt::PageAllocation& ref = allocations[i];
-        allocatedBytes += dmt::toUnderlying(ref.pageSize);
-    }
-    ctx.log("Actually allocated {} Bytes, {} MB, {} GB", { allocatedBytes, allocatedBytes >> 20u, allocatedBytes >> 30u });
+    auto allocInfo = pageAllocator.allocatePagesForBytes(platform.ctx(), numBytes, allocations.get(), numAllocations, pageSize);
+    ctx.log("Actually allocated {} Bytes, {} MB, {} GB", { allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u });
 
-    for (uint32_t i = 0; i != num; ++i)
+    for (uint32_t i = 0; i != allocInfo.numPages; ++i)
     {
         dmt::PageAllocation& ref = allocations[i];
         if (ref.address != nullptr)

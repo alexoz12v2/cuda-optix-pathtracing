@@ -9,6 +9,7 @@ module;
 
 #include <source_location>
 #include <string_view>
+#include <concepts>
 
 #include <cmath>
 #include <cstdint>
@@ -157,6 +158,13 @@ private:
 // binary interface, hence it is fine
 namespace dmt
 {
+
+template<std::integral I>
+constexpr I ceilDiv(I num, I den) 
+{
+    return (num + den - 1) / den;
+}
+
 #if defined(DMT_OS_WINDOWS)
 namespace win32
 {

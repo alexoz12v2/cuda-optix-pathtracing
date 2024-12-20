@@ -6,6 +6,7 @@ module;
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <memory>
 
 #include <cstring>
 
@@ -68,6 +69,7 @@ void testLoggingInMultithreadedEnvironment(dmt::ConsoleLogger& logger,
 
 int main()
 {
+    using namespace std::string_view_literals;
     dmt::CircularOStringStream oss;
     char const*                formatStr = "this is a \\{} {} string. Pi: {}, 4 pi: {}, 1000 == {}, thuthy: {}\n";
     float                      pi        = std::numbers::pi_v<float>;
@@ -82,6 +84,7 @@ int main()
     logger.trace("I shall not be seen");
 
     dmt::Platform platform;
+    auto&         ctx = platform.ctx();
     if (platform.ctx().logEnabled())
         platform.ctx().log("We are in the platform now");
 
@@ -99,4 +102,32 @@ int main()
     pageAllocator.deallocatePage(platform.ctx(), pageAlloc);
 
     platform.ctx().log("Completed");
+
+    std::string_view str = "thishtisdfasdf"sv;
+    dmt::sid_t  sid = dmt::operator""_sid(str.data(), str.size());
+    platform.ctx().log("{}", {dmt::lookupInternedStr(sid)});
+
+    size_t numBytes = dmt::toUnderlying(dmt::EPageSize::e1GB);
+    uint32_t numAllocations = 0;
+    ctx.log("Attempting request to allocate {} Bytes, {} GB", {numBytes, numBytes >> 30u });
+
+    auto pageSize = pageAllocator.allocatePagesForBytesQuery(platform.ctx(), numBytes, numAllocations, false);
+    auto allocations = std::make_unique<dmt::PageAllocation[]>(numAllocations);
+    uint32_t num = pageAllocator.allocatePagesForBytes(platform.ctx(), numBytes, allocations.get(), numAllocations, pageSize);
+    size_t allocatedBytes = 0;
+    for (uint32_t i = 0; i != num; ++i)
+    {
+        dmt::PageAllocation& ref = allocations[i];
+        allocatedBytes += dmt::toUnderlying(ref.pageSize);
+    }
+    ctx.log("Actually allocated {} Bytes, {} MB, {} GB", { allocatedBytes, allocatedBytes >> 20u, allocatedBytes >> 30u });
+
+    for (uint32_t i = 0; i != num; ++i)
+    {
+        dmt::PageAllocation& ref = allocations[i];
+        if (ref.address != nullptr)
+        {
+            pageAllocator.deallocatePage(platform.ctx(), ref);
+        }
+    }
 }

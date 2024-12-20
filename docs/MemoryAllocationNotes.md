@@ -670,3 +670,12 @@ Either
 ```
 winget install --id=Microsoft.Sysinternals.ProcessExplorer  -e
 ```
+
+### If `VirtualAlloc` complains about not having enough free system resources
+Open the Registry Editor, got to
+```
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\MemoryManagement
+```
+And set 
+- `NonPagedPoolSize` to `DWORD` equal to the sufficient memory amount you need, eg 2GB `0x80000000`
+- `LargeSystemCache` to ` to prioritize large pages over other allocations

@@ -11,7 +11,10 @@ module;
 #include <cstring>
 
 #if defined(DMT_DEBUG)
-#include <backward.hpp>
+#include <backward.hpp> // TODO incapsulare nel logger
+#include <memory_resource>
+#include <map>
+#include <thread>
 #endif
 
 #if defined(DMT_OS_LINUX)
@@ -61,11 +64,79 @@ static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 #endif
 
 #if defined(DMT_DEBUG)
-void internStringToCurrent(char const* str, uint64_t sz)
+
+// m_pool represents the Debug Memory. If there is a need to store something else 
+// inside debug memory other than the string table, refactor this class
+class StringTable {
+public:
+    static constexpr uint32_t MAX_SID_LEN = 256;
+
+	StringTable() : m_pool(opts)
+    {
+        std::construct_at<decltype(U::stringTable)>(&u.stringTable, &m_pool);
+    }
+    StringTable(StringTable const&) = delete;
+    StringTable(StringTable&&) noexcept = delete;
+    StringTable &operator=(StringTable const&) = delete;
+    StringTable &operator=(StringTable&&) noexcept = delete;
+    ~StringTable() noexcept 
+    {
+        std::destroy_at<decltype(U::stringTable)>(&u.stringTable);
+    }
+
+	void intern(sid_t sid, char const* str, uint64_t sz);
+
+    union U
+    {
+        U() {}
+        ~U() {}
+		std::pmr::map<sid_t, std::array<char, MAX_SID_LEN>> stringTable;
+    };
+    U u;
+
+private:
+    static inline std::pmr::pool_options const opts {
+        .max_blocks_per_chunk = 8,
+        .largest_required_pool_block = 256, 
+    };
+    std::pmr::synchronized_pool_resource m_pool;
+    std::mutex                           m_mtx;
+};
+
+static StringTable s_stringTable;
+
+void StringTable::intern(sid_t sid, char const* str, uint64_t sz) 
 {
-    // TODO implement table switching mechanism
+    assert(sz < MAX_SID_LEN);
+    std::lock_guard lock{m_mtx};
+
+    auto const &[it, wasInserted] = s_stringTable.u.stringTable.try_emplace(sid);
+    if (wasInserted) 
+    {
+        std::memcpy(it->second.data(), str, sz);
+        it->second[sz] = '\0';
+    }
+}
+
+void internStringToCurrent(sid_t sid, char const* str, uint64_t sz)
+{
+    s_stringTable.intern(sid, str, sz);
 }
 #endif
+
+std::string_view lookupInternedStr(sid_t sid) {
+    using namespace std::string_view_literals;
+    static std::string_view empty = "NOT FOUND"sv;
+#if defined(DMT_DEBUG)
+    auto it = s_stringTable.u.stringTable.find(sid);
+    if (it != s_stringTable.u.stringTable.cend()) {
+        std::string_view str{ it->second.data() };
+        return str;
+    } 
+#endif
+
+	return empty;
+}
 
 #if defined(DMT_OS_LINUX)
 enum PageAllocationFlags : uint32_t
@@ -256,11 +327,11 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     }
 }
 
-PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
+PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
 {
     PageAllocation ret{};
     uint32_t const size     = toUnderlying(EPageSize::e4KB);
-    uint32_t const pageSize = toUnderlying(m_enabledPageSize); // used as alignment
+    uint32_t const pageSize = std::min(toUnderlying(m_enabledPageSize), toUnderlying(sizeOverride)); // used as alignment
 
     if (m_mmapHugeTlbEnabled)
     {
@@ -408,37 +479,40 @@ PageAllocator::~PageAllocator()
 class Janitor
 {
 public:
-	Janitor()                              = default;
-	Janitor(Janitor const&)                = delete;
-	Janitor(Janitor&&) noexcept            = delete;
-	Janitor& operator=(Janitor const&)     = delete;
-	Janitor& operator=(Janitor&&) noexcept = delete;
-	~Janitor() noexcept
-	{
-		if (hProcessToken)
-			CloseHandle(hProcessToken);
-		if (mallocatedMem)
-			std::free(mallocatedMem);
-		if (pSecDescriptor)
-			LocalFree(pSecDescriptor);
-		if (bRevertToSelf)
-			RevertToSelf();
-		if (hImpersonationToken)
-			CloseHandle(hImpersonationToken);
-	}
+    Janitor()                              = default;
+    Janitor(Janitor const&)                = delete;
+    Janitor(Janitor&&) noexcept            = delete;
+    Janitor& operator=(Janitor const&)     = delete;
+    Janitor& operator=(Janitor&&) noexcept = delete;
+    ~Janitor() noexcept
+    {
+        if (hProcessToken)
+            CloseHandle(hProcessToken);
+        if (mallocatedMem)
+            std::free(mallocatedMem);
+        if (pSecDescriptor)
+            LocalFree(pSecDescriptor);
+        if (bRevertToSelf)
+            RevertToSelf();
+        if (hImpersonationToken)
+            CloseHandle(hImpersonationToken);
+    }
 
-	HANDLE               hProcessToken       = nullptr;
-	void*                mallocatedMem       = nullptr;
-	PSECURITY_DESCRIPTOR pSecDescriptor      = nullptr;
-	bool                 bRevertToSelf       = false;
-	HANDLE               hImpersonationToken = nullptr;
+    HANDLE               hProcessToken       = nullptr;
+    void*                mallocatedMem       = nullptr;
+    PSECURITY_DESCRIPTOR pSecDescriptor      = nullptr;
+    bool                 bRevertToSelf       = false;
+    HANDLE               hImpersonationToken = nullptr;
 };
 
-bool PageAllocator::checkAndAdjustPrivileges(PlatformContext &ctx, void* phProcessToken, void const *pseLockMemoryPrivilegeLUID, void* pData) 
+bool PageAllocator::checkAndAdjustPrivileges(PlatformContext& ctx,
+                                             void*            phProcessToken,
+                                             void const*      pseLockMemoryPrivilegeLUID,
+                                             void*            pData)
 {
     HANDLE      hProcessToken             = reinterpret_cast<HANDLE>(phProcessToken);
-    Janitor& janitor = *reinterpret_cast<Janitor*>(pData);
-    LUID const& seLockMemoryPrivilegeLUID = *reinterpret_cast<LUID const *>(pseLockMemoryPrivilegeLUID);
+    Janitor&    janitor                   = *reinterpret_cast<Janitor*>(pData);
+    LUID const& seLockMemoryPrivilegeLUID = *reinterpret_cast<LUID const*>(pseLockMemoryPrivilegeLUID);
     // 1. Get count of bytes for the TokenPrivileges TOKEN_INFORMATION_CLASS for this token handle
     DWORD requiredSize = 0;
     if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize) &&
@@ -547,85 +621,89 @@ bool PageAllocator::checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx)
     return true;
 }
 
-bool PageAllocator::enableLockPrivilege(PlatformContext& ctx, void* phProcessToken, void const* pseLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData)
+bool PageAllocator::enableLockPrivilege(PlatformContext& ctx,
+                                        void*            phProcessToken,
+                                        void const*      pseLockMemoryPrivilegeLUID,
+                                        int64_t          seLockMemoryPrivilegeIndex,
+                                        void*            pData)
 {
     HANDLE      hProcessToken             = reinterpret_cast<HANDLE>(phProcessToken);
     LUID const& seLockMemoryPrivilegeLUID = *reinterpret_cast<LUID const*>(pseLockMemoryPrivilegeLUID);
-	// write into a new entry if we didn't find it at all
-	// we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
-	if (seLockMemoryPrivilegeIndex < 0)
-	{
-		// also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can
-		// tell if you disabled it
-		ctx.error(
-			"SeLockMemoryPrivilege is absent in the current user token. "
-			"Try to run as admin, check `secpol.msc` or use cudaAllocHost");
+    // write into a new entry if we didn't find it at all
+    // we are basically preparing the `NewState` parameter for the `AdjustTokenPrivileges`
+    if (seLockMemoryPrivilegeIndex < 0)
+    {
+        // also HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management registry can
+        // tell if you disabled it
+        ctx.error(
+            "SeLockMemoryPrivilege is absent in the current user token. "
+            "Try to run as admin, check `secpol.msc` or use cudaAllocHost");
         return false;
-	}
-	else
-	{
-		TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
-		privs.PrivilegeCount           = 1;
-		privs.Privileges[0].Luid       = seLockMemoryPrivilegeLUID;
-		privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-		if (!AdjustTokenPrivileges(hProcessToken, false, &privs, sizeof(TOKEN_PRIVILEGES), nullptr, nullptr))
-		{
-			uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-			std::string_view view{sErrorBuffer.data(), length};
-			ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
-			return false;
-		}
-
-		int32_t errCode = GetLastError();
-		if (errCode == ERROR_NOT_ALL_ASSIGNED)
-		{
-			// Sanity check
-			PRIVILEGE_SET privilegeSet;
-			privilegeSet.PrivilegeCount          = 1;
-			privilegeSet.Control                 = PRIVILEGE_SET_ALL_NECESSARY;
-			privilegeSet.Privilege[0].Luid       = seLockMemoryPrivilegeLUID;
-			privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
-			BOOL result                          = false;
-			if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
-			{
-				uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-				std::string_view view{sErrorBuffer.data(), length};
-				ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
-				return false;
-			}
-			if (!result)
-			{
-				ctx.error(
-					"Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to "
-					"be found");
-				return false;
-			}
-
-            return true;
-		}
-		else if (errCode == ERROR_SUCCESS)
-		{
-            return true;
-		}
-		else
-		{
-			ctx.error("`AdjustTokenPrivilege` returned an unexpected error code: {}", {errCode});
+    }
+    else
+    {
+        TOKEN_PRIVILEGES privs; // Assuming ANYSIZE_ARRAY = 1
+        privs.PrivilegeCount           = 1;
+        privs.Privileges[0].Luid       = seLockMemoryPrivilegeLUID;
+        privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        if (!AdjustTokenPrivileges(hProcessToken, false, &privs, sizeof(TOKEN_PRIVILEGES), nullptr, nullptr))
+        {
+            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), length};
+            ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
             return false;
-		}
-	}
+        }
+
+        int32_t errCode = GetLastError();
+        if (errCode == ERROR_NOT_ALL_ASSIGNED)
+        {
+            // Sanity check
+            PRIVILEGE_SET privilegeSet;
+            privilegeSet.PrivilegeCount          = 1;
+            privilegeSet.Control                 = PRIVILEGE_SET_ALL_NECESSARY;
+            privilegeSet.Privilege[0].Luid       = seLockMemoryPrivilegeLUID;
+            privilegeSet.Privilege[0].Attributes = SE_PRIVILEGE_ENABLED;
+            BOOL result                          = false;
+            if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
+            {
+                uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                std::string_view view{sErrorBuffer.data(), length};
+                ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
+                return false;
+            }
+            if (!result)
+            {
+                ctx.error(
+                    "Even though you called `AdjustTokenPrivileges`, the SeLockMemoryPrivilege is still nowhere to "
+                    "be found");
+                return false;
+            }
+
+            return true;
+        }
+        else if (errCode == ERROR_SUCCESS)
+        {
+            return true;
+        }
+        else
+        {
+            ctx.error("`AdjustTokenPrivilege` returned an unexpected error code: {}", {errCode});
+            return false;
+        }
+    }
 }
 
-void *PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, void* phProcessToken, void* pData)
+void* PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, void* phProcessToken, void* pData)
 {
     HANDLE   hProcessToken       = reinterpret_cast<HANDLE>(phProcessToken);
-    Janitor& janitor = *reinterpret_cast<Janitor*>(pData);
-    HANDLE hImpersonationToken = nullptr;
+    Janitor& janitor             = *reinterpret_cast<Janitor*>(pData);
+    HANDLE   hImpersonationToken = nullptr;
     if (!DuplicateToken(hProcessToken, SecurityImpersonation, &hImpersonationToken))
     {
         uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Failed call to `OpenThreadToken`, error: {}", {view});
-		return INVALID_HANDLE_VALUE;
+        return INVALID_HANDLE_VALUE;
     }
     janitor.hImpersonationToken = hImpersonationToken;
     HANDLE hThread              = GetCurrentThread();
@@ -634,7 +712,7 @@ void *PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, void* 
         uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), length};
         ctx.error("Failed call to `SetThreadToken`, error: {}", {view});
-		return INVALID_HANDLE_VALUE;
+        return INVALID_HANDLE_VALUE;
     }
     janitor.bRevertToSelf = true;
     return hImpersonationToken;
@@ -807,8 +885,9 @@ PageAllocator::PageAllocator(PlatformContext& ctx)
     //}
     //janitor.bRevertToSelf = true;
     // source: https://blog.aaronballman.com/2011/08/how-to-check-access-rights/
-    HANDLE hImpersonationToken = reinterpret_cast<HANDLE>(createImpersonatingThreadToken(ctx, hProcessToken, (void*)&janitor));
-    if (hImpersonationToken == INVALID_HANDLE_VALUE) 
+    HANDLE hImpersonationToken = reinterpret_cast<HANDLE>(
+        createImpersonatingThreadToken(ctx, hProcessToken, (void*)&janitor));
+    if (hImpersonationToken == INVALID_HANDLE_VALUE)
     {
         return;
     }
@@ -853,7 +932,7 @@ enum PageAllocationFlags : uint32_t
 // check that the page size is not 4KB. Mapping is carried out with cudaHostRegister
 // reserve = take virtual address space. commit = when you write to it, it will be backed by physical memory
 // TODO see Address Windowing Extension pages (AWE)
-PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
+PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
 {
     static constexpr uint32_t log4KB = 12u;
     PageAllocation            ret{};
@@ -861,11 +940,11 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx)
     uint32_t  errorLength     = 0;
     DWORD     allocationFlags = MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES;
     DWORD     protectionFlags = PAGE_READWRITE;
-    EPageSize pageSize        = EPageSize::e1GB;
+    EPageSize pageSize        = sizeOverride;
 
-    if (m_largePageEnabled)
+    if (m_largePageEnabled && pageSize >= EPageSize::e2MB)
     {
-        if (m_largePage1GB)
+        if (m_largePage1GB && sizeOverride == EPageSize::e1GB)
         {
             // necessary additional parameter to perform 1GB allocation attempt
             MEM_EXTENDED_PARAMETER extended{};
@@ -1085,6 +1164,93 @@ PageAllocator::~PageAllocator()
 {
 }
 
+#endif // DMT_OS_LINUX, DMT_OS_WINDOWS
+
+uint32_t PageAllocator::allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize)
+{
+        uint32_t totalPagesAllocated = 0;
+
+        while (pageSize != EPageSize::e4KB)
+        {
+            uint32_t numPages = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
+
+            for (uint32_t i = totalPagesAllocated; i < numPages; ++i)
+            {
+                pOut[i] = allocatePage(ctx, pageSize);
+                if (!pOut[i].address)
+                {
+                    // Clean up partially allocated pages before falling back
+                    for (uint32_t j = totalPagesAllocated; j < i; ++j)
+                    {
+                        deallocatePage(ctx, pOut[j]);
+                    }
+
+                    // Fall back to smaller page size
+                    pageSize = scaleDownPageSize(pageSize);
+                    break;
+                }
+                ++totalPagesAllocated;
+            }
+
+            if (totalPagesAllocated == numPages)
+            {
+                return totalPagesAllocated;
+            }
+
+            // Recalculate remaining memory and pages
+            numBytes -= totalPagesAllocated * toUnderlying(pageSize);
+        }
+
+        return totalPagesAllocated;
+}
+
+EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, bool no1GB)
+{
+#if defined(DMT_OS_WINDOWS)
+    EPageSize pageSize = m_largePageEnabled ? (m_largePage1GB ? EPageSize::e1GB : EPageSize::e2MB) : EPageSize::e4KB;
+#elif defined(DMT_OS_LINUX)
+    EPageSize pageSize = m_enabledPageSize;
+#else
+    size_t pageSize = EPageSize::e4KB;
 #endif
+
+    if (pageSize == EPageSize::e1GB && no1GB)
+    {
+        pageSize = scaleDownPageSize(pageSize);
+    }
+
+    while (toUnderlying(pageSize) > numBytes && pageSize != EPageSize::e4KB)
+    {
+        pageSize = scaleDownPageSize(pageSize);
+    }
+
+	while (pageSize != EPageSize::e4KB)
+	{
+		if (checkPageSizeAvailability(ctx, pageSize))
+		{
+			inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(pageSize))));
+			return pageSize;
+		}
+
+		pageSize = scaleDownPageSize(pageSize);
+	}
+
+	inOutNum = static_cast<uint32_t>(ceilDiv(numBytes, static_cast<size_t>(toUnderlying(EPageSize::e4KB))));
+	return pageSize;
+}
+
+bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize)
+{ // TODO: don't commit memory or save it into a cache
+    // Attempt a small test allocation to verify if the page size is supported
+    bool           supported = false;
+    PageAllocation testAlloc = allocatePage(ctx, pageSize);
+    if (testAlloc.address && testAlloc.pageSize == pageSize)
+        supported = true;
+
+	if (testAlloc.address)
+		deallocatePage(ctx, testAlloc);
+
+    return supported;
+}
 
 } // namespace dmt

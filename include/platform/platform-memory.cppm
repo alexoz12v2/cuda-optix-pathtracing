@@ -133,6 +133,8 @@
 module;
 
 #include <array>
+#include <string_view>
+#include <compare>
 
 #include <cassert>
 #include <cstdint>
@@ -270,11 +272,13 @@ sid_t consteval operator""_side(char const* str, [[maybe_unused]] uint64_t sz)
  */
 #if defined(DMT_DEBUG)
 inline constexpr uint32_t maxTaglength = 128;
-void                      internStringToCurrent(char const* str, uint64_t sz);
+void                      internStringToCurrent(sid_t sid, char const* str, uint64_t sz);
 sid_t                     operator""_sid(char const* str, [[maybe_unused]] uint64_t sz)
 {
     assert(sz < maxTaglength);
-    return hashCRC64(str);
+    sid_t sid = hashCRC64(str);
+    internStringToCurrent(sid, str, sz);
+    return sid;
 }
 #else
 sid_t operator""_sid(char const* str, [[maybe_unused]] uint64_t sz)
@@ -282,6 +286,8 @@ sid_t operator""_sid(char const* str, [[maybe_unused]] uint64_t sz)
     return hashCRC64(str);
 }
 #endif
+
+std::string_view lookupInternedStr(sid_t sid);
 
 enum class EPageSize : uint32_t
 {
@@ -294,6 +300,24 @@ enum class EPageSize : uint32_t
 constexpr uint32_t toUnderlying(EPageSize ePageSize)
 {
     return static_cast<uint32_t>(ePageSize);
+}
+
+constexpr auto operator<=>(EPageSize lhs, EPageSize rhs) noexcept
+{
+    return toUnderlying(lhs) <=> toUnderlying(rhs);
+}
+
+EPageSize scaleDownPageSize(EPageSize pageSize)
+{
+    switch (pageSize)
+    {
+        case EPageSize::e1GB:
+            return EPageSize::e2MB;
+        case EPageSize::e2MB:
+            return EPageSize::e4KB; 
+        default:
+            return EPageSize::e4KB;
+    }
 }
 
 #if defined(_MSC_VER)
@@ -328,20 +352,32 @@ public:
     ~PageAllocator();
 
     // -- Functions --
-    PageAllocation allocatePage(PlatformContext& ctx);
+    // there's no alignment requirement being passed because we are allocating pages
+    uint32_t allocatePagesForBytes(PlatformContext& ctx, size_t numBytes, PageAllocation* pOut, uint32_t inNum, EPageSize pageSize);
+    EPageSize      allocatePagesForBytesQuery(PlatformContext& ctx, size_t numBytes, uint32_t& inOutNum, bool no1GB);
+    bool           checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize);
+    PageAllocation allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
     void           deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
 
     // TODO should test drive design?
+
 protected:
 #if defined(DMT_OS_WINDOWS)
     /**
      * Check whether the current process token has "SeLockMemoryPrivilege". If it has it, 
      * then enabled it if not enabled. If there's no privilege or cannot enable it, false
      */
-    static bool checkAndAdjustPrivileges(PlatformContext& ctx, void *hProcessToken, void const* seLockMemoryPrivilegeLUID, void* pData);
-    static bool enableLockPrivilege(PlatformContext& ctx, void*hProcessToken, void const* seLockMemoryPrivilegeLUID, int64_t seLockMemoryPrivilegeIndex, void* pData);
-    static bool checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx);
-    static void* createImpersonatingThreadToken(PlatformContext& ctx, void *hProcessToken, void* pData);
+    static bool  checkAndAdjustPrivileges(PlatformContext& ctx,
+                                          void*            hProcessToken,
+                                          void const*      seLockMemoryPrivilegeLUID,
+                                          void*            pData);
+    static bool  enableLockPrivilege(PlatformContext& ctx,
+                                     void*            hProcessToken,
+                                     void const*      seLockMemoryPrivilegeLUID,
+                                     int64_t          seLockMemoryPrivilegeIndex,
+                                     void*            pData);
+    static bool  checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx);
+    static void* createImpersonatingThreadToken(PlatformContext& ctx, void* hProcessToken, void* pData);
 #endif
 
 private:

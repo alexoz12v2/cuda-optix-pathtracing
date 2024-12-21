@@ -1307,82 +1307,124 @@ bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pa
 }
 
 // PageAllocator ------------------------------------------------------------------------------------------------------
-PageAllocationsTracker::PageAllocationsTracker(PlatformContext& ctx, uint32_t capacity, bool owning) 
-    : m_bufferCapacity(capacity), m_owning(owning)
+static void logAndAbort(PlatformContext& ctx, std::string_view str, uint32_t initialNodeNum)
 {
-    m_base = reserveVirtualAddressSpace(
-        (m_bufferCapacity * sizeof(Node) + systemAlignment() - 1) & ~(systemAlignment() - 1));
-    if (!m_base)
-    {
-        ctx.error("Couldn't reserve virtual address space for {} nodes", { capacity });
-        std::abort();
-    }
-
-    if (!commitPhysicalMemory(m_base, initialNodeNum * sizeof(Node) + alignof(Node)))
-    {
         ctx.error("Couldn't commit the first {} nodes into the reserved space", { initialNodeNum });
 #if defined(DMT_OS_WINDOWS)
-		size_t errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-		std::string_view view{sErrorBuffer.data(), errorLength};
-		ctx.error("`VirtualAlloc` with MEM_COMMIT failed, error: {}", {view});
+        size_t errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), errorLength};
+        ctx.error("{}, error: {}", {str, view});
 #endif
         std::abort();
-    }
-    m_buffer = alignTo(m_base, alignof(Node));
-    m_bufferSize = initialNodeNum;
+}
 
-    // Populate the free list
-    m_firstFree     = reinterpret_cast<Node*>(m_buffer);
-    m_firstOccupied = nullptr;
+PageAllocationsTracker::PageAllocationsTracker(
+    PlatformContext& ctx, 
+    uint32_t pageTrackCapacity, 
+    uint32_t allocTrackCapacity)
+{
+    using namespace std::string_view_literals;
+    // reserve virtual address space the double ended buffer
+    m_pageTracking.m_capacity = pageTrackCapacity;
+    m_allocTracking.m_capacity = allocTrackCapacity;
+    m_pageTracking.m_growBackwards = false;
+    m_allocTracking.m_growBackwards = true;
+    size_t sysAlign                 = systemAlignment();
+    assert(sysAlign >= alignof(PageNode) && sysAlign >= alignof(AllocNode));
 
-    Node* curr = m_firstFree;
-    for (Node* next = curr + 1; curr < m_firstFree + m_bufferSize; ++curr, ++next)
+    size_t pageFreeListBytes  = initialNodeNum * sizeof(PageNode);
+    size_t allocFreeListBytes = initialNodeNum * sizeof(AllocNode); 
+    size_t allocOffset        = m_allocTracking.m_capacity * sizeof(AllocNode);
+    size_t pageOffset         = m_pageTracking.m_capacity * sizeof(PageNode);
+    m_bufferBytes             = allocOffset + pageOffset;
+    m_base = reserveVirtualAddressSpace(m_bufferBytes);
+    if (!m_base)
     {
-        curr->free.nextFree = (next < m_firstFree + m_bufferSize) ? next : nullptr;
-        curr->free.magic    = theMagic;
+        ctx.error("Couldn't reserve virtual address space for {} bytes", { m_bufferBytes });
+        std::abort();
     }
+
+    // commit `initialNodeNum` for the low address free list and the high address free list
+    uintptr_t end  = reinterpret_cast<uintptr_t>(m_base) + m_bufferBytes;
+    void* allocBase = alignToBackward(reinterpret_cast<void*>(end - allocFreeListBytes), sysAlign);
+    if (!commitPhysicalMemory(m_base, pageFreeListBytes))
+    {
+        logAndAbort(ctx, "pageFreeList, VirtualAlloc MEM_COMMIT"sv, initialNodeNum);
+    }
+    if (!commitPhysicalMemory(allocBase, end - reinterpret_cast<uintptr_t>(allocBase)))
+    {
+        logAndAbort(ctx, "allocFreeList, VirtualAlloc MEM_COMMIT"sv, initialNodeNum);
+    }
+
+    // set head and reset each list
+    void* pEnd  = reinterpret_cast<void*>(end - sizeof(AllocNode));
+    std::memset(pEnd, 0, 32);
+    m_pageBase  = alignTo(m_base, alignof(PageNode));
+    m_allocBase = alignToBackward(pEnd, alignof(AllocNode));
+
+    m_pageTracking.m_freeHead  = reinterpret_cast<PageNode*>(m_pageBase);
+    m_allocTracking.m_freeHead = reinterpret_cast<AllocNode*>(m_allocBase);
+    m_pageTracking.m_freeSize  = initialNodeNum;
+    m_allocTracking.m_freeSize = initialNodeNum;
+
+    m_pageTracking.reset();
+    m_allocTracking.reset();
+}
+
+template <typename T>
+    requires requires(T t) { t.address; }
+static bool shouldTrack(PlatformContext& ctx, T const& alloc)
+{
+    bool ret = alloc.address != nullptr;
+    if (!ret)
+    {
+        ctx.warn("Passed an invalid allocation to the trakcer, nullptr address");
+    }
+    return ret;
 }
 
 void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const &alloc)
 {
-    if (!m_firstFree)
+    if (!m_pageTracking.m_freeHead)
     {
-        // Grow the free list if no nodes are available
-        growFreeList(ctx);
+        growFreeList(ctx, m_pageTracking, m_pageBase);
     }
 
-    Node*  node = m_firstFree;
-    m_firstFree = node->free.nextFree;
-
-    node->data.alloc = alloc;
-    node->data.next  = m_firstOccupied;
-    m_firstOccupied  = node;
+    if (shouldTrack(ctx, alloc))
+    {
+        m_pageTracking.addNode(alloc);
+    }
 }
 
 void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const &alloc)
 {
-    Node* prev = nullptr;
-    Node* curr = m_firstOccupied;
-
-    // Locate the node to deallocate
-    while (curr)
+    if (m_pageTracking.removeNode(alloc))
     {
-        if (curr->data.alloc.address == alloc.address)
-        {
-            if (prev)
-                prev->data.next = curr->data.next;
-            else
-                m_firstOccupied = curr->data.next;
+        return;
+    }
 
-            // Return node to free list
-            curr->free.magic    = theMagic;
-            curr->free.nextFree = m_firstFree;
-            m_firstFree         = curr;
+    ctx.error("Attempted to deallocate a page that was not tracked.");
+    std::abort();
+}
 
-            return;
-        }
-        prev = curr;
-        curr = curr->data.next;
+void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const &alloc)
+{
+    if (!m_allocTracking.m_freeHead)
+    {
+        growFreeList(ctx, m_allocTracking, m_allocBase);
+    }
+
+    if (shouldTrack(ctx, alloc))
+    {
+        m_allocTracking.addNode(alloc);
+    }
+}
+
+void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const &alloc)
+{
+    if (m_allocTracking.removeNode(alloc))
+    {
+        return;
     }
 
     ctx.error("Attempted to deallocate a page that was not tracked.");
@@ -1394,58 +1436,10 @@ PageAllocationsTracker::~PageAllocationsTracker() noexcept
     PlatformContext::Table nullTable;
     PlatformContext::InlineTable nullInlineTable;
     PlatformContext        nullCtx{nullptr, &nullTable, nullInlineTable};
-    // iterate through the occupied list if owning, freeing all allocated pages
-    if (m_owning)
-    {
-        Node* curr = m_firstOccupied;
-        while (curr)
-        {
-            PageAllocator::deallocatePage(nullCtx, curr->data.alloc);
-            curr = curr->data.next;
-        }
-    }
+    assert(!m_pageTracking.m_occupiedHead && !m_allocTracking.m_occupiedHead 
+        && "some allocated memory is outliving the tracker");
 
-    // free your own buffer
-    freeVirtualAddressSpace(m_base, m_bufferCapacity * sizeof(Node) + alignof(Node));
-}
-
-void PageAllocationsTracker::growFreeList(PlatformContext& ctx)
-{
-    // Check if we can commit more memory
-    if (m_bufferSize >= m_bufferCapacity)
-    {
-        ctx.error("Buffer capacity exceeded, cannot grow the free list further.");
-        std::abort();
-    }
-
-    // Calculate how much more memory to commit (doubling strategy)
-    uint32_t newNodes  = std::min(initialNodeNum, m_bufferCapacity - m_bufferSize);
-    void*    newBuffer = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(m_buffer) + m_bufferSize * sizeof(Node));
-
-    // Commit additional memory
-    if (!commitPhysicalMemory(newBuffer, newNodes * sizeof(Node)))
-    {
-        ctx.error("Failed to commit additional memory for {} nodes.", {newNodes});
-        std::abort();
-    }
-
-    // Add newly committed nodes to the free list
-    Node* newFreeListStart = reinterpret_cast<Node*>(newBuffer);
-    Node* curr             = newFreeListStart;
-
-    for (Node* next = curr + 1; curr < newFreeListStart + newNodes; ++curr, ++next)
-    {
-        curr->free.nextFree = (next < newFreeListStart + newNodes) ? next : nullptr;
-        curr->free.magic    = theMagic;
-    }
-
-    // Attach new free list to the existing one
-    if (m_firstFree)
-    {
-        curr->free.nextFree = m_firstFree;
-    }
-    m_firstFree = newFreeListStart;
-    m_bufferSize += newNodes;
+    freeVirtualAddressSpace(m_base, m_bufferBytes);
 }
 
 } // namespace dmt

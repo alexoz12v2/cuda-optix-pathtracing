@@ -148,7 +148,7 @@ int main()
             {allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u});
     counter = 0;
 
-    for (auto const& node : tracker)
+    for (auto const& node : tracker.pageAllocations())
     {
         ctx.log("Tracker Data: Allocated page at {}, frame number {} of size {}",
                 {node.data.alloc.address, node.data.alloc.pageNum, (void*)dmt::toUnderlying(node.data.alloc.pageSize)});

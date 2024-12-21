@@ -174,15 +174,13 @@ void* reserveVirtualAddressSpace(size_t size)
 
 size_t systemAlignment()
 {
-	SYSTEM_INFO sysInfo{};
-	GetSystemInfo(&sysInfo);
-	return static_cast<size_t>(sysInfo.dwAllocationGranularity);
+    SYSTEM_INFO sysInfo{};
+    GetSystemInfo(&sysInfo);
+    return static_cast<size_t>(sysInfo.dwAllocationGranularity);
 }
 
 bool commitPhysicalMemory(void* address, size_t size)
 {
-    size_t alignment = systemAlignment();
-    size             = (size + alignment - 1) & ~(alignment - 1);
     void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
     return committed != nullptr;
 }

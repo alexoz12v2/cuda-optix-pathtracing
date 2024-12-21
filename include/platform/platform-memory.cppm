@@ -173,6 +173,26 @@ using sid_t = uint64_t;
 namespace dmt
 {
 
+// Primary template (matches nothing by default)
+template <template <typename...> class Template, typename T>
+struct is_template_instantiation : std::false_type
+{
+};
+
+// Specialization for template instantiations
+template <template <typename...> class Template, typename... Args>
+struct is_template_instantiation<Template, Template<Args...>> : std::true_type
+{
+};
+
+// Helper variable template
+template <template <typename...> class Template, typename T>
+inline constexpr bool is_template_instantiation_v = is_template_instantiation<Template, T>::value;
+
+// Concept using the helper
+template <template <typename...> class Template, typename T>
+concept TemplateInstantiationOf = is_template_instantiation_v<Template, T>;
+
 void* alignTo(void* address, size_t alignment)
 {
     // Ensure alignment is a power of two (required for bitwise operations).
@@ -181,6 +201,18 @@ void* alignTo(void* address, size_t alignment)
 
     uintptr_t addr = reinterpret_cast<uintptr_t>(address);
     uintptr_t alignedAddr = (addr + mask) & ~mask;
+
+    return reinterpret_cast<void*>(alignedAddr);
+}
+
+void* alignToBackward(void* address, size_t alignment)
+{
+    // Ensure alignment is a power of two (required for bitwise operations).
+    size_t const mask = alignment - 1;
+    assert((alignment & mask) == 0 && "Alignment must be a power of two.");
+
+    uintptr_t addr        = reinterpret_cast<uintptr_t>(address);
+    uintptr_t alignedAddr = addr & ~mask;
 
     return reinterpret_cast<void*>(alignedAddr);
 }
@@ -448,6 +480,7 @@ static_assert(alignof(PageAllocator) == 8 && sizeof(PageAllocator) == 48);
 
 struct alignas(8) AllocationInfo 
 {
+    void*      address;
     uint64_t allocTime; // millieconds from start of app
     uint64_t freeTime;  // 0 means not freed yet
     size_t   size;
@@ -455,9 +488,210 @@ struct alignas(8) AllocationInfo
     uint32_t alignment;
     EMemoryTag tag;
     //TODO handle source location
-    unsigned char padding[24];
+    unsigned char padding[8];
 };
-static_assert(sizeof(AllocationInfo) == 64 && alignof(AllocationInfo) == 8);
+static_assert(sizeof(AllocationInfo) == 56 && alignof(AllocationInfo) == 8);
+
+template <typename T>
+    requires(std::is_standard_layout_v<T> && std::is_trivially_destructible_v<T>)
+union Node 
+{
+    using DType = T;
+    struct TrackData
+    {
+        T alloc;
+        Node* next;
+    };
+    struct Free
+    {
+        uint64_t magic;
+        Node* nextFree;
+    };
+    TrackData data;
+    Free      free;
+};
+
+template union Node<PageAllocation>;
+template union Node<AllocationInfo>;
+using PageNode = Node<PageAllocation>;
+using AllocNode = Node<AllocationInfo>;
+static_assert(sizeof(PageNode) == 32 && alignof(PageNode) == 8);
+static_assert(sizeof(AllocNode) == 64 && alignof(AllocNode) == 8);
+static_assert(TemplateInstantiationOf<Node, PageNode>);
+static_assert(TemplateInstantiationOf<Node, AllocNode>);
+
+
+template <typename NodeType>
+    requires(TemplateInstantiationOf<Node, NodeType>)
+class FreeList
+{
+    friend class PageAllocationsTracker;
+
+public:
+    static constexpr uint64_t theMagic = static_cast<uint64_t>(-1);
+
+    class Iterator
+    {
+    public:
+        explicit Iterator(NodeType* node) : m_current(node) { }
+
+        Iterator& operator++()
+        {
+            if (m_current)
+                m_current = m_current->data.next;
+
+            return *this;
+        }
+
+        bool operator!=(Iterator const& other) const
+        {
+            return m_current != other.m_current;
+        }
+
+        NodeType& operator*() const
+        {
+            return *m_current;
+        }
+
+        NodeType* operator->() const
+        {
+            return m_current;
+        }
+
+    private:
+        NodeType* m_current = nullptr;
+    };
+
+    Iterator beginAllocated()
+    {
+        return Iterator(m_occupiedHead);
+    }
+    Iterator endAllocated()
+    {
+        return Iterator(nullptr);
+    }
+
+    // Add a node to the occupied list from the free list
+    void addNode(typename NodeType::DType const& data)
+    {
+        assert(m_freeHead && "unexpected node state");
+
+        // Allocate node from free list
+        NodeType* node = m_freeHead;
+        m_freeHead     = getNextFree(node);
+
+        // Initialize the node with data and link to the occupied list
+        node->data.alloc = data;
+        setNextOccupied(node, m_occupiedHead);
+        m_occupiedHead = node;
+    }
+
+    // Remove a node from the occupied list and return it to the free list
+    bool removeNode(typename NodeType::DType const& data)
+    {
+        NodeType* prev = nullptr;
+        NodeType* curr = m_occupiedHead;
+
+        // Locate the node in the occupied list
+        while (curr)
+        {
+            if (curr->data.alloc.address == data.address)
+            {
+                // Unlink from occupied list
+                if (prev)
+                    setNextOccupied(prev, getNextOccupied(curr));
+                else
+                    m_occupiedHead = getNextOccupied(curr);
+
+                // Return node to free list
+                setFreeNode(curr);
+                return true;
+            }
+            prev = curr;
+            curr = getNextOccupied(curr);
+        }
+        return false; // Node not found
+    }
+
+    // Reset the free list to its initial state
+    void reset()
+    {
+        NodeType* curr = m_freeHead;
+        for (uint32_t i = 0; i < m_freeSize - 1; ++i)
+        {
+            NodeType* next = m_growBackwards ? curr - 1 : curr + 1;
+            setNextFree(curr, next);
+            curr->free.magic = theMagic;
+            curr             = next;
+        }
+
+        if (curr)
+        {
+            setNextFree(curr, nullptr); // Last node
+            curr->free.magic = theMagic;
+        }
+    }
+
+    // Grow the free list with new nodes
+    void growList(uint32_t newNodes, NodeType* start)
+    {
+        NodeType* curr = start;
+
+        for (uint32_t i = 0; i < newNodes - 1; ++i)
+        {
+            NodeType* next = m_growBackwards ? curr - 1 : curr + 1;
+            setNextFree(curr, next);
+            curr->free.magic = theMagic;
+            curr             = next;
+        }
+
+        if (curr)
+        {
+            setNextFree(curr, m_freeHead); // Link new list to existing free list
+            curr->free.magic = theMagic;
+        }
+
+        m_freeHead = start;
+        m_freeSize += newNodes;
+    }
+
+private:
+    NodeType* m_freeHead      = nullptr; // Head of the free list
+    NodeType* m_occupiedHead  = nullptr; // Head of the occupied list
+    uint32_t  m_capacity      = 0;       // Total capacity of the list
+    uint32_t  m_freeSize      = 0;       // Number of free nodes available
+    bool      m_growBackwards = false;   // Growth direction
+
+    // Helper functions for managing free and occupied nodes
+    NodeType* getNextFree(NodeType* node) const
+    {
+        return reinterpret_cast<NodeType*>(node->free.nextFree);
+    }
+
+    void setNextFree(NodeType* node, NodeType* next) const
+    {
+        node->free.nextFree = reinterpret_cast<NodeType*>(next);
+    }
+
+    NodeType* getNextOccupied(NodeType* node) const
+    {
+        return reinterpret_cast<NodeType*>(node->data.next);
+    }
+
+    void setNextOccupied(NodeType* node, NodeType* next) const
+    {
+        node->data.next = reinterpret_cast<NodeType*>(next);
+    }
+
+    void setFreeNode(NodeType* node)
+    {
+        setNextFree(node, m_freeHead);
+        node->free.magic = theMagic;
+        m_freeHead       = node;
+    }
+};
+template class FreeList<PageNode>;
+template class FreeList<AllocNode>;
 
 // reserve a large portion of the virtual address to memory tracking and treat it like a stack
 // on one end we'll track page allocations, on the other object allocation. Since we are not committing
@@ -469,112 +703,112 @@ static_assert(sizeof(AllocationInfo) == 64 && alignof(AllocationInfo) == 8);
     // of the virtual address space.
 class alignas(8) PageAllocationsTracker
 {
-private:
-    union Node 
-    {
-        struct PageTrackData
-        {
-            PageAllocation alloc;
-            Node* next;
-        };
-        struct Free
-        {
-            uint64_t magic;
-            Node* nextFree;
-        };
-        PageTrackData data;
-        Free          free;
-    };
-	class OccupiedIterator
-	{
-	public:
-		// Type aliases for iterator traits
-		using iterator_category = std::forward_iterator_tag;
-		using value_type        = PageAllocationsTracker::Node;
-		using pointer           = value_type*;
-		using reference         = value_type&;
-
-		// Constructor
-		explicit OccupiedIterator(pointer ptr) : m_current(ptr)
-		{
-		}
-
-		// Dereference operator
-		reference operator*() const
-		{
-			return *m_current;
-		}
-		pointer operator->() const
-		{
-			return m_current;
-		}
-
-		// Pre-increment operator
-		OccupiedIterator& operator++()
-		{
-			m_current = m_current ? m_current->data.next : nullptr;
-			return *this;
-		}
-
-		// Post-increment operator
-		OccupiedIterator operator++(int)
-		{
-			OccupiedIterator tmp = *this;
-			++(*this);
-			return tmp;
-		}
-
-		// Equality and inequality operators
-		bool operator==(OccupiedIterator const& other) const
-		{
-			return m_current == other.m_current;
-		}
-		bool operator!=(OccupiedIterator const& other) const
-		{
-			return m_current != other.m_current;
-		}
-
-	private:
-		pointer m_current = nullptr;
-	};
-
-
 public:
+    struct PageAllocationView 
+    {
+        PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking) { }
+        auto begin()
+        {
+            return m_pageTracking->beginAllocated();
+        }
+        auto end()
+        {
+            return m_pageTracking->endAllocated();
+        }
+
+    private:
+        FreeList<PageNode> *m_pageTracking;
+    };
+    struct AllocationView 
+    {
+        AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking) { }
+        auto begin()
+        {
+            return m_allocTracking->beginAllocated();
+        }
+        auto end()
+        {
+            return m_allocTracking->endAllocated();
+        }
+    private:
+        FreeList<AllocNode> *m_allocTracking;
+    };
+
     // Forward iterator for occupied list
-    PageAllocationsTracker(PlatformContext& ctx, uint32_t capacity, bool owning);
+    PageAllocationsTracker(PlatformContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity);
+    ~PageAllocationsTracker() noexcept;
+
+    PageAllocationView pageAllocations()
+    {
+        return {&m_pageTracking};
+    }
+
+    AllocationView allocations()
+    {
+        return {&m_allocTracking};
+    }
 
     // start simple: Handle embedded free list inside bootstrap page with allocation and deallocation functions
     void track(PlatformContext& ctx, PageAllocation const &alloc);
     void untrack(PlatformContext& ctx, PageAllocation const &alloc);
-
-	~PageAllocationsTracker() noexcept;
-
-    OccupiedIterator begin() const
-    {
-        return OccupiedIterator(m_firstOccupied);
-    }
-
-    OccupiedIterator end() const
-    {
-        return OccupiedIterator(nullptr);
-    }
+    void track(PlatformContext& ctx, AllocationInfo const &alloc);
+    void untrack(PlatformContext& ctx, AllocationInfo const &alloc);
 
 private:
-    static constexpr uint64_t theMagic = static_cast<uint64_t>(-1);
-    static constexpr uint32_t initialNodeNum = toUnderlying(EPageSize::e4KB) / sizeof(Node);
-    static_assert(sizeof(Node) == 32 && alignof(Node) == 8 && toUnderlying(EPageSize::e4KB) % sizeof(Node) == 0);
+    static constexpr uint32_t initialNodeNum = 128;
+    template <typename NodeType>
+        requires(TemplateInstantiationOf<Node, NodeType>)
+    static void growFreeList(PlatformContext& ctx, FreeList<NodeType> &freeList, void* base)
+    {
+        // Check if we can commit more memory
+        if (freeList.m_freeSize >= freeList.m_capacity)
+        {
+            ctx.error("Buffer capacity exceeded, cannot grow the free list further.");
+            std::abort();
+        }
 
-	void growFreeList(PlatformContext& ctx);
+        // Calculate how many new nodes to commit (doubling strategy)
+        uint32_t newNodes = std::min(initialNodeNum, freeList.m_capacity - freeList.m_freeSize);
+        if (newNodes == 0)
+        {
+            ctx.error("Cannot grow free list: Capacity fully utilized.");
+            std::abort();
+        }
 
-    void*          m_base   = nullptr;
-    void*          m_buffer = nullptr;
-    Node*          m_firstFree = nullptr;
-    Node*          m_firstOccupied = nullptr;
-    uint32_t       m_bufferSize = 0; // in count of Nodes, not bytes
-    uint32_t       m_bufferCapacity; // in count of Nodes, not bytes
-    bool           m_owning;
+        // Determine where to start the new free list
+        void* newBuffer = nullptr;
+        if (freeList.m_growBackwards)
+        {
+            newBuffer = reinterpret_cast<void*>(
+                reinterpret_cast<uintptr_t>(base) - (freeList.m_freeSize + newNodes) * sizeof(NodeType));
+        }
+        else
+        {
+            newBuffer = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(base) + freeList.m_freeSize * sizeof(NodeType));
+        }
+
+        // Commit additional memory
+        if (!commitPhysicalMemory(newBuffer, newNodes * sizeof(NodeType)))
+        {
+            ctx.error("Failed to commit additional memory for {} nodes.", {newNodes});
+            std::abort();
+        }
+
+        // Add newly committed nodes to the free list
+        NodeType* newFreeListStart = reinterpret_cast<NodeType*>(newBuffer);
+        freeList.growList(newNodes, newFreeListStart);
+    }
+
+    FreeList<PageNode> m_pageTracking;
+    FreeList<AllocNode> m_allocTracking;
+    void* m_base   = nullptr;
+    void* m_buffer = nullptr;
+    size_t m_bufferBytes;
+    void*               m_pageBase;
+    void*               m_allocBase;
+    unsigned char       m_padding[24];
 };
-static_assert(sizeof(PageAllocationsTracker) == 48 && alignof(PageAllocationsTracker) == 8);
+static_assert(sizeof(PageAllocationsTracker) == 128 && alignof(PageAllocationsTracker) == 8);
 
 class StackAllocator
 {
@@ -594,8 +828,8 @@ private:
     // the bootstrap page should contain, as last member, the allocation tracking data, because it is variable length
     // there might be the possibility we have to track 2 variable length arrays, eg
 
-	StackHeader *m_pFirst;
-	StackHeader *m_pLast; 
+    StackHeader *m_pFirst;
+    StackHeader *m_pLast; 
 };
 
 } // namespace dmt

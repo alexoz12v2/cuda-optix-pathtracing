@@ -1,12 +1,12 @@
 /**
-* @file testdmtpartitions.cppm
-* @brief Primary interface unit for the `testdmtpartitions` module.
-*
-* This module provides advanced mathematical utilities with partitioned design.
-*
-* @defgroup testdmtpartitions TestDMTPartitions Module
-* @{
-*/
+ * @file testdmtpartitions.cppm
+ * @brief Primary interface unit for the `testdmtpartitions` module.
+ *
+ * This module provides advanced mathematical utilities with partitioned design.
+ *
+ * @defgroup testdmtpartitions TestDMTPartitions Module
+ * @{
+ */
 
 // example of primary module interface unit
 module;

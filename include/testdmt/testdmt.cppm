@@ -1,12 +1,12 @@
 /**
-* @file testdmt.cppm
-* @brief Primary interface unit for the `testdmt` module.
-*
-* This module provides basic mathematical operations and utilities.
-*
-* @defgroup testdmt TestDMT Module
-* @{
-*/
+ * @file testdmt.cppm
+ * @brief Primary interface unit for the `testdmt` module.
+ *
+ * This module provides basic mathematical operations and utilities.
+ *
+ * @defgroup testdmt TestDMT Module
+ * @{
+ */
 
 // example of a primary module interface unit
 module;

@@ -25,6 +25,9 @@ AlignEscapedNewlines: Left
 AlignOperands: Align
 AlignTrailingComments: true
 
+# doxygen
+CommentPragmas: '^\\*|^//!|^///|^/\\*\\*'
+
 # Allow
 AllowAllArgumentsOnNextLine: false
 AllowAllConstructorInitializersOnNextLine: false
@@ -80,6 +83,8 @@ BraceWrapping:
 CompactNamespaces: false
 FixNamespaceComments: true
 NamespaceIndentation: None
+NamespaceMacros:
+  - DMT_MODULE_EXPORT
 
 # Derive
 DeriveLineEnding: false
@@ -133,7 +138,7 @@ PenaltyReturnTypeOnItsOwnLine: 500
 PointerAlignment: Left
 
 # Comments
-ReflowComments: false
+ReflowComments: true
 
 # Spaces
 SpaceAfterCStyleCast: false

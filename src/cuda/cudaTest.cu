@@ -6,9 +6,8 @@
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 
-//#define DMT_INTERFACE_AS_HEADER
-//#define module ;
-//#include <platform/platform.cppm>
+#define DMT_INTERFACE_AS_HEADER
+#include <platform/platform.h>
 
 
 // CUDA kernel to fill the texture with gradient data
@@ -40,23 +39,22 @@ namespace dmt
 {
 bool RegImg(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
 {
-    cudaGraphicsResource  res;
-    cudaGraphicsResource* ptrRes = &res;
+    cudaGraphicsResource_t ptrRes = nullptr;
 
     cudaError_t reMgs = cudaGraphicsGLRegisterImage(&ptrRes, tex, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsNone);
 
     if (reMgs != cudaSuccess)
         return false;
 
-    reMgs = cudaGraphicsMapResources(1, ptrRes, 0);
+    reMgs = cudaGraphicsMapResources(1, &ptrRes, 0);
 
     if (reMgs != cudaSuccess)
         return false;
 
     //define texture array
-    cudaArray* texArray;
+    cudaArray_t texArray = nullptr;
 
-    cudaGraphicsSubResourceGetMappedArray(&texArray, prtRes, 0, 0);
+    cudaGraphicsSubResourceGetMappedArray(&texArray, ptrRes, 0, 0);
 
     // Get a device pointer to the texture memory
     uchar4* devPtr;
@@ -70,12 +68,11 @@ bool RegImg(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
     fillTextureKernel<<<gridDim, blockDim>>>(devPtr, width, height);
 
     // Copy the CUDA memory to the OpenGL texture
-    cudaMemcpyToArray(textureArray, 0, 0, devPtr, width * height * sizeof(uchar4), cudaMemcpyDeviceToDevice);
+    cudaMemcpyToArray(texArray, 0, 0, devPtr, width * height * sizeof(uchar4), cudaMemcpyDeviceToDevice);
 
     // Cleanup
     cudaFree(devPtr);
     cudaGraphicsUnmapResources(1, &ptrRes, 0);
-
 
     return true;
 }
@@ -107,8 +104,8 @@ __global__ void saxpyKernel(float const* A, float const* B, float* C)
  */
 void kernel(float const* A, float const* B, float scalar, float* C, uint32_t N)
 {
-    // dmt::ConsoleLogger logger = dmt::ConsoleLogger::create();
-    // logger.log("Hello from a nvcc file!");
+    dmt::ConsoleLogger logger = dmt::ConsoleLogger::create();
+    logger.log("Hello from a nvcc file!");
 
     // Launch CUDA kernel.
     float *                         d_A, *d_B, *d_C;

@@ -1,7 +1,7 @@
 /**
-* @file testdmtpartitions-moretrig.cppm
-* @brief Partition Interface Unit `moretrig` for `testdmtpartitions` with Additional trigonometric utilities partition.
-*/
+ * @file testdmtpartitions-moretrig.cppm
+ * @brief Partition Interface Unit `moretrig` for `testdmtpartitions` with Additional trigonometric utilities partition.
+ */
 
 module;
 export module testdmtpartitions:moretrig;

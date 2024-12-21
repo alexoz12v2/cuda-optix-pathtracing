@@ -408,7 +408,7 @@ function(dmt_add_module_library name module_name)
   cmake_parse_arguments(THIS_ARGS
     "" # no options
     "MODULE_INTERFACE;MODULE_IMPLEMENTATION" # single argument keys
-    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS" # multiple arguments keys
+    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS;HEADERS" # multiple arguments keys
     ${ARGN}
   )
   if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
@@ -425,14 +425,22 @@ function(dmt_add_module_library name module_name)
   message(STATUS "[${name}] MODULE_IMPLEMENTATION: ${THIS_ARGS_MODULE_IMPLEMENTATION}")
   message(STATUS "[${name}] MODULE_PARTITION_INTERFACES: ${THIS_ARGS_MODULE_PARTITION_INTERFACES}")
   message(STATUS "[${name}] MODULE_PARTITION_IMPLEMENTATIONS: ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS}")
+  message(STATUS "[${name}] HEADERS: ${THIS_ARGS_HEADERS}")
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
   set(interface_file_list "${CMAKE_SOURCE_DIR}/include/${target_path}/${THIS_ARGS_MODULE_INTERFACE}")
   set(implementation_file_list "${THIS_ARGS_MODULE_IMPLEMENTATION}")
+  set(header_file_list "")
   if(DEFINED THIS_ARGS_MODULE_PARTITION_INTERFACES)
     foreach(interface_file ${THIS_ARGS_MODULE_PARTITION_INTERFACES})
       string(PREPEND interface_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
       list(APPEND interface_file_list "${interface_file}")
+    endforeach()
+  endif()
+  if (DEFINED THIS_ARGS_HEADERS)
+    foreach(header_file ${THIS_ARGS_HEADERS})
+      string(PREPEND header_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
+      list(APPEND header_file_list "${header_file}")
     endforeach()
   endif()
   if(DEFINED THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS)
@@ -539,7 +547,7 @@ function(dmt_add_module_library name module_name)
   # add project include as include directory
   target_include_directories(${name}
     PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    PRIVATE ${PROJECT_SOURCE_DIR}/src
+    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include/${target_path}
   )
 
   if(NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
@@ -556,13 +564,26 @@ function(dmt_add_module_library name module_name)
   endif()
 
   # construct the sources lists
-  target_sources(${name}
-    PUBLIC
-      FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
-        FILES ${interface_file_list}
-    PRIVATE
-      ${implementation_file_list}
-  )
+  list(LENGTH header_file_list header_count)
+  if(header_count GREATER 0)
+    target_sources(${name}
+      PUBLIC
+        FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+          FILES ${interface_file_list}
+        FILE_SET "${module_name}_headers" TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+          FILES ${header_file_list}
+      PRIVATE
+        ${implementation_file_list}
+    )
+  else()
+    target_sources(${name}
+      PUBLIC
+        FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+          FILES ${interface_file_list}
+      PRIVATE
+        ${implementation_file_list}
+    )
+  endif()
 
   # create alias
   add_library(${alias_name} ALIAS ${name})

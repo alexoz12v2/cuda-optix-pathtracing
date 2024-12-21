@@ -47,7 +47,8 @@ int main()
 
     logger.log("Starting saxpy computation on the GPU...");
     dmt::kernel(A, B, scalar, C, N);
-    logger.log("Done!\n\nshowing first 4 elements of each result:\nCPU[0:3] = ");
+    logger.log("Done! Showing first 4 elements of each result:");
+    logger.log("CPU[0:3] = ");
 
     std::string str;
     for (uint32_t i = 0; i != 4; ++i)
@@ -55,15 +56,15 @@ int main()
         str += std::to_string(C_cpu[i]) + ' ';
     }
 
-    logger.log("{}", {dmt::StrBuf(str)});
-    logger.log("\n\nGPU[0:3] = ");
+    logger.log("  {}", {dmt::StrBuf(str)});
+    logger.log("GPU[0:3] = ");
     str.clear();
 
     for (uint32_t i = 0; i != 4; ++i)
     {
         str += std::to_string(C[i]) + ' ';
     }
-    logger.log("{}\n", {dmt::StrBuf(str)});
+    logger.log("  {}\n", {dmt::StrBuf(str)});
 
     bool  error = false;
     float diff  = 0.0;
@@ -78,9 +79,9 @@ int main()
     }
 
     if (error)
-        logger.log("\nThe Results are Different!");
+        logger.log("The Results are Different!");
     else
-        logger.log("\nThe Results match!");
+        logger.log("The Results match!");
 
-    logger.log("\nProgramm Finished!");
+    logger.log("Programm Finished!");
 }

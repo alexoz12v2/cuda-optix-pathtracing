@@ -3,6 +3,8 @@ module;
 #include <GLFW/glfw3.h>
 
 #include <atomic>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
 #include <chrono>
 #include <imgui.h>
 #include <iostream>
@@ -10,8 +12,7 @@ module;
 #include <string_view>
 #include <thread>
 #include <vector>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_opengl3.h>
+
 #include <cassert>
 
 
@@ -37,8 +38,8 @@ void WindowGUI()
     char const* glsl_version = "#version 460";
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // 3.2+ only
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);           // 3.0+ only
 
 
     // Create window with graphics context
@@ -168,7 +169,7 @@ void WindowGUI()
     glfwTerminate();
 }
 
-    void printSome(dmt::ConsoleLogger& logger)
+void printSome(dmt::ConsoleLogger& logger)
 {
     using namespace std::string_view_literals;
     logger.log("Hello World from logger");

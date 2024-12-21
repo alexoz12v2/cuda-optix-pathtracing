@@ -90,3 +90,13 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
 - [ ] Implementazione con OptiX
   - [ ] Formazione
 - [ ] GUI imgui implot
+
+## Installazione CUDA OptiX
+- Navigare su [Questo Link](https://developer.nvidia.com/designworks/optix/download) e scaricare la SDK 8.0.0
+- Se lo installi in una directory diversa da
+  ```
+  (Win32) "C:\ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0"
+  (Unix)  "~/NVIDIA-OptiX-SDK-8.0.0-linux64"
+  ```
+  Allora verificare che la variabile di ambiente `OPTIX80_PATH` sia settata correttamente
+- se la variabile di ambiente `OPTIX80_PATH` non viene settata in installazione, settarla manualmente

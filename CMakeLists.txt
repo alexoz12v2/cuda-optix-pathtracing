@@ -75,6 +75,16 @@ project(
 enable_language(C)
 enable_language(CUDA)
 
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
+# link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
+find_package(OpenGL REQUIRED)
+find_package(CUDAToolkit REQUIRED)
+find_package(OptiX80 REQUIRED)
+
+# Link: https://forums.developer.nvidia.com/t/how-to-include-optix-8-0-in-cmake-project/269123
+set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+
 include(cmake/Config.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/SetupDoxygen.cmake)

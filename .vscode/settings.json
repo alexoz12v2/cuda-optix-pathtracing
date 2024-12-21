@@ -2,6 +2,13 @@
     "files.associations": {
         "regex": "cpp",
         "xiosbase": "cpp",
-        "ios": "cpp"
+        "ios": "cpp",
+        "iostream": "cpp"
+    },
+    "terminal.integrated.profiles.windows": {
+        "DevCmd": {
+            "path": ["${env:windir}\\System32\\cmd.exe"],
+            "args": ["/k", "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\Tools\\VsDevCmd.bat"]
+        }
     }
 }

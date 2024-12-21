@@ -1,4 +1,14 @@
+/**
+ * @file platform-threadPool.cppm
+ * @brief ...
+ * 
+ * @defgroup platform platform Module
+ * @{
+ */
 module;
+#if defined(DMT_INTERFACE_AS_HEADER)
+#pragma once
+#endif
 
 #include <functional>
 #include <future>
@@ -8,11 +18,20 @@ module;
 #include <utility>
 #include <vector>
 
+#if !defined(DMT_INTERFACE_AS_HEADER)
 export module platform:threadPool;
+#endif
+
+// TODO move this in an header grouping commonly used macros
+#if !defined(DMT_INTERFACE_AS_HEADER)
+#define DMT_MODULE_EXPORT export
+#else
+#define DMT_MODULE_EXPORT
+#endif
 
 namespace dmt
 {
-export class ThreadPool
+DMT_MODULE_EXPORT class ThreadPool
 {
 public:
     ThreadPool(int const size);
@@ -87,3 +106,4 @@ private:
     std::queue<std::function<void()>> m_queue;
 };
 } // namespace dmt
+/** @} */

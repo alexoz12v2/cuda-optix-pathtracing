@@ -1,4 +1,5 @@
 include(FetchContent)
+include(FindPackageHandleStandardArgs)
 
 macro(dmt_setup_dependencies)
   if(NOT TARGET Catch2::Catch2WithMain)
@@ -38,4 +39,8 @@ macro(dmt_setup_dependencies)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
   endif()
 
+  # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
+  find_package(OpenGL REQUIRED)
+  find_package(CUDAToolkit REQUIRED)
+  find_package(OptiX80 REQUIRED)
 endmacro()

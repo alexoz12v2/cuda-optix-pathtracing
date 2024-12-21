@@ -9,8 +9,9 @@
 
 // in the primary module, we need to support both header inclusion and module exports, driven by a macro which
 // should be defined by the tranlation unit only when including the interface as an header
-#if !defined(DMT_INTERFACE_AS_HEADER)
 module;
+#if defined(DMT_INTERFACE_AS_HEADER)
+#pragma once
 #endif
 
 #include <cstdint>
@@ -21,12 +22,15 @@ module;
  */
 export module platform;
 export import :threadPool;
-import :logging;
+export import :logging;
 #else
-#include <platform-logging.cppm>
-#include <platform-threadPool.cppm>
+#define module ;
+#include <platform/platform-logging.cppm>
+#include <platform/platform-threadPool.cppm>
+#undef module
 #endif
 
+// TODO move this in an header grouping commonly used macros
 #if !defined(DMT_INTERFACE_AS_HEADER)
 #define DMT_MODULE_EXPORT export
 #else
@@ -35,10 +39,6 @@ import :logging;
 
 DMT_MODULE_EXPORT namespace dmt
 {
-
-    struct StrBuf;
-    class ConsoleLogger;
-
     /**
  * @class Platform
  * @brief Class whose constructor initializes all the necessary objects to bootstrap the application

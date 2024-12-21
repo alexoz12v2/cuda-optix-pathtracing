@@ -166,6 +166,37 @@ constexpr I ceilDiv(I num, I den)
 }
 
 #if defined(DMT_OS_WINDOWS)
+void* reserveVirtualAddressSpace(size_t size)
+{
+    void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
+    return address; // to check whether it is different than nullptr
+}
+
+size_t systemAlignment()
+{
+	SYSTEM_INFO sysInfo{};
+	GetSystemInfo(&sysInfo);
+	return static_cast<size_t>(sysInfo.dwAllocationGranularity);
+}
+
+bool commitPhysicalMemory(void* address, size_t size)
+{
+    size_t alignment = systemAlignment();
+    size             = (size + alignment - 1) & ~(alignment - 1);
+    void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
+    return committed != nullptr;
+}
+
+bool freeVirtualAddressSpace(void* address, size_t size) // true if success
+{
+    return VirtualFree(address, 0, MEM_RELEASE);
+}
+
+void decommitPage(void* pageAddress, size_t pageSize)
+{
+    VirtualFree(pageAddress, pageSize, MEM_DECOMMIT);
+}
+
 namespace win32
 {
 
@@ -212,6 +243,39 @@ constexpr bool luidCompare(LUID const& luid0, LUID const& luid1)
 
 } // namespace win32
 #elif defined(DMT_OS_LINUX)
+void* reserveVirtualAddressSpace(size_t size)
+{
+    void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (address == MAP_FAILED)
+    {
+        return nullptr;
+    }
+    return address;
+}
+
+bool commitPhysicalMemory(void* address, size_t size)
+{
+    int result = mprotect(address, size, PROT_READ | PROT_WRITE);
+    return result == 0;
+}
+
+bool freeVirtualAddressSpace(void* address, size_t size)
+{
+    return !munmap(address, size);
+}
+
+void decommitPage(void* pageAddress, size_t pageSize)
+{
+    mprotect(pageAddress, pageSize, PROT_NONE);
+    madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
+}
+
+size_t systemAlignment()
+{
+    // TODO
+    return 0;
+}
+
 namespace linux
 {
 }

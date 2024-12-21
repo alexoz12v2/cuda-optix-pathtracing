@@ -148,6 +148,39 @@ std::string_view lookupInternedStr(sid_t sid)
 
 // PageAllocator ------------------------------------------------------------------------------------------------------
 
+class HooksJanitor
+{
+public:
+    HooksJanitor(PlatformContext& ctx, bool alloc) : m_ctx(ctx), m_alloc(alloc)
+    {
+    }
+    HooksJanitor(HooksJanitor const&)                 = delete;
+    HooksJanitor(HooksJanitor&&) noexcept             = delete;
+    HooksJanitor& operator=(HooksJanitor const &)     = delete;
+    HooksJanitor& operator=(HooksJanitor &&) noexcept = delete;
+    ~HooksJanitor() noexcept 
+    {
+        if (pHooks && pAlloc)
+        {
+            if (m_alloc)
+            {
+                pHooks->allocHook(pHooks->data, m_ctx, *pAlloc);
+            }
+            else
+            {
+                pHooks->freeHook(pHooks->data, m_ctx, *pAlloc);
+            }
+        }
+    }
+
+    PageAllocatorHooks* pHooks = nullptr;
+    PageAllocation*     pAlloc = nullptr;
+
+private:
+    PlatformContext&    m_ctx;
+    bool m_alloc;
+};
+
 #if defined(DMT_OS_LINUX)
 enum PageAllocationFlags : uint32_t
 {
@@ -240,7 +273,7 @@ static page_info_array getInfoForFirstNInRange(void* start, void* end, page_info
     return {pageCount, pool};
 }
 
-PageAllocator::PageAllocator(PlatformContext& ctx)
+PageAllocator::PageAllocator(PlatformContext& ctx, PageAllocatorHooks const &hooks) : PageAllocator(hooks)
 {
     // Paths for huge pages information
     char const* hugePagesPaths[] = {"/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages",
@@ -730,7 +763,7 @@ void* PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, void* 
 
 // TODO error handing with the Janitor Pattern
 // the Process Security Descriptor, the Token -> Close
-PageAllocator::PageAllocator(PlatformContext& ctx)
+PageAllocator::PageAllocator(PlatformContext& ctx, PageAllocatorHooks const& hooks) : PageAllocator(hooks)
 {
     Janitor janitor;
 
@@ -942,8 +975,12 @@ enum PageAllocationFlags : uint32_t
 // check that the page size is not 4KB. Mapping is carried out with cudaHostRegister
 // reserve = take virtual address space. commit = when you write to it, it will be backed by physical memory
 // TODO see Address Windowing Extension pages (AWE)
+// TODO integrate MEM_WRITE_WATCH
 PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
 {
+    HooksJanitor janitor{ctx, true};
+    janitor.pHooks = &m_hooks;
+
     static constexpr uint32_t log4KB = 12u;
     PageAllocation            ret{};
     ret.pageNum               = -1;
@@ -996,7 +1033,8 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeO
             }
         }
     }
-    else
+
+    if (!ret.address)
     {
         allocationFlags &= ~MEM_LARGE_PAGES;
         pageSize    = EPageSize::e4KB;
@@ -1012,6 +1050,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeO
 
     if (ret.address)
     {
+        janitor.pAlloc = &ret;
         // touch first byte to make sure committed memory is backed to physical memory
         reinterpret_cast<unsigned char*>(ret.address)[0] = 0;
 
@@ -1166,8 +1205,6 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
         ctx.trace("Deallocated memory at {} size {}", {alloc.address, toUnderlying(alloc.pageSize)});
 #endif
     }
-
-    alloc.address = nullptr;
 }
 
 PageAllocator::~PageAllocator()
@@ -1175,6 +1212,13 @@ PageAllocator::~PageAllocator()
 }
 
 #endif // DMT_OS_LINUX, DMT_OS_WINDOWS
+
+void PageAllocator::deallocPage(PlatformContext& ctx, PageAllocation& alloc)
+{
+    PageAllocator::deallocatePage(ctx, alloc);
+    m_hooks.freeHook(m_hooks.data, ctx, alloc);
+}
+
 
 AllocatePageForBytesResult PageAllocator::allocatePagesForBytes(
     PlatformContext& ctx,
@@ -1249,7 +1293,7 @@ EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext&            
 
 bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize)
 { // TODO: don't commit memory or save it into a cache
-    ctx.warning("Don't use me");
+    ctx.warn("Don't use me");
     // Attempt a small test allocation to verify if the page size is supported
     bool           supported = false;
     PageAllocation testAlloc = allocatePage(ctx, pageSize);
@@ -1263,49 +1307,59 @@ bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pa
 }
 
 // PageAllocator ------------------------------------------------------------------------------------------------------
-
-PageAllocatorWithTracking::PageAllocatorWithTracking(PlatformContext& ctx) : pageAllocator(ctx)
+PageAllocationsTracker::PageAllocationsTracker(PlatformContext& ctx, uint32_t capacity, bool owning) 
+    : m_bufferCapacity(capacity), m_owning(owning)
 {
-    m_bootstrapPage = pageAllocator.allocatePage(ctx, EPageSize::e4KB);
-    if (!m_bootstrapPage.address)
+    m_base = reserveVirtualAddressSpace(
+        (m_bufferCapacity * sizeof(Node) + systemAlignment() - 1) & ~(systemAlignment() - 1));
+    if (!m_base)
     {
-        ctx.error("Couldn't allocate the 4KB bootstrap page for page allocation tracking, aborting...");
+        ctx.error("Couldn't reserve virtual address space for {} nodes", { capacity });
         std::abort();
     }
-    assert(alignTo(m_bootstrapPage.address, alignof(Node)) == m_bootstrapPage.address);
+
+    if (!commitPhysicalMemory(m_base, initialNodeNum * sizeof(Node) + alignof(Node)))
+    {
+        ctx.error("Couldn't commit the first {} nodes into the reserved space", { initialNodeNum });
+#if defined(DMT_OS_WINDOWS)
+		size_t errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+		std::string_view view{sErrorBuffer.data(), errorLength};
+		ctx.error("`VirtualAlloc` with MEM_COMMIT failed, error: {}", {view});
+#endif
+        std::abort();
+    }
+    m_buffer = alignTo(m_base, alignof(Node));
+    m_bufferSize = initialNodeNum;
 
     // Populate the free list
-    m_firstFree     = reinterpret_cast<Node*>(m_bootstrapPage.address);
+    m_firstFree     = reinterpret_cast<Node*>(m_buffer);
     m_firstOccupied = nullptr;
 
     Node* curr = m_firstFree;
-    for (Node* next = curr + 1; curr < m_firstFree + nodeNum; ++curr, ++next)
+    for (Node* next = curr + 1; curr < m_firstFree + m_bufferSize; ++curr, ++next)
     {
-        curr->free.nextFree = (next < m_firstFree + nodeNum) ? next : nullptr;
+        curr->free.nextFree = (next < m_firstFree + m_bufferSize) ? next : nullptr;
         curr->free.magic    = theMagic;
     }
 }
 
-PageAllocation PageAllocatorWithTracking::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
+void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const &alloc)
 {
     if (!m_firstFree)
     {
-        ctx.error("No free nodes available for allocation.");
-        std::abort();
+        // Grow the free list if no nodes are available
+        growFreeList(ctx);
     }
 
-    PageAllocation ret  = pageAllocator.allocatePage(ctx, sizeOverride);
-    Node*          node = m_firstFree;
-    m_firstFree         = node->free.nextFree;
+    Node*  node = m_firstFree;
+    m_firstFree = node->free.nextFree;
 
-    node->data.alloc = ret;
+    node->data.alloc = alloc;
     node->data.next  = m_firstOccupied;
     m_firstOccupied  = node;
-
-    return ret;
 }
 
-void PageAllocatorWithTracking::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
+void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const &alloc)
 {
     Node* prev = nullptr;
     Node* curr = m_firstOccupied;
@@ -1320,8 +1374,6 @@ void PageAllocatorWithTracking::deallocatePage(PlatformContext& ctx, PageAllocat
             else
                 m_firstOccupied = curr->data.next;
 
-            pageAllocator.deallocatePage(ctx, alloc);
-
             // Return node to free list
             curr->free.magic    = theMagic;
             curr->free.nextFree = m_firstFree;
@@ -1335,6 +1387,65 @@ void PageAllocatorWithTracking::deallocatePage(PlatformContext& ctx, PageAllocat
 
     ctx.error("Attempted to deallocate a page that was not tracked.");
     std::abort();
+}
+
+PageAllocationsTracker::~PageAllocationsTracker() noexcept
+{
+    PlatformContext::Table nullTable;
+    PlatformContext::InlineTable nullInlineTable;
+    PlatformContext        nullCtx{nullptr, &nullTable, nullInlineTable};
+    // iterate through the occupied list if owning, freeing all allocated pages
+    if (m_owning)
+    {
+        Node* curr = m_firstOccupied;
+        while (curr)
+        {
+            PageAllocator::deallocatePage(nullCtx, curr->data.alloc);
+            curr = curr->data.next;
+        }
+    }
+
+    // free your own buffer
+    freeVirtualAddressSpace(m_base, m_bufferCapacity * sizeof(Node) + alignof(Node));
+}
+
+void PageAllocationsTracker::growFreeList(PlatformContext& ctx)
+{
+    // Check if we can commit more memory
+    if (m_bufferSize >= m_bufferCapacity)
+    {
+        ctx.error("Buffer capacity exceeded, cannot grow the free list further.");
+        std::abort();
+    }
+
+    // Calculate how much more memory to commit (doubling strategy)
+    uint32_t newNodes  = std::min(initialNodeNum, m_bufferCapacity - m_bufferSize);
+    void*    newBuffer = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(m_buffer) + m_bufferSize * sizeof(Node));
+
+    // Commit additional memory
+    if (!commitPhysicalMemory(newBuffer, newNodes * sizeof(Node)))
+    {
+        ctx.error("Failed to commit additional memory for {} nodes.", {newNodes});
+        std::abort();
+    }
+
+    // Add newly committed nodes to the free list
+    Node* newFreeListStart = reinterpret_cast<Node*>(newBuffer);
+    Node* curr             = newFreeListStart;
+
+    for (Node* next = curr + 1; curr < newFreeListStart + newNodes; ++curr, ++next)
+    {
+        curr->free.nextFree = (next < newFreeListStart + newNodes) ? next : nullptr;
+        curr->free.magic    = theMagic;
+    }
+
+    // Attach new free list to the existing one
+    if (m_firstFree)
+    {
+        curr->free.nextFree = m_firstFree;
+    }
+    m_firstFree = newFreeListStart;
+    m_bufferSize += newNodes;
 }
 
 } // namespace dmt

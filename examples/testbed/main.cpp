@@ -88,7 +88,37 @@ int main()
     if (platform.ctx().logEnabled())
         platform.ctx().log("We are in the platform now");
 
-    dmt::PageAllocator pageAllocator{platform.ctx()};
+    uint32_t                counter = 0;
+    dmt::PageAllocatorHooks hooks{
+        .allocHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+                uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
+                if (counter++ % 50 == 0)
+                    ctx.log("Inside allocation hook!");
+            },
+        .freeHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+                uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
+                if (counter++ % 50 == 0)
+                    ctx.log("inside deallocation Hook!");
+            },
+        .data = &counter,
+    };
+    dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
+    dmt::PageAllocatorHooks     testhooks{
+            .allocHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+                tracker.track(ctx, alloc);
+            },
+            .freeHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+                tracker.untrack(ctx, alloc);
+            },
+            .data = &tracker,
+    };
+    dmt::PageAllocator pageAllocator{ctx, testhooks};
     auto               pageAlloc = pageAllocator.allocatePage(platform.ctx());
     if (pageAlloc.address)
     {
@@ -99,7 +129,7 @@ int main()
     {
         platform.ctx().error("Couldn't allocate memory");
     }
-    pageAllocator.deallocatePage(platform.ctx(), pageAlloc);
+    pageAllocator.deallocPage(platform.ctx(), pageAlloc);
 
     platform.ctx().log("Completed");
 
@@ -116,13 +146,20 @@ int main()
     auto allocInfo = pageAllocator.allocatePagesForBytes(platform.ctx(), numBytes, allocations.get(), numAllocations, pageSize);
     ctx.log("Actually allocated {} Bytes, {} MB, {} GB",
             {allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u});
+    counter = 0;
+
+    for (auto const& node : tracker)
+    {
+        ctx.log("Tracker Data: Allocated page at {}, frame number {} of size {}",
+                {node.data.alloc.address, node.data.alloc.pageNum, (void*)dmt::toUnderlying(node.data.alloc.pageSize)});
+    }
 
     for (uint32_t i = 0; i != allocInfo.numPages; ++i)
     {
         dmt::PageAllocation& ref = allocations[i];
         if (ref.address != nullptr)
         {
-            pageAllocator.deallocatePage(platform.ctx(), ref);
+            pageAllocator.deallocPage(platform.ctx(), ref);
         }
     }
 }

@@ -23,7 +23,10 @@ __global__ void fillTextureKernel(uchar4* devPtr, int width, int height)
     }
 }
 
-GLuint createOpenGLTexture(int width, int height)
+namespace dmt
+{
+
+uint32_t createOpenGLTexture(int width, int height)
 {
     GLuint texture;
     glGenTextures(1, &texture);
@@ -35,9 +38,7 @@ GLuint createOpenGLTexture(int width, int height)
     return texture;
 }
 
-namespace dmt
-{
-bool RegImg(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
+bool RegImg(uint32_t tex, uint32_t width, uint32_t height)
 {
     cudaGraphicsResource_t ptrRes = nullptr;
 

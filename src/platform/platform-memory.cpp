@@ -3,6 +3,7 @@ module;
 // NOLINTBEGIN
 #include <array>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 
 #include <cassert>
@@ -14,7 +15,6 @@ module;
 #include <backward.hpp> // TODO incapsulare nel logger
 #include <map>
 #include <memory_resource>
-#include <thread>
 #endif
 
 #if defined(DMT_OS_LINUX)
@@ -90,12 +90,10 @@ public:
 
     union U
     {
-        U()
-        {
-        }
-        ~U()
-        {
-        }
+        // clang-format off
+        U() { }
+        ~U() { }
+        // clang-format on
         std::pmr::map<sid_t, std::array<char, MAX_SID_LEN>> stringTable;
     };
     U u;
@@ -154,11 +152,11 @@ public:
     HooksJanitor(PlatformContext& ctx, bool alloc) : m_ctx(ctx), m_alloc(alloc)
     {
     }
-    HooksJanitor(HooksJanitor const&)                 = delete;
-    HooksJanitor(HooksJanitor&&) noexcept             = delete;
-    HooksJanitor& operator=(HooksJanitor const &)     = delete;
-    HooksJanitor& operator=(HooksJanitor &&) noexcept = delete;
-    ~HooksJanitor() noexcept 
+    HooksJanitor(HooksJanitor const&)                = delete;
+    HooksJanitor(HooksJanitor&&) noexcept            = delete;
+    HooksJanitor& operator=(HooksJanitor const&)     = delete;
+    HooksJanitor& operator=(HooksJanitor&&) noexcept = delete;
+    ~HooksJanitor() noexcept
     {
         if (pHooks && pAlloc)
         {
@@ -177,8 +175,8 @@ public:
     PageAllocation*     pAlloc = nullptr;
 
 private:
-    PlatformContext&    m_ctx;
-    bool m_alloc;
+    PlatformContext& m_ctx;
+    bool             m_alloc;
 };
 
 #if defined(DMT_OS_LINUX)
@@ -273,7 +271,7 @@ static page_info_array getInfoForFirstNInRange(void* start, void* end, page_info
     return {pageCount, pool};
 }
 
-PageAllocator::PageAllocator(PlatformContext& ctx, PageAllocatorHooks const &hooks) : PageAllocator(hooks)
+PageAllocator::PageAllocator(PlatformContext& ctx, PageAllocatorHooks const& hooks) : PageAllocator(hooks)
 {
     // Paths for huge pages information
     char const* hugePagesPaths[] = {"/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages",
@@ -466,7 +464,7 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
 {
     if ((alloc.bits & DMT_OS_LINUX_MMAP_ALLOCATED) != 0)
     {
-        if (munmap(alloc.address, toUnderlying(alloc.pageSize)))
+        if (munmap(alloc.address, toUnderlying(alloc.pageSize) * alloc.count))
         {
 #if defined(DMT_DEBUG)
             backward::Printer    p;
@@ -514,6 +512,65 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
 #endif
 }
 
+bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
+{
+    size_t const size        = toUnderlying(EPageSize::e2MB);
+    bool         isLargePage = false;
+
+    out.address = nullptr;
+
+    if (m_mmapHugeTlbEnabled)
+    {
+        static constexpr int32_t hugeFlags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_LOCKED | MAP_POPULATE | MAP_NONBLOCK |
+                                             MAP_HUGETLB;
+        out.address = mmap(nullptr, size, PROT_READ | PROT_WRITE, hugeFlags, -1, 0);
+        if (out.address == MAP_FAILED)
+        {
+            out.address = nullptr;
+            ctx.error("`mmap` with MAP_HUGETLB failed, trying without it, error: {}", {strerror(errno)});
+        }
+        else
+        {
+            isLargePage  = true;
+            out.count    = 1;
+            out.pageSize = EPageSize::e2MB;
+            out.bits     = DMT_OS_LINUX_MMAP_ALLOCATED | DMT_OS_LINUX_HUGETLB;
+        }
+    }
+
+    if (!out.address)
+    {
+        // Fallback to standard pages
+        static constexpr int32_t normalFlags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_LOCKED | MAP_POPULATE;
+        out.address                          = mmap(nullptr, size, PROT_READ | PROT_WRITE, normalFlags, -1, 0);
+        if (out.address == MAP_FAILED)
+        {
+            out.address = nullptr;
+            ctx.error("`mmap` failed, error: {}", {strerror(errno)});
+            return false;
+        }
+        else
+        {
+            out.count    = size / toUnderlying(EPageSize::e4KB);
+            out.pageSize = EPageSize::e4KB;
+            out.bits     = DMT_OS_LINUX_MMAP_ALLOCATED | DMT_OS_LINUX_NORMAL_PAGE;
+        }
+    }
+
+    if (out.address)
+    {
+        // Touch memory to ensure allocation
+        unsigned char* ptr = static_cast<unsigned char*>(out.address);
+        for (size_t i = 0; i < size; i += toUnderlying(out.pageSize))
+        {
+            ptr[i] = 0;
+        }
+    }
+
+    // TODO
+    // addAllocInfo(ctx, isLargePage, out);
+    return true;
+}
 PageAllocator::~PageAllocator()
 {
 }
@@ -971,6 +1028,86 @@ enum PageAllocationFlags : uint32_t
     DMT_OS_WINDOWS_VIRTUALALLOC2 = 1 << 1  // Use bit 1
 };
 
+// TODO promote to class static protected, shared between windows and linux
+static void addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAllocation& ret)
+{
+    static constexpr uint32_t log4KB      = 12u;
+    uint32_t                  errorLength = 0;
+    // if you allocated the page with MEM_LARGE_PAGES, then it is locked to memory, and hence, like AWE,
+    // is NOT part of the working set of the process.
+    // Therefore you can get the physical frame nubmber with `QueryWorkingSetEx`
+    // if instead you didn't allocate with MEM_LARGE_PAGES, then the allocated block is part of
+    // the working set, and therefore you can use `QueryWorkingSet`
+    // (Requires PROCESS_QUERY_INFORMATION and PROCESS_VM_READ access right to the process)
+    MEMORY_BASIC_INFORMATION memoryInfo{};
+    size_t                   memoryInfoBytes = ret.count * sizeof(MEMORY_BASIC_INFORMATION);
+
+    // VirtualAddress = input, VirtualAttributes = output
+    PSAPI_WORKING_SET_EX_INFORMATION input{};
+    input.VirtualAddress = ret.address;
+    uint32_t inputSize   = sizeof(PSAPI_WORKING_SET_EX_INFORMATION);
+    if (!QueryWorkingSetEx(GetCurrentProcess(), &input, inputSize))
+    {
+        errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), errorLength};
+        ctx.error("Call to `QueryWorkingSetEx` failed, hence cannot check page status, error: {}", {view});
+    }
+    else if (!input.VirtualAttributes.Valid)
+    {
+        ctx.error("Call to `QueryWorkingSetEx` succeeded, but for some reason attributes are invalid, {}",
+                  {input.VirtualAttributes.Flags});
+    }
+    else
+    {
+        // POSSIBLE TODO = use `VirtualLock` to lock a page even if not large
+        bool effectivelyLarge = input.VirtualAttributes.LargePage;
+        bool locked           = input.VirtualAttributes.Locked;
+        if (isLargePageAlloc != effectivelyLarge)
+        {
+            ctx.error("Allocation should be large? {}. But found value {}", {isLargePageAlloc, effectivelyLarge});
+        }
+
+        if (isLargePageAlloc && !locked)
+        {
+            ctx.error("Allocation should be large, but its not locked");
+        }
+    }
+
+    size_t numBytes = VirtualQuery(ret.address, &memoryInfo, memoryInfoBytes);
+    if (numBytes == 0)
+    {
+        errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+        std::string_view view{sErrorBuffer.data(), errorLength};
+        ctx.error("Call to `VirtualQuery` failed, hence cannot acquire virtual page number, error: {}", {view});
+    }
+    else
+    {
+        size_t   expectedSize = toUnderlying(ret.pageSize);
+        void*    pRegion      = memoryInfo.BaseAddress;
+        uint64_t region       = (uint64_t)pRegion;
+        uint64_t mask         = toUnderlying(EPageSize::e4KB) - 1;
+        if (expectedSize != memoryInfo.RegionSize)
+        {
+            ctx.error("Expected region at {} size to be {} B but found {} B",
+                      {pRegion, expectedSize, memoryInfo.RegionSize});
+        }
+
+        if ((memoryInfo.State & MEM_COMMIT) == 0)
+        {
+            ctx.error("Expected memory region at {} to be committed, but it's not", {pRegion});
+        }
+
+        if ((region & mask) != 0)
+        {
+            ctx.error("Expected memory region at {} to be aligned to a 4KB boundary. It's not.", {pRegion});
+        }
+        else
+        {
+            ret.pageNum = region >> log4KB;
+        }
+    }
+}
+
 // NOTE: Only Pinned memory can be mapped to CUDA device memory, hence you need to
 // check that the page size is not 4KB. Mapping is carried out with cudaHostRegister
 // reserve = take virtual address space. commit = when you write to it, it will be backed by physical memory
@@ -1059,79 +1196,7 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeO
         ret.pageSize          = pageSize;
         bool isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
 
-        // if you allocated the page with MEM_LARGE_PAGES, then it is locked to memory, and hence, like AWE,
-        // is NOT part of the working set of the process.
-        // Therefore you can get the physical frame nubmber with `QueryWorkingSetEx`
-        // if instead you didn't allocate with MEM_LARGE_PAGES, then the allocated block is part of
-        // the working set, and therefore you can use `QueryWorkingSet`
-        // (Requires PROCESS_QUERY_INFORMATION and PROCESS_VM_READ access right to the process)
-        MEMORY_BASIC_INFORMATION memoryInfo{};
-        size_t                   memoryInfoBytes = ret.count * sizeof(MEMORY_BASIC_INFORMATION);
-
-        // VirtualAddress = input, VirtualAttributes = output
-        PSAPI_WORKING_SET_EX_INFORMATION input{};
-        input.VirtualAddress = ret.address;
-        uint32_t inputSize   = sizeof(PSAPI_WORKING_SET_EX_INFORMATION);
-        if (!QueryWorkingSetEx(GetCurrentProcess(), &input, inputSize))
-        {
-            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), errorLength};
-            ctx.error("Call to `QueryWorkingSetEx` failed, hence cannot check page status, error: {}", {view});
-        }
-        else if (!input.VirtualAttributes.Valid)
-        {
-            ctx.error("Call to `QueryWorkingSetEx` succeeded, but for some reason attributes are invalid, {}",
-                      {input.VirtualAttributes.Flags});
-        }
-        else
-        {
-            // POSSIBLE TODO = use `VirtualLock` to lock a page even if not large
-            bool effectivelyLarge = input.VirtualAttributes.LargePage;
-            bool locked           = input.VirtualAttributes.Locked;
-            if (isLargePageAlloc != effectivelyLarge)
-            {
-                ctx.error("Allocation should be large? {}. But found value {}", {isLargePageAlloc, effectivelyLarge});
-            }
-
-            if (isLargePageAlloc && !locked)
-            {
-                ctx.error("Allocation should be large, but its not locked");
-            }
-        }
-
-        size_t numBytes = VirtualQuery(ret.address, &memoryInfo, memoryInfoBytes);
-        if (numBytes == 0)
-        {
-            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), errorLength};
-            ctx.error("Call to `VirtualQuery` failed, hence cannot acquire virtual page number, error: {}", {view});
-        }
-        else
-        {
-            size_t   expectedSize = toUnderlying(ret.pageSize);
-            void*    pRegion      = memoryInfo.BaseAddress;
-            uint64_t region       = (uint64_t)pRegion;
-            uint64_t mask         = toUnderlying(EPageSize::e4KB) - 1;
-            if (expectedSize != memoryInfo.RegionSize)
-            {
-                ctx.error("Expected region at {} size to be {} B but found {} B",
-                          {pRegion, expectedSize, memoryInfo.RegionSize});
-            }
-
-            if ((memoryInfo.State & MEM_COMMIT) == 0)
-            {
-                ctx.error("Expected memory region at {} to be committed, but it's not", {pRegion});
-            }
-
-            if ((region & mask) != 0)
-            {
-                ctx.error("Expected memory region at {} to be aligned to a 4KB boundary. It's not.", {pRegion});
-            }
-            else
-            {
-                ret.pageNum = region >> log4KB;
-            }
-        }
+        addAllocInfo(ctx, isLargePageAlloc, ret);
 
 #if defined(DMT_DEBUG)
         ctx.trace(
@@ -1169,8 +1234,61 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeO
     return ret;
 }
 
+bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
+{
+    DWORD        allocationFlags = MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES;
+    DWORD const  protectionFlags = PAGE_READWRITE;
+    size_t const size            = toUnderlying(EPageSize::e2MB);
+    out.address                  = nullptr;
+    bool     isLargePage         = false;
+    uint32_t errorLength         = 0;
+    if (m_largePageEnabled)
+    {
+        out.address = VirtualAlloc(nullptr, size, allocationFlags, protectionFlags);
+        if (!out.address)
+        {
+            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), errorLength};
+            ctx.error("`VirtualAlloc` with MEM_LARGE_PAGES, trying without it, error: {}", {view});
+        }
+        else
+        {
+            out.count    = 1;
+            out.pageSize = EPageSize::e2MB;
+            out.bits     = DMT_OS_WINDOWS_LARGE_PAGE;
+            isLargePage  = true;
+        }
+    }
+
+    if (!out.address)
+    {
+        allocationFlags &= ~MEM_LARGE_PAGES;
+        out.address = VirtualAlloc(nullptr, size, allocationFlags, protectionFlags);
+        if (!out.address)
+        {
+            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), errorLength};
+            ctx.error("`VirtualAlloc` failed, error: {}", {view});
+            return false;
+        }
+        else
+        {
+            out.count    = num4KBIn2MB;
+            out.pageSize = EPageSize::e4KB;
+            out.bits     = DMT_OS_WINDOWS_SMALL_PAGE;
+        }
+    }
+
+    addAllocInfo(ctx, isLargePage, out);
+
+    return true;
+}
+
 void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
 {
+    // the page allocation might be part of the memory portion itself, we need to copy it
+    PageAllocation allocCopy = alloc;
+
     // decommit = get out of memory, but leave the virtual address space reserved
     // POSSIBLE TODO. The other type, release, will decommit + free up the virtual address space
     DWORD freeType = MEM_RELEASE;
@@ -1179,7 +1297,7 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
         uint32_t         errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
         std::string_view view{sErrorBuffer.data(), errorLength};
 #if defined(DMT_DEBUG)
-        ctx.error("Failed to Free memory at {}, error {}, Printing Stacktrace", {alloc.address, view});
+        ctx.error("Failed to Free memory at {}, error {}, Printing Stacktrace", {allocCopy.address, view});
         if (ctx.errorEnabled())
         {
             backward::Printer    p;
@@ -1193,7 +1311,8 @@ void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
     else
     {
 #if defined(DMT_DEBUG)
-        ctx.trace("Deallocated memory at {} size {}, Printing stacktrace", {alloc.address, toUnderlying(alloc.pageSize)});
+        ctx.trace("Deallocated memory at {} size {}, Printing stacktrace",
+                  {allocCopy.address, toUnderlying(allocCopy.pageSize)});
         if (ctx.traceEnabled())
         {
             backward::Printer    p;
@@ -1306,47 +1425,45 @@ bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pa
     return supported;
 }
 
-// PageAllocator ------------------------------------------------------------------------------------------------------
+// PageAllocatorTracker -----------------------------------------------------------------------------------------------
+
 static void logAndAbort(PlatformContext& ctx, std::string_view str, uint32_t initialNodeNum)
 {
-        ctx.error("Couldn't commit the first {} nodes into the reserved space", { initialNodeNum });
+    ctx.error("Couldn't commit the first {} nodes into the reserved space", {initialNodeNum});
 #if defined(DMT_OS_WINDOWS)
-        size_t errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), errorLength};
-        ctx.error("{}, error: {}", {str, view});
+    size_t           errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+    std::string_view view{sErrorBuffer.data(), errorLength};
+    ctx.error("{}, error: {}", {str, view});
 #endif
-        std::abort();
+    std::abort();
 }
 
-PageAllocationsTracker::PageAllocationsTracker(
-    PlatformContext& ctx, 
-    uint32_t pageTrackCapacity, 
-    uint32_t allocTrackCapacity)
+PageAllocationsTracker::PageAllocationsTracker(PlatformContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity)
 {
     using namespace std::string_view_literals;
     // reserve virtual address space the double ended buffer
-    m_pageTracking.m_capacity = pageTrackCapacity;
-    m_allocTracking.m_capacity = allocTrackCapacity;
-    m_pageTracking.m_growBackwards = false;
+    m_pageTracking.m_capacity       = pageTrackCapacity;
+    m_allocTracking.m_capacity      = allocTrackCapacity;
+    m_pageTracking.m_growBackwards  = false;
     m_allocTracking.m_growBackwards = true;
     size_t sysAlign                 = systemAlignment();
     assert(sysAlign >= alignof(PageNode) && sysAlign >= alignof(AllocNode));
 
     size_t pageFreeListBytes  = initialNodeNum * sizeof(PageNode);
-    size_t allocFreeListBytes = initialNodeNum * sizeof(AllocNode); 
+    size_t allocFreeListBytes = initialNodeNum * sizeof(AllocNode);
     size_t allocOffset        = m_allocTracking.m_capacity * sizeof(AllocNode);
     size_t pageOffset         = m_pageTracking.m_capacity * sizeof(PageNode);
     m_bufferBytes             = allocOffset + pageOffset;
-    m_base = reserveVirtualAddressSpace(m_bufferBytes);
+    m_base                    = reserveVirtualAddressSpace(m_bufferBytes);
     if (!m_base)
     {
-        ctx.error("Couldn't reserve virtual address space for {} bytes", { m_bufferBytes });
+        ctx.error("Couldn't reserve virtual address space for {} bytes", {m_bufferBytes});
         std::abort();
     }
 
     // commit `initialNodeNum` for the low address free list and the high address free list
-    uintptr_t end  = reinterpret_cast<uintptr_t>(m_base) + m_bufferBytes;
-    void* allocBase = alignToBackward(reinterpret_cast<void*>(end - allocFreeListBytes), sysAlign);
+    uintptr_t end       = reinterpret_cast<uintptr_t>(m_base) + m_bufferBytes;
+    void*     allocBase = alignToBackward(reinterpret_cast<void*>(end - allocFreeListBytes), sysAlign);
     if (!commitPhysicalMemory(m_base, pageFreeListBytes))
     {
         logAndAbort(ctx, "pageFreeList, VirtualAlloc MEM_COMMIT"sv, initialNodeNum);
@@ -1357,7 +1474,7 @@ PageAllocationsTracker::PageAllocationsTracker(
     }
 
     // set head and reset each list
-    void* pEnd  = reinterpret_cast<void*>(end - sizeof(AllocNode));
+    void* pEnd = reinterpret_cast<void*>(end - sizeof(AllocNode));
     std::memset(pEnd, 0, 32);
     m_pageBase  = alignTo(m_base, alignof(PageNode));
     m_allocBase = alignToBackward(pEnd, alignof(AllocNode));
@@ -1383,7 +1500,7 @@ static bool shouldTrack(PlatformContext& ctx, T const& alloc)
     return ret;
 }
 
-void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const &alloc)
+void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const& alloc)
 {
     if (!m_pageTracking.m_freeHead)
     {
@@ -1396,7 +1513,7 @@ void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const &a
     }
 }
 
-void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const &alloc)
+void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const& alloc)
 {
     if (m_pageTracking.removeNode(alloc))
     {
@@ -1407,7 +1524,7 @@ void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const 
     std::abort();
 }
 
-void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const &alloc)
+void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const& alloc)
 {
     if (!m_allocTracking.m_freeHead)
     {
@@ -1420,7 +1537,7 @@ void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const &a
     }
 }
 
-void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const &alloc)
+void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const& alloc)
 {
     if (m_allocTracking.removeNode(alloc))
     {
@@ -1433,13 +1550,153 @@ void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const 
 
 PageAllocationsTracker::~PageAllocationsTracker() noexcept
 {
-    PlatformContext::Table nullTable;
+    PlatformContext::Table       nullTable;
     PlatformContext::InlineTable nullInlineTable;
-    PlatformContext        nullCtx{nullptr, &nullTable, nullInlineTable};
-    assert(!m_pageTracking.m_occupiedHead && !m_allocTracking.m_occupiedHead 
-        && "some allocated memory is outliving the tracker");
+    PlatformContext              nullCtx{nullptr, &nullTable, nullInlineTable};
+    assert(!m_pageTracking.m_occupiedHead && !m_allocTracking.m_occupiedHead &&
+           "some allocated memory is outliving the tracker");
 
     freeVirtualAddressSpace(m_base, m_bufferBytes);
 }
+
+// StackAllocator -----------------------------------------------------------------------------------------------------
+StackAllocator::StackAllocator(PlatformContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks)
+{
+    // try to allocate the first 2MB stack buffer
+    PageAllocation alloc;
+    if (!pageAllocator.allocate2MB(ctx, alloc))
+    {
+        ctx.error("Couldn't allocate 2MB buffer for the stack allocator, aborting ...");
+        std::abort();
+    }
+
+    // create the StackHeader structure in the beginning of the page
+    assert(alloc.address == alignTo(alloc.address, alignof(StackHeader)) &&
+           "page address isn't "
+           "aligned to a stack header size boundary");
+
+    StackHeader& header = *reinterpret_cast<StackHeader*>(alloc.address);
+    header.alloc        = alloc;
+    header.bp           = reinterpret_cast<uintptr_t>(&header) + sizeof(StackHeader);
+    header.sp           = header.bp;
+    header.prev         = nullptr;
+    header.next         = nullptr;
+    header.notUsedFor   = 0;
+
+    // wire the buffer
+    m_pFirst = &header;
+    m_pLast  = &header;
+
+    // copy hooks
+    m_hooks = hooks;
+}
+
+void StackAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator)
+{
+    std::lock_guard lock{m_mtx};
+
+    // start from last and free all buffers
+    for (StackHeader* curr = m_pLast; curr != nullptr;)
+    {
+        StackHeader* prev = curr->prev;
+        ctx.trace("Deallocating buffer at address: {}", {reinterpret_cast<void*>(curr)});
+        pageAllocator.deallocatePage(ctx, curr->alloc);
+        curr = prev;
+    }
+
+    m_pFirst = nullptr;
+    m_pLast  = nullptr;
+    ctx.trace("Cleanup complete. All buffers have been deallocated.");
+}
+
+void* StackAllocator::allocate(PlatformContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment)
+{
+    if (size > bufferSize || (alignment & (alignment - 1)) != 0)
+    {
+        ctx.error("Invalid allocation parameters: size={}, alignment={}", {size, alignment});
+        return nullptr;
+    }
+
+    std::lock_guard lock{m_mtx};
+    assert(m_pFirst);
+
+    // verify that sp is within the bounds [bp, bp+bufferSize)
+    // if yes, then verify that, given size and alignment, we can satisfy the allocation
+    // if yes again, then compute the aligned pointer, update sp, and return
+    // if any of the aforementioned conditions failed, we need to try onto the next buffer the same procedure
+    // if there's no next buffer, then call `newBuffer` and try again
+    while (true)
+    {
+        for (StackHeader* curr = m_pLast; curr != nullptr; curr = curr->next)
+        {
+            uintptr_t alignedSP = alignToAddr(curr->sp, alignment);
+            uintptr_t end       = curr->bp + bufferSize;
+
+            if (alignedSP + size <= end)
+            {
+                void* ptr        = reinterpret_cast<void*>(alignedSP);
+                curr->sp         = alignedSP + size;
+                curr->notUsedFor = 0;
+                return ptr;
+            }
+        }
+
+        if (!newBuffer(ctx, pageAllocator))
+        {
+            ctx.error("Allocation failed: size={}, alignment={}", {size, alignment});
+            return nullptr;
+        }
+    }
+
+    return nullptr;
+}
+
+void StackAllocator::reset(PlatformContext& ctx, PageAllocator& pageAllocator)
+{
+    std::lock_guard lock{m_mtx};
+    assert(m_pFirst);
+
+    for (StackHeader* curr = m_pLast; curr != nullptr;)
+    {
+        curr->sp          = curr->bp;
+        StackHeader* prev = curr->prev;
+
+        // if you didn't use the buffer for a certain number of times, then deallocate it
+        if (++curr->notUsedFor > notUsedForThreshold)
+        {
+            pageAllocator.deallocatePage(ctx, curr->alloc);
+        }
+        curr = prev;
+        if (prev)
+            prev->next = nullptr; // there's the assumption that you are using buffers in order. how to check?
+    }
+}
+
+bool StackAllocator::newBuffer(PlatformContext& ctx, PageAllocator& pageAllocator)
+{
+    assert(m_pLast);
+    PageAllocation alloc;
+    if (!pageAllocator.allocate2MB(ctx, alloc))
+    {
+        ctx.error("Failed to allocate new 2MB buffer.");
+        return false;
+    }
+
+    // Create the new StackHeader at the beginning of the new buffer
+    StackHeader& newHeader = *reinterpret_cast<StackHeader*>(alloc.address);
+    newHeader.alloc        = alloc;
+    newHeader.bp           = reinterpret_cast<uintptr_t>(&newHeader) + sizeof(StackHeader);
+    newHeader.sp           = newHeader.bp;
+    newHeader.prev         = m_pLast;
+    newHeader.next         = nullptr;
+    newHeader.notUsedFor   = 0;
+
+    // Update the chain
+    m_pLast->next = &newHeader;
+    m_pLast       = &newHeader;
+
+    return true;
+}
+
 
 } // namespace dmt

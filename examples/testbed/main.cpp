@@ -8,6 +8,7 @@ module;
 #include <thread>
 #include <vector>
 
+#include <cassert>
 #include <cstring>
 
 module platform;
@@ -63,6 +64,67 @@ void testLoggingInMultithreadedEnvironment(dmt::ConsoleLogger& logger,
 
     // Ensure all threads completed
     logger.log("All threads completed logging. Total threads: {}", {completedThreads.load()});
+}
+
+void testStackAllocator(dmt::PlatformContext& ctx, dmt::PageAllocator& pageAllocator, dmt::StackAllocator& stackAllocator)
+{
+    // Allocate memory with different sizes and alignments
+    void* ptr1 = stackAllocator.allocate(ctx, pageAllocator, 128, 16);
+    assert(ptr1 != nullptr && reinterpret_cast<uintptr_t>(ptr1) % 16 == 0);
+    ctx.log("Allocated 128 bytes aligned to 16 at {}", {ptr1});
+
+    void* ptr2 = stackAllocator.allocate(ctx, pageAllocator, 256, 32);
+    assert(ptr2 != nullptr && reinterpret_cast<uintptr_t>(ptr2) % 32 == 0);
+    ctx.log("Allocated 256 bytes aligned to 32 at {}", {ptr2});
+
+    // Reset the allocator and allocate again
+    stackAllocator.reset(ctx, pageAllocator);
+    ctx.log("Allocator reset.");
+
+    void* ptr3 = stackAllocator.allocate(ctx, pageAllocator, 512, 64);
+    assert(ptr3 != nullptr && reinterpret_cast<uintptr_t>(ptr3) % 64 == 0);
+    ctx.log("Allocated 512 bytes aligned to 64 at {}", {ptr3});
+
+    // Attempt to allocate more than buffer size (should fail gracefully)
+    void* ptr4 = stackAllocator.allocate(ctx, pageAllocator, 3 * 1024 * 1024, 128); // 3 MB
+    assert(ptr4 == nullptr);
+    ctx.log("Failed to allocate 3 MB as expected.");
+
+    // Cleanup resources
+    stackAllocator.cleanup(ctx, pageAllocator);
+    ctx.log("Allocator cleaned up successfully.");
+}
+
+void testAllocations(dmt::PlatformContext&        ctx,
+                     dmt::PageAllocator&          pageAllocator,
+                     dmt::PageAllocationsTracker& tracker,
+                     uint32_t&                    counter)
+{
+    size_t   numBytes       = dmt::toUnderlying(dmt::EPageSize::e1GB);
+    uint32_t numAllocations = 0;
+    ctx.log("Attempting request to allocate {} Bytes, {} GB", {numBytes, numBytes >> 30u});
+
+    auto pageSize    = pageAllocator.allocatePagesForBytesQuery(ctx, numBytes, numAllocations);
+    auto allocations = std::make_unique<dmt::PageAllocation[]>(numAllocations);
+    auto allocInfo   = pageAllocator.allocatePagesForBytes(ctx, numBytes, allocations.get(), numAllocations, pageSize);
+    ctx.log("Actually allocated {} Bytes, {} MB, {} GB",
+            {allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u});
+    counter = 0;
+
+    for (auto const& node : tracker.pageAllocations())
+    {
+        ctx.log("Tracker Data: Allocated page at {}, frame number {} of size {}",
+                {node.data.alloc.address, node.data.alloc.pageNum, (void*)dmt::toUnderlying(node.data.alloc.pageSize)});
+    }
+
+    for (uint32_t i = 0; i != allocInfo.numPages; ++i)
+    {
+        dmt::PageAllocation& ref = allocations[i];
+        if (ref.address != nullptr)
+        {
+            pageAllocator.deallocPage(ctx, ref);
+        }
+    }
 }
 
 } // namespace
@@ -137,29 +199,10 @@ int main()
     dmt::sid_t       sid = dmt::operator""_sid(str.data(), str.size());
     platform.ctx().log("{}", {dmt::lookupInternedStr(sid)});
 
-    size_t   numBytes       = dmt::toUnderlying(dmt::EPageSize::e1GB);
-    uint32_t numAllocations = 0;
-    ctx.log("Attempting request to allocate {} Bytes, {} GB", {numBytes, numBytes >> 30u});
+    //testAllocations(ctx, pageAllocator, tracker, counter);
 
-    auto pageSize    = pageAllocator.allocatePagesForBytesQuery(platform.ctx(), numBytes, numAllocations);
-    auto allocations = std::make_unique<dmt::PageAllocation[]>(numAllocations);
-    auto allocInfo = pageAllocator.allocatePagesForBytes(platform.ctx(), numBytes, allocations.get(), numAllocations, pageSize);
-    ctx.log("Actually allocated {} Bytes, {} MB, {} GB",
-            {allocInfo.numBytes, allocInfo.numBytes >> 20u, allocInfo.numBytes >> 30u});
-    counter = 0;
-
-    for (auto const& node : tracker.pageAllocations())
-    {
-        ctx.log("Tracker Data: Allocated page at {}, frame number {} of size {}",
-                {node.data.alloc.address, node.data.alloc.pageNum, (void*)dmt::toUnderlying(node.data.alloc.pageSize)});
-    }
-
-    for (uint32_t i = 0; i != allocInfo.numPages; ++i)
-    {
-        dmt::PageAllocation& ref = allocations[i];
-        if (ref.address != nullptr)
-        {
-            pageAllocator.deallocPage(platform.ctx(), ref);
-        }
-    }
+    dmt::AllocatorHooks defHooks;
+    dmt::StackAllocator stackAllocator{ctx, pageAllocator, defHooks};
+    testStackAllocator(ctx, pageAllocator, stackAllocator);
+    stackAllocator.cleanup(ctx, pageAllocator);
 }

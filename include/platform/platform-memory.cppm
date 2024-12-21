@@ -134,6 +134,7 @@ module;
 
 #include <array>
 #include <string_view>
+#include <thread>
 
 #include <cassert>
 #include <compare>
@@ -199,10 +200,21 @@ void* alignTo(void* address, size_t alignment)
     size_t const mask = alignment - 1;
     assert((alignment & mask) == 0 && "Alignment must be a power of two.");
 
-    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+    uintptr_t addr        = reinterpret_cast<uintptr_t>(address);
     uintptr_t alignedAddr = (addr + mask) & ~mask;
 
     return reinterpret_cast<void*>(alignedAddr);
+}
+
+uintptr_t alignToAddr(uintptr_t address, size_t alignment)
+{
+    // Ensure alignment is a power of two (required for bitwise operations).
+    size_t const mask = alignment - 1;
+    assert((alignment & mask) == 0 && "Alignment must be a power of two.");
+
+    uintptr_t alignedAddr = (address + mask) & ~mask;
+
+    return alignedAddr;
 }
 
 void* alignToBackward(void* address, size_t alignment)
@@ -407,9 +419,10 @@ class alignas(8) PageAllocator
 {
 public:
     // -- Types --
+    static constexpr uint32_t num4KBIn2MB = toUnderlying(EPageSize::e2MB) / toUnderlying(EPageSize::e4KB);
 
     // -- Construtors/Copy Control --
-    PageAllocator(PlatformContext& ctx, PageAllocatorHooks const &hooks);
+    PageAllocator(PlatformContext& ctx, PageAllocatorHooks const& hooks);
     PageAllocator(PageAllocator const&)            = default;
     PageAllocator(PageAllocator&&) noexcept        = default;
     PageAllocator& operator=(PageAllocator const&) = default;
@@ -429,6 +442,7 @@ public:
                                               uint32_t&                   inOutNum,
                                               EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
     bool           checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize);
+    bool           allocate2MB(PlatformContext& ctx, PageAllocation& out);
     PageAllocation allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
     static void    deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
     void           deallocPage(PlatformContext& ctx, PageAllocation& alloc);
@@ -455,7 +469,9 @@ protected:
 #endif
 
 private:
-    explicit PageAllocator(PageAllocatorHooks const& hooks) : m_hooks(hooks) {}
+    explicit PageAllocator(PageAllocatorHooks const& hooks) : m_hooks(hooks)
+    {
+    }
 
     //-- Members --
 #if defined(DMT_OS_LINUX)
@@ -478,34 +494,43 @@ private:
 
 static_assert(alignof(PageAllocator) == 8 && sizeof(PageAllocator) == 48);
 
-struct alignas(8) AllocationInfo 
+struct alignas(8) AllocationInfo
 {
     void*      address;
-    uint64_t allocTime; // millieconds from start of app
-    uint64_t freeTime;  // 0 means not freed yet
-    size_t   size;
-    sid_t    sid;
-    uint32_t alignment;
+    uint64_t   allocTime; // millieconds from start of app
+    uint64_t   freeTime;  // 0 means not freed yet
+    size_t     size;
+    sid_t      sid;
+    uint32_t   alignment;
     EMemoryTag tag;
     //TODO handle source location
     unsigned char padding[8];
 };
 static_assert(sizeof(AllocationInfo) == 56 && alignof(AllocationInfo) == 8);
 
+struct AllocatorHooks
+{
+    void (*allocHook)(void* data, PlatformContext& ctx, AllocationInfo const& alloc) =
+        [](void* data, PlatformContext& ctx, AllocationInfo const& alloc) {};
+    void (*freeHook)(void* data, PlatformContext& ctx, AllocationInfo const& alloc) =
+        [](void* data, PlatformContext& ctx, AllocationInfo const& alloc) {};
+    void* data = nullptr;
+};
+
 template <typename T>
     requires(std::is_standard_layout_v<T> && std::is_trivially_destructible_v<T>)
-union Node 
+union Node
 {
     using DType = T;
     struct TrackData
     {
-        T alloc;
+        T     alloc;
         Node* next;
     };
     struct Free
     {
         uint64_t magic;
-        Node* nextFree;
+        Node*    nextFree;
     };
     TrackData data;
     Free      free;
@@ -513,7 +538,7 @@ union Node
 
 template union Node<PageAllocation>;
 template union Node<AllocationInfo>;
-using PageNode = Node<PageAllocation>;
+using PageNode  = Node<PageAllocation>;
 using AllocNode = Node<AllocationInfo>;
 static_assert(sizeof(PageNode) == 32 && alignof(PageNode) == 8);
 static_assert(sizeof(AllocNode) == 64 && alignof(AllocNode) == 8);
@@ -533,7 +558,9 @@ public:
     class Iterator
     {
     public:
-        explicit Iterator(NodeType* node) : m_current(node) { }
+        explicit Iterator(NodeType* node) : m_current(node)
+        {
+        }
 
         Iterator& operator++()
         {
@@ -698,15 +725,17 @@ template class FreeList<AllocNode>;
 // all memory at once
 // TODO = for now it works with 1 page, then write a per-platform method to reserve virtual address space and
 // commit on usage
-// with a single 4KB bootstrap page, you can allocate 128 nodes (ie pages), which corresponds to 512 KB if all 
+// with a single 4KB bootstrap page, you can allocate 128 nodes (ie pages), which corresponds to 512 KB if all
 // pages are of 4KB. Theferore we need more memory. A good strategy would be to allocate a big enough portion
-    // of the virtual address space.
+// of the virtual address space.
 class alignas(8) PageAllocationsTracker
 {
 public:
-    struct PageAllocationView 
+    struct PageAllocationView
     {
-        PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking) { }
+        PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking)
+        {
+        }
         auto begin()
         {
             return m_pageTracking->beginAllocated();
@@ -717,11 +746,13 @@ public:
         }
 
     private:
-        FreeList<PageNode> *m_pageTracking;
+        FreeList<PageNode>* m_pageTracking;
     };
-    struct AllocationView 
+    struct AllocationView
     {
-        AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking) { }
+        AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking)
+        {
+        }
         auto begin()
         {
             return m_allocTracking->beginAllocated();
@@ -730,12 +761,17 @@ public:
         {
             return m_allocTracking->endAllocated();
         }
+
     private:
-        FreeList<AllocNode> *m_allocTracking;
+        FreeList<AllocNode>* m_allocTracking;
     };
 
     // Forward iterator for occupied list
     PageAllocationsTracker(PlatformContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity);
+    PageAllocationsTracker(PageAllocationsTracker const&)                = delete;
+    PageAllocationsTracker(PageAllocationsTracker&&) noexcept            = delete;
+    PageAllocationsTracker& operator=(PageAllocationsTracker const&)     = delete;
+    PageAllocationsTracker& operator=(PageAllocationsTracker&&) noexcept = delete;
     ~PageAllocationsTracker() noexcept;
 
     PageAllocationView pageAllocations()
@@ -749,16 +785,16 @@ public:
     }
 
     // start simple: Handle embedded free list inside bootstrap page with allocation and deallocation functions
-    void track(PlatformContext& ctx, PageAllocation const &alloc);
-    void untrack(PlatformContext& ctx, PageAllocation const &alloc);
-    void track(PlatformContext& ctx, AllocationInfo const &alloc);
-    void untrack(PlatformContext& ctx, AllocationInfo const &alloc);
+    void track(PlatformContext& ctx, PageAllocation const& alloc);
+    void untrack(PlatformContext& ctx, PageAllocation const& alloc);
+    void track(PlatformContext& ctx, AllocationInfo const& alloc);
+    void untrack(PlatformContext& ctx, AllocationInfo const& alloc);
 
 private:
     static constexpr uint32_t initialNodeNum = 128;
     template <typename NodeType>
         requires(TemplateInstantiationOf<Node, NodeType>)
-    static void growFreeList(PlatformContext& ctx, FreeList<NodeType> &freeList, void* base)
+    static void growFreeList(PlatformContext& ctx, FreeList<NodeType>& freeList, void* base)
     {
         // Check if we can commit more memory
         if (freeList.m_freeSize >= freeList.m_capacity)
@@ -799,37 +835,59 @@ private:
         freeList.growList(newNodes, newFreeListStart);
     }
 
-    FreeList<PageNode> m_pageTracking;
+    FreeList<PageNode>  m_pageTracking;
     FreeList<AllocNode> m_allocTracking;
-    void* m_base   = nullptr;
-    void* m_buffer = nullptr;
-    size_t m_bufferBytes;
+    void*               m_base   = nullptr;
+    void*               m_buffer = nullptr;
+    size_t              m_bufferBytes;
     void*               m_pageBase;
     void*               m_allocBase;
     unsigned char       m_padding[24];
 };
 static_assert(sizeof(PageAllocationsTracker) == 128 && alignof(PageAllocationsTracker) == 8);
 
+//TODO for now you manually pass instances of PlatformContext and PageAllocator, work on a dependency injection tree
+// class later
 class StackAllocator
 {
+public:
+    StackAllocator(PlatformContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks);
+    StackAllocator(StackAllocator const&)                = delete;
+    StackAllocator(StackAllocator&&) noexcept            = delete;
+    StackAllocator& operator=(StackAllocator const&)     = delete;
+    StackAllocator& operator=(StackAllocator&&) noexcept = delete;
+    // To be called before destruction, eg with a janitor class. When DI works, remove this
+    void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator);
+
+    void* allocate(PlatformContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment);
+    void  reset(PlatformContext& ctx, PageAllocator& pageAllocator);
+
 private:
     struct alignas(8) StackHeader
     {
-        uintptr_t bp;
-        uintptr_t sp;
-        size_t    sz;
-        StackHeader* next;
+        PageAllocation alloc;
+        uintptr_t      bp; // not necessary, but there's excess space to get to 64 bytes
+        uintptr_t      sp; // empty ascending stack
+        StackHeader*   prev;
+        StackHeader*   next;
+        uint8_t        notUsedFor;
     };
-    static_assert(sizeof(StackHeader) == 32 && alignof(StackHeader) == 8);
+    static_assert(sizeof(StackHeader) == 64 && alignof(StackHeader) == 8);
+    static constexpr size_t   bufferSize          = toUnderlying(EPageSize::e2MB);
+    static constexpr uint32_t notUsedForThreshold = 10;
+
+    bool newBuffer(PlatformContext& ctx, PageAllocator& pageAllocator);
 
     // cleanup: until last is different than first, give back the buffer to the page tracker, which will be
-    // allocated in the "bootstrap memory page", which is a minimuum (4KB) page containing whathever data the 
+    // allocated in the "bootstrap memory page", which is a minimuum (4KB) page containing whathever data the
     // application needs to track in order to start
     // the bootstrap page should contain, as last member, the allocation tracking data, because it is variable length
     // there might be the possibility we have to track 2 variable length arrays, eg
 
-    StackHeader *m_pFirst;
-    StackHeader *m_pLast; 
+    AllocatorHooks     m_hooks;
+    mutable std::mutex m_mtx;
+    StackHeader*       m_pFirst;
+    StackHeader*       m_pLast;
 };
 
 } // namespace dmt

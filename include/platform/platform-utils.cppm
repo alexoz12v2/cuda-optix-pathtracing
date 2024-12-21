@@ -7,9 +7,9 @@
  */
 module;
 
+#include <concepts>
 #include <source_location>
 #include <string_view>
-#include <concepts>
 
 #include <cmath>
 #include <cstdint>
@@ -159,8 +159,8 @@ private:
 namespace dmt
 {
 
-template<std::integral I>
-constexpr I ceilDiv(I num, I den) 
+template <std::integral I>
+constexpr I ceilDiv(I num, I den)
 {
     return (num + den - 1) / den;
 }

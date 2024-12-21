@@ -33,3 +33,7 @@ foreach(FOLDER IN ITEMS include src test benchmark examples)
 endforeach()
 
 execute_process(COMMAND ${CLANG_FORMAT_EXECUTABLE} -i ${FORMAT_SOURCES})
+add_custom_target(dmt-clang-format 
+  COMMAND ${CLANG_FORMAT_EXECUTABLE} -i ${FORMAT_SOURCES}
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)

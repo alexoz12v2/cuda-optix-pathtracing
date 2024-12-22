@@ -158,7 +158,7 @@ void kernel(float const* A, float const* B, float scalar, float* C, uint32_t N)
     cudaMemcpy(C, d_C, N * sizeof(float), cudaMemcpyDeviceToHost);
 }
 
-bool RegImg(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
+bool RegImgSurf(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
 {
     //used to map the OpenGL texture to a CUDA buffer that can be used in a CUDA kernel
     cudaGraphicsResource_t ptrRes = nullptr;

@@ -133,6 +133,7 @@
 module;
 
 #include <array>
+#include <bit>
 #include <string_view>
 #include <thread>
 
@@ -501,7 +502,8 @@ struct alignas(8) AllocationInfo
     uint64_t   freeTime;  // 0 means not freed yet
     size_t     size;
     sid_t      sid;
-    uint32_t   alignment;
+    uint32_t   alignment : 31;
+    uint32_t   transient : 1; // whether to automatically untrack this after 1 iteration
     EMemoryTag tag;
     //TODO handle source location
     unsigned char padding[8];
@@ -514,7 +516,8 @@ struct AllocatorHooks
         [](void* data, PlatformContext& ctx, AllocationInfo const& alloc) {};
     void (*freeHook)(void* data, PlatformContext& ctx, AllocationInfo const& alloc) =
         [](void* data, PlatformContext& ctx, AllocationInfo const& alloc) {};
-    void* data = nullptr;
+    void (*cleanTransients)(void* data, PlatformContext& ctx) = [](void* data, PlatformContext& ctx) {};
+    void* data                                                = nullptr;
 };
 
 template <typename T>
@@ -789,6 +792,7 @@ public:
     void untrack(PlatformContext& ctx, PageAllocation const& alloc);
     void track(PlatformContext& ctx, AllocationInfo const& alloc);
     void untrack(PlatformContext& ctx, AllocationInfo const& alloc);
+    // TODO add clean transient
 
 private:
     static constexpr uint32_t initialNodeNum = 128;
@@ -888,6 +892,163 @@ private:
     mutable std::mutex m_mtx;
     StackHeader*       m_pFirst;
     StackHeader*       m_pLast;
+};
+
+// MultiPoolAllocator
+// should handle pool sizes from 32 bytes to 256 bytes
+// - x86_64 systems actually use 48 bits for virtual addresses. Actually, scratch that, with the
+//   latest PML5 (https://en.wikipedia.org/wiki/Intel_5-level_paging) extended virtual adderesses
+//   to 57 bits. This means that the high 7 bits of a memory address are unused, and we can make good use of them
+// - adding to the fact that minimum block size is 32 Bytes, hence aligned to a 32 Byte boundary, we have an additional
+//   5 bits free to use
+// hence, our tagged pointers can exploit 12 bits of information in total
+// Remember: it holds only for host addresses, and to regain access to the original address, you need to mask out
+// the low bits (5), and sign extend from bit 56 to bit 63
+// Reference test code:
+//   alignas(32) int data  = 42; // Ensure alignment
+//   uint16_t      trueTag = (1u << 12u) - 1;
+//   TaggedPointer tp(&data, trueTag);
+//   std::cout << "True Tag 0x" << std::hex << trueTag << std::dec << '\n';
+//   std::cout << "Raw pointer: " << tp.getPointer() << "\n";
+//   std::cout << "True Pointer: " << &data << '\n';
+//   std::cout << "Tag: 0x" << std::hex << tp.getTag() << "\n";
+//   std::cout << "Dereferenced value: " << std::dec << tp.operator* <int>() << "\n";
+// TODO: we can template this class on the number of low bits we expect to be zeroed out
+#if !defined(DMT_ARCH_X86_64)
+#error "Pointer Tagging relies heavily on x86_64's virtual addreess format"
+#endif
+class TaggedPointer
+{
+public:
+    // Constructor
+    constexpr TaggedPointer(void* ptr = nullptr, uint16_t tag = 0)
+    {
+        set(std::bit_cast<uintptr_t>(ptr), tag);
+    }
+
+    // Set pointer and tag
+    constexpr void set(uintptr_t ptr, uint16_t tag)
+    {
+        uintptr_t address = ptr;
+        assert((address & 0b11111) == 0 && "Pointer must be aligned to 32 bytes");
+        assert(tag <= 0xFFF && "Tag must fit in 12 bits");
+        uintptr_t lowTag  = tag & lowBitsMask_;
+        uintptr_t highTag = (static_cast<uintptr_t>(tag) << numVirtAddressBits);
+        // Store pointer and tag in the m_taggedPtr
+        m_taggedPtr = (address & addressMask_) | highTag | lowTag;
+    }
+
+    // Get the raw pointer (removing tag bits and restoring original address)
+    constexpr void* getPointer() const
+    {
+        uintptr_t address = m_taggedPtr & addressMask_;
+        // Sign extend from bit 56
+        if (address & (1ULL << (numVirtAddressBits - 2)))
+        {
+            address |= highBitsMask_;
+        }
+        return std::bit_cast<void*>(address);
+    }
+
+    // Get the tag
+    constexpr uint16_t getTag() const
+    {
+        uint16_t highTag = static_cast<uint16_t>((m_taggedPtr & ~addressMask_) >> (numVirtAddressBits - 1));
+        uint16_t lowTag  = m_taggedPtr & lowBitsMask_;
+        return ((highTag << (numLowBits - 1)) | lowTag);
+    }
+
+    // Dereference operator
+    template <typename T>
+    constexpr T& operator*() const
+    {
+        return *reinterpret_cast<T*>(getPointer());
+    }
+
+    // Arrow operator
+    template <typename T>
+    constexpr T* operator->() const
+    {
+        return reinterpret_cast<T*>(getPointer());
+    }
+
+private:
+    uintptr_t                  m_taggedPtr        = 0; // Stores the tagged pointer
+    static constexpr uint32_t  numLowBits         = 5u;
+    static constexpr uint32_t  numHighBits        = 7u;
+    static constexpr uint32_t  numVirtAddressBits = 57;
+    static constexpr uintptr_t lowBitsMask_       = (1ULL << numLowBits) - 1;
+    static constexpr uintptr_t addressMask_  = 0x00FFFFFFFFFFFFFFULL & ~lowBitsMask_; // Low 56 bits for the address
+    static constexpr uintptr_t highBitsMask_ = 0xFF00000000000000ULL;                 // High bits for sign extension
+};
+static_assert(sizeof(void*) == sizeof(TaggedPointer) && alignof(TaggedPointer) == alignof(void*));
+
+enum class EBlockSize : uint16_t
+{
+    e32B  = 32u,
+    e64B  = 64u,
+    e128B = 128u,
+    e256B = 256u,
+};
+constexpr uint16_t toUnderlying(EBlockSize blkSize)
+{
+    return static_cast<uint16_t>(blkSize);
+}
+
+constexpr uint8_t blockSizeEncoding(EBlockSize blkSize)
+{
+    switch (blkSize)
+    {
+        using enum EBlockSize;
+        case e32B:
+            return 0;
+        case e64B:
+            return 1;
+        case e128B:
+            return 2;
+        case e256B:
+            return 3;
+    }
+
+    assert(false && "unknown block size");
+    return 0;
+}
+
+class MultiPoolAllocator
+{
+    static constexpr uint32_t numBlockSizes     = 4;
+    static constexpr uint32_t poolBaseAlignment = 32; // we need 5 bits for the tagged pointer
+
+public:
+    MultiPoolAllocator(PlatformContext&                   ctx,
+                       PageAllocator&                     pageAllocator,
+                       std::array<uint32_t, numBlockSizes> numBlocksPerPool,
+                       AllocatorHooks const&              hooks);
+    MultiPoolAllocator(MultiPoolAllocator const&)                = delete;
+    MultiPoolAllocator(MultiPoolAllocator&&) noexcept            = delete;
+    MultiPoolAllocator& operator=(MultiPoolAllocator const&)     = delete;
+    MultiPoolAllocator& operator=(MultiPoolAllocator&&) noexcept = delete;
+    // To be called before destruction, eg with a janitor class. When DI works, remove this
+    void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator);
+
+    // 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
+    TaggedPointer allocateBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize);
+    void freeBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
+
+private:
+    struct BufferHeader
+    {
+        PageAllocation alloc;
+        BufferHeader*  next;
+        uint32_t       counts[numBlockSizes];
+        uintptr_t      poolBase;
+        uint8_t        notUsedFor;
+        unsigned char  padding[7];
+    };
+    static_assert(sizeof(BufferHeader) == 64 && alignof(BufferHeader) == 8);
+
+    AllocatorHooks     m_hooks;
+    mutable std::mutex m_mtx;
 };
 
 } // namespace dmt

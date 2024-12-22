@@ -34,4 +34,5 @@ int32_t main()
     ctx.log("Hello darkness my old friend");
 
     stackAllocator.cleanup(ctx, pageAllocator);
+    multiPoolAllocator.cleanup(ctx, pageAllocator);
 }

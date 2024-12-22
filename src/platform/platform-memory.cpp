@@ -573,6 +573,8 @@ bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
 
     // TODO
     // addAllocInfo(ctx, isLargePage, out);
+
+    m_hooks.allocHook(m_hooks.data, ctx, ret);
     return true;
 }
 PageAllocator::~PageAllocator()
@@ -1032,8 +1034,9 @@ enum PageAllocationFlags : uint32_t
     DMT_OS_WINDOWS_VIRTUALALLOC2 = 1 << 1  // Use bit 1
 };
 
+#if defined(DMT_OS_WINDOWS)
 // TODO promote to class static protected, shared between windows and linux
-static void addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAllocation& ret)
+void PageAllocator::addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAllocation& ret)
 {
     static constexpr uint32_t log4KB      = 12u;
     uint32_t                  errorLength = 0;
@@ -1110,7 +1113,10 @@ static void addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAlloca
             ret.pageNum = region >> log4KB;
         }
     }
+
+    m_hooks.allocHook(m_hooks.data, ctx, ret);
 }
+#endif
 
 // NOTE: Only Pinned memory can be mapped to CUDA device memory, hence you need to
 // check that the page size is not 4KB. Mapping is carried out with cudaHostRegister
@@ -1338,8 +1344,9 @@ PageAllocator::~PageAllocator()
 
 void PageAllocator::deallocPage(PlatformContext& ctx, PageAllocation& alloc)
 {
+    PageAllocation allocCopy = alloc;
     PageAllocator::deallocatePage(ctx, alloc);
-    m_hooks.freeHook(m_hooks.data, ctx, alloc);
+    m_hooks.freeHook(m_hooks.data, ctx, allocCopy);
 }
 
 
@@ -1604,7 +1611,7 @@ void StackAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator)
     {
         StackHeader* prev = curr->prev;
         ctx.trace("Deallocating buffer at address: {}", {reinterpret_cast<void*>(curr)});
-        pageAllocator.deallocatePage(ctx, curr->alloc);
+        pageAllocator.deallocPage(ctx, curr->alloc);
         curr = prev;
     }
 
@@ -1730,7 +1737,6 @@ m_hooks(hooks)
 {
     static_assert(numBlockSizes == 4);
     static constexpr uint16_t max        = 256;
-    static constexpr size_t   bufferSize = toUnderlying(EPageSize::e2MB);
 
     // compute numBytes and counts for each pool
     uint16_t blockSizes[numBlockSizes]{toUnderlying(EBlockSize::e32B),
@@ -1745,32 +1751,32 @@ m_hooks(hooks)
     // compute size of the metadata required to associate 1 bit to each block (account for the PageAllocation(24B) + next pointer + uint8_t notUsedFor)
     // modify numBytes and counts such that we can fit metadata + pools into the 2MB buffer
     uint32_t numBitsMetadata = std::reduce(std::begin(numBlocksPerPool), std::end(numBlocksPerPool), 0u, std::plus<>());
-    uint32_t numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
-    size_t total = std::reduce(std::begin(bytesPerPool), std::end(bytesPerPool), 0ULL, std::plus<>()) + numBytesMetadata;
+    m_numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
+    m_totalSize = std::reduce(std::begin(bytesPerPool), std::end(bytesPerPool), 0ULL, std::plus<>()) + m_numBytesMetadata;
     ctx.log("tring to allocate pool buffer for {} {} {} {}",
             {StrBuf{bytesPerPool[0], "0x%zx"},
              StrBuf{bytesPerPool[1], "0x%zx"},
              StrBuf{bytesPerPool[2], "0x%zx"},
              StrBuf{bytesPerPool[3], "0x%zx"}});
-    while (total > bufferSize)
+    while (m_totalSize > bufferSize)
     { // reduce the largest pool whose block size is bigger than the difference between total and bufferSize
-        size_t residual = total - bufferSize;
+        size_t residual = m_totalSize - bufferSize;
         for (uint32_t i = numBlockSizes - 1; i < numBlockSizes; --i)
         {
             if (residual > blockSizes[i])
             {
                 --numBlocksPerPool[i];
                 bytesPerPool[i] -= blockSizes[i];
-                total -= blockSizes[i];
+                m_totalSize -= blockSizes[i];
                 --numBitsMetadata;
-                numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
+                m_numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
                 break;
             }
         }
     } 
 
     // Adjust the pools to fill up the remaining space but leave room for alignment overhead
-    size_t remainingSpace = bufferSize - total;
+    size_t remainingSpace = bufferSize - m_totalSize;
     while (remainingSpace > *std::min_element(blockSizes, blockSizes + numBlockSizes)) // Ensure we leave space for alignment
     {
         bool blockAdded = false;
@@ -1781,10 +1787,10 @@ m_hooks(hooks)
             {
                 ++numBlocksPerPool[i];
                 bytesPerPool[i] += blockSizes[i];
-                total += blockSizeWithMetadata;
+                m_totalSize += blockSizeWithMetadata;
                 ++numBitsMetadata;
-                numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
-                remainingSpace   = bufferSize - total;
+                m_numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
+                remainingSpace   = bufferSize - m_totalSize;
                 blockAdded       = true;
                 break;
             }
@@ -1799,9 +1805,18 @@ m_hooks(hooks)
              StrBuf{bytesPerPool[2], "0x%zx"},
              StrBuf{bytesPerPool[3], "0x%zx"}});
     ctx.log("Allocating a buffer of {} Bytes, actually using {} Bytes",
-            {StrBuf{bufferSize, "0x%zx"}, StrBuf{total, "0x%zx"}});
+            {StrBuf{bufferSize, "0x%zx"}, StrBuf{m_totalSize, "0x%zx"}});
+
+    for (uint32_t i = 0; i != numBlockSizes; ++i)
+        m_numBlocksPerPool[i] = m_numBlocksPerPool[i];
 
     // allocate initial 2MB block
+    newBlock(ctx, pageAllocator, &m_firstBuffer);
+    m_lastBuffer = m_firstBuffer;
+}
+
+void MultiPoolAllocator::newBlock(PlatformContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr)
+{
     PageAllocation pageAlloc;
     if (!pageAllocator.allocate2MB(ctx, pageAlloc))
     {
@@ -1811,42 +1826,71 @@ m_hooks(hooks)
     auto& header      = *reinterpret_cast<BufferHeader*>(pageAlloc.address);
     header.alloc      = pageAlloc;
     header.next       = nullptr;
-    header.notUsedFor = 0;
-    for (uint32_t i = 0; i != numBlockSizes; ++i)
-        header.counts[i] = numBlocksPerPool[i];
 
     // compute the buffer base
     uintptr_t metadataAddr = reinterpret_cast<uintptr_t>(&header) + sizeof(BufferHeader);
-    uintptr_t poolBase     = metadataAddr + numBytesMetadata;
+    uintptr_t poolBase     = metadataAddr + m_numBytesMetadata;
     poolBase               = alignToAddr(poolBase, poolBaseAlignment);
-    if (size_t alignmentOverhead = poolBase - (metadataAddr + numBytesMetadata); alignmentOverhead > 0)
+    if (size_t alignmentOverhead = poolBase - (metadataAddr + m_numBytesMetadata); alignmentOverhead > 0)
     {
-        size_t adjustedTotal = total + alignmentOverhead;
+        size_t adjustedTotal = m_totalSize + alignmentOverhead;
         if (adjustedTotal > bufferSize)
         {
             ctx.error("Alignment overhead caused total size to exceed buffer limit.");
             std::abort();
         }
-        total += alignmentOverhead;
+        m_totalSize += alignmentOverhead;
     }
 
     header.poolBase = poolBase;
 
     // tag all blocks in the metadata as empty
     std::memset(std::bit_cast<void*>(metadataAddr), 0, poolBase - metadataAddr);
+
+    if (ptr)
+    {
+        *ptr = reinterpret_cast<BufferHeader*>(pageAlloc.address);
+    }
 }
 
 void MultiPoolAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator)
 {
+    std::lock_guard lock{m_mtx};
+
+    // Traverse the linked list of buffers starting from the first buffer
+    BufferHeader* currentBuffer = m_firstBuffer;
+
+    while (currentBuffer)
+    {
+        // Save the pointer to the next buffer before deallocating the current one
+        BufferHeader* nextBuffer = currentBuffer->next;
+
+        // Deallocate the page associated with the current buffer
+        pageAllocator.deallocPage(ctx, currentBuffer->alloc);
+
+        // Move to the next buffer in the list
+        currentBuffer = nextBuffer;
+    }
+
+    // Clear the state of the allocator
+    m_firstBuffer      = nullptr;
+    m_lastBuffer       = nullptr;
+    m_totalSize        = 0;
+    m_numBytesMetadata = 0;
+    std::fill(std::begin(m_numBlocksPerPool), std::end(m_numBlocksPerPool), 0);
+
+    ctx.log("MultiPoolAllocator cleanup complete. All buffers deallocated.");
 }
 
 TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize)
 {
+    std::lock_guard lock{m_mtx};
     return {nullptr, 0};
 }
 
 void MultiPoolAllocator::freeBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr)
 {
+    std::lock_guard lock{m_mtx};
 }
 
 } // namespace dmt

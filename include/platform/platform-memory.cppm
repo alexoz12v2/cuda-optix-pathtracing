@@ -467,6 +467,9 @@ protected:
                                      void*            pData);
     static bool  checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx);
     static void* createImpersonatingThreadToken(PlatformContext& ctx, void* hProcessToken, void* pData);
+
+    // TODO shared between windows and linux
+    void addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAllocation& ret);
 #endif
 
 private:
@@ -1018,6 +1021,7 @@ class MultiPoolAllocator
 {
     static constexpr uint32_t numBlockSizes     = 4;
     static constexpr uint32_t poolBaseAlignment = 32; // we need 5 bits for the tagged pointer
+    static constexpr size_t   bufferSize = toUnderlying(EPageSize::e2MB);
 
 public:
     MultiPoolAllocator(PlatformContext&                   ctx,
@@ -1029,6 +1033,8 @@ public:
     MultiPoolAllocator& operator=(MultiPoolAllocator const&)     = delete;
     MultiPoolAllocator& operator=(MultiPoolAllocator&&) noexcept = delete;
     // To be called before destruction, eg with a janitor class. When DI works, remove this
+    // WARNING: To be called, you need to be absolutely sure that all objects inside it have been destroyed
+    // (or they are trivially destructible)
     void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator);
 
     // 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
@@ -1039,16 +1045,20 @@ private:
     struct BufferHeader
     {
         PageAllocation alloc;
-        BufferHeader*  next;
-        uint32_t       counts[numBlockSizes];
+        BufferHeader*  next; // skip list if too slow
         uintptr_t      poolBase;
-        uint8_t        notUsedFor;
-        unsigned char  padding[7];
     };
-    static_assert(sizeof(BufferHeader) == 64 && alignof(BufferHeader) == 8);
+    static_assert(sizeof(BufferHeader) == 40 && alignof(BufferHeader) == 8);
 
-    AllocatorHooks     m_hooks;
+    void newBlock(PlatformContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr);
+
     mutable std::mutex m_mtx;
+    AllocatorHooks     m_hooks;
+    BufferHeader*      m_firstBuffer;
+    BufferHeader*      m_lastBuffer;
+    size_t             m_totalSize;
+    uint32_t           m_numBytesMetadata;
+    uint32_t           m_numBlocksPerPool[numBlockSizes];
 };
 
 } // namespace dmt

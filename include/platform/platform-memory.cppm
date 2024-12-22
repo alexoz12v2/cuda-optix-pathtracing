@@ -924,7 +924,9 @@ class TaggedPointer
 {
 public:
     // Constructor
-    constexpr TaggedPointer(void* ptr = nullptr, uint16_t tag = 0)
+    constexpr TaggedPointer(std::nullptr_t null = nullptr) : m_taggedPtr(0) { }
+
+    constexpr TaggedPointer(void* ptr, uint16_t tag = 0)
     {
         set(std::bit_cast<uintptr_t>(ptr), tag);
     }
@@ -942,7 +944,7 @@ public:
     }
 
     // Get the raw pointer (removing tag bits and restoring original address)
-    constexpr void* getPointer() const
+    constexpr void* pointer() const
     {
         uintptr_t address = m_taggedPtr & addressMask_;
         // Sign extend from bit 56
@@ -953,8 +955,37 @@ public:
         return std::bit_cast<void*>(address);
     }
 
+    constexpr uintptr_t address() const
+    {
+        uintptr_t address = m_taggedPtr & addressMask_;
+        // Sign extend from bit 56
+        if (address & (1ULL << (numVirtAddressBits - 2)))
+        {
+            address |= highBitsMask_;
+        }
+        return address;
+    }
+
+    constexpr bool operator==(TaggedPointer other)
+    {
+        return m_taggedPtr == other.m_taggedPtr;
+    }
+
+    template <typename T>
+    constexpr bool operator==(T* other)
+    {
+        void* ptr = pointer();
+        return ptr == other;
+    }
+
+    constexpr bool operator==(std::nullptr_t null)
+    {
+        void* ptr = pointer();
+        return ptr == null;
+    }
+
     // Get the tag
-    constexpr uint16_t getTag() const
+    constexpr uint16_t tag() const
     {
         uint16_t highTag = static_cast<uint16_t>((m_taggedPtr & ~addressMask_) >> (numVirtAddressBits - 1));
         uint16_t lowTag  = m_taggedPtr & lowBitsMask_;
@@ -965,14 +996,14 @@ public:
     template <typename T>
     constexpr T& operator*() const
     {
-        return *reinterpret_cast<T*>(getPointer());
+        return *reinterpret_cast<T*>(pointer());
     }
 
     // Arrow operator
     template <typename T>
     constexpr T* operator->() const
     {
-        return reinterpret_cast<T*>(getPointer());
+        return reinterpret_cast<T*>(pointer());
     }
 
 private:
@@ -985,6 +1016,7 @@ private:
     static constexpr uintptr_t highBitsMask_ = 0xFF00000000000000ULL;                 // High bits for sign extension
 };
 static_assert(sizeof(void*) == sizeof(TaggedPointer) && alignof(TaggedPointer) == alignof(void*));
+inline constexpr TaggedPointer taggedNullptr;
 
 enum class EBlockSize : uint16_t
 {
@@ -1015,6 +1047,25 @@ constexpr uint8_t blockSizeEncoding(EBlockSize blkSize)
 
     assert(false && "unknown block size");
     return 0;
+}
+
+constexpr EBlockSize fromEncoding(uint8_t encoding)
+{
+    using enum EBlockSize;
+    switch (encoding)
+    {
+        case 0:
+            return e32B;
+        case 1:
+            return e64B;
+        case 2:
+            return e128B;
+        case 3:
+            return e256B;
+    }
+
+    assert(false && "invalid value");
+    return e32B;
 }
 
 class MultiPoolAllocator

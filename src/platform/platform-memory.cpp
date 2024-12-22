@@ -1885,12 +1885,136 @@ void MultiPoolAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAlloca
 TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize)
 {
     std::lock_guard lock{m_mtx};
-    return {nullptr, 0};
+
+    // Determine the block size index
+    uint8_t blockSizeIndex = blockSizeEncoding(blockSize);
+
+    BufferHeader* currentBuffer = m_firstBuffer;
+
+    // Iterate through the buffers to find free blocks
+    while (currentBuffer)
+    {
+        uintptr_t metadataAddr = std::bit_cast<uintptr_t>(currentBuffer) + sizeof(BufferHeader);
+        uintptr_t poolBase     = currentBuffer->poolBase;
+
+        // Scan the metadata for a free region of numBlocks
+        uint8_t* metadata        = reinterpret_cast<uint8_t*>(metadataAddr);
+        uint32_t numBlocksInPool = m_numBlocksPerPool[blockSizeIndex];
+        uint16_t blockSizeBytes  = toUnderlying(blockSize);
+
+        for (uint32_t i = 0; i <= numBlocksInPool - numBlocks; ++i)
+        {
+            // Check if a region of numBlocks is free
+            bool isRegionFree = true;
+            for (uint32_t j = 0; j < numBlocks; ++j)
+            {
+                if (metadata[(i + j) / 8] & (1 << ((i + j) % 8))) // not sure this works
+                {
+                    isRegionFree = false;
+                    break;
+                }
+            }
+
+            if (isRegionFree)
+            {
+                // Mark the blocks as allocated in metadata
+                for (uint32_t j = 0; j < numBlocks; ++j)
+                {
+                    metadata[(i + j) / 8] |= (1 << ((i + j) % 8)); // not sure this works
+                }
+
+                // Calculate the starting address of the allocated blocks
+                uintptr_t blockAddr = poolBase + i * blockSizeBytes;
+
+                ctx.log("Allocated {} blocks of size {} at address {}",
+                        {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
+
+                return encode(bufferIndex(reinterpret_cast<uint16_t>(currentBuffer)),
+                              blockSizeIndex,
+                              reinterpret_cast<void*>(blockAddr));
+            }
+        }
+
+        currentBuffer = currentBuffer->next;
+    }
+
+    // No free blocks found, try to allocate a new buffer
+    BufferHeader* newBuffer = nullptr;
+    newBlock(ctx, pageAllocator, &newBuffer);
+
+    if (!newBuffer)
+    {
+        ctx.error("Failed to allocate a new buffer for MultiPoolAllocator.");
+        return {nullptr, 0};
+    }
+
+    // Add the new buffer to the list
+    m_lastBuffer->next = newBuffer;
+    m_lastBuffer       = newBuffer;
+
+    // Retry allocation
+    return allocateBlocks(ctx, pageAllocator, numBlocks, blockSize);
 }
 
 void MultiPoolAllocator::freeBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr)
 {
     std::lock_guard lock{m_mtx};
+
+    if (ptr == taggedNullptr)
+    {
+        ctx.error("Attempting to free a null pointer.");
+        return;
+    }
+
+    // Extract buffer index and block size encoding from the tag
+    uint16_t tag          = ptr.tag();
+    uint16_t bufferIdx    = bufferIndex(tag);
+    uint8_t  blockSizeEnc = blockSizeEncoding(tag);
+
+    if (blockSizeEnc >= numBlockSizes)
+    {
+        ctx.error("Invalid block size encoding in tagged pointer.");
+        return;
+    }
+
+    EBlockSize blockSize      = fromEncoding(blockSizeEnc);
+    uint16_t   blockSizeBytes = toUnderlying(blockSize);
+
+    // Locate the buffer using the buffer index
+    BufferHeader* currentBuffer = m_firstBuffer;
+    for (uint16_t i = 0; i < bufferIdx && currentBuffer; ++i)
+    {
+        currentBuffer = currentBuffer->next;
+    }
+
+    if (!currentBuffer)
+    {
+        ctx.error("Buffer index out of bounds.");
+        return;
+    }
+
+    uintptr_t metadataAddr = reinterpret_cast<uintptr_t>(currentBuffer) + sizeof(BufferHeader);
+    uintptr_t poolBase     = currentBuffer->poolBase;
+
+    // Calculate the block index
+    uintptr_t blockAddr = ptr.address();
+    if (blockAddr < poolBase || (blockAddr - poolBase) % blockSizeBytes != 0) // not sure this works
+    {
+        ctx.error("Pointer does not correspond to a valid block in this buffer.");
+        return;
+    }
+
+    uint32_t blockIndex = static_cast<uint32_t>((blockAddr - poolBase) / blockSizeBytes);
+
+    // Update metadata to mark blocks as free
+    uint8_t* metadata = reinterpret_cast<uint8_t*>(metadataAddr);
+    for (uint32_t i = 0; i < numBlocks; ++i)
+    {
+        metadata[(blockIndex + i) / 8] &= ~(1 << ((blockIndex + i) % 8)); // not sure this works
+    }
+
+    ctx.log("Freed {} blocks of size {} at address {}", {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
 }
 
 } // namespace dmt
+

@@ -186,6 +186,9 @@ Procfile text
 *.prefs
 
 ##### Language
+# CUDA
+*.cu text eol=lf
+*.cuh text eol=lf
 # C/C++
 *.c text eol=lf
 *.cc text eol=lf

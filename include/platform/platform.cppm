@@ -6,6 +6,9 @@
  * @defgroup platform platform Module
  * @{
  */
+
+// in the primary module, we need to support both header inclusion and module exports, driven by a macro which
+// should be defined by the tranlation unit only when including the interface as an header
 module;
 
 /**
@@ -17,6 +20,6 @@ export import :logging;
 export import :memory;
 export import :utils; /** Note: Utils contains private, possibly OS specific, functionality + PlatformContext */
 
-export import <platform.h>
+export import <platform.h>;
 
 /** @} */

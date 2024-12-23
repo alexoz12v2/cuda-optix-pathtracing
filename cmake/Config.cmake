@@ -235,59 +235,63 @@ macro(dmt_set_target_warnings target)
   option(DMT_WARNINGS_AS_ERRORS "Treat Compiler Warnings as errors" OFF)
   if(DMT_COMPILER_MSVC)
     if(DMT_WARNINGS_AS_ERRORS)
-      target_compile_options(${target} PRIVATE /WX)
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/WX>)
     endif()
     target_compile_options(${target} PRIVATE
-      /w14242 # 'identifier': conversion from 'type1' to 'type1', possible loss of data
-      /w14254 # 'operator': conversion from 'type1:field_bits' to 'type2:field_bits', possible loss of data
-      /w14263 # 'function': member function does not override any base class virtual member function
-      /w14265 # 'classname': class has virtual functions, but destructor is not virtual instances of this class may not be destructed correctly
-      /w14287 # 'operator': unsigned/negative constant mismatch
-      /we4289 # nonstandard extension used: 'variable': loop control variable declared in the for-loop is used outside the for-loop scope
-      /w14296 # 'operator': expression is always 'boolean_value'
-      /w14311 # 'variable': pointer truncation from 'type1' to 'type2'
-      /w14545 # expression before comma evaluates to a function which is missing an argument list
-      /w14546 # function call before comma missing argument list
-      /w14547 # 'operator': operator before comma has no effect; expected operator with side-effect
-      /w14549 # 'operator': operator before comma has no effect; did you intend 'operator'?
-      /w14555 # expression has no effect; expected expression with side- effect
-      /w14619 # pragma warning: there is no warning number 'number'
-      /w14640 # Enable warning on thread un-safe static member initialization
-      /w14826 # Conversion from 'type1' to 'type_2' is sign-extended. This may cause unexpected runtime behavior.
-      /w14905 # wide string literal cast to 'LPSTR'
-      /w14906 # string literal cast to 'LPWSTR'
-      /w14928 # illegal copy-initialization; more than one user-defined conversion has been implicitly applied
-      /permissive- # standards conformance mode
+      $<$<COMPILE_LANGUAGE:CXX>:
+        /w14242 # 'identifier': conversion from 'type1' to 'type1', possible loss of data
+        /w14254 # 'operator': conversion from 'type1:field_bits' to 'type2:field_bits', possible loss of data
+        /w14263 # 'function': member function does not override any base class virtual member function
+        /w14265 # 'classname': class has virtual functions, but destructor is not virtual instances of this class may not be destructed correctly
+        /w14287 # 'operator': unsigned/negative constant mismatch
+        /we4289 # nonstandard extension used: 'variable': loop control variable declared in the for-loop is used outside the for-loop scope
+        /w14296 # 'operator': expression is always 'boolean_value'
+        /w14311 # 'variable': pointer truncation from 'type1' to 'type2'
+        /w14545 # expression before comma evaluates to a function which is missing an argument list
+        /w14546 # function call before comma missing argument list
+        /w14547 # 'operator': operator before comma has no effect; expected operator with side-effect
+        /w14549 # 'operator': operator before comma has no effect; did you intend 'operator'?
+        /w14555 # expression has no effect; expected expression with side- effect
+        /w14619 # pragma warning: there is no warning number 'number'
+        /w14640 # Enable warning on thread un-safe static member initialization
+        /w14826 # Conversion from 'type1' to 'type_2' is sign-extended. This may cause unexpected runtime behavior.
+        /w14905 # wide string literal cast to 'LPSTR'
+        /w14906 # string literal cast to 'LPWSTR'
+        /w14928 # illegal copy-initialization; more than one user-defined conversion has been implicitly applied
+        /permissive- # standards conformance mode
 
-      # Disables, remove when appropriate
-      /wd4068 # disable warnings about unknown pragmas (e.g. #pragma GCC)
-      /wd4505 # disable warnings about unused functions that might be platform-specific
-      /wd4800 # disable warnings regarding implicit conversions to bool
-      /wd4275 # disable warnings about exporting non DLL-interface classes
+        # Disables, remove when appropriate
+        /wd4068 # disable warnings about unknown pragmas (e.g. #pragma GCC)
+        /wd4505 # disable warnings about unused functions that might be platform-specific
+        /wd4800 # disable warnings regarding implicit conversions to bool
+        /wd4275 # disable warnings about exporting non DLL-interface classes
+      >
     )
   endif()
 
   if(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
     if(DMT_WARNINGS_AS_ERRORS)
-      target_compile_options(${target} PRIVATE -Werror)
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: -Werror>)
     endif()
     target_compile_options(${target} PRIVATE
-      -Wall
-      -Wextra # reasonable and standard
-      -Wshadow # warn the user if a variable declaration shadows one from a parent context
-      -Wnon-virtual-dtor # warn the user if a class with virtual functions has a non-virtual destructor. This helps catch hard to track down memory errors
-      -Wcast-align # warn for potential performance problem casts
-      -Wunused # warn on anything being unused
-      -Woverloaded-virtual # warn if you overload (not override) a virtual function
-      -Wconversion # warn on type conversions that may lose data
-      -Wsign-conversion # warn on sign conversions
-      -Wdouble-promotion # warn if float is implicit promoted to double
-      -Wformat=2 # warn on security issues around functions that format output (ie printf)
-      -Wimplicit-fallthrough # warn when a missing break causes control flow to continue at the next case in a switch statement
-      -Wsuggest-override # warn when 'override' could be used on a member function overriding a virtual function
-      -Wnull-dereference # warn if a null dereference is detected
-      -Wold-style-cast # warn for c-style casts
-      -Wpedantic # warn if non-standard C++ is used
+      $<$<COMPILE_LANGUAGE:CXX>:
+        -Wall
+        -Wextra # reasonable and standard
+        -Wshadow # warn the user if a variable declaration shadows one from a parent context
+        -Wnon-virtual-dtor # warn the user if a class with virtual functions has a non-virtual destructor. This helps catch hard to track down memory errors
+        -Wcast-align # warn for potential performance problem casts
+        -Wunused # warn on anything being unused
+        -Woverloaded-virtual # warn if you overload (not override) a virtual function
+        -Wconversion # warn on type conversions that may lose data
+        -Wsign-conversion # warn on sign conversions
+        -Wdouble-promotion # warn if float is implicit promoted to double
+        -Wformat=2 # warn on security issues around functions that format output (ie printf)
+        -Wimplicit-fallthrough # warn when a missing break causes control flow to continue at the next case in a switch statement
+        -Wsuggest-override # warn when 'override' could be used on a member function overriding a virtual function
+        -Wnull-dereference # warn if a null dereference is detected
+        -Wold-style-cast # warn for c-style casts
+        -Wpedantic # warn if non-standard C++ is used
+      >
     )
   endif()
 
@@ -295,17 +299,19 @@ macro(dmt_set_target_warnings target)
     # Don't enable -Wduplicated-branches for GCC < 8.1 since it will lead to false positives
     # https://github.com/gcc-mirror/gcc/commit/6bebae75035889a4844eb4d32a695bebf412bcd7
     target_compile_options(${target} PRIVATE
-      -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
-      -Wduplicated-cond # warn if if / else chain has duplicated conditions
-      -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
-      # -Wuseless-cast # warn if you perform a cast to the same type (disabled because it is not portable as some type aliases might vary between platforms)
-      $<$<VERSION_GREATER_EQUAL:${CMAKE_CXX_COMPILER_VERSION},8.1>:-Wduplicated-branches> # warn if if / else branches have duplicated code
+      $<$<COMPILE_LANGUAGE:CXX>:
+        -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
+        -Wduplicated-cond # warn if if / else chain has duplicated conditions
+        -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
+        # -Wuseless-cast # warn if you perform a cast to the same type (disabled because it is not portable as some type aliases might vary between platforms)
+        $<$<VERSION_GREATER_EQUAL:${CMAKE_CXX_COMPILER_VERSION},8.1>:-Wduplicated-branches> # warn if if / else branches have duplicated code
+      >
     )
   endif()
 
   if(DMT_COMPILER_CLANG OR DMT_COMPILER_CLANG_CL)
     target_compile_options(${target} PRIVATE
-      -Wno-unknown-warning-option # do not warn on GCC-specific warning diagnostic pragmas
+      $<$<COMPILE_LANGUAGE:CXX>: -Wno-unknown-warning-option> # do not warn on GCC-specific warning diagnostic pragmas 
     )
   endif()
 endmacro()
@@ -314,26 +320,38 @@ endmacro()
 function(dmt_set_target_optimization target)
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(${target} PRIVATE
-      $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi>
-      $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O0 -g -fprofile-arcs -ftest-coverage>
-      $<$<COMPILE_LANGUAGE:CUDA>:-G>
+      $<$<COMPILE_LANGUAGE:CXX>:
+        $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi>
+        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O0 -g -fprofile-arcs -ftest-coverage>
+      >
+      $<$<COMPILE_LANGUAGE:CUDA>:
+        -G
+      >
     )
     target_link_options(${target} PUBLIC $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
   elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(${target} PRIVATE
-      $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2>
-      $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O3>
+      $<$<COMPILE_LANGUAGE:CXX>:
+        $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2>
+        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O3>
+      >
     )
   elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     target_compile_options(${target} PRIVATE
-      $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2 /Zi>
-      $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O2 -g>
-      $<$<COMPILE_LANGUAGE:CUDA>:-G>
+      $<$<COMPILE_LANGUAGE:CXX>:
+        $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2 /Zi>
+        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O2 -g>
+      >
+      $<$<COMPILE_LANGUAGE:CUDA>:
+        -G
+      >
     )
   elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     target_compile_options(${target} PRIVATE
-      $<$<BOOL:${DMT_COMPILER_MSVC}>:/O1>
-      $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-Os>
+      $<$<COMPILE_LANGUAGE:CXX>:
+        $<$<BOOL:${DMT_COMPILER_MSVC}>:/O1>
+        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-Os>
+      >
     )
   endif()
 endfunction()
@@ -403,7 +421,7 @@ function(dmt_add_module_library name module_name)
   cmake_parse_arguments(THIS_ARGS
     "" # no options
     "MODULE_INTERFACE;MODULE_IMPLEMENTATION" # single argument keys
-    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS" # multiple arguments keys
+    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS;HEADERS" # multiple arguments keys
     ${ARGN}
   )
   if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
@@ -420,14 +438,22 @@ function(dmt_add_module_library name module_name)
   message(STATUS "[${name}] MODULE_IMPLEMENTATION: ${THIS_ARGS_MODULE_IMPLEMENTATION}")
   message(STATUS "[${name}] MODULE_PARTITION_INTERFACES: ${THIS_ARGS_MODULE_PARTITION_INTERFACES}")
   message(STATUS "[${name}] MODULE_PARTITION_IMPLEMENTATIONS: ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS}")
+  message(STATUS "[${name}] HEADERS: ${THIS_ARGS_HEADERS}")
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
   set(interface_file_list "${CMAKE_SOURCE_DIR}/include/${target_path}/${THIS_ARGS_MODULE_INTERFACE}")
   set(implementation_file_list "${THIS_ARGS_MODULE_IMPLEMENTATION}")
+  set(header_file_list "")
   if(DEFINED THIS_ARGS_MODULE_PARTITION_INTERFACES)
     foreach(interface_file ${THIS_ARGS_MODULE_PARTITION_INTERFACES})
       string(PREPEND interface_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
       list(APPEND interface_file_list "${interface_file}")
+    endforeach()
+  endif()
+  if (DEFINED THIS_ARGS_HEADERS)
+    foreach(header_file ${THIS_ARGS_HEADERS})
+      string(PREPEND header_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
+      list(APPEND header_file_list "${header_file}")
     endforeach()
   endif()
   if(DEFINED THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS)
@@ -477,7 +503,7 @@ function(dmt_add_module_library name module_name)
     #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
     #  PUBLIC /reference ${module_name}=${BMI}
     #)
-    target_compile_options(${name} PRIVATE /Zc:preprocessor PUBLIC /std:c17)
+    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
 
     #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
     #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
@@ -534,7 +560,7 @@ function(dmt_add_module_library name module_name)
   # add project include as include directory
   target_include_directories(${name}
     PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    PRIVATE ${PROJECT_SOURCE_DIR}/src
+    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include/${target_path}
   )
 
   if(NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
@@ -544,18 +570,33 @@ function(dmt_add_module_library name module_name)
     # TODO: handle dependencies
     message(STATUS "clang-tidy requires me to manually setup the prebuilt-module-path,\n\tsetting path for ${name} to ${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir")
     target_compile_options(${name} PRIVATE
-      -fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir
+      $<$<COMPILE_LANGUAGE:CXX>:
+        -fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir
+      >
     )
   endif()
 
   # construct the sources lists
-  target_sources(${name}
-    PUBLIC
-      FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
-        FILES ${interface_file_list}
-    PRIVATE
-      ${implementation_file_list}
-  )
+  list(LENGTH header_file_list header_count)
+  if(header_count GREATER 0)
+    target_sources(${name}
+      PUBLIC
+        FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+          FILES ${interface_file_list}
+        FILE_SET "${module_name}_headers" TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+          FILES ${header_file_list}
+      PRIVATE
+        ${implementation_file_list}
+    )
+  else()
+    target_sources(${name}
+      PUBLIC
+        FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
+          FILES ${interface_file_list}
+      PRIVATE
+        ${implementation_file_list}
+    )
+  endif()
 
   # create alias
   add_library(${alias_name} ALIAS ${name})
@@ -625,7 +666,7 @@ function(dmt_add_example target)
   dmt_add_compile_definitions(${target})
 
   if(MSVC)
-    target_compile_options(${target} PRIVATE /Zc:preprocessor PUBLIC /std:c17)
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
     #target_compile_options(${target} PRIVATE )
   endif()
 
@@ -663,7 +704,7 @@ function(dmt_add_test target)
   target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   if(MSVC)
-    target_compile_options(${target} PRIVATE /Zc:preprocessor PUBLIC /std:c17)
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>: /std:c17>)
   endif()
 
   # Iterate over dependencies to add their corresponding BMI paths

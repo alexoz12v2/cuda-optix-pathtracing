@@ -24,6 +24,6 @@ module;
  */
 export module platform:logging;
 
-export import <platform-logging.h>
+export import <platform-logging.h>;
 
 /** @} */

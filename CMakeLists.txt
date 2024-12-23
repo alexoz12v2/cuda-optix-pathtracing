@@ -75,6 +75,11 @@ project(
 enable_language(C)
 enable_language(CUDA)
 
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
+# Link: https://forums.developer.nvidia.com/t/how-to-include-optix-8-0-in-cmake-project/269123
+set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+
 include(cmake/Config.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/SetupDoxygen.cmake)

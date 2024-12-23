@@ -186,16 +186,20 @@ Procfile text
 *.prefs
 
 ##### Language
+# CUDA
+*.cu text eol=lf
+*.cuh text eol=lf
 # C/C++
-*.c text
-*.cc text
-*.cxx text
-*.cpp text
-*.c++ text
-*.hpp text
-*.h text
-*.h++ text
-*.hh text
+*.c text eol=lf
+*.cc text eol=lf
+*.cxx text eol=lf
+*.cpp text eol=lf
+*.c++ text eol=lf
+*.hpp text eol=lf
+*.cppm text eol=lf
+*.h text eol=lf
+*.h++ text eol=lf
+*.hh text eol=lf
 *.slo binary
 *.lo binary
 *.o binary

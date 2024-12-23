@@ -1,7 +1,7 @@
 /**
-* @file testdmtpartitions-trig.cpp
-* @brief Implementation unit for the `trig` partition.
-*/
+ * @file testdmtpartitions-trig.cpp
+ * @brief Implementation unit for the `trig` partition.
+ */
 
 module;
 

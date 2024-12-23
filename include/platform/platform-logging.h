@@ -2,6 +2,8 @@
 
 #include "dmtmacros.h"
 
+#include "dmtmacros.h"
+
 #include <array>
 #include <concepts>
 #include <format>

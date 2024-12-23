@@ -1,7 +1,7 @@
 /**
-* @file testdmtpartitions.cpp
-* @brief Implementation unit for the primary module `testdmtpartitions`.
-*/
+ * @file testdmtpartitions.cpp
+ * @brief Implementation unit for the primary module `testdmtpartitions`.
+ */
 
 module;
 

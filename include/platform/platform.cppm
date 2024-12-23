@@ -11,15 +11,11 @@
 // should be defined by the tranlation unit only when including the interface as an header
 module;
 
-#include <cstdint>
-
 /**
  * @brief Module `platform`
  */
 export module platform;
-export import :threadPool;
 export import :logging;
-export import :display
 
 export import <platform.h>;
 

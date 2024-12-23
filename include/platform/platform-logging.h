@@ -1,6 +1,7 @@
 #pragma once
 
-// Keep in sync with .cppm
+#include "dmtmacros.h"
+
 #include <array>
 #include <concepts>
 #include <format>
@@ -14,12 +15,6 @@
 #include <compare>
 #include <cstdint>
 #include <cstring>
-
-#if !defined(DMT_INTERFACE_AS_HEADER)
-#define DMT_MODULE_EXPORT export namespace
-#else
-#define DMT_MODULE_EXPORT namespace
-#endif
 
 DMT_MODULE_EXPORT dmt {
     /**
@@ -474,7 +469,7 @@ concept LogDisplay = requires(T t)
          * explicit constructor for the base logger starting from the desired level
          * @param level desired log level
          */
-        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
         /**
          * Setter for the `m_level`

@@ -1,20 +1,13 @@
 #pragma once
 
+#include "dmtmacros.h"
+
 #include <cstdint>
 
 #if defined(DMT_INTERFACE_AS_HEADER)
 // Keep in sync with .cppm
 #include <platform/platform-logging.h>
-#include <platform/platform-threadPool.h>
-#include <platform/platform-display.h>
 
-#endif
-
-// TODO move this in an header grouping commonly used macros
-#if !defined(DMT_INTERFACE_AS_HEADER)
-#define DMT_MODULE_EXPORT export namespace
-#else
-#define DMT_MODULE_EXPORT namespace
 #endif
 
 DMT_MODULE_EXPORT dmt {

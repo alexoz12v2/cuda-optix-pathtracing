@@ -19,20 +19,6 @@
  */
 module;
 
-#include <array>
-#include <concepts>
-#include <format>
-#include <mutex>
-#include <source_location>
-#include <string>
-#include <string_view>
-#include <utility>
-
-#include <cassert>
-#include <compare>
-#include <cstdint>
-#include <cstring>
-
 /**
  * @brief module partition `platform:logging`
  */

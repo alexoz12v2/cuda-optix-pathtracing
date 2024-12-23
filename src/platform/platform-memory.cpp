@@ -1206,8 +1206,6 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeO
         ret.pageSize          = pageSize;
         bool isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
 
-        addAllocInfo(ctx, isLargePageAlloc, ret);
-
 #if defined(DMT_DEBUG)
         ctx.trace(
             "Called allocatePage, allocated "
@@ -1246,6 +1244,8 @@ PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeO
 
 bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
 {
+    HooksJanitor janitor{ctx, true};
+    janitor.pHooks = &m_hooks;
     DWORD        allocationFlags = MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES;
     DWORD const  protectionFlags = PAGE_READWRITE;
     size_t const size            = toUnderlying(EPageSize::e2MB);
@@ -1289,7 +1289,7 @@ bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
         }
     }
 
-    addAllocInfo(ctx, isLargePage, out);
+	janitor.pAlloc = &out;
 
     return true;
 }

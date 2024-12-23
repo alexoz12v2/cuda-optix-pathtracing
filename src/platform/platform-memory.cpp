@@ -1289,7 +1289,7 @@ bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
         }
     }
 
-	janitor.pAlloc = &out;
+    janitor.pAlloc = &out;
 
     return true;
 }
@@ -1451,7 +1451,7 @@ static void logAndAbort(PlatformContext& ctx, std::string_view str, uint32_t ini
 
 PageAllocationsTracker::PageAllocationsTracker(PlatformContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity)
 {
-    using namespace std::string_view_literals;
+    using namespace std::string_view_literals; 
     // reserve virtual address space the double ended buffer
     m_pageTracking.m_capacity       = pageTrackCapacity;
     m_allocTracking.m_capacity      = allocTrackCapacity;
@@ -1513,6 +1513,7 @@ static bool shouldTrack(PlatformContext& ctx, T const& alloc)
 
 void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const& alloc)
 {
+    ctx.trace("tracking allocation at address {}", { alloc.address });
     if (!m_pageTracking.m_freeHead)
     {
         growFreeList(ctx, m_pageTracking, m_pageBase);
@@ -1526,6 +1527,7 @@ void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const& a
 
 void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const& alloc)
 {
+    ctx.trace("Untracking allocation at address {}", { alloc.address });
     if (m_pageTracking.removeNode(alloc))
     {
         return;
@@ -1537,6 +1539,7 @@ void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const&
 
 void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const& alloc)
 {
+    ctx.trace("tracking allocation at address {}", { alloc.address });
     if (!m_allocTracking.m_freeHead)
     {
         growFreeList(ctx, m_allocTracking, m_allocBase);
@@ -1550,6 +1553,7 @@ void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const& a
 
 void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const& alloc)
 {
+    ctx.trace("Untracking allocation at address {}", { alloc.address });
     if (m_allocTracking.removeNode(alloc))
     {
         return;
@@ -1557,6 +1561,12 @@ void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const&
 
     ctx.error("Attempted to deallocate a page that was not tracked.");
     std::abort();
+}
+
+void PageAllocationsTracker::claenTransients(PlatformContext& ctx)
+{
+    ctx.log("Untracking (deallocating tracking data) for all transient allocations");
+    m_allocTracking.removeTransientNodes();
 }
 
 PageAllocationsTracker::~PageAllocationsTracker() noexcept
@@ -1605,6 +1615,7 @@ StackAllocator::StackAllocator(PlatformContext& ctx, PageAllocator& pageAllocato
 void StackAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator)
 {
     std::lock_guard lock{m_mtx};
+    m_hooks.cleanTransients(m_hooks.data, ctx);
 
     // start from last and free all buffers
     for (StackHeader* curr = m_pLast; curr != nullptr;)
@@ -1648,7 +1659,15 @@ void* StackAllocator::allocate(PlatformContext& ctx, PageAllocator& pageAllocato
                 void* ptr        = reinterpret_cast<void*>(alignedSP);
                 curr->sp         = alignedSP + size;
                 curr->notUsedFor = 0;
-                // TODO properly call hooks
+
+                // call allocation hooks (TODO create properly AllocationInfo)
+                AllocationInfo allocInfo;
+                allocInfo.address = ptr;
+                allocInfo.size    = size;
+                allocInfo.alignment = alignment;
+                allocInfo.transient = 1;
+                m_hooks.allocHook(m_hooks.data, ctx, allocInfo);
+
                 return ptr;
             }
         }
@@ -1668,6 +1687,8 @@ void StackAllocator::reset(PlatformContext& ctx, PageAllocator& pageAllocator)
     std::lock_guard lock{m_mtx};
     assert(m_pFirst);
 
+    m_hooks.cleanTransients(m_hooks.data, ctx);
+
     for (StackHeader* curr = m_pLast; curr != nullptr;)
     {
         curr->sp          = curr->bp;
@@ -1676,7 +1697,7 @@ void StackAllocator::reset(PlatformContext& ctx, PageAllocator& pageAllocator)
         // if you didn't use the buffer for a certain number of times, then deallocate it
         if (++curr->notUsedFor > notUsedForThreshold)
         {
-            pageAllocator.deallocatePage(ctx, curr->alloc);
+            pageAllocator.deallocPage(ctx, curr->alloc);
         }
         curr = prev;
         if (prev)
@@ -1931,6 +1952,13 @@ TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAlloc
                 ctx.log("Allocated {} blocks of size {} at address {}",
                         {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
 
+                // TODO perform hooks
+                AllocationInfo info;
+                info.address = reinterpret_cast<void*>(blockAddr);
+                info.size    = blockSizeBytes * numBlocks;
+                info.alignment = poolBaseAlignment;
+                info.transient = 0;
+                m_hooks.allocHook(m_hooks.data, ctx, info);
                 return encode(bufferIdx, blockSizeIndex, reinterpret_cast<void*>(blockAddr));
             }
         }
@@ -2013,6 +2041,9 @@ void MultiPoolAllocator::freeBlocks(PlatformContext& ctx, PageAllocator& pageAll
         metadata[(blockIndex + i) / 8] &= ~(1 << ((blockIndex + i) % 8)); // not sure this works
     }
 
+    AllocationInfo info;
+    info.address = ptr.pointer();
+    m_hooks.freeHook(m_hooks.data, ctx, info);
     ctx.log("Freed {} blocks of size {} at address {}", {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
 }
 

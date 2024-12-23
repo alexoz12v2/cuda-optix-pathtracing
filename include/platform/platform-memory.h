@@ -565,6 +565,35 @@ DMT_MODULE_EXPORT dmt {
             m_freeSize += newNodes;
         }
 
+        void removeTransientNodes()
+            requires requires(NodeType::DType t) { t.transient; }
+        {
+            NodeType* prev = nullptr;
+            NodeType* curr = m_occupiedHead;
+
+            while (curr)
+            {
+                if (curr->data.alloc.transient) // Check if node is transient
+                {
+                    // Remove the node from the occupied list
+                    if (prev)
+                        setNextOccupied(prev, getNextOccupied(curr));
+                    else
+                        m_occupiedHead = getNextOccupied(curr);
+
+                    // Return the node to the free list
+                    setFreeNode(curr);
+                }
+                else
+                {
+                    prev = curr; // Only move the previous pointer if we don't remove the node
+                }
+
+                // Move to the next node in the occupied list
+                curr = getNextOccupied(curr);
+            }
+        }
+
     private:
         NodeType* m_freeHead      = nullptr; // Head of the free list
         NodeType* m_occupiedHead  = nullptr; // Head of the occupied list
@@ -672,7 +701,7 @@ DMT_MODULE_EXPORT dmt {
         void untrack(PlatformContext& ctx, PageAllocation const& alloc);
         void track(PlatformContext& ctx, AllocationInfo const& alloc);
         void untrack(PlatformContext& ctx, AllocationInfo const& alloc);
-        // TODO add clean transient
+        void claenTransients(PlatformContext& ctx);
 
     private:
         static constexpr uint32_t initialNodeNum = 128;

@@ -1713,18 +1713,18 @@ bool StackAllocator::newBuffer(PlatformContext& ctx, PageAllocator& pageAllocato
 // MultiPoolAllocator -------------------------------------------------------------------------------------------------
 
 static constexpr uint16_t bufferIndex(uint16_t tag)
-{
+{ // 7 high bits + 3 low bits
     return tag >> 2;
 }
 
 static constexpr uint8_t blockSizeEncoding(uint16_t tag)
-{
+{ // 2 least significant bits
     return tag & 0x3;
 }
 
 static constexpr TaggedPointer encode(uint16_t bufferIndex, uint8_t blockSizeEncoding, void* ptr)
 {
-    uint16_t tag = (bufferIndex << 2) | static_cast<uint16_t>(blockSizeEncoding);
+    uint16_t tag = bufferIndex | static_cast<uint16_t>(blockSizeEncoding);
     assert(tag <= 0xFFF);
     return {ptr, tag};
 }
@@ -1890,6 +1890,7 @@ TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAlloc
     uint8_t blockSizeIndex = blockSizeEncoding(blockSize);
 
     BufferHeader* currentBuffer = m_firstBuffer;
+    uint16_t      bufferIdx     = 0;
 
     // Iterate through the buffers to find free blocks
     while (currentBuffer)
@@ -1911,6 +1912,7 @@ TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAlloc
                 if (metadata[(i + j) / 8] & (1 << ((i + j) % 8))) // not sure this works
                 {
                     isRegionFree = false;
+                    ++bufferIdx;
                     break;
                 }
             }
@@ -1929,7 +1931,7 @@ TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAlloc
                 ctx.log("Allocated {} blocks of size {} at address {}",
                         {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
 
-                return encode(bufferIndex(reinterpret_cast<uint16_t>(currentBuffer)),
+                return encode(bufferIdx,
                               blockSizeIndex,
                               reinterpret_cast<void*>(blockAddr));
             }

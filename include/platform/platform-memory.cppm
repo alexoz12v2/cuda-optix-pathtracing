@@ -938,13 +938,14 @@ public:
         assert((address & 0b11111) == 0 && "Pointer must be aligned to 32 bytes");
         assert(tag <= 0xFFF && "Tag must fit in 12 bits");
         uintptr_t lowTag  = tag & lowBitsMask_;
-        uintptr_t highTag = (static_cast<uintptr_t>(tag) << numVirtAddressBits);
+        uintptr_t highTag = (static_cast<uintptr_t>(tag) & ~lowBitsMask_) << (numVirtAddressBits - numLowBits);
         // Store pointer and tag in the m_taggedPtr
         m_taggedPtr = (address & addressMask_) | highTag | lowTag;
     }
 
     // Get the raw pointer (removing tag bits and restoring original address)
-    constexpr void* pointer() const
+    template <typename T = void>
+    constexpr T* pointer() const
     {
         uintptr_t address = m_taggedPtr & addressMask_;
         // Sign extend from bit 56
@@ -952,7 +953,7 @@ public:
         {
             address |= highBitsMask_;
         }
-        return std::bit_cast<void*>(address);
+        return std::bit_cast<T*>(address);
     }
 
     constexpr uintptr_t address() const
@@ -987,11 +988,10 @@ public:
     // Get the tag
     constexpr uint16_t tag() const
     {
-        uint16_t highTag = static_cast<uint16_t>((m_taggedPtr & ~addressMask_) >> (numVirtAddressBits - 1));
+        uint16_t highTag = static_cast<uint16_t>((m_taggedPtr & ~addressMask_) >> (numVirtAddressBits - numLowBits));
         uint16_t lowTag  = m_taggedPtr & lowBitsMask_;
-        return ((highTag << (numLowBits - 1)) | lowTag);
+        return (highTag | lowTag);
     }
-
     // Dereference operator
     template <typename T>
     constexpr T& operator*() const

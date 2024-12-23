@@ -33,8 +33,8 @@ __global__ void fillAndWriteTextureKernelSurfObj(cudaSurfaceObject_t surfObj, in
 
     if (x < width && y < height)
     {
-        int index = y * width + x;
-        uchar4 value     = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
+        int    index = y * width + x;
+        uchar4 value = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
         surf2Dwrite(value, surfObj, x * sizeof(float), y);
     }
 }

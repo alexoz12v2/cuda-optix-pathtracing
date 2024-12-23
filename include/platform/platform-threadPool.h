@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dmtmacros.h"
 // Keep in sync with .cppm
 #include <functional>
 #include <future>
@@ -9,12 +10,6 @@
 #include <utility>
 #include <vector>
 
-// TODO move this in an header grouping commonly used macros
-#if !defined(DMT_INTERFACE_AS_HEADER)
-#define DMT_MODULE_EXPORT export namespace
-#else
-#define DMT_MODULE_EXPORT namespace
-#endif
 
 DMT_MODULE_EXPORT dmt {
     class ThreadPool

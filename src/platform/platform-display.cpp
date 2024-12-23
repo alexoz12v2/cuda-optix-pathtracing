@@ -5,5 +5,5 @@ module platform;
 
 namespace dmt
 {
-    
+
 }

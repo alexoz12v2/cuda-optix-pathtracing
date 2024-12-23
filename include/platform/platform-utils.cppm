@@ -9,8 +9,6 @@ module;
 
 export module platform:utils;
 
-import :logging;
-
 export import <platform-utils.h>;
 
 /** @} */

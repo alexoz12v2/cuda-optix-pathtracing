@@ -170,6 +170,7 @@ macro(dmt_define_environment)
   message(STATUS "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
   if(MSVC)
     set(DMT_COMPILER_MSVC 1)
+    set(DMT_COMPILER "DMT_COMPILER_MSVC")
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       set(DMT_COMPILER_CLANG_CL 1)
       message(STATUS "Compiler Found: clang-cl.exe")
@@ -178,11 +179,14 @@ macro(dmt_define_environment)
     endif()
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(DMT_COMPILER_CLANG 1)
+    set(DMT_COMPILER "DMT_COMPILER_CLANG")
     message(STATUS "Compiler Found: clang++")
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     set(DMT_COMPILER_GCC 1)
+    set(DMT_COMPILER "DMT_COMPILER_GCC")
     message(STATUS "Compiler Found: g++")
   else()
+    set(DMT_COMPILER "DMT_COMPILER_UNKNOWN")
     message(WARNING "Unrecognized compiler: ${CMAKE_CXX_COMPILER_ID}")
   endif()
 
@@ -409,7 +413,7 @@ function(dmt_add_compile_definitions target)
   else()
     set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
   endif()
-  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH})
+  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
 endfunction()
 
 
@@ -586,7 +590,7 @@ function(dmt_add_module_library name module_name)
         FILE_SET "${module_name}_headers" TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
           FILES ${header_file_list}
       PRIVATE
-        ${implementation_file_list}
+        FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
     )
   else()
     target_sources(${name}
@@ -594,7 +598,7 @@ function(dmt_add_module_library name module_name)
         FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
           FILES ${interface_file_list}
       PRIVATE
-        ${implementation_file_list}
+        FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
     )
   endif()
 

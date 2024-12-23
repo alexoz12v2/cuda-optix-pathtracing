@@ -1,4 +1,7 @@
 #pragma once
+#if defined(DMT_COMPILER_MSVC)
+#pragma warning(disable : 4005 5106) // SHut SAL macro redefinition up
+#endif
 
 #include "dmtmacros.h"
 
@@ -11,11 +14,14 @@
 #include <cstdio>
 
 #if defined(DMT_OS_WINDOWS)
+// clang-format off
 #pragma comment(lib, "mincore")
-#include <AclAPI.h>
+#define NO_SAL
 #include <Windows.h>
+#include <AclAPI.h>
 #include <securitybaseapi.h>
 #include <sysinfoapi.h>
+// clang-format on
 #elif defined(DMT_OS_LINUX)
 #endif
 
@@ -146,131 +152,131 @@ DMT_MODULE_EXPORT dmt {
          */
         void* m_data = nullptr;
     };
-}; // namespace dmt
+}
 
-    // module-private bits of functionality. Should not be exported by the primary interface unit
-    // note: since this is to be visible to all implementation units, it cannot be put into a .cpp file, as
-    // implementation units are not linked together. It needs to stay here. It should not be included in the
-    // binary interface, hence it is fine
-    namespace dmt {
-        template <std::integral I>
-        constexpr I ceilDiv(I num, I den)
-        {
-            return (num + den - 1) / den;
-        }
+// module-private bits of functionality. Should not be exported by the primary interface unit
+// note: since this is to be visible to all implementation units, it cannot be put into a .cpp file, as
+// implementation units are not linked together. It needs to stay here. It should not be included in the
+// binary interface, hence it is fine
+namespace dmt {
+    template <std::integral I>
+    constexpr I ceilDiv(I num, I den)
+    {
+        return (num + den - 1) / den;
+    }
 
 #if defined(DMT_OS_WINDOWS)
-        void* reserveVirtualAddressSpace(size_t size)
+    void* reserveVirtualAddressSpace(size_t size)
+    {
+        void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
+        return address; // to check whether it is different than nullptr
+    }
+
+    size_t systemAlignment()
+    {
+        SYSTEM_INFO sysInfo{};
+        GetSystemInfo(&sysInfo);
+        return static_cast<size_t>(sysInfo.dwAllocationGranularity);
+    }
+
+    bool commitPhysicalMemory(void* address, size_t size)
+    {
+        void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
+        return committed != nullptr;
+    }
+
+    bool freeVirtualAddressSpace(void* address, size_t size) // true if success
+    {
+        return VirtualFree(address, 0, MEM_RELEASE);
+    }
+
+    void decommitPage(void* pageAddress, size_t pageSize)
+    {
+        VirtualFree(pageAddress, pageSize, MEM_DECOMMIT);
+    }
+
+    namespace win32
+    {
+
+    uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize)
+    {
+        //Get the error message ID, if any.
+        DWORD errorMessageID = ::GetLastError();
+        if (errorMessageID == 0)
         {
-            void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
-            return address; // to check whether it is different than nullptr
+            buffer[0] = '\n';
+            return 0;
         }
-
-        size_t systemAlignment()
-        {
-            SYSTEM_INFO sysInfo{};
-            GetSystemInfo(&sysInfo);
-            return static_cast<size_t>(sysInfo.dwAllocationGranularity);
-        }
-
-        bool commitPhysicalMemory(void* address, size_t size)
-        {
-            void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
-            return committed != nullptr;
-        }
-
-        bool freeVirtualAddressSpace(void* address, size_t size) // true if success
-        {
-            return VirtualFree(address, 0, MEM_RELEASE);
-        }
-
-        void decommitPage(void* pageAddress, size_t pageSize)
-        {
-            VirtualFree(pageAddress, pageSize, MEM_DECOMMIT);
-        }
-
-        namespace win32
+        else
         {
 
-        uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize)
-        {
-            //Get the error message ID, if any.
-            DWORD errorMessageID = ::GetLastError();
-            if (errorMessageID == 0)
-            {
-                buffer[0] = '\n';
-                return 0;
-            }
-            else
-            {
+            LPSTR messageBuffer = nullptr;
 
-                LPSTR messageBuffer = nullptr;
-
-                //Ask Win32 to give us the string version of that message ID.
-                //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
-                size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                                                 FORMAT_MESSAGE_IGNORE_INSERTS,
-                                             NULL,
-                                             errorMessageID,
-                                             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                             (LPSTR)&messageBuffer,
-                                             0,
-                                             NULL);
+            //Ask Win32 to give us the string version of that message ID.
+            //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
+            size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                                             FORMAT_MESSAGE_IGNORE_INSERTS,
+                                         NULL,
+                                         errorMessageID,
+                                         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                         (LPSTR)&messageBuffer,
+                                         0,
+                                         NULL);
 
 //Copy the error message into a std::string.
 #undef min
-                size_t actual = std::min(static_cast<size_t>(maxSize - 1), size);
-                std::memcpy(buffer, messageBuffer, actual);
-                buffer[actual] = '\0';
+            size_t actual = std::min(static_cast<size_t>(maxSize - 1), size);
+            std::memcpy(buffer, messageBuffer, actual);
+            buffer[actual] = '\0';
 
-                //Free the Win32's string's buffer.
-                LocalFree(messageBuffer);
-                return actual;
-            }
+            //Free the Win32's string's buffer.
+            LocalFree(messageBuffer);
+            return actual;
         }
+    }
 
-        constexpr bool luidCompare(LUID const& luid0, LUID const& luid1)
-        {
-            return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
-        }
+    constexpr bool luidCompare(LUID const& luid0, LUID const& luid1)
+    {
+        return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
+    }
 
-        } // namespace win32
+    } // namespace win32
 #elif defined(DMT_OS_LINUX)
-        void* reserveVirtualAddressSpace(size_t size)
+    void* reserveVirtualAddressSpace(size_t size)
+    {
+        void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (address == MAP_FAILED)
         {
-            void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-            if (address == MAP_FAILED)
-            {
-                return nullptr;
-            }
-            return address;
+            return nullptr;
         }
+        return address;
+    }
 
-        bool commitPhysicalMemory(void* address, size_t size)
-        {
-            int result = mprotect(address, size, PROT_READ | PROT_WRITE);
-            return result == 0;
-        }
+    bool commitPhysicalMemory(void* address, size_t size)
+    {
+        int result = mprotect(address, size, PROT_READ | PROT_WRITE);
+        return result == 0;
+    }
 
-        bool freeVirtualAddressSpace(void* address, size_t size)
-        {
-            return !munmap(address, size);
-        }
+    bool freeVirtualAddressSpace(void* address, size_t size)
+    {
+        return !munmap(address, size);
+    }
 
-        void decommitPage(void* pageAddress, size_t pageSize)
-        {
-            mprotect(pageAddress, pageSize, PROT_NONE);
-            madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
-        }
+    void decommitPage(void* pageAddress, size_t pageSize)
+    {
+        mprotect(pageAddress, pageSize, PROT_NONE);
+        madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
+    }
 
-        size_t systemAlignment()
-        {
-            // TODO
-            return 0;
-        }
+    size_t systemAlignment()
+    {
+        // TODO
+        return 0;
+    }
 
-        namespace linux
-        {
-        }
+    namespace linux
+    {
+    }
 #endif
-    } // namespace dmt
+} // namespace dmt

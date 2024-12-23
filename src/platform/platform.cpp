@@ -18,6 +18,11 @@ Platform::Platform(Platform&&) noexcept
 {
 }
 
+uint64_t Platform::getSize() const
+{
+    return 4096;
+}
+
 Platform& Platform::operator=(Platform&&) noexcept
 {
     return *this;

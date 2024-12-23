@@ -134,8 +134,6 @@ module;
 
 export module platform:memory;
 
-export import :utils;
-
 export import <platform-memory.h>;
 
 /** @} */

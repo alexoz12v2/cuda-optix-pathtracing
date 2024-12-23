@@ -1,7 +1,7 @@
 /**
-* @file testdmtpartitions-implonly.cppm
-* @brief Partition Interface Unit `implonly` for the `testdmtpartitions` module.
-*/
+ * @file testdmtpartitions-implonly.cppm
+ * @brief Partition Interface Unit `implonly` for the `testdmtpartitions` module.
+ */
 
 export module testdmtpartitions:implonly;
 

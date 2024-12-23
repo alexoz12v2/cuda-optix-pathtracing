@@ -1,7 +1,7 @@
 /**
-* @file testdmt.cpp
-* @brief Implementation unit for the `testdmt` module.
-*/
+ * @file testdmt.cpp
+ * @brief Implementation unit for the `testdmt` module.
+ */
 
 // example of a module implementation unit
 module testdmt;

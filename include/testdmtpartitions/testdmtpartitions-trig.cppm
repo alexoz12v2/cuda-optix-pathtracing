@@ -1,7 +1,7 @@
 /**
-* @file testdmtpartitions-trig.cppm
-* @brief Partition Interface Unit `trig` containing trigonometric utilities in the `testdmtpartitions` module.
-*/
+ * @file testdmtpartitions-trig.cppm
+ * @brief Partition Interface Unit `trig` containing trigonometric utilities in the `testdmtpartitions` module.
+ */
 
 export module testdmtpartitions:trig;
 export import :moretrig;

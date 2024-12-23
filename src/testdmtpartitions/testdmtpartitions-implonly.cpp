@@ -1,7 +1,7 @@
 /**
-* @file testdmtpartitions-implonly.cpp
-* @brief Implementation unit for the `implonly` partition.
-*/
+ * @file testdmtpartitions-implonly.cpp
+ * @brief Implementation unit for the `implonly` partition.
+ */
 
 // you can also declare some module partitions as only implementation units, if they will be fully exported
 // by the primary interface module

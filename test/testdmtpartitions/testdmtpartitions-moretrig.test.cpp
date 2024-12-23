@@ -24,7 +24,7 @@ TEST_CASE("[testdmtpartitions:moretrig] Test case")
         dmt::resetMockHistory();
         dmt::someFunc(3);
         CHECK(dmt::myCos_fake.call_count > 0);
-        CALL_RESET(dmt::myCos);
+        RESET_FAKE(dmt::myCos);
         CHECK(dmt::myCos_fake.call_count == 0);
     }
 }

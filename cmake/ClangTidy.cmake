@@ -16,7 +16,7 @@ unset(CLANG_TIDY_VERSION)
 
 # second match, after the dot
 # If you use a newer feature, remember to update this!
-if(CMAKE_MATCH_1 GREATER_EQUAL 18)
+if(CMAKE_MATCH_1 GREATER_EQUAL 16)
   message(STATUS "Using clang-tidy version ${CMAKE_MATCH_1}")
 else()
   message(FATAL_ERROR "clang-tidy version ${CMAKE_MATCH_1} is too low")

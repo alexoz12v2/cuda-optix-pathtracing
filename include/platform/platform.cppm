@@ -17,6 +17,7 @@ module;
 export module platform;
 
 export import :logging;
+export import :threadPool;
 export import :memory;
 export import :utils; /** Note: Utils contains private, possibly OS specific, functionality + PlatformContext */
 

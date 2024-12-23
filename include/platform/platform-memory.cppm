@@ -924,7 +924,9 @@ class TaggedPointer
 {
 public:
     // Constructor
-    constexpr TaggedPointer(std::nullptr_t null = nullptr) : m_taggedPtr(0) { }
+    constexpr TaggedPointer(std::nullptr_t null = nullptr) : m_taggedPtr(0)
+    {
+    }
 
     constexpr TaggedPointer(void* ptr, uint16_t tag = 0)
     {
@@ -1072,13 +1074,13 @@ class MultiPoolAllocator
 {
     static constexpr uint32_t numBlockSizes     = 4;
     static constexpr uint32_t poolBaseAlignment = 32; // we need 5 bits for the tagged pointer
-    static constexpr size_t   bufferSize = toUnderlying(EPageSize::e2MB);
+    static constexpr size_t   bufferSize        = toUnderlying(EPageSize::e2MB);
 
 public:
-    MultiPoolAllocator(PlatformContext&                   ctx,
-                       PageAllocator&                     pageAllocator,
+    MultiPoolAllocator(PlatformContext&                    ctx,
+                       PageAllocator&                      pageAllocator,
                        std::array<uint32_t, numBlockSizes> numBlocksPerPool,
-                       AllocatorHooks const&              hooks);
+                       AllocatorHooks const&               hooks);
     MultiPoolAllocator(MultiPoolAllocator const&)                = delete;
     MultiPoolAllocator(MultiPoolAllocator&&) noexcept            = delete;
     MultiPoolAllocator& operator=(MultiPoolAllocator const&)     = delete;

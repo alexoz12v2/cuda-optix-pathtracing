@@ -1,12 +1,13 @@
 
-#include <cstdint>
 #include <memory>
+
+#include <cstdint>
 
 import platform;
 
 struct TestObject
 {
-    int x, y;
+    int                   x, y;
     dmt::PlatformContext& ctx;
     TestObject(int a, int b, dmt::PlatformContext& ctx) : x(a), y(b), ctx(ctx)
     {

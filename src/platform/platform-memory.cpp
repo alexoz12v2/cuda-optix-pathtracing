@@ -1729,14 +1729,14 @@ static constexpr TaggedPointer encode(uint16_t bufferIndex, uint8_t blockSizeEnc
     return {ptr, tag};
 }
 
-MultiPoolAllocator::MultiPoolAllocator(PlatformContext&                   ctx,
-                                       PageAllocator&                     pageAllocator,
+MultiPoolAllocator::MultiPoolAllocator(PlatformContext&                    ctx,
+                                       PageAllocator&                      pageAllocator,
                                        std::array<uint32_t, numBlockSizes> numBlocksPerPool,
-                                       AllocatorHooks const&              hooks) :
+                                       AllocatorHooks const&               hooks) :
 m_hooks(hooks)
 {
     static_assert(numBlockSizes == 4);
-    static constexpr uint16_t max        = 256;
+    static constexpr uint16_t max = 256;
 
     // compute numBytes and counts for each pool
     uint16_t blockSizes[numBlockSizes]{toUnderlying(EBlockSize::e32B),
@@ -1751,7 +1751,7 @@ m_hooks(hooks)
     // compute size of the metadata required to associate 1 bit to each block (account for the PageAllocation(24B) + next pointer + uint8_t notUsedFor)
     // modify numBytes and counts such that we can fit metadata + pools into the 2MB buffer
     uint32_t numBitsMetadata = std::reduce(std::begin(numBlocksPerPool), std::end(numBlocksPerPool), 0u, std::plus<>());
-    m_numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
+    m_numBytesMetadata       = ceilDiv(numBitsMetadata, 8u);
     m_totalSize = std::reduce(std::begin(bytesPerPool), std::end(bytesPerPool), 0ULL, std::plus<>()) + m_numBytesMetadata;
     ctx.log("tring to allocate pool buffer for {} {} {} {}",
             {StrBuf{bytesPerPool[0], "0x%zx"},
@@ -1773,7 +1773,7 @@ m_hooks(hooks)
                 break;
             }
         }
-    } 
+    }
 
     // Adjust the pools to fill up the remaining space but leave room for alignment overhead
     size_t remainingSpace = bufferSize - m_totalSize;
@@ -1790,8 +1790,8 @@ m_hooks(hooks)
                 m_totalSize += blockSizeWithMetadata;
                 ++numBitsMetadata;
                 m_numBytesMetadata = ceilDiv(numBitsMetadata, 8u);
-                remainingSpace   = bufferSize - m_totalSize;
-                blockAdded       = true;
+                remainingSpace     = bufferSize - m_totalSize;
+                blockAdded         = true;
                 break;
             }
         }
@@ -1799,7 +1799,7 @@ m_hooks(hooks)
             break; // No block could fit into the remaining space
     }
 
-    ctx.log("The possible sizes are {} {} {} {}", 
+    ctx.log("The possible sizes are {} {} {} {}",
             {StrBuf{bytesPerPool[0], "0x%zx"},
              StrBuf{bytesPerPool[1], "0x%zx"},
              StrBuf{bytesPerPool[2], "0x%zx"},
@@ -1823,9 +1823,9 @@ void MultiPoolAllocator::newBlock(PlatformContext& ctx, PageAllocator& pageAlloc
         ctx.error("Couldn't allocate 2MB buffer for multi pool allocator, aborting...");
         std::abort();
     }
-    auto& header      = *reinterpret_cast<BufferHeader*>(pageAlloc.address);
-    header.alloc      = pageAlloc;
-    header.next       = nullptr;
+    auto& header = *reinterpret_cast<BufferHeader*>(pageAlloc.address);
+    header.alloc = pageAlloc;
+    header.next  = nullptr;
 
     // compute the buffer base
     uintptr_t metadataAddr = reinterpret_cast<uintptr_t>(&header) + sizeof(BufferHeader);
@@ -1931,9 +1931,7 @@ TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx, PageAlloc
                 ctx.log("Allocated {} blocks of size {} at address {}",
                         {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
 
-                return encode(bufferIdx,
-                              blockSizeIndex,
-                              reinterpret_cast<void*>(blockAddr));
+                return encode(bufferIdx, blockSizeIndex, reinterpret_cast<void*>(blockAddr));
             }
         }
 
@@ -2019,4 +2017,3 @@ void MultiPoolAllocator::freeBlocks(PlatformContext& ctx, PageAllocator& pageAll
 }
 
 } // namespace dmt
-

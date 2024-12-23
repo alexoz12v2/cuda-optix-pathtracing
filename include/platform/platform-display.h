@@ -20,5 +20,33 @@
 
 
 DMT_MODULE_EXPORT dmt {
+    class Display
+    {
+    public:
+        Display();
+        ~Display();
 
+        //Display cannot be copied or assigned
+        Display(Display const&)            = delete;
+        Display& operator=(Display const&) = delete;
+
+        //Display object cannot be moved and move assignment
+        Display(Display&&)            = delete;
+        Display& operator=(Display&&) = delete;
+
+        void ShowWindow();
+        
+        void Renderer();
+
+    private:
+        static void GlfwErrorCallback(int error, char const* description)
+        {
+            std::cerr << "GLFW Error " << error << description << std::endl;
+        }
+        void ShowPropertyWindow();
+
+    private:
+        GLFWwindow*  m_window;
+        GLFWmonitor* m_monitor;
+    };
 }

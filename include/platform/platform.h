@@ -6,6 +6,7 @@
 // Keep in sync with .cppm
 #include <platform/platform-logging.h>
 #include <platform/platform-threadPool.h>
+#include <platform/platform-display.h>
 
 #endif
 

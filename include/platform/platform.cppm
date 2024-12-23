@@ -19,6 +19,7 @@ module;
 export module platform;
 export import :threadPool;
 export import :logging;
+export import :display
 
 export import <platform.h>;
 

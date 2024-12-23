@@ -9,9 +9,10 @@
 #define DMT_INTERFACE_AS_HEADER
 #include <platform/platform.h>
 
-
-surface<void, cudaSurfaceType2D> surfRef;
-//CUDA kernel that fill the texture with gradient data but use surface
+//deprecated
+//urface<void, cudaSurfaceType2D> surfRef;
+//CUDA kernel that fill the texture with gradient data but use surface deprecated
+/*
 __global__ void fillAndWriteTextureKernel(int width, int height)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -19,22 +20,22 @@ __global__ void fillAndWriteTextureKernel(int width, int height)
 
     if (x < width && y < height)
     {
-        int index     = y * width + x;
-        value = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
-        surf2Dwrite(value, surfRef, x*sizeof(float), y);
+        int index = y * width + x;
+        uchar4 value     = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
+        surf2Dwrite(value, surfRef, x * sizeof(float), y);
     }
-}
+}*/
 
-__global__ void fillAndWriteTextureKernelSurfObj(cudaSurfaceObject_t surfObj,int width, int height)
+__global__ void fillAndWriteTextureKernelSurfObj(cudaSurfaceObject_t surfObj, int width, int height)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < width && y < height)
     {
-        int index     = y * width + x;
-        value = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
-        surf2Dwrite(value, surfObj, x*sizeof(float), y);
+        int index = y * width + x;
+        uchar4 value     = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
+        surf2Dwrite(value, surfObj, x * sizeof(float), y);
     }
 }
 
@@ -163,8 +164,8 @@ bool RegImgSurf(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
     //used to map the OpenGL texture to a CUDA buffer that can be used in a CUDA kernel
     cudaGraphicsResource_t ptrRes = nullptr;
 
-    //register the resource 
-    cudaError_t reMgs = cudaGraphicsGLRegisterImage(&prtRes, tex, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsNone);
+    //register the resource
+    cudaError_t reMgs = cudaGraphicsGLRegisterImage(&ptrRes, tex, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsNone);
 
     if (reMgs != cudaSuccess)
         return false;
@@ -188,7 +189,7 @@ bool RegImgSurf(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
     resDesc.resType = cudaResourceTypeArray;
 
     // Create the surface objects
-    resDesc.res.array.array = ptrArray;
+    resDesc.res.array.array     = ptrArray;
     cudaSurfaceObject_t surfObj = 0;
     cudaCreateSurfaceObject(&surfObj, &resDesc);
 

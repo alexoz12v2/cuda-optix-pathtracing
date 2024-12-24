@@ -992,6 +992,17 @@ DMT_MODULE_EXPORT dmt {
         MultiPoolAllocator(MultiPoolAllocator&&) noexcept            = delete;
         MultiPoolAllocator& operator=(MultiPoolAllocator const&)     = delete;
         MultiPoolAllocator& operator=(MultiPoolAllocator&&) noexcept = delete;
+
+        static constexpr uint16_t bufferIndex(uint16_t tag)
+        { // 7 high bits + 3 low bits
+            return tag >> 2;
+        }
+
+        static constexpr uint8_t blockSizeEncoding(uint16_t tag)
+        { // 2 least significant bits
+            return tag & 0x3;
+        }
+
         // To be called before destruction, eg with a janitor class. When DI works, remove this
         // WARNING: To be called, you need to be absolutely sure that all objects inside it have been destroyed
         // (or they are trivially destructible)
@@ -1019,5 +1030,14 @@ DMT_MODULE_EXPORT dmt {
         size_t             m_totalSize;
         uint32_t           m_numBytesMetadata;
         uint32_t           m_numBlocksPerPool[numBlockSizes];
+    };
+
+
+    template <typename T, EBlockSize size>
+        requires(sizeof(T) + sizeof(uintptr_t) == toUnderlying(size))
+    struct alignas(32) PoolNode
+    {
+        T             data;
+        TaggedPointer next;
     };
 } // namespace dmt

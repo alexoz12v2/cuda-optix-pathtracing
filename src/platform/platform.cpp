@@ -7,29 +7,28 @@ module;
 
 module platform;
 
-namespace dmt
-{
+namespace dmt {
 
-Platform::Platform()
-{
-}
+    Platform::Platform()
+    {
+    }
 
-Platform::Platform(Platform&&) noexcept
-{
-}
+    Platform::Platform(Platform&&) noexcept
+    {
+    }
 
-uint64_t Platform::getSize() const
-{
-    return 4096;
-}
+    uint64_t Platform::getSize() const
+    {
+        return 4096;
+    }
 
-Platform& Platform::operator=(Platform&&) noexcept
-{
-    return *this;
-}
+    Platform& Platform::operator=(Platform&&) noexcept
+    {
+        return *this;
+    }
 
-Platform::~Platform() noexcept
-{
-}
+    Platform::~Platform() noexcept
+    {
+    }
 
 } // namespace dmt

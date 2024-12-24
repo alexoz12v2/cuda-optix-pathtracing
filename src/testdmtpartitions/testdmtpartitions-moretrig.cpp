@@ -6,10 +6,9 @@
 module testdmtpartitions; // implementation units for partitions do not redeclare the partition
 import :trig;             // intra module dependencies
 
-namespace dmt
-{
-float someFunc(float x)
-{
-    return myCos(x);
-}
+namespace dmt {
+    float someFunc(float x)
+    {
+        return myCos(x);
+    }
 } // namespace dmt

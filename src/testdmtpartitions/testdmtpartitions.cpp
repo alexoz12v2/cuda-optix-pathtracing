@@ -9,10 +9,9 @@ module;
 
 module testdmtpartitions;
 
-namespace dmt
-{
-float mySin(float x)
-{
-    return std::sinf(x);
-}
+namespace dmt {
+    float mySin(float x)
+    {
+        return std::sinf(x);
+    }
 } // namespace dmt

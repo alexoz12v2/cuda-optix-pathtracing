@@ -28,31 +28,34 @@ int32_t main()
     auto&                       ctx = platform.ctx();
     dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
     dmt::PageAllocatorHooks     testhooks{
-		.allocHook =
-		[](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
-			auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-			tracker.track(ctx, alloc);
-		},
-		.freeHook =
-		[](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
-			auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-			tracker.untrack(ctx, alloc);
-		},
-		.data = &tracker,
+            .allocHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+                tracker.track(ctx, alloc);
+            },
+            .freeHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+                tracker.untrack(ctx, alloc);
+            },
+            .data = &tracker,
     };
     dmt::AllocatorHooks defHooks{
-        .allocHook       = [](void* data, dmt::PlatformContext& ctx, dmt::AllocationInfo const& alloc) {
-			auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+        .allocHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::AllocationInfo const& alloc)
+        {
+            auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
             tracker.track(ctx, alloc);
         },
-        .freeHook        = [](void* data, dmt::PlatformContext& ctx, dmt::AllocationInfo const& alloc) {
-			auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+        .freeHook =
+            [](void* data, dmt::PlatformContext& ctx, dmt::AllocationInfo const& alloc)
+        {
+            auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
             tracker.untrack(ctx, alloc);
         },
-        .cleanTransients = [](void* data, dmt::PlatformContext& ctx) {
-			auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-        },
-		.data = &tracker,
+        .cleanTransients = [](void* data, dmt::PlatformContext& ctx)
+        { auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data); },
+        .data = &tracker,
     };
 
     dmt::PageAllocator      pageAllocator{ctx, testhooks};

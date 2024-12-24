@@ -7,9 +7,8 @@ module;
 #include <fff/fff.h>
 
 module testdmtpartitions;
-namespace dmt
-{
-FAKE_VALUE_FUNC(float, myCos, float);
+namespace dmt {
+    FAKE_VALUE_FUNC(float, myCos, float);
 }
 
 void resetMyCos()

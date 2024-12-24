@@ -11,16 +11,15 @@ module;
 
 module testdmtpartitions; // implementation units for partitions do not redeclare the partition
 
-namespace dmt
-{
-void implOnlyHidden()
-{
-    std::cout << "you can't see mee";
-}
+namespace dmt {
+    void implOnlyHidden()
+    {
+        std::cout << "you can't see mee";
+    }
 
-void implOnly()
-{
-    implOnlyHidden();
-    std::cout << "Basilare, impl only wow" << std::endl;
-}
+    void implOnly()
+    {
+        implOnlyHidden();
+        std::cout << "Basilare, impl only wow" << std::endl;
+    }
 } // namespace dmt

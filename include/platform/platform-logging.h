@@ -73,64 +73,63 @@ DMT_MODULE_EXPORT dmt {
     /**
      * Namespace containing ASCII color codes for console colored output
      */
-    namespace logcolor
-    {
-    /**
-     * ASCII sequence to reset the color of the terminal. called at the end of `write` of `ConsoleLogger`
-     */
-    inline constexpr std::string_view const reset = "\033[0m";
+    namespace logcolor {
+        /**
+         * ASCII sequence to reset the color of the terminal. called at the end of `write` of `ConsoleLogger`
+         */
+        inline constexpr std::string_view const reset = "\033[0m";
 
-    /**
-     *  ASCII sequence for the red color
-     */
-    inline constexpr std::string_view const red = "\033[31m";
+        /**
+         *  ASCII sequence for the red color
+         */
+        inline constexpr std::string_view const red = "\033[31m";
 
-    /**
-     *  ASCII sequence for the green color
-     */
-    inline constexpr std::string_view const green = "\033[32m";
+        /**
+         *  ASCII sequence for the green color
+         */
+        inline constexpr std::string_view const green = "\033[32m";
 
-    /**
-     *  ASCII sequence for a bright tint of yellow
-     */
-    inline constexpr std::string_view const brightYellow = "\033[93m";
+        /**
+         *  ASCII sequence for a bright tint of yellow
+         */
+        inline constexpr std::string_view const brightYellow = "\033[93m";
 
-    /**
-     *  ASCII sequence for a greyish green
-     */
-    inline constexpr std::string_view const greyGreen = "\033[38;5;102m";
+        /**
+         *  ASCII sequence for a greyish green
+         */
+        inline constexpr std::string_view const greyGreen = "\033[38;5;102m";
 
-    /**
-     *  ASCII sequence for the blue color
-     */
-    inline constexpr std::string_view const blue = "\033[34m";
+        /**
+         *  ASCII sequence for the blue color
+         */
+        inline constexpr std::string_view const blue = "\033[34m";
 
-    /**
-     *  ASCII sequence for the magenta color
-     */
-    inline constexpr std::string_view const magenta = "\033[35m";
+        /**
+         *  ASCII sequence for the magenta color
+         */
+        inline constexpr std::string_view const magenta = "\033[35m";
 
-    /**
-     *  ASCII sequence for the cyan color
-     */
-    inline constexpr std::string_view const cyan = "\033[36m";
+        /**
+         *  ASCII sequence for the cyan color
+         */
+        inline constexpr std::string_view const cyan = "\033[36m";
 
-    /**
-     *  ASCII sequence for a bold-like white color
-     */
-    inline constexpr std::string_view const brightWhite = "\033[97m";
+        /**
+         *  ASCII sequence for a bold-like white color
+         */
+        inline constexpr std::string_view const brightWhite = "\033[97m";
 
-    /**
-     * Extract the terminal.color from an `ELogLevel`
-     * @param level log level
-     * @return ASCII color sequence for console logging
-     */
-    inline constexpr std::string_view colorFromLevel(ELogLevel level)
-    {
-        assert(level != ELogLevel::NONE);
-        constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, brightYellow, red};
-        return colors[toUnderlying(level)];
-    }
+        /**
+         * Extract the terminal.color from an `ELogLevel`
+         * @param level log level
+         * @return ASCII color sequence for console logging
+         */
+        inline constexpr std::string_view colorFromLevel(ELogLevel level)
+        {
+            assert(level != ELogLevel::NONE);
+            constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, brightYellow, red};
+            return colors[toUnderlying(level)];
+        }
     } // namespace logcolor
 
     /**

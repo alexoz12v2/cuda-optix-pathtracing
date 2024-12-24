@@ -27,16 +27,15 @@ export import :trig;
 import :implonly;
 
 // you can either export a namespace, class, variable or function
-/*export*/ namespace dmt
-{
-/**
- * @brief Computes the sine of a given value.
- * @param x The input value (in radians).
- * @return The sine of `x`.
- */
-export float mySin(float x);
+/*export*/ namespace dmt {
+    /**
+     * @brief Computes the sine of a given value.
+     * @param x The input value (in radians).
+     * @return The sine of `x`.
+     */
+    export float mySin(float x);
 
-// no doc as it is redeclared
-export void implOnly(); // redeclare the part of the partition you want to export (gives readability warning)
+    // no doc as it is redeclared
+    export void implOnly(); // redeclare the part of the partition you want to export (gives readability warning)
 } // namespace dmt
 /** @} */ // End of group testdmtpartitions

@@ -1,5 +1,6 @@
 
 #include <memory>
+#include <thread>
 
 #include <cstdint>
 
@@ -17,6 +18,85 @@ struct TestObject
         ctx.log("Destruction TestObject");
     }
 };
+
+void testThreadpool(dmt::PlatformContext&    ctx,
+                    dmt::PageAllocator&      pageAllocator,
+                    dmt::StackAllocator&     stackAllocator,
+                    dmt::MultiPoolAllocator& multiPoolAllocator)
+{
+    struct JobData
+    {
+        std::atomic<int> counter;
+        dmt::PlatformContext& ctx;
+
+        JobData(dmt::PlatformContext& ctx) : counter(0), ctx(ctx)
+        {
+        }
+    };
+
+    // Instantiate the thread pool
+    dmt::ThreadPoolV2 threadPool(ctx, pageAllocator, multiPoolAllocator, stackAllocator);
+
+    // Create job data shared between jobs
+    JobData test0Data{ctx};
+    JobData test1Data{ctx};
+
+    // Define jobs for layer eTest0
+    auto jobTest0 = [](uintptr_t data)
+    {
+        JobData* jobData = reinterpret_cast<JobData*>(data);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Simulate work
+        ++jobData->counter;
+        jobData->ctx.log("Executed job in eTest0 layer, counter: {}", {jobData->counter.load()});
+    };
+
+    // Define jobs for layer eTest1
+    auto jobTest1 = [](uintptr_t data)
+    {
+        JobData* jobData = reinterpret_cast<JobData*>(data);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Simulate work
+        ++jobData->counter;
+        jobData->ctx.log("Executed job in eTest1 layer, counter: {}", {jobData->counter.load()});
+    };
+
+    // Enqueue jobs for eTest0 layer
+    int const numJobsTest0 = 5;
+    for (int i = 0; i < numJobsTest0; ++i)
+    {
+        dmt::Job job{jobTest0, reinterpret_cast<uintptr_t>(&test0Data)};
+        threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest0);
+    }
+
+    // Enqueue jobs for eTest1 layer
+    int const numJobsTest1 = 3;
+    for (int i = 0; i < numJobsTest1; ++i)
+    {
+        dmt::Job job{jobTest1, reinterpret_cast<uintptr_t>(&test1Data)};
+        threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest1);
+    }
+
+    // Kick off the jobs
+    threadPool.kickJobs();
+
+    // Wait for jobs to complete
+    while (test0Data.counter.load() < numJobsTest0 || test1Data.counter.load() < numJobsTest1)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    // Ensure all jobs in eTest0 were executed before eTest1
+    if (test0Data.counter.load() == numJobsTest0 && test1Data.counter.load() == numJobsTest1)
+    {
+        ctx.log("All jobs in eTest0 executed before eTest1.");
+    }
+    else
+    {
+        ctx.error("Job execution order violated.");
+    }
+
+    // Cleanup the thread pool
+    threadPool.cleanup(ctx, pageAllocator, multiPoolAllocator);
+}
 
 // 32B  count: 8192
 // 64B  count: 4096
@@ -81,6 +161,8 @@ int32_t main()
     {
         ctx.error("Failed to allocate memory for TestObject");
     }
+
+    testThreadpool(ctx, pageAllocator, stackAllocator, multiPoolAllocator);
 
     stackAllocator.cleanup(ctx, pageAllocator);
     multiPoolAllocator.cleanup(ctx, pageAllocator);

@@ -146,7 +146,7 @@ namespace dmt {
         {
             // wait for a job to become available
             {
-                std::unique_lock<SpinLock> lk{threadPool->m_mtx};
+                std::unique_lock<decltype(threadPool->m_mtx)> lk{threadPool->m_mtx};
                 if (threadPool->m_shutdownRequested)
                 {
                     break;
@@ -178,7 +178,7 @@ namespace dmt {
         static_assert(numBlocks >= 5);
         static constexpr uint32_t threadBlocks = 3;
         static_assert(threadBlocks > 1);
-        std::lock_guard<SpinLock> lk{m_mtx};
+        std::lock_guard<decltype(m_mtx)> lk{m_mtx};
 
         // allocate the 256 Bytes block for the index
         // TODO: manage allocation of more blocks at a time
@@ -208,7 +208,7 @@ namespace dmt {
         for (uint32_t i = 0; i != jobBlocks; ++i)
         {
             void* ptr = std::bit_cast<void*>(m_pIndex.address() + offset);
-            assert(alignTo(ptr, toUnderlying(EBlockSize::e32B)) == 0);
+            assert(alignTo(ptr, toUnderlying(EBlockSize::e32B)) == ptr);
 
             // store it in the job index
             index.data.ptrs[i] = TaggedPointer{ptr, nullTag};
@@ -282,15 +282,17 @@ namespace dmt {
     void ThreadPoolV2::kickJobs()
     {
         assert(m_pIndex != taggedNullptr);
-        std::lock_guard<SpinLock> lk{m_mtx};
-        m_ready = true;
+        {
+            std::lock_guard<decltype(m_mtx)> lk{m_mtx};
+			m_ready = true;
+        }
         m_cv.notify_one();
     }
 
     void ThreadPoolV2::pauseJobs()
     {
         assert(m_pIndex != taggedNullptr);
-        std::lock_guard<SpinLock> lk{m_mtx};
+        std::lock_guard<decltype(m_mtx)> lk{m_mtx};
         m_ready = false;
     }
 
@@ -370,7 +372,7 @@ namespace dmt {
         };
 
         {
-            std::lock_guard<SpinLock> lk{m_mtx};
+            std::lock_guard<decltype(m_mtx)> lk{m_mtx};
 
             // 1. account for all index blocks
             forEachTrueJobIndexBlock(incrementCount, &trueTaggedPointerCount);
@@ -382,7 +384,7 @@ namespace dmt {
         m_cv.notify_all();
 
         {
-            std::lock_guard<SpinLock> lk{m_mtx};
+            std::lock_guard<decltype(m_mtx)> lk{m_mtx};
 
             forEachTrueThreadBlock(incrementCount, &trueTaggedPointerCount, true);
 
@@ -430,7 +432,7 @@ namespace dmt {
                               Job const&          job,
                               EJobLayer           layer)
     {
-        std::lock_guard<SpinLock> lk{m_mtx};
+        std::lock_guard<decltype(m_mtx)> lk{m_mtx};
         assert(m_pIndex != taggedNullptr);
 
         auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
@@ -529,7 +531,6 @@ namespace dmt {
 
     Job ThreadPoolV2::nextJob()
     {
-        std::lock_guard<SpinLock> lk{m_mtx};
         assert(m_pIndex != taggedNullptr);
 
         auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
@@ -569,6 +570,7 @@ namespace dmt {
         }
 
         // no jobs left
+        m_ready = false;
         return {};
     }
 } // namespace dmt

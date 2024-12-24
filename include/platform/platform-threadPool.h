@@ -57,6 +57,8 @@ DMT_MODULE_EXPORT dmt {
     enum class EJobLayer : uint32_t
     {
         eDefault = 0,
+        eTest0 = 0,
+        eTest1 = 1,
         eEmpty   = static_cast<uint32_t>(-1),
     };
 
@@ -121,7 +123,7 @@ DMT_MODULE_EXPORT dmt {
     class ThreadPoolV2
     {
 #undef max
-        static constexpr uint16_t nullTag     = std::numeric_limits<uint16_t>::max();
+        static constexpr uint16_t nullTag     = 0xFFFU;
         static constexpr uint32_t blockSz     = toUnderlying(EBlockSize::e256B);
         static constexpr uint32_t numBlocks   = 10;
         static constexpr uint32_t num32Blocks = ceilDiv(layerCardinality * static_cast<uint32_t>(sizeof(TaggedPointer)),
@@ -177,7 +179,7 @@ DMT_MODULE_EXPORT dmt {
         TaggedPointer m_pThreads;
 
         mutable std::condition_variable_any m_cv;
-        mutable SpinLock                    m_mtx;
+        mutable SpinLock m_mtx;
         uint32_t                            m_numJobs           = 0;
         mutable bool                        m_ready             = false;
         mutable bool                        m_shutdownRequested = false;

@@ -33,6 +33,20 @@ import <platform/platform-logging.h>;
 #endif
 
 DMT_MODULE_EXPORT dmt {
+    class ChunkedFileReader
+    {
+    public:
+        ChunkedFileReader(std::string_view filePath);
+        ChunkedFileReader(ChunkedFileReader const&)                = delete;
+        ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
+        ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;
+        ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
+        ~ChunkedFileReader() noexcept;
+
+    private:
+        alignas(8) unsigned char data[64];
+    };
+
     /**
      * Convenience pointer type to pass around systems of the application to get an enriched/targeted
      * interface to the platform

@@ -977,9 +977,9 @@ DMT_MODULE_EXPORT dmt {
         return e32B;
     }
 
+    inline constexpr uint32_t numBlockSizes = 4;
     class MultiPoolAllocator
     {
-        static constexpr uint32_t numBlockSizes     = 4;
         static constexpr uint32_t poolBaseAlignment = 32; // we need 5 bits for the tagged pointer
         static constexpr size_t   bufferSize        = toUnderlying(EPageSize::e2MB);
 
@@ -1023,13 +1023,14 @@ DMT_MODULE_EXPORT dmt {
 
         void newBlock(PlatformContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr);
 
-        mutable std::mutex m_mtx;
-        AllocatorHooks     m_hooks;
-        BufferHeader*      m_firstBuffer;
-        BufferHeader*      m_lastBuffer;
-        size_t             m_totalSize;
-        uint32_t           m_numBytesMetadata;
-        uint32_t           m_numBlocksPerPool[numBlockSizes];
+        mutable std::mutex                  m_mtx;
+        std::array<uint32_t, numBlockSizes> m_blocksPerPool;
+        AllocatorHooks                      m_hooks;
+        BufferHeader*                       m_firstBuffer;
+        BufferHeader*                       m_lastBuffer;
+        size_t                              m_totalSize;
+        uint32_t                            m_numBytesMetadata;
+        uint32_t                            m_numBlocksPerPool[numBlockSizes];
     };
 
 
@@ -1039,5 +1040,34 @@ DMT_MODULE_EXPORT dmt {
     {
         T             data;
         TaggedPointer next;
+    };
+
+    struct MemoryContext
+    {
+        MemoryContext(void*                                      platformContextData,
+                      PlatformContext::Table const*              pTable,
+                      PlatformContext::InlineTable const&        inlineTable,
+                      uint32_t                                   pageTrackCapacity,
+                      uint32_t                                   allocTrackCapacity,
+                      std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
+
+        // stack methods
+        void* stackAllocate(size_t size, size_t alignment);
+        void  stackReset();
+
+        // pool methods
+        TaggedPointer poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize);
+        void          poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr);
+
+        // clean up everything (TODO: move to destructor)
+        void cleanup();
+
+        PlatformContext        pctx;
+        PageAllocationsTracker tracker;
+        PageAllocatorHooks     pageHooks;
+        AllocatorHooks         allocHooks;
+        PageAllocator          pageAllocator;
+        StackAllocator         stackAllocator;
+        MultiPoolAllocator     multiPoolAllocator;
     };
 } // namespace dmt

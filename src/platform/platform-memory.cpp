@@ -1793,6 +1793,8 @@ namespace dmt {
             }
         }
 
+        m_blocksPerPool = numBlocksPerPool;
+
         // Adjust the pools to fill up the remaining space but leave room for alignment overhead
         size_t remainingSpace = bufferSize - m_totalSize;
         while (remainingSpace > *std::min_element(blockSizes, blockSizes + numBlockSizes)) // Ensure we leave space for alignment
@@ -1900,6 +1902,16 @@ namespace dmt {
         ctx.log("MultiPoolAllocator cleanup complete. All buffers deallocated.");
     }
 
+    static constexpr uint8_t flipBits(uint8_t value)
+    {
+        uint8_t result = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            result |= ((value >> i) & 1) << (7 - i);
+        }
+        return result;
+    }
+
     TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx,
                                                      PageAllocator&   pageAllocator,
                                                      uint32_t         numBlocks,
@@ -1912,25 +1924,37 @@ namespace dmt {
 
         BufferHeader* currentBuffer = m_firstBuffer;
         uint16_t      bufferIdx     = 0;
+        uint32_t      bitsOffset    = 0;
+        for (uint32_t i = 0; i < blockSizeIndex; ++i)
+        {
+            bitsOffset += m_blocksPerPool[i];
+        }
 
         // Iterate through the buffers to find free blocks
         while (currentBuffer)
         {
             uintptr_t metadataAddr = std::bit_cast<uintptr_t>(currentBuffer) + sizeof(BufferHeader);
             uintptr_t poolBase     = currentBuffer->poolBase;
+            for (uint32_t i = 0; i < blockSizeIndex; ++i)
+            {
+                poolBase += m_blocksPerPool[i] * toUnderlying(fromEncoding(i));
+            }
 
             // Scan the metadata for a free region of numBlocks
             uint8_t* metadata        = reinterpret_cast<uint8_t*>(metadataAddr);
             uint32_t numBlocksInPool = m_numBlocksPerPool[blockSizeIndex];
             uint16_t blockSizeBytes  = toUnderlying(blockSize);
 
-            for (uint32_t i = 0; i <= numBlocksInPool - numBlocks; ++i)
+            for (uint32_t i = 0; i <= numBlocksInPool; ++i)
             {
                 // Check if a region of numBlocks is free
                 bool isRegionFree = true;
                 for (uint32_t j = 0; j < numBlocks; ++j)
                 {
-                    if (metadata[(i + j) / 8] & (1 << ((i + j) % 8))) // not sure this works
+                    uint32_t byteIndex = (bitsOffset + i + j) / 8;
+                    uint8_t  byteMask  = 1u << ((bitsOffset + i + j) % 8);
+                    byteMask           = flipBits(byteMask);
+                    if (metadata[byteIndex] & byteMask) // not sure this works
                     {
                         isRegionFree = false;
                         ++bufferIdx;
@@ -1943,7 +1967,10 @@ namespace dmt {
                     // Mark the blocks as allocated in metadata
                     for (uint32_t j = 0; j < numBlocks; ++j)
                     {
-                        metadata[(i + j) / 8] |= (1 << ((i + j) % 8)); // not sure this works
+                        uint32_t byteIndex = (bitsOffset + i + j) / 8;
+                        uint8_t  byteMask  = 1u << ((bitsOffset + i + j) % 8);
+                        byteMask           = flipBits(byteMask);
+                        metadata[byteIndex] |= byteMask; // not sure this works
                     }
 
                     // Calculate the starting address of the allocated blocks
@@ -1995,9 +2022,18 @@ namespace dmt {
         }
 
         // Extract buffer index and block size encoding from the tag
-        uint16_t tag          = ptr.tag();
-        uint16_t bufferIdx    = bufferIndex(tag);
-        uint8_t  blockSizeEnc = blockSizeEncoding(tag);
+        uintptr_t     blockAddr       = ptr.address();
+        uint16_t      tag             = ptr.tag();
+        uint16_t      bufferIdx       = bufferIndex(tag);
+        uint8_t       blockSizeEnc    = blockSizeEncoding(tag);
+        uint32_t      bitsOffset      = 0;
+        BufferHeader* currentBuffer   = m_firstBuffer;
+        uintptr_t     metadataAddr    = reinterpret_cast<uintptr_t>(currentBuffer) + sizeof(BufferHeader);
+        uintptr_t     poolBase        = currentBuffer->poolBase;
+        EBlockSize    blockSize       = fromEncoding(blockSizeEnc);
+        uint16_t      blockSizeBytes  = toUnderlying(blockSize);
+        uint32_t      metadataBaseIdx = 0;
+
         // the last buffer index value is used by callers to hold special meaning
         assert(bufferIdx != (std::numeric_limits<uint16_t>::max() >> 6u));
 
@@ -2007,11 +2043,20 @@ namespace dmt {
             return;
         }
 
-        EBlockSize blockSize      = fromEncoding(blockSizeEnc);
-        uint16_t   blockSizeBytes = toUnderlying(blockSize);
+        for (uint32_t i = 0; i < blockSizeEnc; ++i)
+        {
+            poolBase += m_blocksPerPool[i] * toUnderlying(fromEncoding(i));
+            bitsOffset += m_blocksPerPool[i];
+        }
+
+        // add the block size until you go past the tagged address. Then you found the base index
+        // for the metadata
+        for (uintptr_t poolAddr = poolBase; poolAddr < ptr.address(); poolAddr += blockSizeBytes)
+        {
+            ++metadataBaseIdx;
+        }
 
         // Locate the buffer using the buffer index
-        BufferHeader* currentBuffer = m_firstBuffer;
         for (uint16_t i = 0; i < bufferIdx && currentBuffer; ++i)
         {
             currentBuffer = currentBuffer->next;
@@ -2023,11 +2068,7 @@ namespace dmt {
             return;
         }
 
-        uintptr_t metadataAddr = reinterpret_cast<uintptr_t>(currentBuffer) + sizeof(BufferHeader);
-        uintptr_t poolBase     = currentBuffer->poolBase;
-
         // Calculate the block index
-        uintptr_t blockAddr = ptr.address();
         if (blockAddr < poolBase || (blockAddr - poolBase) % blockSizeBytes != 0) // not sure this works
         {
             ctx.error("Pointer does not correspond to a valid block in this buffer.");
@@ -2040,7 +2081,10 @@ namespace dmt {
         uint8_t* metadata = reinterpret_cast<uint8_t*>(metadataAddr);
         for (uint32_t i = 0; i < numBlocks; ++i)
         {
-            metadata[(blockIndex + i) / 8] &= ~(1 << ((blockIndex + i) % 8)); // not sure this works
+            uint32_t byteIndex = (bitsOffset + metadataBaseIdx + i) / 8;
+            uint8_t  byteMask  = 1u << ((bitsOffset + metadataBaseIdx + i) % 8);
+            byteMask           = flipBits(byteMask);
+            metadata[byteIndex] &= ~byteMask; // not sure this works
         }
 
         AllocationInfo info;
@@ -2049,4 +2093,84 @@ namespace dmt {
         ctx.log("Freed {} blocks of size {} at address {}", {numBlocks, blockSizeBytes, StrBuf{blockAddr, "0x%zx"}});
     }
 
+    // MemoryContext ---------------------------------------------------------------------------------------------------------
+
+    MemoryContext::MemoryContext(void*                                      platformContextData,
+                                 PlatformContext::Table const*              pTable,
+                                 PlatformContext::InlineTable const&        inlineTable,
+                                 uint32_t                                   pageTrackCapacity,
+                                 uint32_t                                   allocTrackCapacity,
+                                 std::array<uint32_t, numBlockSizes> const& numBlocksPerPool) :
+    pctx{platformContextData, pTable, inlineTable},
+    tracker{pctx, pageTrackCapacity, allocTrackCapacity},
+    pageHooks{
+        .allocHook =
+            [](void* data, PlatformContext& ctx, PageAllocation const& alloc)
+        {
+            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+            tracker.track(ctx, alloc);
+        },
+        .freeHook =
+            [](void* data, PlatformContext& ctx, PageAllocation const& alloc)
+        {
+            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+            tracker.untrack(ctx, alloc);
+        },
+        .data = &tracker,
+    },
+    allocHooks{
+        .allocHook =
+            [](void* data, PlatformContext& ctx, AllocationInfo const& alloc)
+        {
+            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+            tracker.track(ctx, alloc);
+        },
+        .freeHook =
+            [](void* data, PlatformContext& ctx, AllocationInfo const& alloc)
+        {
+            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+            tracker.untrack(ctx, alloc);
+        },
+        .cleanTransients =
+            [](void* data, PlatformContext& ctx)
+        {
+            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+            tracker.claenTransients(ctx);
+        },
+        .data = &tracker,
+    },
+    pageAllocator{pctx, pageHooks},
+    stackAllocator{pctx, pageAllocator, allocHooks},
+    multiPoolAllocator{pctx, pageAllocator, numBlocksPerPool, allocHooks}
+    {
+    }
+
+    // stack methods
+    void* MemoryContext::stackAllocate(size_t size, size_t alignment)
+    {
+        return stackAllocator.allocate(pctx, pageAllocator, size, alignment);
+    }
+
+    void MemoryContext::stackReset()
+    {
+        stackAllocator.reset(pctx, pageAllocator);
+    }
+
+    // pool methods
+    TaggedPointer MemoryContext::poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize)
+    {
+        return multiPoolAllocator.allocateBlocks(pctx, pageAllocator, numBlocks, blockSize);
+    }
+
+    void MemoryContext::poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr)
+    {
+        multiPoolAllocator.freeBlocks(pctx, pageAllocator, numBlocks, ptr);
+    }
+
+    // clean up everything
+    void MemoryContext::cleanup()
+    {
+        stackAllocator.cleanup(pctx, pageAllocator);
+        multiPoolAllocator.cleanup(pctx, pageAllocator);
+    }
 } // namespace dmt

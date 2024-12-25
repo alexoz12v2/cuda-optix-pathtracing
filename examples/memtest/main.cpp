@@ -8,9 +8,9 @@ import platform;
 
 struct TestObject
 {
-    int                   x, y;
-    dmt::PlatformContext& ctx;
-    TestObject(int a, int b, dmt::PlatformContext& ctx) : x(a), y(b), ctx(ctx)
+    int              x, y;
+    dmt::AppContext& ctx;
+    TestObject(int a, int b, dmt::AppContext& ctx) : x(a), y(b), ctx(ctx)
     {
     }
     ~TestObject()
@@ -19,23 +19,17 @@ struct TestObject
     }
 };
 
-void testThreadpool(dmt::PlatformContext&    ctx,
-                    dmt::PageAllocator&      pageAllocator,
-                    dmt::StackAllocator&     stackAllocator,
-                    dmt::MultiPoolAllocator& multiPoolAllocator)
+void testThreadpool(dmt::AppContext& ctx)
 {
     struct JobData
     {
-        std::atomic<int>      counter;
-        dmt::PlatformContext& ctx;
+        std::atomic<int> counter;
+        dmt::AppContext& ctx;
 
-        JobData(dmt::PlatformContext& ctx) : counter(0), ctx(ctx)
+        JobData(dmt::AppContext& ctx) : counter(0), ctx(ctx)
         {
         }
     };
-
-    // Instantiate the thread pool
-    dmt::ThreadPoolV2 threadPool(ctx, pageAllocator, multiPoolAllocator, stackAllocator);
 
     // Create job data shared between jobs
     JobData test0Data{ctx};
@@ -64,7 +58,7 @@ void testThreadpool(dmt::PlatformContext&    ctx,
     for (int i = 0; i < numJobsTest0; ++i)
     {
         dmt::Job job{jobTest0, reinterpret_cast<uintptr_t>(&test0Data)};
-        threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest0);
+        ctx.threadPool.addJob(ctx.mctx, job, dmt::EJobLayer::eTest0);
     }
 
     // Enqueue jobs for eTest1 layer
@@ -72,17 +66,17 @@ void testThreadpool(dmt::PlatformContext&    ctx,
     for (int i = 0; i < numJobsTest1; ++i)
     {
         dmt::Job job{jobTest1, reinterpret_cast<uintptr_t>(&test1Data)};
-        threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest1);
+        ctx.threadPool.addJob(ctx.mctx, job, dmt::EJobLayer::eTest1);
     }
 
     for (int i = 0; i < numJobsTest0; ++i)
     {
         dmt::Job job{jobTest0, reinterpret_cast<uintptr_t>(&test0Data)};
-        threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest0);
+        ctx.threadPool.addJob(ctx.mctx, job, dmt::EJobLayer::eTest0);
     }
 
     // Kick off the jobs
-    threadPool.kickJobs();
+    ctx.threadPool.kickJobs();
 
     // Wait for jobs to complete
     while (test0Data.counter.load() < 2 * numJobsTest0 || test1Data.counter.load() < numJobsTest1)
@@ -99,9 +93,6 @@ void testThreadpool(dmt::PlatformContext&    ctx,
     {
         ctx.error("Job execution order violated.");
     }
-
-    // Cleanup the thread pool
-    threadPool.cleanup(ctx, pageAllocator, multiPoolAllocator);
 }
 
 // 32B  count: 8192
@@ -110,46 +101,11 @@ void testThreadpool(dmt::PlatformContext&    ctx,
 // 256B count: 1024
 int32_t main()
 {
-    dmt::Platform               platform;
-    auto&                       ctx = platform.ctx();
-    dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
-    dmt::PageAllocatorHooks     testhooks{
-            .allocHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
-                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-                tracker.track(ctx, alloc);
-            },
-            .freeHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
-                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-                tracker.untrack(ctx, alloc);
-            },
-            .data = &tracker,
-    };
-    dmt::AllocatorHooks defHooks{
-        .allocHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::AllocationInfo const& alloc)
-        {
-            auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-            tracker.track(ctx, alloc);
-        },
-        .freeHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::AllocationInfo const& alloc)
-        {
-            auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-            tracker.untrack(ctx, alloc);
-        },
-        .cleanTransients = [](void* data, dmt::PlatformContext& ctx)
-        { auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data); },
-        .data = &tracker,
-    };
-
-    dmt::PageAllocator      pageAllocator{ctx, testhooks};
-    dmt::StackAllocator     stackAllocator{ctx, pageAllocator, defHooks};
-    dmt::MultiPoolAllocator multiPoolAllocator{ctx, pageAllocator, {8192, 4096, 2048, 1024}, defHooks};
+    dmt::Platform platform;
+    auto&         ctx = platform.ctx();
 
     ctx.log("Hello darkness my old friend");
-    auto ptr = multiPoolAllocator.allocateBlocks(ctx, pageAllocator, 1, dmt::EBlockSize::e64B);
+    auto ptr = ctx.mctx.poolAllocateBlocks(1, dmt::EBlockSize::e64B);
     if (ptr != dmt::taggedNullptr)
     {
         // Construct object in allocated memory
@@ -161,15 +117,12 @@ int32_t main()
         std::destroy_at(testObject);
 
         // Free the allocated memory
-        multiPoolAllocator.freeBlocks(ctx, pageAllocator, 1, ptr);
+        ctx.mctx.poolFreeBlocks(1, ptr);
     }
     else
     {
         ctx.error("Failed to allocate memory for TestObject");
     }
 
-    testThreadpool(ctx, pageAllocator, stackAllocator, multiPoolAllocator);
-
-    stackAllocator.cleanup(ctx, pageAllocator);
-    multiPoolAllocator.cleanup(ctx, pageAllocator);
+    testThreadpool(ctx);
 }

@@ -187,10 +187,7 @@ namespace dmt {
         }
     }
 
-    ThreadPoolV2::ThreadPoolV2(PlatformContext&    ctx,
-                               PageAllocator&      pageAllocator,
-                               MultiPoolAllocator& multiPoolAllocator,
-                               StackAllocator&     stackAllocator)
+    ThreadPoolV2::ThreadPoolV2(MemoryContext& ctx)
     {
         static_assert(numBlocks >= 5);
         static constexpr uint32_t threadBlocks = 3;
@@ -199,10 +196,10 @@ namespace dmt {
 
         // allocate the 256 Bytes block for the index
         // TODO: manage allocation of more blocks at a time
-        m_pIndex = multiPoolAllocator.allocateBlocks(ctx, pageAllocator, numBlocks, EBlockSize::e256B);
+        m_pIndex = ctx.poolAllocateBlocks(numBlocks, EBlockSize::e256B);
         if (m_pIndex == taggedNullptr)
         {
-            ctx.error("Couldn't allocate {} index blocks for threadPool", {numBlocks});
+            ctx.pctx.error("Couldn't allocate {} index blocks for threadPool", {numBlocks});
             std::abort();
         }
 
@@ -270,10 +267,10 @@ namespace dmt {
             for (uint32_t i = 0; i < additionalBlocks; ++i)
             {
                 uint8_t threadNum = static_cast<uint8_t>(i == additionalBlocks - 1 ? threadsResidual : ThreadBlob::numTs);
-                ptThreadsNext = multiPoolAllocator.allocateBlocks(ctx, pageAllocator, 1, EBlockSize::e256B);
+                ptThreadsNext = ctx.poolAllocateBlocks(1, EBlockSize::e256B);
                 if (ptThreadsNext == taggedNullptr)
                 {
-                    ctx.error("Could not allocate additional block of 256 B index {} for the threadpool", {i});
+                    ctx.pctx.error("Could not allocate additional block of 256 B index {} for the threadpool", {i});
                     std::abort();
                 }
 
@@ -373,7 +370,7 @@ namespace dmt {
         }
     }
 
-    void ThreadPoolV2::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator, MultiPoolAllocator& multiPoolAllocator)
+    void ThreadPoolV2::cleanup(MemoryContext& ctx)
     {
         // cycle through all Tagged pointers and count the number of true taggeed pointers
         uint32_t       trueTaggedPointerCount = 0;
@@ -419,11 +416,11 @@ namespace dmt {
             // free all memory
             for (uint32_t i = 0; i < trueTaggedPointerCount; ++i)
             {
-                multiPoolAllocator.freeBlocks(ctx, pageAllocator, 1, t.p[i]);
+                ctx.poolFreeBlocks(1, t.p[i]);
             }
 
             // free the index block, the only one with `numBlocks` adjacent
-            multiPoolAllocator.freeBlocks(ctx, pageAllocator, numBlocks, m_pIndex);
+            ctx.poolFreeBlocks(numBlocks, m_pIndex);
 
             // bookkeeping
             m_ready    = false;
@@ -432,25 +429,18 @@ namespace dmt {
         } // lock guard scope
     }
 
-    static TaggedPointer tryAlloc(PlatformContext&    ctx,
-                                  PageAllocator&      pageAllocator,
-                                  MultiPoolAllocator& multiPoolAllocator,
-                                  EJobLayer           layer)
+    static TaggedPointer tryAlloc(MemoryContext& ctx, EJobLayer layer)
     {
-        TaggedPointer newJobBlock = multiPoolAllocator.allocateBlocks(ctx, pageAllocator, 1, EBlockSize::e256B);
+        TaggedPointer newJobBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B);
         if (newJobBlock == taggedNullptr)
         {
-            ctx.error("failed to allocate new job block for layer {}", {toUnderlying(layer)});
+            ctx.pctx.error("failed to allocate new job block for layer {}", {toUnderlying(layer)});
         }
 
         return newJobBlock;
     }
 
-    void ThreadPoolV2::addJob(PlatformContext&    ctx,
-                              PageAllocator&      pageAllocator,
-                              MultiPoolAllocator& multiPoolAllocator,
-                              Job const&          job,
-                              EJobLayer           layer)
+    void ThreadPoolV2::addJob(MemoryContext& ctx, Job const& job, EJobLayer layer)
     {
         std::lock_guard<decltype(m_mtx)> lk{m_mtx};
         assert(m_pIndex != taggedNullptr);
@@ -485,7 +475,7 @@ namespace dmt {
                         // and if this is the last one, try to allocate a new one
                         if (jobNode->next == taggedNullptr)
                         {
-                            TaggedPointer newJobBlock = tryAlloc(ctx, pageAllocator, multiPoolAllocator, layer);
+                            TaggedPointer newJobBlock = tryAlloc(ctx, layer);
 
                             jobNode->next = newJobBlock;
                             std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
@@ -497,9 +487,8 @@ namespace dmt {
                 else if (pIndexNode->data.layers[i] == EJobLayer::eEmpty)
                 { // this is a new layer, allocate a new job block
                     pIndexNode->data.layers[i] = layer;
-                    TaggedPointer newJobBlock  = pIndexNode->data.ptrs[i] == taggedNullptr
-                                                     ? tryAlloc(ctx, pageAllocator, multiPoolAllocator, layer)
-                                                     : pIndexNode->data.ptrs[i];
+                    TaggedPointer newJobBlock  = pIndexNode->data.ptrs[i] == taggedNullptr ? tryAlloc(ctx, layer)
+                                                                                           : pIndexNode->data.ptrs[i];
                     pIndexNode->data.ptrs[i]   = newJobBlock;
                     std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
 
@@ -510,7 +499,7 @@ namespace dmt {
                     ++m_numJobs;
                     return;
                 } // pIndexNode->data.layers[i] == EJobLayer::eEmpty
-            } // loop over layer cardinality of the current index block
+            }     // loop over layer cardinality of the current index block
 
             // if you didn't find any slots from the current index block, go to the next one
             lastPtr    = pIndexNode->next;
@@ -518,10 +507,10 @@ namespace dmt {
         }
 
         // if we exhausted the index, allocate a new block, for the index...
-        TaggedPointer newIndexBlock = multiPoolAllocator.allocateBlocks(ctx, pageAllocator, 1, EBlockSize::e256B);
+        TaggedPointer newIndexBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B);
         if (newIndexBlock == taggedNullptr)
         {
-            ctx.error("Failed to allocate new index block for thread pool");
+            ctx.pctx.error("Failed to allocate new index block for thread pool");
             std::abort();
         }
 
@@ -531,7 +520,7 @@ namespace dmt {
         }
         else // this shouldn't be hit
         {
-            ctx.warn("You shouldn't be here");
+            ctx.pctx.warn("You shouldn't be here");
             m_pIndex = newIndexBlock;
         }
 
@@ -544,7 +533,7 @@ namespace dmt {
         }
 
         // ... and a new block for the job
-        TaggedPointer newJobBlock = tryAlloc(ctx, pageAllocator, multiPoolAllocator, layer);
+        TaggedPointer newJobBlock = tryAlloc(ctx, layer);
         newIndex->data.ptrs[0]    = newJobBlock;
         auto* newJobNode          = newJobBlock.pointer<JobNode256B>();
         std::memset(newJobNode, 0, sizeof(JobNode256B));

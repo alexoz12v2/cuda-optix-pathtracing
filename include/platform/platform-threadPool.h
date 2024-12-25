@@ -131,22 +131,15 @@ DMT_MODULE_EXPORT dmt {
         friend void               jobWorkerThread(ThreadPoolV2* threadPool);
 
     public:
-        ThreadPoolV2(PlatformContext&    ctx,
-                     PageAllocator&      pageAllocator,
-                     MultiPoolAllocator& multiPoolAllocator,
-                     StackAllocator&     stackAllocator);
+        ThreadPoolV2(MemoryContext& ctx);
         ThreadPoolV2(ThreadPoolV2 const&)                = delete;
         ThreadPoolV2(ThreadPoolV2&&) noexcept            = delete;
         ThreadPoolV2& operator=(ThreadPoolV2 const&)     = delete;
         ThreadPoolV2& operator=(ThreadPoolV2&&) noexcept = delete;
 
-        void addJob(PlatformContext&    ctx,
-                    PageAllocator&      pageAllocator,
-                    MultiPoolAllocator& multiPoolAllocator,
-                    Job const&          job,
-                    EJobLayer           layer);
+        void addJob(MemoryContext& ctx, Job const& job, EJobLayer layer);
 
-        void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator, MultiPoolAllocator& multiPoolAllocator);
+        void cleanup(MemoryContext& ctx);
 
         void kickJobs();
 

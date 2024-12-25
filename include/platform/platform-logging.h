@@ -464,111 +464,10 @@ concept LogDisplay = requires(T t)
 };
     // clang-format on
 
-    /**
-     * CRTP base class for a logger, implementing redundant functions like `log`, `error`, ... using the `Derived`
-     * `write` function
-     * @tparam Derived type of the derived logger class
-     */
     template <typename Derived>
-    class BaseLogger
+    class InterfaceLogger
     {
     public:
-        /**
-         * explicit constructor for the base logger starting from the desired level
-         * @param level desired log level
-         */
-        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
-
-        /**
-         * Setter for the `m_level`
-         * @param level new level
-         */
-        void setLevel(ELogLevel level)
-        {
-            m_level = level;
-        }
-
-        /**
-         * check if the given log level is enabled
-         * @param level log level
-         * @return boolean indicating whether the given log level is enabled
-         */
-        [[nodiscard]] bool enabled(ELogLevel level) const
-        {
-            return m_level <= level;
-        }
-
-        /**
-         * Checks if the `LOG` log level is enabled
-         * @return boolean indicating whether the `LOG` log level is enabled
-         */
-        [[nodiscard]] bool logEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::LOG);
-        }
-
-        /**
-         * Checks if the `ERROR` log level is enabled
-         * @return boolean indicating whether the `ERROR` log level is enabled
-         */
-        [[nodiscard]] bool errorEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::ERR);
-        }
-
-        /**
-         * Checks if the `TRACE` log level is enabled
-         * @return boolean indicating whether the `TRACE` log level is enabled
-         */
-        [[nodiscard]] bool traceEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::TRACE);
-        }
-
-        /**
-         * Checks if the `WARN` log level is enabled
-         * @return boolean indicating whether the `WARN` log level is enabled
-         */
-        [[nodiscard]] bool warnEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::WARNING);
-        }
-        /**
-         * Checks if the `LOG` log level is enabled
-         * @return boolean indicating whether the `LOG` log level is enabled
-         */
-        [[nodiscard]] bool logEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::LOG);
-        }
-
-        /**
-         * Checks if the `ERROR` log level is enabled
-         * @return boolean indicating whether the `ERROR` log level is enabled
-         */
-        [[nodiscard]] bool errorEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::ERR);
-        }
-
-        /**
-         * Checks if the `TRACE` log level is enabled
-         * @return boolean indicating whether the `TRACE` log level is enabled
-         */
-        [[nodiscard]] bool traceEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::TRACE);
-        }
-
-        /**
-         * Checks if the `WARN` log level is enabled
-         * @return boolean indicating whether the `WARN` log level is enabled
-         */
-        [[nodiscard]] bool warnEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::WARNING);
-        }
-
         /**
          * Function which performs logging with the `LOG` log level, only if `m_level` is at least `LOG`
          * @param str the string to print
@@ -663,6 +562,112 @@ concept LogDisplay = requires(T t)
                    std::source_location const&          loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, list, loc);
+        }
+    };
+
+    /**
+     * CRTP base class for a logger, implementing redundant functions like `log`, `error`, ... using the `Derived`
+     * `write` function
+     * @tparam Derived type of the derived logger class
+     */
+    template <typename Derived>
+    class BaseLogger : public InterfaceLogger<Derived>
+    {
+    public:
+        /**
+         * explicit constructor for the base logger starting from the desired level
+         * @param level desired log level
+         */
+        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+
+        /**
+         * Setter for the `m_level`
+         * @param level new level
+         */
+        void setLevel(ELogLevel level)
+        {
+            m_level = level;
+        }
+
+        /**
+         * check if the given log level is enabled
+         * @param level log level
+         * @return boolean indicating whether the given log level is enabled
+         */
+        [[nodiscard]] bool enabled(ELogLevel level) const
+        {
+            return m_level <= level;
+        }
+
+        /**
+         * Checks if the `LOG` log level is enabled
+         * @return boolean indicating whether the `LOG` log level is enabled
+         */
+        [[nodiscard]] bool logEnabled()
+        {
+            return static_cast<Derived*>(this)->enabled(ELogLevel::LOG);
+        }
+
+        /**
+         * Checks if the `ERROR` log level is enabled
+         * @return boolean indicating whether the `ERROR` log level is enabled
+         */
+        [[nodiscard]] bool errorEnabled()
+        {
+            return static_cast<Derived*>(this)->enabled(ELogLevel::ERR);
+        }
+
+        /**
+         * Checks if the `TRACE` log level is enabled
+         * @return boolean indicating whether the `TRACE` log level is enabled
+         */
+        [[nodiscard]] bool traceEnabled()
+        {
+            return static_cast<Derived*>(this)->enabled(ELogLevel::TRACE);
+        }
+
+        /**
+         * Checks if the `WARN` log level is enabled
+         * @return boolean indicating whether the `WARN` log level is enabled
+         */
+        [[nodiscard]] bool warnEnabled()
+        {
+            return static_cast<Derived*>(this)->enabled(ELogLevel::WARNING);
+        }
+        /**
+         * Checks if the `LOG` log level is enabled
+         * @return boolean indicating whether the `LOG` log level is enabled
+         */
+        [[nodiscard]] bool logEnabled() const
+        {
+            return static_cast<Derived const*>(this)->enabled(ELogLevel::LOG);
+        }
+
+        /**
+         * Checks if the `ERROR` log level is enabled
+         * @return boolean indicating whether the `ERROR` log level is enabled
+         */
+        [[nodiscard]] bool errorEnabled() const
+        {
+            return static_cast<Derived const*>(this)->enabled(ELogLevel::ERR);
+        }
+
+        /**
+         * Checks if the `TRACE` log level is enabled
+         * @return boolean indicating whether the `TRACE` log level is enabled
+         */
+        [[nodiscard]] bool traceEnabled() const
+        {
+            return static_cast<Derived const*>(this)->enabled(ELogLevel::TRACE);
+        }
+
+        /**
+         * Checks if the `WARN` log level is enabled
+         * @return boolean indicating whether the `WARN` log level is enabled
+         */
+        [[nodiscard]] bool warnEnabled() const
+        {
+            return static_cast<Derived const*>(this)->enabled(ELogLevel::WARNING);
         }
 
     protected:

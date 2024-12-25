@@ -33,20 +33,6 @@ import <platform/platform-logging.h>;
 #endif
 
 DMT_MODULE_EXPORT dmt {
-    class ChunkedFileReader
-    {
-    public:
-        ChunkedFileReader(std::string_view filePath);
-        ChunkedFileReader(ChunkedFileReader const&)                = delete;
-        ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
-        ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;
-        ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
-        ~ChunkedFileReader() noexcept;
-
-    private:
-        alignas(8) unsigned char data[64];
-    };
-
     /**
      * Convenience pointer type to pass around systems of the application to get an enriched/targeted
      * interface to the platform
@@ -165,6 +151,26 @@ DMT_MODULE_EXPORT dmt {
          * functions, like `Platform`
          */
         void* m_data = nullptr;
+    };
+
+    class ChunkedFileReader
+    {
+    public:
+        static constexpr uint32_t size      = 64;
+        static constexpr uint32_t alignment = 8;
+        ChunkedFileReader(PlatformContext& pctx, std::string_view filePath, uint32_t chunkSize);
+        ChunkedFileReader(ChunkedFileReader const&)                = delete;
+        ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
+        ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;
+        ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
+        ~ChunkedFileReader() noexcept;
+
+        bool     requestChunk(PlatformContext& pctx, void* chunkBuffer, uint32_t chunkNum);
+        bool     waitForPendingChunk(PlatformContext& pctx, uint32_t timeoutMillis);
+        uint32_t lastNumBytesRead();
+
+    private:
+        alignas(alignment) unsigned char m_data[size];
     };
 }
 

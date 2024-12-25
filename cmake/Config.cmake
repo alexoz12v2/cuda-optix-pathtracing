@@ -557,6 +557,10 @@ function(dmt_add_module_library name module_name)
   set_target_properties(${name} PROPERTIES DEFINE_SYMBOL ${NAME_UPPER}_EXPORTS)
   set_target_properties(${name} PROPERTIES EXPORT_NAME dmt::${target_path})
 
+  set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_target_properties(${name} PROPERTIES FOLDER "Modules")
+
   # Possible todo: Handle Shared libraries (SFML)
 
   # possible todo: Override PDB name/directory as 2 configurations generate debug symbols
@@ -658,11 +662,13 @@ function(dmt_add_example target)
 
   # possible todo: PCH
 
+  # put the executable file in the right place
+  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   set_target_properties(${target} PROPERTIES DEBUG_POSTFIX -d)
   # target folder (will show in visual studio)
   set_target_properties(${target} PROPERTIES FOLDER "Examples")
   # visual studio startup path for debugging
-  set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   dmt_set_target_warnings(${target})

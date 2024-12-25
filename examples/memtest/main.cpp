@@ -1,7 +1,9 @@
 
 #include <memory>
+#include <string_view>
 #include <thread>
 
+#include <cassert>
 #include <cstdint>
 
 import platform;
@@ -18,6 +20,36 @@ struct TestObject
         ctx.log("Destruction TestObject");
     }
 };
+
+void testChunkedFileReader(dmt::PlatformContext& pctx)
+{
+    constexpr uint32_t chunkSize = 1024; // Define chunk size (e.g., 1 KB)
+    char const*        filePath  = "..\\res\\test.txt";
+
+    dmt::ChunkedFileReader reader(pctx, filePath, chunkSize);
+
+    // Test 1: Request a chunk
+    char buffer[chunkSize];
+    std::memset(buffer, 0, sizeof(buffer));
+    bool success = reader.requestChunk(pctx, buffer, 0); // Read first chunk
+    assert(success && "Failed to request chunk");
+
+    // Test 2: Wait for completion (non-blocking for this test)
+    bool completed = reader.waitForPendingChunk(pctx, 1000); // Wait for 1 second max
+    assert(completed && "Chunk read did not complete in time");
+
+    // Test 3: Verify data is not empty (assuming file has content)
+    bool dataNonEmpty = std::strlen(buffer) > 0;
+    assert(dataNonEmpty && "Buffer contains no data");
+
+    std::string_view view{buffer, reader.lastNumBytesRead()};
+    pctx.log("Bytes read from test file: {}", {view});
+
+    // Test 4: Destructor cleanup (implicitly tested)
+    // When the reader goes out of scope, the destructor will close the file handle.
+
+    pctx.log("All tests passed for ChunkedFileReader.");
+}
 
 void testThreadpool(dmt::AppContext& ctx)
 {
@@ -125,4 +157,5 @@ int32_t main()
     }
 
     testThreadpool(ctx);
+    testChunkedFileReader(ctx.mctx.pctx);
 }

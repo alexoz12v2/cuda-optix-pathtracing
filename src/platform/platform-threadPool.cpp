@@ -499,7 +499,7 @@ namespace dmt {
                     ++m_numJobs;
                     return;
                 } // pIndexNode->data.layers[i] == EJobLayer::eEmpty
-            }     // loop over layer cardinality of the current index block
+            } // loop over layer cardinality of the current index block
 
             // if you didn't find any slots from the current index block, go to the next one
             lastPtr    = pIndexNode->next;

@@ -98,10 +98,16 @@ if(DMT_ENABLE_SANITIZERS AND NOT DMT_COMPILER_MSVC)
 endif()
 
 # output directory of eventual dlls and executables
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin) # TODO remove, put per target basis
 
 dmt_set_option(CLANG_TIDY_EXECUTABLE clang-tidy STRING "clang-tidy executable program")
 include(cmake/ClangTidy.cmake)
+
+# custom target to copy assets from the `res/` directory (use `add_dependencies` in executable targets to have 
+# this copy happen automatically)
+add_custom_target(dmt-copy-assets 
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/res ${CMAKE_CURRENT_BINARY_DIR}/res
+)
 
 # add library code
 add_subdirectory(src)

@@ -75,17 +75,23 @@ void testThreadpool(dmt::PlatformContext&    ctx,
         threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest1);
     }
 
+    for (int i = 0; i < numJobsTest0; ++i)
+    {
+        dmt::Job job{jobTest0, reinterpret_cast<uintptr_t>(&test0Data)};
+        threadPool.addJob(ctx, pageAllocator, multiPoolAllocator, job, dmt::EJobLayer::eTest0);
+    }
+
     // Kick off the jobs
     threadPool.kickJobs();
 
     // Wait for jobs to complete
-    while (test0Data.counter.load() < numJobsTest0 || test1Data.counter.load() < numJobsTest1)
+    while (test0Data.counter.load() < 2 * numJobsTest0 || test1Data.counter.load() < numJobsTest1)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     // Ensure all jobs in eTest0 were executed before eTest1
-    if (test0Data.counter.load() == numJobsTest0 && test1Data.counter.load() == numJobsTest1)
+    if (test0Data.counter.load() == 2 * numJobsTest0 && test1Data.counter.load() == numJobsTest1)
     {
         ctx.log("All jobs in eTest0 executed before eTest1.");
     }

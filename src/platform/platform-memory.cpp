@@ -1999,7 +1999,7 @@ namespace dmt {
         uint16_t bufferIdx    = bufferIndex(tag);
         uint8_t  blockSizeEnc = blockSizeEncoding(tag);
         // the last buffer index value is used by callers to hold special meaning
-        assert(bufferIdx != std::numeric_limits<uint16_t>::max());
+        assert(bufferIdx != (std::numeric_limits<uint16_t>::max() >> 6u));
 
         if (blockSizeEnc >= numBlockSizes)
         {

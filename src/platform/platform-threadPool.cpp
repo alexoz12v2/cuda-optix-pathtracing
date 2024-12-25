@@ -152,7 +152,8 @@ namespace dmt {
                     break;
                 }
 
-                threadPool->m_cv.wait(lk, [&threadPool]() { return threadPool->m_ready; });
+                threadPool->m_cv.wait(lk,
+                                      [&threadPool]() { return threadPool->m_ready || threadPool->m_shutdownRequested; });
                 if (threadPool->m_shutdownRequested)
                 {
                     break;
@@ -162,7 +163,6 @@ namespace dmt {
                 copy = threadPool->nextJob();
             }
 
-            assert(copy.func && "bad function call in job");
             if (copy.func)
             {
                 copy.func(copy.data);
@@ -284,7 +284,7 @@ namespace dmt {
         assert(m_pIndex != taggedNullptr);
         {
             std::lock_guard<decltype(m_mtx)> lk{m_mtx};
-			m_ready = true;
+            m_ready = true;
         }
         m_cv.notify_one();
     }
@@ -360,8 +360,9 @@ namespace dmt {
     {
         // cycle through all Tagged pointers and count the number of true taggeed pointers
         uint32_t       trueTaggedPointerCount = 0;
-        constexpr auto incrementCount         = [](void* p, TaggedPointer)
+        constexpr auto incrementCount         = [](void* p, TaggedPointer tp)
         {
+            assert(tp.tag() != nullTag);
             auto& cnt = *reinterpret_cast<uint32_t*>(p);
             ++cnt;
         };
@@ -370,6 +371,7 @@ namespace dmt {
             auto& pair           = *reinterpret_cast<BufferCountPair*>(p);
             pair.p[pair.count++] = tp;
         };
+        constexpr auto nothing = [](void* p, TaggedPointer tp) {};
 
         {
             std::lock_guard<decltype(m_mtx)> lk{m_mtx};
@@ -382,11 +384,12 @@ namespace dmt {
         } // lock guard scope
 
         m_cv.notify_all();
+        forEachTrueThreadBlock(nothing, nullptr, true);
 
         {
             std::lock_guard<decltype(m_mtx)> lk{m_mtx};
 
-            forEachTrueThreadBlock(incrementCount, &trueTaggedPointerCount, true);
+            forEachTrueThreadBlock(incrementCount, &trueTaggedPointerCount, false);
 
             // allocate a unique ptr with the necessary space to hold the true tagged pointers (we don't care
             // about memory here as this should be the shutdown of the application)

@@ -26,7 +26,7 @@ void testThreadpool(dmt::PlatformContext&    ctx,
 {
     struct JobData
     {
-        std::atomic<int> counter;
+        std::atomic<int>      counter;
         dmt::PlatformContext& ctx;
 
         JobData(dmt::PlatformContext& ctx) : counter(0), ctx(ctx)

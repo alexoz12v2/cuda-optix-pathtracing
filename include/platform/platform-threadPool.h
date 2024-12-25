@@ -82,7 +82,7 @@ DMT_MODULE_EXPORT dmt {
     struct JobBlob
     {
         std::array<Job, 15> jobs;
-        unsigned char       padding[8]; // TODO: change this into top and bottom and treat the blob as a circular buffer
+        uint64_t            counter;
     };
     template struct PoolNode<JobBlob, EBlockSize::e256B>;
     using JobNode256B = PoolNode<JobBlob, EBlockSize::e256B>;
@@ -146,13 +146,13 @@ DMT_MODULE_EXPORT dmt {
                     Job const&          job,
                     EJobLayer           layer);
 
-        Job nextJob();
-
         void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator, MultiPoolAllocator& multiPoolAllocator);
 
         void kickJobs();
 
         void pauseJobs();
+
+        bool otherLayerActive(EJobLayer& layer) const;
 
     private:
         static constexpr bool isTrueTaggedPointer(TaggedPointer ptr)
@@ -160,9 +160,12 @@ DMT_MODULE_EXPORT dmt {
             return ptr.tag() != nullTag;
         }
 
-        void forEachTrueJobIndexBlock(void (*func)(void*, TaggedPointer), void* p);
-        void forEachTrueThreadBlock(void (*func)(void*, TaggedPointer), void* p, bool joinAll);
-        void prepareThreadNode(TaggedPointer current, TaggedPointer next, uint8_t activeCount);
+        Job nextJob(bool& otherJobsRemaining, EJobLayer& outLayer);
+
+        void          forEachTrueJobIndexBlock(void (*func)(void*, TaggedPointer), void* p);
+        void          forEachTrueThreadBlock(void (*func)(void*, TaggedPointer), void* p, bool joinAll);
+        void          prepareThreadNode(TaggedPointer current, TaggedPointer next, uint8_t activeCount);
+        TaggedPointer getSmallestLayer(EJobLayer& outLayer) const;
 
         /**
          * pointer to `num32Blocks` 32B adjacent blocks from the pool allocator
@@ -180,10 +183,13 @@ DMT_MODULE_EXPORT dmt {
 
         mutable std::condition_variable_any m_cv;
         mutable SpinLock                    m_mtx;
+        EJobLayer                           m_activeLayer{EJobLayer::eEmpty};
         uint32_t                            m_numJobs           = 0;
+        std::atomic_flag                    m_jobsInFlight      = ATOMIC_FLAG_INIT;
         mutable bool                        m_ready             = false;
         mutable bool                        m_shutdownRequested = false;
     };
+    static_assert(std::atomic<EJobLayer>::is_always_lock_free);
 
     class ThreadPool
     {

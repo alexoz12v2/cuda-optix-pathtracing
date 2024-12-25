@@ -876,19 +876,19 @@ DMT_MODULE_EXPORT dmt {
             return address;
         }
 
-        constexpr bool operator==(TaggedPointer other)
+        constexpr bool operator==(TaggedPointer other) const
         {
             return m_taggedPtr == other.m_taggedPtr;
         }
 
         template <typename T>
-        constexpr bool operator==(T* other)
+        constexpr bool operator==(T* other) const
         {
             void* ptr = pointer();
             return ptr == other;
         }
 
-        constexpr bool operator==(std::nullptr_t null)
+        constexpr bool operator==(std::nullptr_t null) const
         {
             void* ptr = pointer();
             return ptr == null;

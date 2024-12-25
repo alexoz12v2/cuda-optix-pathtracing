@@ -1,5 +1,6 @@
 module;
 
+#include <atomic>
 #include <bit>
 #include <functional>
 #include <future>
@@ -139,7 +140,9 @@ namespace dmt {
 
     static void jobWorkerThread(ThreadPoolV2* threadPool)
     {
-        Job copy;
+        Job       copy;
+        EJobLayer currentLayer   = EJobLayer::eEmpty;
+        bool      otherRemaining = false;
 
         // forever
         while (true)
@@ -152,20 +155,34 @@ namespace dmt {
                     break;
                 }
 
+                EJobLayer activeLayer = currentLayer;
                 threadPool->m_cv.wait(lk,
-                                      [&threadPool]() { return threadPool->m_ready || threadPool->m_shutdownRequested; });
+                                      [&threadPool, &activeLayer]() {
+                                          return (threadPool->m_ready && !threadPool->otherLayerActive(activeLayer)) ||
+                                                 threadPool->m_shutdownRequested;
+                                      });
                 if (threadPool->m_shutdownRequested)
                 {
                     break;
                 }
 
                 // copy the next job
-                copy = threadPool->nextJob();
+                copy = threadPool->nextJob(otherRemaining, currentLayer);
+
+                if (activeLayer != currentLayer)
+                {
+                    threadPool->m_activeLayer = currentLayer;
+                }
             }
 
             if (copy.func)
             {
+                threadPool->m_jobsInFlight.test_and_set();
                 copy.func(copy.data);
+                if (!otherRemaining)
+                {
+                    threadPool->m_jobsInFlight.clear();
+                }
             }
         }
     }
@@ -458,6 +475,7 @@ namespace dmt {
                         { // if the slot is available, add the job
                             if (jobSlot.func == nullptr)
                             {
+                                ++jobBlockPtr.pointer<JobNode256B>()->data.counter;
                                 jobSlot = job;
                                 ++m_numJobs;
                                 return;
@@ -472,6 +490,8 @@ namespace dmt {
                             jobNode->next = newJobBlock;
                             std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
                         }
+
+                        jobNode = jobNode->next.pointer<JobNode256B>();
                     }
                 } // pIndexNode->data.layers[i] == layer
                 else if (pIndexNode->data.layers[i] == EJobLayer::eEmpty)
@@ -486,6 +506,7 @@ namespace dmt {
                     // add the job in the new block
                     auto* newJobNode         = newJobBlock.pointer<JobNode256B>();
                     newJobNode->data.jobs[0] = job;
+                    newJobNode->data.counter = 1;
                     ++m_numJobs;
                     return;
                 } // pIndexNode->data.layers[i] == EJobLayer::eEmpty
@@ -529,10 +550,12 @@ namespace dmt {
         std::memset(newJobNode, 0, sizeof(JobNode256B));
 
         newJobNode->data.jobs[0] = job;
+        newJobNode->data.counter = 1;
         ++m_numJobs;
     }
 
-    Job ThreadPoolV2::nextJob()
+#if 0
+    Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
     {
         assert(m_pIndex != taggedNullptr);
 
@@ -552,11 +575,14 @@ namespace dmt {
                         {
                             if (jobSlot.func != nullptr)
                             {
-                                Job copy     = jobSlot;
-                                jobSlot.func = nullptr;
+                                Job copy       = jobSlot;
+                                jobSlot.func   = nullptr;
+                                uint64_t value = --jobBlockPtr.pointer<JobNode256B>()->data.counter;
                                 --m_numJobs;
 
                                 // TODO maybe: if this is the last job in the node, free it?
+                                otherJobsRemaining = value != 0;
+                                outLayer           = pIndexNode->data.layers[i];
                                 return copy;
                             }
                         } // iteration over job slots
@@ -573,7 +599,104 @@ namespace dmt {
         }
 
         // no jobs left
-        m_ready = false;
+        otherJobsRemaining = false;
+        outLayer           = EJobLayer::eEmpty;
+        m_ready            = false;
         return {};
     }
+#else
+    Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
+    {
+        assert(m_pIndex != taggedNullptr);
+
+        // Find the smallest layer with jobs
+        TaggedPointer jobBlockPtr = getSmallestLayer(outLayer);
+        if (jobBlockPtr == taggedNullptr)
+        {
+            // No jobs left
+            otherJobsRemaining = false;
+            outLayer           = EJobLayer::eEmpty;
+            m_ready            = false;
+            return {};
+        }
+
+        auto* jobNode = jobBlockPtr.pointer<JobNode256B>();
+        while (jobNode != nullptr)
+        {
+            for (auto& jobSlot : jobNode->data.jobs)
+            {
+                if (jobSlot.func != nullptr)
+                {
+                    Job copy     = jobSlot;
+                    jobSlot.func = nullptr;
+
+                    uint64_t value = --jobBlockPtr.pointer<JobNode256B>()->data.counter;
+                    --m_numJobs;
+
+                    // Determine if other jobs remain in this layer
+                    otherJobsRemaining = (value != 0);
+                    return copy;
+                }
+            }
+
+            jobNode = jobNode->next.pointer<JobNode256B>();
+        }
+
+        // If we exhaust the current layer, mark it as empty
+        auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
+        while (pIndexNode != nullptr)
+        {
+            for (uint32_t i = 0; i < layerCardinality; ++i)
+            {
+                if (pIndexNode->data.layers[i] == outLayer)
+                {
+                    pIndexNode->data.layers[i] = EJobLayer::eEmpty;
+                    break;
+                }
+            }
+            pIndexNode = pIndexNode->next.pointer<IndexNode256B>();
+        }
+
+        // No jobs left in the layer
+        otherJobsRemaining = false;
+        return {};
+    }
+#endif
+
+    TaggedPointer ThreadPoolV2::getSmallestLayer(EJobLayer& outLayer) const
+    {
+        assert(m_pIndex != taggedNullptr);
+
+        TaggedPointer smallestJobBlock = taggedNullptr;
+        EJobLayer     smallestLayer    = EJobLayer::eEmpty;
+
+        auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
+        while (pIndexNode != nullptr)
+        {
+            for (uint32_t i = 0; i < layerCardinality; ++i)
+            {
+                EJobLayer currentLayer = pIndexNode->data.layers[i];
+                if (currentLayer != EJobLayer::eEmpty &&
+                    (smallestLayer == EJobLayer::eEmpty || currentLayer < smallestLayer))
+                {
+                    smallestLayer    = currentLayer;
+                    smallestJobBlock = pIndexNode->data.ptrs[i];
+                }
+            }
+            pIndexNode = pIndexNode->next.pointer<IndexNode256B>();
+        }
+
+        outLayer = smallestLayer;
+        return smallestJobBlock;
+    }
+
+    bool ThreadPoolV2::otherLayerActive(EJobLayer& inOutLayer) const
+    {
+        if (inOutLayer == m_activeLayer)
+            return false;
+
+        inOutLayer = m_activeLayer;
+        return m_activeLayer != EJobLayer::eEmpty && m_jobsInFlight.test();
+    }
+
 } // namespace dmt

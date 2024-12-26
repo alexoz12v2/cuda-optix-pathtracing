@@ -2,6 +2,7 @@ module;
 
 #include <array>
 #include <bit>
+#include <concepts>
 #include <limits>
 
 #include <cassert>
@@ -25,6 +26,20 @@ namespace dmt {
     inline constexpr uint8_t bufferOccupied = 1;
     inline constexpr uint8_t bufferFinished = 2;
 
+    template <std::integral I>
+    static constexpr bool isPowerOfTwoAndGE512(I num)
+    {
+        // Check if number is greater than or equal to 512
+        if (num < 512)
+        {
+            return false;
+        }
+
+        // Check if the number is a power of 2
+        // A number is a power of 2 if it has only one bit set
+        return (num & (num - 1)) == 0;
+    }
+
 #if defined(DMT_OS_WINDOWS)
     inline constexpr uint32_t                              sErrorBufferSize = 256;
     static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
@@ -41,14 +56,13 @@ namespace dmt {
         static constexpr uint64_t theMagic = std::numeric_limits<uint64_t>::max();
         struct PData
         {
-            static constexpr uint32_t bufferStatusCount = 9;
-            static constexpr uint32_t bufferStatusBytes = 2 * bufferStatusCount * sizeof(uint8_t);
+            static constexpr uint32_t bufferStatusCount = 18;
 
             void*    buffer;
             uint64_t magic;
             uint32_t numChunksRead;
             uint8_t  numBuffers;
-            uint8_t  bufferStatus[2 * bufferStatusCount]; // 0 = free, 1 = occupied, 2 = finished,
+            uint8_t  bufferStatus[bufferStatusCount]; // 0 = free, 1 = occupied, 2 = finished,
         };
         struct UData
         {
@@ -67,7 +81,16 @@ namespace dmt {
         uint32_t numChunks;
     };
     static_assert(sizeof(Win32ChunkedFileReader) == ChunkedFileReader::size &&
-                  alignof(Win32ChunkedFileReader) == ChunkedFileReader::alignment);
+                  alignof(Win32ChunkedFileReader) <= ChunkedFileReader::alignment);
+
+    static ExtraData* extraFromBuffer(void* buffer, uint32_t chunkSize)
+    { // TODO remove offset
+        auto* pOffset = std::bit_cast<uint64_t*>(
+            alignToAddr(std::bit_cast<uintptr_t>(buffer) + chunkSize, alignof(uint64_t)));
+        auto* pExtra = std::bit_cast<ExtraData*>(
+            alignToAddr(std::bit_cast<uintptr_t>(pOffset) + sizeof(uint64_t), alignof(ExtraData)));
+        return pExtra;
+    }
 
     static void __stdcall completionRoutine(_In_ DWORD           dwErrorCode,
                                             _In_ DWORD           dwNumberOfBytesTransfered,
@@ -80,6 +103,19 @@ namespace dmt {
         }
         else
         {
+            uint16_t tag         = pt.tag() & 0x7FFu;
+            uint8_t  i           = static_cast<uint8_t>(tag >> 2);
+            uint8_t  j           = static_cast<uint8_t>(tag & 0b11);
+            auto*    ptr         = pt.pointer<Win32ChunkedFileReader>();
+            uint8_t  bufferIndex = (i << 2) + j;
+            assert(bufferIndex < ChunkedFileReader::maxNumBuffers);
+            uint8_t byteIndex = i;
+
+            ptr->u.pData.bufferStatus[byteIndex] ^= (bufferOccupied << (j << 1));
+            ptr->u.pData.bufferStatus[byteIndex] |= (bufferFinished << (j << 1));
+            void* p                          = reinterpret_cast<void**>(ptr->u.pData.buffer)[bufferIndex];
+            auto* pExtra                     = extraFromBuffer(p, ptr->chunkSize);
+            pExtra->numBytesReadLastTransfer = dwNumberOfBytesTransfered;
         }
     }
 
@@ -123,11 +159,18 @@ namespace dmt {
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
-        data.chunkSize               = chunkSize;
+        if (!isPowerOfTwoAndGE512(chunkSize))
+        {
+            pctx.error("Invalid Chunk Size. Win32 requires a POT GE 512");
+            data.hFile = INVALID_HANDLE_VALUE;
+            return;
+        }
         if (!initFile(pctx, filePath, data))
         {
             return;
         }
+
+        data.chunkSize = chunkSize;
         data.numChunks = static_cast<uint32_t>(ceilDiv(data.fileSize, static_cast<uint64_t>(chunkSize)));
 
         // from docs: The ReadFileEx function ignores the OVERLAPPED structure's hEvent member. An application is
@@ -154,6 +197,12 @@ namespace dmt {
             data.hFile = INVALID_HANDLE_VALUE;
             return;
         }
+        if (!isPowerOfTwoAndGE512(chunkSize))
+        {
+            pctx.error("Invalid Chunk Size. Win32 requires a POT GE 512");
+            data.hFile = INVALID_HANDLE_VALUE;
+            return;
+        }
 
         data.chunkSize = chunkSize;
         if (!initFile(pctx, filePath, data))
@@ -163,20 +212,16 @@ namespace dmt {
         data.numChunks          = static_cast<uint32_t>(ceilDiv(data.fileSize, static_cast<uint64_t>(chunkSize)));
         data.u.pData.magic      = Win32ChunkedFileReader::theMagic;
         data.u.pData.numBuffers = numBuffers;
-        std::memset(data.u.pData.bufferStatus, 0, Win32ChunkedFileReader::PData::bufferStatusBytes);
+        std::memset(data.u.pData.bufferStatus, 0, Win32ChunkedFileReader::PData::bufferStatusCount * sizeof(uint8_t));
 
         // for each buffer, initialize offset to metadata and void* to actual data
         data.u.pData.buffer = reinterpret_cast<void*>(pBuffers);
         for (uint64_t i = 0; i < numBuffers; ++i)
         {
-            void* ptr     = std::bit_cast<void*>(pBuffers[i]);
-            auto* pOffset = std::bit_cast<uint64_t*>(alignToAddr(pBuffers[i] + chunkSize, alignof(uint64_t)));
-            auto* pExtra  = std::bit_cast<ExtraData*>(
-                alignToAddr(std::bit_cast<uintptr_t>(pOffset) + sizeof(uint64_t), alignof(ExtraData)));
-            *pOffset = std::bit_cast<uintptr_t>(pExtra) - std::bit_cast<uintptr_t>(ptr);
+            void* ptr    = std::bit_cast<void*>(pBuffers[i]);
+            auto* pExtra = extraFromBuffer(ptr, chunkSize);
 
             pExtra->overlapped               = {};
-            pExtra->overlapped.hEvent        = std::bit_cast<HANDLE>(TaggedPointer{ptr, 0x800});
             pExtra->numBytesReadLastTransfer = 0;
         }
 #elif defined(DMT_OS_LINUX)
@@ -285,7 +330,10 @@ namespace dmt {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
         if (data.hFile && data.hFile != INVALID_HANDLE_VALUE)
         {
-            CloseHandle(data.hFile);
+            if (!CloseHandle(data.hFile))
+            {
+                assert(false && "error while closing a file");
+            }
             data.hFile = INVALID_HANDLE_VALUE;
         }
 #elif defined(DMT_OS_LINUX)
@@ -297,14 +345,86 @@ namespace dmt {
 
     bool ChunkedFileReader::InputIterator::operator==(ChunkedFileReader::EndSentinel const&) const
     {
-        return false;
-    }
-
-    ChunkedFileReader::ChunkInfo ChunkedFileReader::InputIterator::operator*() const
-    {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
-        // retrieve the next buffer
+        if (data.hFile == INVALID_HANDLE_VALUE || data.fileSize == 0)
+        {
+            return true;
+        }
+
+        // see whether all chunks were requested
+        bool allChunksRequested = data.numChunks >= m_chunkNum;
+        if (!allChunksRequested)
+        {
+            return false;
+        }
+
+        // now scan the metadata so see whether all buffers are actually free
+        for (uint8_t i = 0; i < Win32ChunkedFileReader::PData::bufferStatusCount; ++i)
+        {
+            uint8_t byteIndex = i;
+            for (uint8_t j = 0; j < 4; ++j)
+            { // since maxNumBuffers is 72, we need 7 bits to store the bufferIndex + 2 bits for j
+                uint8_t bufferIndex = (i << 2) + j;
+                uint8_t status      = (data.u.pData.bufferStatus[byteIndex] >> (j << 1)) & 0b11u;
+                if (status != bufferFree)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+    }
+
+    ChunkInfo ChunkedFileReader::InputIterator::operator*() const
+    {
+        ChunkInfo ret{};
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
+        // find the first free buffer. If there's none, `SleepEx` and try again
+        while (true)
+        {
+            for (uint8_t i = 0; i < Win32ChunkedFileReader::PData::bufferStatusCount; ++i)
+            {
+                uint8_t byteIndex = i;
+                for (uint8_t j = 0; j < 4; ++j)
+                { // since maxNumBuffers is 72, we need 7 bits to store the bufferIndex + 2 bits for j
+                    uint8_t bufferIndex = (i << 2) + j;
+
+                    // TODO better
+                    if (bufferIndex >= data.u.pData.numBuffers)
+                    {
+                        break;
+                    }
+
+                    uint8_t status = (data.u.pData.bufferStatus[byteIndex] >> (j << 1)) & 0b11u;
+                    if (status == bufferFinished)
+                    {
+                        // return a chunk info with the current buffer. It is the caller responsibility to
+                        // call the `markFree` method to let the reader use the buffer for another chunk
+                        void* ptr        = reinterpret_cast<void**>(data.u.pData.buffer)[bufferIndex];
+                        auto* pExtra     = extraFromBuffer(ptr, data.chunkSize);
+                        ret.buffer       = ptr;
+                        ret.numBytesRead = pExtra->numBytesReadLastTransfer;
+                        ret.chunkNum     = pExtra->chunkNum;
+                        ret.indexData    = (static_cast<uint64_t>(byteIndex) << 3) | (j << 1);
+                        return ret;
+                    }
+                }
+            }
+
+            // nothing finished, then wait
+            if (SleepEx(INFINITE, true) != WAIT_IO_COMPLETION)
+            {
+                return {};
+            }
+        }
 #elif defined(DMT_OS_LINUX)
 #error "todo"
 #else
@@ -313,59 +433,126 @@ namespace dmt {
         return {};
     }
 
+    void ChunkedFileReader::markFree(ChunkInfo const& chunkInfo)
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data      = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        uint32_t                byteIndex = static_cast<uint32_t>(chunkInfo.indexData >> 3);
+        uint32_t                shamt     = static_cast<uint32_t>(chunkInfo.indexData & 0b111);
+        uint8_t                 status    = (data.u.pData.bufferStatus[byteIndex] >> shamt) & 0b11u;
+        assert(status == bufferFinished);
+        data.u.pData.bufferStatus[byteIndex] ^= (bufferFinished << shamt);
+        data.u.pData.bufferStatus[byteIndex] |= (bufferFree << shamt);
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+    }
+
     ChunkedFileReader::InputIterator& ChunkedFileReader::InputIterator::operator++()
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
+        if (m_chunkNum >= data.numChunks)
+        {
+            return *this;
+        }
+
         // if there are any in flight operations (bufferStatus == 1), then return immediately
         // or if in data, the numChunksRead == numChunks, return
-        for (uint32_t i = 0; i < Win32ChunkedFileReader::PData::bufferStatusCount)
+        for (uint8_t i = 0; i < Win32ChunkedFileReader::PData::bufferStatusCount; ++i)
         {
-            uint32_t byteIndex = i >> 1;
-            for (uint32_t j = 0; j < 4; ++j)
-            {
-                uint32_t bufferIndex = i + j;
-                uint8_t  status      = (data.u.pData.bufferStatus[byteIndex] >> (j << 1)) & 0b11u;
+            uint8_t byteIndex = i;
+            for (uint8_t j = 0; j < 4; ++j)
+            { // since maxNumBuffers is 72, we need 7 bits to store the bufferIndex + 2 bits for j
+                uint8_t bufferIndex = (i << 2) + j;
+                if (bufferIndex >= data.u.pData.numBuffers)
+                {
+                    return *this;
+                }
+
+                uint16_t tag = (static_cast<uint16_t>(i) << 2) | j;
+                assert(tag <= 0x7FFu);
+                tag |= 0x800u;
+                uint8_t status = (data.u.pData.bufferStatus[byteIndex] >> (j << 1)) & 0b11u;
                 switch (status)
                 {
                     case bufferFree:
                     {
-
                         void* ptr     = reinterpret_cast<void**>(data.u.pData.buffer)[bufferIndex];
                         auto* pOffset = std::bit_cast<uint64_t*>(
-                            alignToAddr(std::bit_cast<uintptr_t>(ptr) + chunkSize, alignof(uint64_t)));
+                            alignToAddr(std::bit_cast<uintptr_t>(ptr) + data.chunkSize, alignof(uint64_t)));
                         auto* pExtra = std::bit_cast<ExtraData*>(
                             alignToAddr(std::bit_cast<uintptr_t>(pOffset) + sizeof(uint64_t), alignof(ExtraData)));
                         OVERLAPPED* pOverlapped = &pExtra->overlapped;
                         size_t      offset      = m_chunkNum * data.chunkSize;
                         pOverlapped->Offset     = static_cast<DWORD>(offset & 0x0000'0000'FFFF'FFFFULL);
                         pOverlapped->OffsetHigh = static_cast<DWORD>(offset >> 32); // file size > 4GB
+                        pOverlapped->hEvent     = std::bit_cast<HANDLE>(TaggedPointer{&data, tag});
+                        pExtra->chunkNum        = m_chunkNum;
 
-                        if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.u.uData.overlapped, completionRoutine))
+                        if (!ReadFileEx(data.hFile, ptr, data.chunkSize, pOverlapped, completionRoutine))
                         {
+                            // TODO handle better
                             uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
                             StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
-                            pctx.error("CreateFileA failed: {}", {view});
-                            return false;
+                            m_chunkNum = data.numChunks;
+                            return *this;
                         }
 
                         ++m_chunkNum;
-                        data.u.pData.bufferStatus[byteIndex] |= (1u << (j << 1));
+                        data.u.pData.bufferStatus[byteIndex] |= (bufferOccupied << (j << 1));
+
+                        if (m_chunkNum >= data.numChunks)
+                        {
+                            return *this;
+                        }
+
                         break;
                     }
-                    case bufferOccupied:
-                        break;
                     case bufferFinished:
                         return *this;
+                        break;
+                    case bufferOccupied:
+                        [[fallthrough]];
+                    default:
                         break;
                 }
             }
         }
+
+        // if you are still here, it means that all buffers are occupied, meaning you can go on
+        return *this;
 #elif defined(DMT_OS_LINUX)
 #error "todo"
 #else
 #error "platform not supported"
 #endif
         return *this;
+    }
+
+    ChunkedFileReader::operator bool() const
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader const& data = *reinterpret_cast<Win32ChunkedFileReader const*>(&m_data);
+        return data.hFile != INVALID_HANDLE_VALUE;
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+    }
+
+    uint32_t ChunkedFileReader::numChunks() const
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader const& data = *reinterpret_cast<Win32ChunkedFileReader const*>(&m_data);
+        return data.numChunks;
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
     }
 } // namespace dmt

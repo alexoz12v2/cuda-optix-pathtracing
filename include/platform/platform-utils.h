@@ -329,16 +329,18 @@ DMT_MODULE_EXPORT dmt {
         void* m_data = nullptr;
     };
 
+    struct ChunkInfo
+    {
+        void*    buffer;
+        uint64_t indexData;
+        uint32_t numBytesRead;
+        uint32_t chunkNum;
+    };
+
     // TODO remove this templating tagged pointer
     class alignas(32) ChunkedFileReader
     {
     public:
-        struct ChunkInfo
-        {
-            void*    buffer;
-            uint32_t numBytesRead;
-            uint32_t chunkNum;
-        };
 
     private:
         struct EndSentinel
@@ -365,7 +367,7 @@ DMT_MODULE_EXPORT dmt {
 
         private:
             void*    m_pData;
-            uint32_t m_chunkNum;
+            uint32_t m_chunkNum = 0;
         };
 
         static_assert(std::input_iterator<InputIterator>);
@@ -374,7 +376,7 @@ DMT_MODULE_EXPORT dmt {
     public:
         static constexpr uint32_t maxNumBuffers = 72;
         static constexpr uint32_t size          = 64;
-        static constexpr uint32_t alignment     = 8;
+        static constexpr uint32_t alignment     = 32;
         ChunkedFileReader(PlatformContext& pctx, char const* filePath, uint32_t chunkSize);
         ChunkedFileReader(PlatformContext& pctx, char const* filePath, uint32_t chunkSize, uint8_t numBuffers, uintptr_t* pBuffers);
         ChunkedFileReader(ChunkedFileReader const&)                = delete;
@@ -383,15 +385,34 @@ DMT_MODULE_EXPORT dmt {
         ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
         ~ChunkedFileReader() noexcept;
 
+        InputIterator begin()
+        {
+            return ++InputIterator(&m_data);
+        }
+
+        EndSentinel end()
+        {
+            return {};
+        }
+
         bool     requestChunk(PlatformContext& pctx, void* chunkBuffer, uint32_t chunkNum);
         bool     waitForPendingChunk(PlatformContext& pctx, uint32_t timeoutMillis);
         uint32_t lastNumBytesRead();
+        void     markFree(ChunkInfo const& chunkInfo);
+        uint32_t numChunks() const;
+        operator bool() const;
 
         static size_t computeAlignedChunkSize(size_t chunkSize);
 
     private:
         alignas(alignment) unsigned char m_data[size];
     };
+
+    template <std::integral I>
+    constexpr I ceilDiv(I num, I den)
+    {
+        return (num + den - 1) / den;
+    }
 }
 
 // module-private bits of functionality. Should not be exported by the primary interface unit
@@ -399,12 +420,6 @@ DMT_MODULE_EXPORT dmt {
 // implementation units are not linked together. It needs to stay here. It should not be included in the
 // binary interface, hence it is fine
 namespace dmt {
-    template <std::integral I>
-    constexpr I ceilDiv(I num, I den)
-    {
-        return (num + den - 1) / den;
-    }
-
 #if defined(DMT_OS_WINDOWS)
     void* reserveVirtualAddressSpace(size_t size)
     {

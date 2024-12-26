@@ -1,5 +1,7 @@
 
+#include <bit>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -21,9 +23,54 @@ struct TestObject
     }
 };
 
-void testChunkedFileReader(dmt::PlatformContext& pctx)
+static void testChunkedFileReaderPData(dmt::AppContext& actx)
 {
-    constexpr uint32_t chunkSize = 1024; // Define chunk size (e.g., 1 KB)
+    constexpr uint32_t dataChunkSize = 512;
+    constexpr uint32_t dataAlignment = 8;
+    char const*        filePath      = "..\\res\\test.txt";
+    uint8_t            numBuffers    = 12;
+    size_t const       memSize       = dmt::ChunkedFileReader::computeAlignedChunkSize(dataChunkSize);
+
+    // allocate the buffers
+    size_t dataSize     = memSize * numBuffers;
+    size_t pointersSize = sizeof(uintptr_t) * numBuffers;
+    size_t size         = dataSize + pointersSize;
+
+    uintptr_t* data = reinterpret_cast<uintptr_t*>(actx.mctx.stackAllocate(size, dataAlignment));
+    auto       addr = std::bit_cast<uintptr_t>(data);
+    uint64_t   off  = numBuffers * sizeof(uintptr_t);
+    assert(data);
+
+    // setup the array of pointers to `memSize` sized buffers
+    for (uint32_t i = 0; i < numBuffers; ++i)
+    {
+        data[i] = dmt::alignToAddr(addr + off, dataAlignment);
+        off += memSize;
+    }
+
+    std::string str{};
+    // reader needs to go out of scope before freeing memory
+    {
+        dmt::ChunkedFileReader reader{actx.mctx.pctx, filePath, dataChunkSize, numBuffers, data};
+        str.resize(dataChunkSize * reader.numChunks());
+        for (dmt::ChunkInfo chunkinfo : reader)
+        {
+            assert(chunkinfo.numBytesRead <= dataChunkSize);
+            for (uint32_t i = 0; i < chunkinfo.numBytesRead; ++i)
+            {
+                str[chunkinfo.chunkNum * dataChunkSize + i] = reinterpret_cast<char*>(chunkinfo.buffer)[i];
+            }
+            reader.markFree(chunkinfo);
+        }
+    }
+
+    actx.log("The string read from the file is {}...", {str.substr(0, 230)});
+    actx.mctx.stackReset();
+}
+
+static void testChunkedFileReader(dmt::PlatformContext& pctx)
+{
+    constexpr uint32_t chunkSize = 512; // Define chunk size (e.g., 1 KB)
     char const*        filePath  = "..\\res\\test.txt";
 
     dmt::ChunkedFileReader reader(pctx, filePath, chunkSize);
@@ -42,13 +89,13 @@ void testChunkedFileReader(dmt::PlatformContext& pctx)
     bool dataNonEmpty = std::strlen(buffer) > 0;
     assert(dataNonEmpty && "Buffer contains no data");
 
-    std::string_view view{buffer, reader.lastNumBytesRead()};
+    std::string_view view{buffer, std::min(reader.lastNumBytesRead(), 25u)};
     pctx.log("Bytes read from test file: {}", {view});
 
     // Test 4: Destructor cleanup (implicitly tested)
     // When the reader goes out of scope, the destructor will close the file handle.
 
-    pctx.log("All tests passed for ChunkedFileReader.");
+    pctx.log("All tests passed for ChunkedFileReader in uData mode.");
 }
 
 void testThreadpool(dmt::AppContext& ctx)
@@ -157,5 +204,6 @@ int32_t main()
     }
 
     testThreadpool(ctx);
+    testChunkedFileReaderPData(ctx);
     testChunkedFileReader(ctx.mctx.pctx);
 }

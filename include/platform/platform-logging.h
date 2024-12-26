@@ -176,6 +176,14 @@ DMT_MODULE_EXPORT dmt {
         }
 
         /**
+         * Converting constructor from a string_view. NOT `explicit` on purpose
+         * @param view
+         */
+        constexpr StrBuf(std::string const& view) : str(view.c_str()), len(static_cast<int32_t>(view.length()))
+        {
+        }
+
+        /**
          * Converting constructor for formatting booleans
          * @param b
          */
@@ -578,7 +586,7 @@ concept LogDisplay = requires(T t)
          * explicit constructor for the base logger starting from the desired level
          * @param level desired log level
          */
-        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
         /**
          * Setter for the `m_level`

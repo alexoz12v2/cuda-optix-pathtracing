@@ -42,7 +42,7 @@ namespace dmt {
         }
         else
         {
-            assert(false); // you shouldn't get here
+            assert(false && "Log Buffer length exceeded"); // you shouldn't get here
             // Write the part that fits at the end
             std::memcpy(m_buffer + m_pos, ps, remaining);
             // Wrap around and write the rest
@@ -388,15 +388,28 @@ namespace dmt {
     bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
     {
         OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
-        bool             started   = WriteFile(m_hStdOut, m_lines[idx].buf, size, nullptr, &aioStruct.overlapped);
+        // TODO fix this. inspect how std handle is taken, duplicate it to a pipe if necessary
+        //bool             started   = WriteFile(m_hStdOut, m_lines[idx].buf, size, nullptr, &aioStruct.overlapped);
+        bool started = WriteConsole(m_hStdOut, m_lines[idx].buf, size, nullptr, nullptr);
 
-        if (started && GetLastError() == ERROR_IO_PENDING)
+        DWORD err = GetLastError();
+        if (started && (err == ERROR_IO_PENDING || err == ERROR_SUCCESS))
         {
             // io started
             return false;
         }
         else
         {
+            char*  buf  = nullptr;
+            size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                                             FORMAT_MESSAGE_IGNORE_INSERTS,
+                                         nullptr,
+                                         err,
+                                         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                         (LPSTR)&buf,
+                                         0,
+                                         nullptr);
+            LocalFree(buf);
             return true;
         }
     }

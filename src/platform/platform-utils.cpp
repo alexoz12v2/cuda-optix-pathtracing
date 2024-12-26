@@ -1,8 +1,8 @@
 module;
 
+#include <array>
 #include <bit>
 #include <limits>
-#include <string_view>
 
 #include <cassert>
 
@@ -21,9 +21,12 @@ module;
 module platform;
 
 namespace dmt {
+    inline constexpr uint8_t bufferFree     = 0;
+    inline constexpr uint8_t bufferOccupied = 1;
+    inline constexpr uint8_t bufferFinished = 2;
 
 #if defined(DMT_OS_WINDOWS)
-    static constexpr uint32_t                              sErrorBufferSize = 256;
+    inline constexpr uint32_t                              sErrorBufferSize = 256;
     static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 
     struct ExtraData
@@ -80,12 +83,12 @@ namespace dmt {
         }
     }
 
-    static bool initFile(PlatformContext& pctx, std::string_view filePath, Win32ChunkedFileReader& data)
+    static bool initFile(PlatformContext& pctx, char const* filePath, Win32ChunkedFileReader& data)
     {
         LARGE_INTEGER fileSize;
 
         // create file with ascii path only
-        data.hFile = CreateFileA(filePath.data(),
+        data.hFile = CreateFileA(filePath,
                                  GENERIC_READ,
                                  FILE_SHARE_READ,
                                  nullptr, // TODO maybe insert process descriptor, when you refactor system and process information
@@ -95,15 +98,15 @@ namespace dmt {
                                  nullptr);
         if (data.hFile == INVALID_HANDLE_VALUE)
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
             pctx.error("CreateFileA failed: {}", {view});
             return false;
         }
         if (!GetFileSizeEx(data.hFile, &fileSize))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
             pctx.error("CreateFileA failed: {}", {view});
             return false;
         }
@@ -116,7 +119,7 @@ namespace dmt {
 #error "platform not supported"
 #endif
 
-    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx, std::string_view filePath, uint32_t chunkSize)
+    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx, char const* filePath, uint32_t chunkSize)
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
@@ -138,7 +141,7 @@ namespace dmt {
     }
 
     ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx,
-                                         std::string_view filePath,
+                                         char const*      filePath,
                                          uint32_t         chunkSize,
                                          uint8_t          numBuffers,
                                          uintptr_t*       pBuffers)
@@ -147,7 +150,7 @@ namespace dmt {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
         if (numBuffers > maxNumBuffers)
         {
-            pctx.error("Exceeded maximum number of buffers for chunked file read ({})", {maxNumBuffers});
+            pctx.error("Exceeded maximum number of buffers for chunked file read");
             data.hFile = INVALID_HANDLE_VALUE;
             return;
         }
@@ -201,8 +204,8 @@ namespace dmt {
 
         if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.u.uData.overlapped, completionRoutine))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
             pctx.error("CreateFileA failed: {}", {view});
             return false;
         }
@@ -228,6 +231,7 @@ namespace dmt {
 #else
 #error "platform not supported"
 #endif
+        return 0;
     }
 
     bool ChunkedFileReader::waitForPendingChunk(PlatformContext& pctx, uint32_t timeoutMillis)
@@ -243,8 +247,8 @@ namespace dmt {
         if (DWORD err = GetLastError(); err != ERROR_SUCCESS)
         {
             SetLastError(err);
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
             pctx.error("Read Operation failed: {}", {view});
             return false;
         }
@@ -315,6 +319,48 @@ namespace dmt {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
         // if there are any in flight operations (bufferStatus == 1), then return immediately
         // or if in data, the numChunksRead == numChunks, return
+        for (uint32_t i = 0; i < Win32ChunkedFileReader::PData::bufferStatusCount)
+        {
+            uint32_t byteIndex = i >> 1;
+            for (uint32_t j = 0; j < 4; ++j)
+            {
+                uint32_t bufferIndex = i + j;
+                uint8_t  status      = (data.u.pData.bufferStatus[byteIndex] >> (j << 1)) & 0b11u;
+                switch (status)
+                {
+                    case bufferFree:
+                    {
+
+                        void* ptr     = reinterpret_cast<void**>(data.u.pData.buffer)[bufferIndex];
+                        auto* pOffset = std::bit_cast<uint64_t*>(
+                            alignToAddr(std::bit_cast<uintptr_t>(ptr) + chunkSize, alignof(uint64_t)));
+                        auto* pExtra = std::bit_cast<ExtraData*>(
+                            alignToAddr(std::bit_cast<uintptr_t>(pOffset) + sizeof(uint64_t), alignof(ExtraData)));
+                        OVERLAPPED* pOverlapped = &pExtra->overlapped;
+                        size_t      offset      = m_chunkNum * data.chunkSize;
+                        pOverlapped->Offset     = static_cast<DWORD>(offset & 0x0000'0000'FFFF'FFFFULL);
+                        pOverlapped->OffsetHigh = static_cast<DWORD>(offset >> 32); // file size > 4GB
+
+                        if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.u.uData.overlapped, completionRoutine))
+                        {
+                            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+                            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
+                            pctx.error("CreateFileA failed: {}", {view});
+                            return false;
+                        }
+
+                        ++m_chunkNum;
+                        data.u.pData.bufferStatus[byteIndex] |= (1u << (j << 1));
+                        break;
+                    }
+                    case bufferOccupied:
+                        break;
+                    case bufferFinished:
+                        return *this;
+                        break;
+                }
+            }
+        }
 #elif defined(DMT_OS_LINUX)
 #error "todo"
 #else

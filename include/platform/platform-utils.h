@@ -8,7 +8,6 @@
 #include <concepts>
 #include <iterator>
 #include <source_location>
-#include <string_view>
 
 #include <cmath>
 #include <cstdint>
@@ -365,7 +364,8 @@ DMT_MODULE_EXPORT dmt {
             }
 
         private:
-            void* m_pData;
+            void*    m_pData;
+            uint32_t m_chunkNum;
         };
 
         static_assert(std::input_iterator<InputIterator>);
@@ -375,12 +375,8 @@ DMT_MODULE_EXPORT dmt {
         static constexpr uint32_t maxNumBuffers = 72;
         static constexpr uint32_t size          = 64;
         static constexpr uint32_t alignment     = 8;
-        ChunkedFileReader(PlatformContext& pctx, std::string_view filePath, uint32_t chunkSize);
-        ChunkedFileReader(PlatformContext& pctx,
-                          std::string_view filePath,
-                          uint32_t         chunkSize,
-                          uint8_t          numBuffers,
-                          uintptr_t*       pBuffers);
+        ChunkedFileReader(PlatformContext& pctx, char const* filePath, uint32_t chunkSize);
+        ChunkedFileReader(PlatformContext& pctx, char const* filePath, uint32_t chunkSize, uint8_t numBuffers, uintptr_t* pBuffers);
         ChunkedFileReader(ChunkedFileReader const&)                = delete;
         ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
         ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;

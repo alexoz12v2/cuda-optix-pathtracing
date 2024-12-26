@@ -250,10 +250,9 @@ namespace dmt {
     static_assert(std::is_standard_layout_v<WindowsAsyncIOManager> && sizeof(WindowsAsyncIOManager) == asyncIOClassSize);
 
     WindowsAsyncIOManager::WindowsAsyncIOManager() :
-    m_hStdOut(
-        CreateFile("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL)
-        // GetStdHandle(STD_OUTPUT_HANDLE)
-    ),
+    m_hStdOut(CreateFile("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL)
+              // GetStdHandle(STD_OUTPUT_HANDLE)
+              ),
     m_aioQueue(reinterpret_cast<AioSpace*>(std::malloc(numAios * sizeof(OverlappedWrite)))),
     m_lines(reinterpret_cast<Line*>(std::malloc(numAios * sizeof(Line))))
     {
@@ -390,7 +389,7 @@ namespace dmt {
 
     bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
     {
-        OverlappedWrite& aioStruct      = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
+        OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
         if (WaitForSingleObject(aioStruct.overlapped.hEvent, INFINITE) != WAIT_OBJECT_0)
         {
             return true;

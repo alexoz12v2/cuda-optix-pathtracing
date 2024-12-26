@@ -353,7 +353,7 @@ namespace dmt {
         }
 
         // see whether all chunks were requested
-        bool allChunksRequested = data.numChunks >= m_chunkNum;
+        bool allChunksRequested = !inRange();
         if (!allChunksRequested)
         {
             return false;
@@ -454,7 +454,7 @@ namespace dmt {
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
-        if (m_chunkNum >= data.numChunks)
+        if (!inRange())
         {
             return *this;
         }
@@ -486,25 +486,25 @@ namespace dmt {
                         auto* pExtra = std::bit_cast<ExtraData*>(
                             alignToAddr(std::bit_cast<uintptr_t>(pOffset) + sizeof(uint64_t), alignof(ExtraData)));
                         OVERLAPPED* pOverlapped = &pExtra->overlapped;
-                        size_t      offset      = m_chunkNum * data.chunkSize;
+                        size_t      offset      = m_current * data.chunkSize;
                         pOverlapped->Offset     = static_cast<DWORD>(offset & 0x0000'0000'FFFF'FFFFULL);
                         pOverlapped->OffsetHigh = static_cast<DWORD>(offset >> 32); // file size > 4GB
                         pOverlapped->hEvent     = std::bit_cast<HANDLE>(TaggedPointer{&data, tag});
-                        pExtra->chunkNum        = m_chunkNum;
+                        pExtra->chunkNum        = m_current;
 
                         if (!ReadFileEx(data.hFile, ptr, data.chunkSize, pOverlapped, completionRoutine))
                         {
                             // TODO handle better
                             uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
                             StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
-                            m_chunkNum = data.numChunks;
+                            m_current = m_chunkNum + m_numChunks;
                             return *this;
                         }
 
-                        ++m_chunkNum;
+                        ++m_current;
                         data.u.pData.bufferStatus[byteIndex] |= (bufferOccupied << (j << 1));
 
-                        if (m_chunkNum >= data.numChunks)
+                        if (!inRange())
                         {
                             return *this;
                         }
@@ -554,5 +554,18 @@ namespace dmt {
 #else
 #error "platform not supported"
 #endif
+    }
+
+    ChunkedFileReader::InputIterator ChunkedFileReader::Range::begin()
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader const& data = *reinterpret_cast<Win32ChunkedFileReader const*>(pData);
+        assert(data.numChunks >= chunkNum + numChunks);
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+        return ++InputIterator(pData, chunkNum, numChunks);
     }
 } // namespace dmt

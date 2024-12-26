@@ -337,7 +337,6 @@ DMT_MODULE_EXPORT dmt {
         uint32_t chunkNum;
     };
 
-    // TODO remove this templating tagged pointer
     class alignas(32) ChunkedFileReader
     {
     public:
@@ -352,7 +351,11 @@ DMT_MODULE_EXPORT dmt {
             using difference_type = std::ptrdiff_t;
             using value_type      = ChunkInfo;
 
-            InputIterator(void* pData) : m_pData(pData)
+            InputIterator(void* pData, uint32_t chunkedNum, uint32_t numChunks) :
+            m_pData(pData),
+            m_chunkNum(chunkedNum),
+            m_current(chunkedNum),
+            m_numChunks(numChunks)
             {
             }
 
@@ -366,11 +369,39 @@ DMT_MODULE_EXPORT dmt {
             }
 
         private:
+            constexpr bool inRange() const
+            {
+                return m_current < m_chunkNum + m_numChunks;
+            }
+
             void*    m_pData;
-            uint32_t m_chunkNum = 0;
+            uint32_t m_chunkNum;
+            uint32_t m_current;
+            uint32_t m_numChunks;
+        };
+        static_assert(std::input_iterator<InputIterator>);
+
+        struct Range
+        {
+            constexpr Range(void* pData, uint32_t chunkNum, uint32_t numChunks) :
+            pData(pData),
+            chunkNum(chunkNum),
+            numChunks(numChunks)
+            {
+            }
+
+            InputIterator begin();
+
+            EndSentinel end()
+            {
+                return {};
+            }
+
+            void*    pData;
+            uint32_t chunkNum;
+            uint32_t numChunks;
         };
 
-        static_assert(std::input_iterator<InputIterator>);
         friend struct InputIterator;
 
     public:
@@ -385,21 +416,16 @@ DMT_MODULE_EXPORT dmt {
         ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
         ~ChunkedFileReader() noexcept;
 
-        InputIterator begin()
-        {
-            return ++InputIterator(&m_data);
-        }
-
-        EndSentinel end()
-        {
-            return {};
-        }
-
         bool     requestChunk(PlatformContext& pctx, void* chunkBuffer, uint32_t chunkNum);
         bool     waitForPendingChunk(PlatformContext& pctx, uint32_t timeoutMillis);
         uint32_t lastNumBytesRead();
         void     markFree(ChunkInfo const& chunkInfo);
         uint32_t numChunks() const;
+        Range    range(uint32_t chunkNum, uint32_t numChunks)
+        {
+            return Range{&m_data, chunkNum, numChunks};
+        }
+
         operator bool() const;
 
         static size_t computeAlignedChunkSize(size_t chunkSize);

@@ -53,7 +53,7 @@ static void testChunkedFileReaderPData(dmt::AppContext& actx)
     {
         dmt::ChunkedFileReader reader{actx.mctx.pctx, filePath, dataChunkSize, numBuffers, data};
         str.resize(dataChunkSize * reader.numChunks());
-        for (dmt::ChunkInfo chunkinfo : reader)
+        for (dmt::ChunkInfo chunkinfo : reader.range(0, reader.numChunks()))
         {
             assert(chunkinfo.numBytesRead <= dataChunkSize);
             for (uint32_t i = 0; i < chunkinfo.numBytesRead; ++i)

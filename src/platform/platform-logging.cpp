@@ -250,7 +250,10 @@ namespace dmt {
     static_assert(std::is_standard_layout_v<WindowsAsyncIOManager> && sizeof(WindowsAsyncIOManager) == asyncIOClassSize);
 
     WindowsAsyncIOManager::WindowsAsyncIOManager() :
-    m_hStdOut(GetStdHandle(STD_OUTPUT_HANDLE)),
+    m_hStdOut(
+        CreateFile("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL)
+        // GetStdHandle(STD_OUTPUT_HANDLE)
+    ),
     m_aioQueue(reinterpret_cast<AioSpace*>(std::malloc(numAios * sizeof(OverlappedWrite)))),
     m_lines(reinterpret_cast<Line*>(std::malloc(numAios * sizeof(Line))))
     {
@@ -387,29 +390,37 @@ namespace dmt {
 
     bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
     {
-        OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
-        // TODO fix this. inspect how std handle is taken, duplicate it to a pipe if necessary
-        //bool             started   = WriteFile(m_hStdOut, m_lines[idx].buf, size, nullptr, &aioStruct.overlapped);
-        bool started = WriteConsole(m_hStdOut, m_lines[idx].buf, size, nullptr, nullptr);
+        OverlappedWrite& aioStruct      = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
+        if (WaitForSingleObject(aioStruct.overlapped.hEvent, INFINITE) != WAIT_OBJECT_0)
+        {
+            return true;
+        }
+
+        aioStruct.overlapped.Offset     = 0xFFFF'FFFF;
+        aioStruct.overlapped.OffsetHigh = 0xFFFF'FFFF;
+
+        bool started = WriteFile(m_hStdOut, m_lines[idx].buf, size, nullptr, &aioStruct.overlapped);
+        //bool started = WriteConsole(m_hStdOut, m_lines[idx].buf, size, nullptr, nullptr);
 
         DWORD err = GetLastError();
-        if (started && (err == ERROR_IO_PENDING || err == ERROR_SUCCESS))
+        if (started || err == ERROR_IO_PENDING)
         {
             // io started
             return false;
         }
         else
         {
-            char*  buf  = nullptr;
-            size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                                             FORMAT_MESSAGE_IGNORE_INSERTS,
-                                         nullptr,
-                                         err,
-                                         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                         (LPSTR)&buf,
-                                         0,
-                                         nullptr);
-            LocalFree(buf);
+            // uncomment this if you need to debug duplicate lines
+            //char*  buf  = nullptr;
+            //size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            //                                 FORMAT_MESSAGE_IGNORE_INSERTS,
+            //                             nullptr,
+            //                             err,
+            //                             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            //                             (LPSTR)&buf,
+            //                             0,
+            //                             nullptr);
+            //LocalFree(buf);
             return true;
         }
     }

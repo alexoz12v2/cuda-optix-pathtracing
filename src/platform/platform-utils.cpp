@@ -1,6 +1,7 @@
 module;
 
 #include <bit>
+#include <limits>
 #include <string_view>
 
 #include <cassert>
@@ -13,6 +14,8 @@ module;
 #include <fileapi.h>
 #include <securitybaseapi.h>
 #include <sysinfoapi.h>
+#undef max
+#undef min
 #endif
 
 module platform;
@@ -22,14 +25,43 @@ namespace dmt {
 #if defined(DMT_OS_WINDOWS)
     static constexpr uint32_t                              sErrorBufferSize = 256;
     static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
+
+    struct ExtraData
+    {
+        OVERLAPPED overlapped;
+        uint32_t   numBytesReadLastTransfer;
+        uint32_t   chunkNum;
+    };
+
     struct Win32ChunkedFileReader
     {
-        HANDLE hFile;
-        OVERLAPPED overlapped; // TODO move class in platform or threadpool level and inject memory context or app context
+        static constexpr uint64_t theMagic = std::numeric_limits<uint64_t>::max();
+        struct PData
+        {
+            static constexpr uint32_t bufferStatusCount = 9;
+            static constexpr uint32_t bufferStatusBytes = 2 * bufferStatusCount * sizeof(uint8_t);
+
+            void*    buffer;
+            uint64_t magic;
+            uint32_t numChunksRead;
+            uint8_t  numBuffers;
+            uint8_t  bufferStatus[2 * bufferStatusCount]; // 0 = free, 1 = occupied, 2 = finished,
+        };
+        struct UData
+        {
+            OVERLAPPED overlapped;
+            uint32_t   numBytesReadLastTransfer;
+        };
+        union U
+        {
+            PData pData;
+            UData uData;
+        };
+        HANDLE   hFile;
         size_t   fileSize;
+        U        u;
         uint32_t chunkSize;
         uint32_t numChunks;
-        uint32_t numBytesReadLastTransfer;
     };
     static_assert(sizeof(Win32ChunkedFileReader) == ChunkedFileReader::size &&
                   alignof(Win32ChunkedFileReader) == ChunkedFileReader::alignment);
@@ -38,23 +70,22 @@ namespace dmt {
                                             _In_ DWORD           dwNumberOfBytesTransfered,
                                             _Inout_ LPOVERLAPPED lpOverlapped)
     {
-        reinterpret_cast<Win32ChunkedFileReader*>(lpOverlapped->hEvent)->numBytesReadLastTransfer = dwNumberOfBytesTransfered;
+        auto pt = std::bit_cast<TaggedPointer>(lpOverlapped->hEvent);
+        if (pt.tag() == 0x400)
+        {
+            pt.pointer<Win32ChunkedFileReader>()->u.uData.numBytesReadLastTransfer = dwNumberOfBytesTransfered;
+        }
+        else
+        {
+        }
     }
-#elif defined(DMT_OS_LINUX)
-#error "todo"
-#else
-#error "platform not supported"
-#endif
 
-    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx, std::string_view filePath, uint32_t chunkSize)
+    static bool initFile(PlatformContext& pctx, std::string_view filePath, Win32ChunkedFileReader& data)
     {
-#if defined(DMT_OS_WINDOWS)
         LARGE_INTEGER fileSize;
 
-        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
         // create file with ascii path only
-        data.chunkSize = chunkSize;
-        data.hFile     = CreateFileA(filePath.data(),
+        data.hFile = CreateFileA(filePath.data(),
                                  GENERIC_READ,
                                  FILE_SHARE_READ,
                                  nullptr, // TODO maybe insert process descriptor, when you refactor system and process information
@@ -67,21 +98,84 @@ namespace dmt {
             uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), length};
             pctx.error("CreateFileA failed: {}", {view});
-            return;
+            return false;
         }
         if (!GetFileSizeEx(data.hFile, &fileSize))
         {
             uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), length};
             pctx.error("CreateFileA failed: {}", {view});
+            return false;
+        }
+        data.fileSize = fileSize.QuadPart;
+        return true;
+    }
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+
+    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx, std::string_view filePath, uint32_t chunkSize)
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        data.chunkSize               = chunkSize;
+        if (!initFile(pctx, filePath, data))
+        {
             return;
         }
-        data.fileSize  = fileSize.QuadPart;
         data.numChunks = static_cast<uint32_t>(ceilDiv(data.fileSize, static_cast<uint64_t>(chunkSize)));
 
         // from docs: The ReadFileEx function ignores the OVERLAPPED structure's hEvent member. An application is
         // free to use that member for its own purposes in the context of a ReadFileEx call.
-        data.overlapped.hEvent = this;
+        data.u.uData.overlapped.hEvent = std::bit_cast<HANDLE>(TaggedPointer{this, 0x400});
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+    }
+
+    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx,
+                                         std::string_view filePath,
+                                         uint32_t         chunkSize,
+                                         uint8_t          numBuffers,
+                                         uintptr_t*       pBuffers)
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        if (numBuffers > maxNumBuffers)
+        {
+            pctx.error("Exceeded maximum number of buffers for chunked file read ({})", {maxNumBuffers});
+            data.hFile = INVALID_HANDLE_VALUE;
+            return;
+        }
+
+        data.chunkSize = chunkSize;
+        if (!initFile(pctx, filePath, data))
+        {
+            return;
+        }
+        data.numChunks          = static_cast<uint32_t>(ceilDiv(data.fileSize, static_cast<uint64_t>(chunkSize)));
+        data.u.pData.magic      = Win32ChunkedFileReader::theMagic;
+        data.u.pData.numBuffers = numBuffers;
+        std::memset(data.u.pData.bufferStatus, 0, Win32ChunkedFileReader::PData::bufferStatusBytes);
+
+        // for each buffer, initialize offset to metadata and void* to actual data
+        data.u.pData.buffer = reinterpret_cast<void*>(pBuffers);
+        for (uint64_t i = 0; i < numBuffers; ++i)
+        {
+            void* ptr     = std::bit_cast<void*>(pBuffers[i]);
+            auto* pOffset = std::bit_cast<uint64_t*>(alignToAddr(pBuffers[i] + chunkSize, alignof(uint64_t)));
+            auto* pExtra  = std::bit_cast<ExtraData*>(
+                alignToAddr(std::bit_cast<uintptr_t>(pOffset) + sizeof(uint64_t), alignof(ExtraData)));
+            *pOffset = std::bit_cast<uintptr_t>(pExtra) - std::bit_cast<uintptr_t>(ptr);
+
+            pExtra->overlapped               = {};
+            pExtra->overlapped.hEvent        = std::bit_cast<HANDLE>(TaggedPointer{ptr, 0x800});
+            pExtra->numBytesReadLastTransfer = 0;
+        }
 #elif defined(DMT_OS_LINUX)
 #error "todo"
 #else
@@ -94,11 +188,18 @@ namespace dmt {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
         assert(chunkNum < data.numChunks);
-        size_t offset              = chunkNum * data.chunkSize;
-        data.overlapped.Offset     = static_cast<DWORD>(offset & 0x0000'0000'FFFF'FFFFULL);
-        data.overlapped.OffsetHigh = static_cast<DWORD>(offset >> 32); // file size > 4GB
 
-        if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.overlapped, completionRoutine))
+        if (data.u.pData.magic == Win32ChunkedFileReader::theMagic)
+        {
+            pctx.error("invalid state. initialized for multi chunk operator, tried single buffer op");
+            return false;
+        }
+
+        size_t offset                      = chunkNum * data.chunkSize;
+        data.u.uData.overlapped.Offset     = static_cast<DWORD>(offset & 0x0000'0000'FFFF'FFFFULL);
+        data.u.uData.overlapped.OffsetHigh = static_cast<DWORD>(offset >> 32); // file size > 4GB
+
+        if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.u.uData.overlapped, completionRoutine))
         {
             uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), length};
@@ -117,7 +218,11 @@ namespace dmt {
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
-        return data.numBytesReadLastTransfer;
+        if (data.u.pData.magic == Win32ChunkedFileReader::theMagic)
+        {
+            return 0;
+        }
+        return data.u.uData.numBytesReadLastTransfer;
 #elif defined(DMT_OS_LINUX)
 #error "todo"
 #else
@@ -128,6 +233,13 @@ namespace dmt {
     bool ChunkedFileReader::waitForPendingChunk(PlatformContext& pctx, uint32_t timeoutMillis)
     {
 #if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        if (data.u.pData.magic == Win32ChunkedFileReader::theMagic)
+        {
+            pctx.error("invalid state. initialized for multi chunk operator, tried single buffer op");
+            return false;
+        }
+
         if (DWORD err = GetLastError(); err != ERROR_SUCCESS)
         {
             SetLastError(err);
@@ -147,6 +259,22 @@ namespace dmt {
         return true;
     }
 
+    size_t ChunkedFileReader::computeAlignedChunkSize(size_t chunkSize)
+    {
+#if defined(DMT_OS_WINDOWS)
+        constexpr size_t alignment = alignof(OVERLAPPED); // alignof(OVERLAPPED) == 8
+        constexpr size_t extraSize = sizeof(ExtraData);
+
+        // Compute total size needed, aligning the sum to the alignment boundary
+        size_t totalSize = sizeof(uint64_t) + chunkSize + extraSize;
+        return (totalSize + (alignment - 1)) & ~(alignment - 1); // Align to next multiple of alignment
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+    }
+
     ChunkedFileReader::~ChunkedFileReader() noexcept
     {
 #if defined(DMT_OS_WINDOWS)
@@ -161,5 +289,37 @@ namespace dmt {
 #else
 #error "platform not supported"
 #endif
+    }
+
+    bool ChunkedFileReader::InputIterator::operator==(ChunkedFileReader::EndSentinel const&) const
+    {
+        return false;
+    }
+
+    ChunkedFileReader::ChunkInfo ChunkedFileReader::InputIterator::operator*() const
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
+        // retrieve the next buffer
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+        return {};
+    }
+
+    ChunkedFileReader::InputIterator& ChunkedFileReader::InputIterator::operator++()
+    {
+#if defined(DMT_OS_WINDOWS)
+        Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
+        // if there are any in flight operations (bufferStatus == 1), then return immediately
+        // or if in data, the numChunksRead == numChunks, return
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+        return *this;
     }
 } // namespace dmt

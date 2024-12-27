@@ -43,7 +43,8 @@ DMT_MODULE_EXPORT dmt {
         {
             std::cerr << "GLFW Error " << error << description << std::endl;
         }
-        void ShowPropertyWindow();
+        
+        void ShowPropertyWindow(bool* pOpen, int displayW, int displayH);
 
     private:
         GLFWwindow*  m_window;

@@ -1,7 +1,7 @@
 module;
 
 #include <GLFW/glfw3.h>
-
+#include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
@@ -29,6 +29,9 @@ static void GlfwErrorCallback(int error, char const* description)
 
 void Display::ShowWindow()
 {
+    //state imGui window
+    bool showPropertyWindow = true;
+
     glfwSetErrorCallback(GlfwErrorCallback);
 
     if (!glfwInit())
@@ -87,18 +90,19 @@ void Display::ShowWindow()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        int displayW, displayH;
+        glfwGetFramebufferSize(m_window, &displayW, &displayH);
         //display propertyWindow
-        Display::ShowPropertyWindow()
+        Display::ShowPropertyWindow(&showPropertyWindow, displayW, displayH);
         //rendering 
         ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(m_window, &display_w, &display_h);
-        glViewport(0.2f*display_w, 0, 0.8*display_w, display_h);
+        
+        glViewport(0.2f*displayW, 0, 0.8*displayW, displayH);
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        glfwSwapBuffers(window);
+        glfwSwapBuffers(m_window);
     }
 
     //cleanup
@@ -108,37 +112,74 @@ void Display::ShowWindow()
 }
 
 //to review 
-void Display::ShowPropertyWindow()
+void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
 {
+    static ImGuiDemoWindowData demo_data;
+
+    if (demo_data.ShowMainMenuBar)          { ShowExampleAppMainMenuBar(); }
+    
     bool scrollbar = false;
     bool move = false;
     bool close = false;
     bool resize = false;
     bool background = false;
     
-    ImGuiWindowFLags windowFlags = 0;
+    ImGuiWindowFlags windowFlags = 0;
 
-    if (scrollbar)       window_flags |= ImGuiWindowFlags_NoScrollbar;
-    if (move)            window_flags |= ImGuiWindowFlags_NoMove;
-    if (resize)          window_flags |= ImGuiWindowFlags_NoResize;
-    if (background)      window_flags |= ImGuiWindowFlags_NoBackground;
-    if (close)           p_open = NULL; 
+    if (scrollbar)       windowFlags |= ImGuiWindowFlags_NoScrollbar;
+    if (move)            windowFlags |= ImGuiWindowFlags_NoMove;
+    if (resize)          windowFlags |= ImGuiWindowFlags_NoResize;
+    if (background)      windowFlags |= ImGuiWindowFlags_NoBackground;
+    if (close)           pOpen = NULL; 
 
-    //fix position and size
     const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(mainViewport->WorkPos.x + 650, mainViewport->WorkPos.y + 20), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(550, 680), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(mainViewport->WorkPos.x, mainViewport->WorkPos.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(displayW*0.2, displayH), ImGuiCond_FirstUseEver);
+
 
     
     //create a window 
-    if (!ImGui::Begin("Property DMT", p_open, window_flags))
+    if (!ImGui::Begin("Property DMT", pOpen, windowFlags))
     {
         // Early out if the window is collapsed, as an optimization.
         ImGui::End();
         return;
     }
     
-    ImGui::("DEMO DEMO");
     
+    // Most "big" widgets share a common width settings by default. See 'Demo->Layout->Widgets Width' for details.
+    ImGui::PushItemWidth(ImGui::GetFontSize() * -12); 
+    //Menu bar
+    ShowPropertyWindowMenuBar();
+    ImGui::Text("DMT Properties");
+    ImGui::Spacing();
+    //Header for the tracer configuration
+    if(ImGui::CollapsingHeader("Configuration"))
+    {
+        ImGuiIO& io = ImGui::GetIO();
+
+        if(ImGui::TreeNode("Tracer Options"))
+        {
+            ImGui::SeparatorText("General");
+            bool check = true;
+            static char str0[128] = "Hello, world!";
+            ImGui::InputText("input text", str0, IM_ARRAYSIZE(str0));
+            ImGui::SameLine(); HelpMarker(
+                "Type text\n");
+            static int i0 = 123;
+            ImGui::InputInt("input int", &i0);
+        }
+    }
+
+    
+}
+
+void ShowMenuFile()
+{
+    if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {}
+    if (ImGui::MenuItem("Play Rendering", "Ctrl+P")) {}
+    if (ImGui::MenuItem("Save Image", "Ctrl+S")) {}
+    ImGui::Separator();
+    if (ImGui::MenuItem("Quit", "Alt+F4")) {}
 }
 } // namespace dmt

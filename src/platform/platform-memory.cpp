@@ -1,5 +1,7 @@
 module;
 
+#include "platform-os-utils.h"
+
 // NOLINTBEGIN
 #include <array>
 #include <bit>

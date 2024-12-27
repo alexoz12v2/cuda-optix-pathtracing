@@ -44,7 +44,6 @@ DMT_MODULE_EXPORT dmt {
     };
 
     // TODO boot up request sudo access
-    // TODO log level should be owned by the Platform class only
     /**
      * @class Platform
      * @brief Class whose constructor initializes all the necessary objects to bootstrap the application

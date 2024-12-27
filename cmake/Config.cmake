@@ -425,7 +425,7 @@ function(dmt_add_module_library name module_name)
   cmake_parse_arguments(THIS_ARGS
     "" # no options
     "MODULE_INTERFACE;MODULE_IMPLEMENTATION" # single argument keys
-    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS;HEADERS" # multiple arguments keys
+    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS;HEADERS;PRIVATE_SOURCES" # multiple arguments keys
     ${ARGN}
   )
   if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
@@ -443,6 +443,7 @@ function(dmt_add_module_library name module_name)
   message(STATUS "[${name}] MODULE_PARTITION_INTERFACES: ${THIS_ARGS_MODULE_PARTITION_INTERFACES}")
   message(STATUS "[${name}] MODULE_PARTITION_IMPLEMENTATIONS: ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS}")
   message(STATUS "[${name}] HEADERS: ${THIS_ARGS_HEADERS}")
+  message(STATUS "[${name}] PRIVATE_SOURCES: ${THIS_ARGS_PRIVATE_SOURCES}")
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
   set(interface_file_list "${CMAKE_SOURCE_DIR}/include/${target_path}/${THIS_ARGS_MODULE_INTERFACE}")
@@ -568,7 +569,7 @@ function(dmt_add_module_library name module_name)
   # add project include as include directory
   target_include_directories(${name}
     PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/src/${target_path} ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include
   )
 
   if(NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
@@ -595,6 +596,8 @@ function(dmt_add_module_library name module_name)
           FILES ${header_file_list}
       PRIVATE
         FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
+      PRIVATE
+        ${THIS_ARGS_PRIVATE_SOURCES}
     )
   else()
     target_sources(${name}
@@ -603,6 +606,8 @@ function(dmt_add_module_library name module_name)
           FILES ${interface_file_list}
       PRIVATE
         FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
+      PRIVATE
+        ${THIS_ARGS_PRIVATE_SOURCES}
     )
   endif()
 

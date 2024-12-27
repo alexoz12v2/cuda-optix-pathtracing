@@ -1,7 +1,4 @@
 #pragma once
-#if defined(DMT_COMPILER_MSVC)
-#pragma warning(disable : 4005 5106) // SHut SAL macro redefinition up
-#endif
 
 #include "dmtmacros.h"
 
@@ -11,19 +8,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-
-#if defined(DMT_OS_WINDOWS)
-// clang-format off
-#pragma comment(lib, "mincore")
-#define NO_SAL
-#include <Windows.h>
-#include <AclAPI.h>
-#include <securitybaseapi.h>
-#include <sysinfoapi.h>
-// clang-format on
-#elif defined(DMT_OS_LINUX)
-#endif
 
 #if defined(DMT_INTERFACE_AS_HEADER)
 // Keep in sync with .cppm
@@ -31,6 +15,18 @@
 #else
 import <platform/platform-logging.h>;
 #endif
+
+namespace dmt {
+    void* reserveVirtualAddressSpace(size_t size);
+
+    size_t systemAlignment();
+
+    bool commitPhysicalMemory(void* address, size_t size);
+
+    bool freeVirtualAddressSpace(void* address, size_t size);
+
+    void decommitPage(void* pageAddress, size_t pageSize);
+} // namespace dmt
 
 DMT_MODULE_EXPORT dmt {
     // Primary template (matches nothing by default)
@@ -88,27 +84,29 @@ DMT_MODULE_EXPORT dmt {
         return reinterpret_cast<void*>(alignedAddr);
     }
 
-// - x86_64 systems actually use 48 bits for virtual addresses. Actually, scratch that, with the
-//   latest PML5 (https://en.wikipedia.org/wiki/Intel_5-level_paging) extended virtual adderesses
-//   to 57 bits. This means that the high 7 bits of a memory address are unused, and we can make good use of them
-// - adding to the fact that minimum block size is 32 Bytes, hence aligned to a 32 Byte boundary, we have an additional
-//   5 bits free to use
-// hence, our tagged pointers can exploit 12 bits of information in total
-// Remember: it holds only for host addresses, and to regain access to the original address, you need to mask out
-// the low bits (5), and sign extend from bit 56 to bit 63
-// Reference test code:
-//   alignas(32) int data  = 42; // Ensure alignment
-//   uint16_t      trueTag = (1u << 12u) - 1;
-//   TaggedPointer tp(&data, trueTag);
-//   std::cout << "True Tag 0x" << std::hex << trueTag << std::dec << '\n';
-//   std::cout << "Raw pointer: " << tp.getPointer() << "\n";
-//   std::cout << "True Pointer: " << &data << '\n';
-//   std::cout << "Tag: 0x" << std::hex << tp.getTag() << "\n";
-//   std::cout << "Dereferenced value: " << std::dec << tp.operator* <int>() << "\n";
-// TODO: we can template this class on the number of low bits we expect to be zeroed out
 #if !defined(DMT_ARCH_X86_64)
 #error "Pointer Tagging relies heavily on x86_64's virtual addreess format"
 #endif
+    /** Class managing a pointer aligned to a 32 byte boundary, embedding a 12 bits tag split among its 7 high bits and 5 low bits
+     * - x86_64 systems actually use 48 bits for virtual addresses. Actually, scratch that, with the
+     *   latest PML5 (https://en.wikipedia.org/wiki/Intel_5-level_paging) extended virtual adderesses
+     *   to 57 bits. This means that the high 7 bits of a memory address are unused, and we can make good use of them
+     * - adding to the fact that minimum block size is 32 Bytes, hence aligned to a 32 Byte boundary, we have an additional
+     *   5 bits free to use
+     * hence, our tagged pointers can exploit 12 bits of information in total
+     * Remember: it holds only for host addresses, and to regain access to the original address, you need to mask out
+     * the low bits (5), and sign extend from bit 56 to bit 63
+     * Reference test code:
+     *   alignas(32) int data  = 42; // Ensure alignment
+     *   uint16_t      trueTag = (1u << 12u) - 1;
+     *   TaggedPointer tp(&data, trueTag);
+     *   std::cout << "True Tag 0x" << std::hex << trueTag << std::dec << '\n';
+     *   std::cout << "Raw pointer: " << tp.getPointer() << "\n";
+     *   std::cout << "True Pointer: " << &data << '\n';
+     *   std::cout << "Tag: 0x" << std::hex << tp.getTag() << "\n";
+     *   std::cout << "Dereferenced value: " << std::dec << tp.operator* <int>() << "\n";
+     * TODO: we can template this class on the number of low bits we expect to be zeroed out
+     */
     class TaggedPointer
     {
     public:
@@ -320,122 +318,3 @@ DMT_MODULE_EXPORT dmt {
         return (num + den - 1) / den;
     }
 }
-
-// module-private bits of functionality. Should not be exported by the primary interface unit
-// note: since this is to be visible to all implementation units, it cannot be put into a .cpp file, as
-// implementation units are not linked together. It needs to stay here. It should not be included in the
-// binary interface, hence it is fine
-namespace dmt {
-#if defined(DMT_OS_WINDOWS)
-    void* reserveVirtualAddressSpace(size_t size)
-    {
-        void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
-        return address; // to check whether it is different than nullptr
-    }
-
-    size_t systemAlignment()
-    {
-        SYSTEM_INFO sysInfo{};
-        GetSystemInfo(&sysInfo);
-        return static_cast<size_t>(sysInfo.dwAllocationGranularity);
-    }
-
-    bool commitPhysicalMemory(void* address, size_t size)
-    {
-        void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
-        return committed != nullptr;
-    }
-
-    bool freeVirtualAddressSpace(void* address, size_t size) // true if success
-    {
-        return VirtualFree(address, 0, MEM_RELEASE);
-    }
-
-    void decommitPage(void* pageAddress, size_t pageSize)
-    {
-        VirtualFree(pageAddress, pageSize, MEM_DECOMMIT);
-    }
-
-    namespace win32 {
-
-        uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize)
-        {
-            //Get the error message ID, if any.
-            DWORD errorMessageID = ::GetLastError();
-            if (errorMessageID == 0)
-            {
-                buffer[0] = '\n';
-                return 0;
-            }
-            else
-            {
-
-                LPSTR messageBuffer = nullptr;
-
-                //Ask Win32 to give us the string version of that message ID.
-                //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
-                size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                                                 FORMAT_MESSAGE_IGNORE_INSERTS,
-                                             NULL,
-                                             errorMessageID,
-                                             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                             (LPSTR)&messageBuffer,
-                                             0,
-                                             NULL);
-
-//Copy the error message into a std::string.
-#undef min
-                size_t actual = std::min(static_cast<size_t>(maxSize - 1), size);
-                std::memcpy(buffer, messageBuffer, actual);
-                buffer[actual] = '\0';
-
-                //Free the Win32's string's buffer.
-                LocalFree(messageBuffer);
-                return actual;
-            }
-        }
-
-        constexpr bool luidCompare(LUID const& luid0, LUID const& luid1)
-        {
-            return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
-        }
-
-    } // namespace win32
-#elif defined(DMT_OS_LINUX)
-    void* reserveVirtualAddressSpace(size_t size)
-    {
-        void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (address == MAP_FAILED)
-        {
-            return nullptr;
-        }
-        return address;
-    }
-
-    bool commitPhysicalMemory(void* address, size_t size)
-    {
-        int result = mprotect(address, size, PROT_READ | PROT_WRITE);
-        return result == 0;
-    }
-
-    bool freeVirtualAddressSpace(void* address, size_t size)
-    {
-        return !munmap(address, size);
-    }
-
-    void decommitPage(void* pageAddress, size_t pageSize)
-    {
-        mprotect(pageAddress, pageSize, PROT_NONE);
-        madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
-    }
-
-    size_t systemAlignment()
-    {
-        // TODO
-        return 0;
-    }
-
-    namespace linux {
-    }
-#endif
-} // namespace dmt

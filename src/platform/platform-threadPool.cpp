@@ -1,5 +1,7 @@
 module;
 
+#include "platform-os-utils.h"
+
 #include <atomic>
 #include <bit>
 #include <functional>

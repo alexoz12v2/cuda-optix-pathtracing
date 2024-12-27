@@ -8,6 +8,7 @@ module;
 #include <future>
 #include <iostream>
 #include <queue>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -199,15 +200,17 @@ namespace dmt {
 
     ThreadPoolV2::ThreadPoolV2(MemoryContext& ctx)
     {
+        using namespace std::string_view_literals;
         static_assert(numBlocks >= 5);
         static constexpr uint32_t threadBlocks = 3;
         static_assert(threadBlocks > 1);
         std::lock_guard<decltype(m_mtx)> lk{m_mtx};
+        m_memoryTrackingSid = ctx.strTable.intern("ThreadPool data (Index block, Job Block, or Thread Block)"sv);
 
         // allocate the 256 Bytes block for the index
         // TODO: manage allocation of more blocks at a time
         // TODO: sid
-        m_pIndex = ctx.poolAllocateBlocks(numBlocks, EBlockSize::e256B, EMemoryTag::eJob, 0);
+        m_pIndex = ctx.poolAllocateBlocks(numBlocks, EBlockSize::e256B, EMemoryTag::eJob, m_memoryTrackingSid);
         if (m_pIndex == taggedNullptr)
         {
             ctx.pctx.error("Couldn't allocate {} index blocks for threadPool", {numBlocks});
@@ -244,8 +247,6 @@ namespace dmt {
             offset += blockSz;
         }
 
-#undef max
-#undef min
         assert(std::thread::hardware_concurrency() >= 1);
         uint32_t numThreads = std::max(std::thread::hardware_concurrency() - 1u, 1u);
         // TODO hsndle thread construction
@@ -278,7 +279,7 @@ namespace dmt {
             for (uint32_t i = 0; i < additionalBlocks; ++i)
             {
                 uint8_t threadNum = static_cast<uint8_t>(i == additionalBlocks - 1 ? threadsResidual : ThreadBlob::numTs);
-                ptThreadsNext = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, 0);
+                ptThreadsNext = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, m_memoryTrackingSid);
                 if (ptThreadsNext == taggedNullptr)
                 {
                     ctx.pctx.error("Could not allocate additional block of 256 B index {} for the threadpool", {i});
@@ -440,9 +441,9 @@ namespace dmt {
         } // lock guard scope
     }
 
-    static TaggedPointer tryAlloc(MemoryContext& ctx, EJobLayer layer)
+    static TaggedPointer tryAlloc(MemoryContext& ctx, EJobLayer layer, sid_t sid)
     {
-        TaggedPointer newJobBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, 0);
+        TaggedPointer newJobBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, sid);
         if (newJobBlock == taggedNullptr)
         {
             ctx.pctx.error("failed to allocate new job block for layer {}", {toUnderlying(layer)});
@@ -486,7 +487,7 @@ namespace dmt {
                         // and if this is the last one, try to allocate a new one
                         if (jobNode->next == taggedNullptr)
                         {
-                            TaggedPointer newJobBlock = tryAlloc(ctx, layer);
+                            TaggedPointer newJobBlock = tryAlloc(ctx, layer, m_memoryTrackingSid);
 
                             jobNode->next = newJobBlock;
                             std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
@@ -498,8 +499,9 @@ namespace dmt {
                 else if (pIndexNode->data.layers[i] == EJobLayer::eEmpty)
                 { // this is a new layer, allocate a new job block
                     pIndexNode->data.layers[i] = layer;
-                    TaggedPointer newJobBlock  = pIndexNode->data.ptrs[i] == taggedNullptr ? tryAlloc(ctx, layer)
-                                                                                           : pIndexNode->data.ptrs[i];
+                    TaggedPointer newJobBlock  = pIndexNode->data.ptrs[i] == taggedNullptr
+                                                     ? tryAlloc(ctx, layer, m_memoryTrackingSid)
+                                                     : pIndexNode->data.ptrs[i];
                     pIndexNode->data.ptrs[i]   = newJobBlock;
                     std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
 
@@ -518,7 +520,7 @@ namespace dmt {
         }
 
         // if we exhausted the index, allocate a new block, for the index...
-        TaggedPointer newIndexBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, 0);
+        TaggedPointer newIndexBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, m_memoryTrackingSid);
         if (newIndexBlock == taggedNullptr)
         {
             ctx.pctx.error("Failed to allocate new index block for thread pool");
@@ -544,7 +546,7 @@ namespace dmt {
         }
 
         // ... and a new block for the job
-        TaggedPointer newJobBlock = tryAlloc(ctx, layer);
+        TaggedPointer newJobBlock = tryAlloc(ctx, layer, m_memoryTrackingSid);
         newIndex->data.ptrs[0]    = newJobBlock;
         auto* newJobNode          = newJobBlock.pointer<JobNode256B>();
         std::memset(newJobNode, 0, sizeof(JobNode256B));
@@ -554,57 +556,6 @@ namespace dmt {
         ++m_numJobs;
     }
 
-#if 0
-    Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
-    {
-        assert(m_pIndex != taggedNullptr);
-
-        auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
-        while (pIndexNode != nullptr)
-        { // for each index node, for each layer in the node different than `eEmpty`
-            for (uint32_t i = 0; i < layerCardinality; ++i)
-            {
-                if (pIndexNode->data.layers[i] != EJobLayer::eEmpty)
-                {
-                    TaggedPointer jobBlockPtr = pIndexNode->data.ptrs[i];
-                    auto*         jobNode     = jobBlockPtr.pointer<JobNode256B>();
-                    // iterate the entire linked list to find the first job with non null `func`
-                    while (jobNode != nullptr)
-                    {
-                        for (auto& jobSlot : jobNode->data.jobs)
-                        {
-                            if (jobSlot.func != nullptr)
-                            {
-                                Job copy       = jobSlot;
-                                jobSlot.func   = nullptr;
-                                uint64_t value = --jobBlockPtr.pointer<JobNode256B>()->data.counter;
-                                --m_numJobs;
-
-                                // TODO maybe: if this is the last job in the node, free it?
-                                otherJobsRemaining = value != 0;
-                                outLayer           = pIndexNode->data.layers[i];
-                                return copy;
-                            }
-                        } // iteration over job slots
-
-                        jobNode = jobNode->next.pointer<JobNode256B>();
-                    } // iteration over job nodes
-
-                    // if there are no jobs left in this index eleent, mark it as empty
-                    pIndexNode->data.layers[i] = EJobLayer::eEmpty;
-                } // pIndexNode->data.layers[i] != EJobLayer::eEmpty
-            }
-
-            pIndexNode = pIndexNode->next.pointer<IndexNode256B>();
-        }
-
-        // no jobs left
-        otherJobsRemaining = false;
-        outLayer           = EJobLayer::eEmpty;
-        m_ready            = false;
-        return {};
-    }
-#else
     Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
     {
         assert(m_pIndex != taggedNullptr);
@@ -661,7 +612,6 @@ namespace dmt {
         otherJobsRemaining = false;
         return {};
     }
-#endif
 
     TaggedPointer ThreadPoolV2::getSmallestLayer(EJobLayer& outLayer) const
     {

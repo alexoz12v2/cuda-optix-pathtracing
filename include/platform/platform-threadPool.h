@@ -175,14 +175,15 @@ DMT_MODULE_EXPORT dmt {
         TaggedPointer m_pThreads;
 
         mutable std::condition_variable_any m_cv;
-        mutable SpinLock                    m_mtx;
+        sid_t                               m_memoryTrackingSid;
         EJobLayer                           m_activeLayer{EJobLayer::eEmpty};
-        uint32_t                            m_numJobs           = 0;
-        std::atomic_flag                    m_jobsInFlight      = ATOMIC_FLAG_INIT;
+        uint32_t                            m_numJobs      = 0;
+        std::atomic_flag                    m_jobsInFlight = ATOMIC_FLAG_INIT;
+        mutable SpinLock                    m_mtx;
         mutable bool                        m_ready             = false;
         mutable bool                        m_shutdownRequested = false;
     };
-    static_assert(std::atomic<EJobLayer>::is_always_lock_free);
+    static_assert(sizeof(ThreadPoolV2) == 128 && alignof(ThreadPoolV2) <= 8);
 
     class ThreadPool
     {

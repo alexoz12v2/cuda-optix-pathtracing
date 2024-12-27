@@ -119,7 +119,7 @@ namespace dmt {
         }
     }
 
-    static bool initFile(PlatformContext& pctx, char const* filePath, Win32ChunkedFileReader& data)
+    static bool initFile(LoggingContext& pctx, char const* filePath, Win32ChunkedFileReader& data)
     {
         LARGE_INTEGER fileSize;
 
@@ -155,7 +155,7 @@ namespace dmt {
 #error "platform not supported"
 #endif
 
-    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx, char const* filePath, uint32_t chunkSize)
+    ChunkedFileReader::ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize)
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
@@ -183,11 +183,11 @@ namespace dmt {
 #endif
     }
 
-    ChunkedFileReader::ChunkedFileReader(PlatformContext& pctx,
-                                         char const*      filePath,
-                                         uint32_t         chunkSize,
-                                         uint8_t          numBuffers,
-                                         uintptr_t*       pBuffers)
+    ChunkedFileReader::ChunkedFileReader(LoggingContext& pctx,
+                                         char const*     filePath,
+                                         uint32_t        chunkSize,
+                                         uint8_t         numBuffers,
+                                         uintptr_t*      pBuffers)
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
@@ -231,7 +231,7 @@ namespace dmt {
 #endif
     }
 
-    bool ChunkedFileReader::requestChunk(PlatformContext& pctx, void* chunkBuffer, uint32_t chunkNum)
+    bool ChunkedFileReader::requestChunk(LoggingContext& pctx, void* chunkBuffer, uint32_t chunkNum)
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
@@ -279,7 +279,7 @@ namespace dmt {
         return 0;
     }
 
-    bool ChunkedFileReader::waitForPendingChunk(PlatformContext& pctx, uint32_t timeoutMillis)
+    bool ChunkedFileReader::waitForPendingChunk(LoggingContext& pctx, uint32_t timeoutMillis)
     {
 #if defined(DMT_OS_WINDOWS)
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);

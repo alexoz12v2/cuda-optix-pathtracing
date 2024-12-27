@@ -107,6 +107,12 @@ include(cmake/ClangTidy.cmake)
 # this copy happen automatically)
 add_custom_target(dmt-copy-assets 
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/res ${CMAKE_CURRENT_BINARY_DIR}/res
+  COMMENT "copying in the build directory the assets directory"
+)
+
+add_custom_target(dmt-link-assets 
+  COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/res ${CMAKE_CURRENT_BINARY_DIR}/res
+  COMMENT "Creating symbolic link for assets directory"
 )
 
 # add library code

@@ -25,8 +25,8 @@ DMT_MODULE_EXPORT dmt {
     struct AppContext : public InterfaceLogger<AppContext>
     {
         AppContext(void*                                      platformContextData,
-                   PlatformContext::Table const*              pTable,
-                   PlatformContext::InlineTable const&        inlineTable,
+                   LoggingContext::Table const*               pTable,
+                   LoggingContext::InlineTable const&         inlineTable,
                    uint32_t                                   pageTrackCapacity,
                    uint32_t                                   allocTrackCapacity,
                    std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
@@ -97,9 +97,9 @@ DMT_MODULE_EXPORT dmt {
             reinterpret_cast<Platform*>(data)->m_logger.setLevel(level);
         }
 
-        PlatformContext::InlineTable inlineTable() const
+        LoggingContext::InlineTable inlineTable() const
         {
-            PlatformContext::InlineTable ret;
+            LoggingContext::InlineTable ret;
             ret.write      = doWrite;
             ret.writeArgs  = doWriteArgs;
             ret.checkLevel = doCheckLevel;
@@ -109,8 +109,8 @@ DMT_MODULE_EXPORT dmt {
         // Threadpool m_threadpool
         // Display m_display
         // ...
-        ConsoleLogger          m_logger = ConsoleLogger::create();
-        PlatformContext::Table m_ctxTable{.changeLevel = doChangeLevel};
+        ConsoleLogger         m_logger = ConsoleLogger::create();
+        LoggingContext::Table m_ctxTable{.changeLevel = doChangeLevel};
         // clang-format off
         AppContext             m_ctx{this,
                                      &m_ctxTable,

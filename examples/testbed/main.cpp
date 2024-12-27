@@ -66,7 +66,7 @@ namespace // all functions declared in an anonymous namespace (from the global n
         logger.log("All threads completed logging. Total threads: {}", {completedThreads.load()});
     }
 
-    void testStackAllocator(dmt::PlatformContext& ctx, dmt::PageAllocator& pageAllocator, dmt::StackAllocator& stackAllocator)
+    void testStackAllocator(dmt::LoggingContext& ctx, dmt::PageAllocator& pageAllocator, dmt::StackAllocator& stackAllocator)
     {
         // Allocate memory with different sizes and alignments
         void* ptr1 = stackAllocator.allocate(ctx, pageAllocator, 128, 16);
@@ -95,7 +95,7 @@ namespace // all functions declared in an anonymous namespace (from the global n
         ctx.log("Allocator cleaned up successfully.");
     }
 
-    void testAllocations(dmt::PlatformContext&        ctx,
+    void testAllocations(dmt::LoggingContext&         ctx,
                          dmt::PageAllocator&          pageAllocator,
                          dmt::PageAllocationsTracker& tracker,
                          uint32_t&                    counter)
@@ -146,20 +146,20 @@ int main()
     logger.trace("I shall not be seen");
 
     dmt::Platform platform;
-    auto&         ctx = platform.ctx();
+    auto&         ctx = platform.ctx().mctx.pctx;
     if (platform.ctx().logEnabled())
         platform.ctx().log("We are in the platform now");
 
     uint32_t                counter = 0;
     dmt::PageAllocatorHooks hooks{
         .allocHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+            [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
                 uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
                 if (counter++ % 50 == 0)
                     ctx.log("Inside allocation hook!");
             },
         .freeHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+            [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
                 uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
                 if (counter++ % 50 == 0)
                     ctx.log("inside deallocation Hook!");
@@ -169,12 +169,12 @@ int main()
     dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
     dmt::PageAllocatorHooks     testhooks{
             .allocHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+            [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
                 auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
                 tracker.track(ctx, alloc);
             },
             .freeHook =
-            [](void* data, dmt::PlatformContext& ctx, dmt::PageAllocation const& alloc) { //
+            [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
                 auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
                 tracker.untrack(ctx, alloc);
             },

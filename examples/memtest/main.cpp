@@ -68,7 +68,7 @@ static void testChunkedFileReaderPData(dmt::AppContext& actx)
     actx.mctx.stackReset();
 }
 
-static void testChunkedFileReader(dmt::PlatformContext& pctx)
+static void testChunkedFileReader(dmt::LoggingContext& pctx)
 {
     constexpr uint32_t chunkSize = 512; // Define chunk size (e.g., 1 KB)
     char const*        filePath  = "..\\res\\test.txt";

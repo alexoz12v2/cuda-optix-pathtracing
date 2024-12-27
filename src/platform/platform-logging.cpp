@@ -14,6 +14,10 @@ module;
 #include <cstring>
 #include <ctime>
 
+#if defined(DMT_DEBUG)
+#include <backward.hpp>
+#endif
+
 #if defined(DMT_OS_LINUX)
 #include <unistd.h>
 #if defined(_POSIX_ASYNCHRONOUS_IO)
@@ -551,5 +555,35 @@ namespace dmt {
     }
 
     static_assert(LogDisplay<ConsoleLogger>);
+
+    // LoggingContext -------------------------------------------------------------------------------------------------
+    void LoggingContext::dbgTraceStackTrace()
+    {
+#if defined(DMT_DEBUG)
+        if (traceEnabled())
+        {
+            trace("Printing StackTrace");
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#endif
+    }
+
+    void LoggingContext::dbgErrorStackTrace()
+    {
+#if defined(DMT_DEBUG)
+        if (errorEnabled())
+        {
+            error("Printing StackTrace");
+            backward::Printer    p;
+            backward::StackTrace st;
+            st.load_here();
+            p.print(st);
+        }
+#endif
+    }
+
 
 } // namespace dmt

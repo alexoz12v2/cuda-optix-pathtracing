@@ -14,7 +14,7 @@ module;
 #include <cstring>
 
 #if defined(DMT_DEBUG)
-#include <backward.hpp> // TODO incapsulare nel logger
+#include <backward.hpp>
 #include <map>
 #include <memory_resource>
 #endif
@@ -150,7 +150,7 @@ namespace dmt {
     class HooksJanitor
     {
     public:
-        HooksJanitor(PlatformContext& ctx, bool alloc) : m_ctx(ctx), m_alloc(alloc)
+        HooksJanitor(LoggingContext& ctx, bool alloc) : m_ctx(ctx), m_alloc(alloc)
         {
         }
         HooksJanitor(HooksJanitor const&)                = delete;
@@ -176,8 +176,8 @@ namespace dmt {
         PageAllocation*     pAlloc = nullptr;
 
     private:
-        PlatformContext& m_ctx;
-        bool             m_alloc;
+        LoggingContext& m_ctx;
+        bool            m_alloc;
     };
 
 #if defined(DMT_OS_LINUX)
@@ -272,7 +272,7 @@ namespace dmt {
         return {pageCount, pool};
     }
 
-    PageAllocator::PageAllocator(PlatformContext& ctx, PageAllocatorHooks const& hooks) : PageAllocator(hooks)
+    PageAllocator::PageAllocator(LoggingContext& ctx, PageAllocatorHooks const& hooks) : PageAllocator(hooks)
     {
         // Paths for huge pages information
         char const* hugePagesPaths[] = {"/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages",
@@ -369,7 +369,7 @@ namespace dmt {
         }
     }
 
-    PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
+    PageAllocation PageAllocator::allocatePage(LoggingContext& ctx, EPageSize sizeOverride)
     {
         PageAllocation ret{};
         uint32_t const size = toUnderlying(EPageSize::e4KB);
@@ -440,43 +440,23 @@ namespace dmt {
 
         // TODO print if allocation failed
         // TODO refactor common bits of functionality/logging among operating systems
-#if defined(DMT_DEBUG)
-        ctx.trace(
-            "Called allocatePage, allocated "
-            "at {} page of {} Printing Stacktrace",
-            {ret.address, (void*)toUnderlying(ret.pageSize)});
-        if (ctx.traceEnabled())
-        {
-            backward::Printer    p;
-            backward::StackTrace st;
-            st.load_here();
-            p.print(st);
-        }
-#else
         ctx.trace(
             "Called allocatePage, allocated "
             "at {} page of {}",
             {ret.address, (void*)toUnderlying(ret.pageSize)});
-#endif
+        ctx.dbgTraceStackTrace();
         return ret;
     }
 
-    void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
+    void PageAllocator::deallocatePage(LoggingContext& ctx, PageAllocation& alloc)
     {
         PageAllocation allocCopy = alloc;
         if ((allocCopy.bits & DMT_OS_LINUX_MMAP_ALLOCATED) != 0)
         {
             if (munmap(allocCopy.address, toUnderlying(allocCopy.pageSize) * allocCopy.count))
             {
-#if defined(DMT_DEBUG)
-                backward::Printer    p;
-                backward::StackTrace st;
-                st.load_here();
-                ctx.error("Couldn't deallocate {}, printing stacktrace:", {allocCopy.address});
-                p.print(st);
-#else
                 ctx.error("Couldn't deallocate {}", {allocCopy.address});
-#endif
+                ctx.dbgErrorStackTrace();
             }
             allocCopy.address = nullptr;
         }
@@ -487,35 +467,15 @@ namespace dmt {
         }
         else // TODO add unreachable or something
         {
-#if defined(DMT_DEBUG)
-            ctx.trace("You called deallocatePage, but nothing done. Printing Stacktrace");
-            if (ctx.traceEnabled())
-            {
-                backward::Printer    p;
-                backward::StackTrace st;
-                st.load_here();
-                p.print(st);
-            }
-#else
             ctx.trace("You called deallocatePage, but nothing done.");
-#endif
+            ctx.dbgTraceStackTrace();
         }
-#if defined(DMT_DEBUG)
-        ctx.trace("Deallocated memory at {} size {}, Printing stacktrace",
-                  {allocCopy.address, toUnderlying(allocCopy.pageSize)});
-        if (ctx.traceEnabled())
-        {
-            backward::Printer    p;
-            backward::StackTrace st;
-            st.load_here();
-            p.print(st);
-        }
-#else
+
         ctx.trace("Deallocated memory at {} size {}", {allocCopy.address, toUnderlying(allocCopy.pageSize)});
-#endif
+        ctx.dbgTraceStackTrace();
     }
 
-    bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
+    bool PageAllocator::allocate2MB(LoggingContext& ctx, PageAllocation& out)
     {
         size_t const size        = toUnderlying(EPageSize::e2MB);
         bool         isLargePage = false;
@@ -610,10 +570,10 @@ namespace dmt {
         HANDLE               hImpersonationToken = nullptr;
     };
 
-    bool PageAllocator::checkAndAdjustPrivileges(PlatformContext& ctx,
-                                                 void*            phProcessToken,
-                                                 void const*      pseLockMemoryPrivilegeLUID,
-                                                 void*            pData)
+    bool PageAllocator::checkAndAdjustPrivileges(LoggingContext& ctx,
+                                                 void*           phProcessToken,
+                                                 void const*     pseLockMemoryPrivilegeLUID,
+                                                 void*           pData)
     {
         HANDLE      hProcessToken             = reinterpret_cast<HANDLE>(phProcessToken);
         Janitor&    janitor                   = *reinterpret_cast<Janitor*>(pData);
@@ -699,7 +659,7 @@ namespace dmt {
         return true;
     }
 
-    bool PageAllocator::checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx)
+    bool PageAllocator::checkVirtualAlloc2InKernelbaseDll(LoggingContext& ctx)
     {
         HMODULE hKernel32Dll = LoadLibraryA("kernelbase.dll");
         if (!hKernel32Dll)
@@ -726,11 +686,11 @@ namespace dmt {
         return true;
     }
 
-    bool PageAllocator::enableLockPrivilege(PlatformContext& ctx,
-                                            void*            phProcessToken,
-                                            void const*      pseLockMemoryPrivilegeLUID,
-                                            int64_t          seLockMemoryPrivilegeIndex,
-                                            void*            pData)
+    bool PageAllocator::enableLockPrivilege(LoggingContext& ctx,
+                                            void*           phProcessToken,
+                                            void const*     pseLockMemoryPrivilegeLUID,
+                                            int64_t         seLockMemoryPrivilegeIndex,
+                                            void*           pData)
     {
         HANDLE      hProcessToken             = reinterpret_cast<HANDLE>(phProcessToken);
         LUID const& seLockMemoryPrivilegeLUID = *reinterpret_cast<LUID const*>(pseLockMemoryPrivilegeLUID);
@@ -798,7 +758,7 @@ namespace dmt {
         }
     }
 
-    void* PageAllocator::createImpersonatingThreadToken(PlatformContext& ctx, void* phProcessToken, void* pData)
+    void* PageAllocator::createImpersonatingThreadToken(LoggingContext& ctx, void* phProcessToken, void* pData)
     {
         HANDLE   hProcessToken       = reinterpret_cast<HANDLE>(phProcessToken);
         Janitor& janitor             = *reinterpret_cast<Janitor*>(pData);
@@ -825,7 +785,7 @@ namespace dmt {
 
     // TODO error handing with the Janitor Pattern
     // the Process Security Descriptor, the Token -> Close
-    PageAllocator::PageAllocator(PlatformContext& ctx, PageAllocatorHooks const& hooks) : PageAllocator(hooks)
+    PageAllocator::PageAllocator(LoggingContext& ctx, PageAllocatorHooks const& hooks) : PageAllocator(hooks)
     {
         Janitor janitor;
 
@@ -1035,7 +995,7 @@ namespace dmt {
 
 #if defined(DMT_OS_WINDOWS)
     // TODO promote to class static protected, shared between windows and linux
-    void PageAllocator::addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAllocation& ret)
+    void PageAllocator::addAllocInfo(LoggingContext& ctx, bool isLargePageAlloc, PageAllocation& ret)
     {
         static constexpr uint32_t log4KB      = 12u;
         uint32_t                  errorLength = 0;
@@ -1122,7 +1082,7 @@ namespace dmt {
     // reserve = take virtual address space. commit = when you write to it, it will be backed by physical memory
     // TODO see Address Windowing Extension pages (AWE)
     // TODO integrate MEM_WRITE_WATCH
-    PageAllocation PageAllocator::allocatePage(PlatformContext& ctx, EPageSize sizeOverride)
+    PageAllocation PageAllocator::allocatePage(LoggingContext& ctx, EPageSize sizeOverride)
     {
         HooksJanitor janitor{ctx, true};
         janitor.pHooks = &m_hooks;
@@ -1205,43 +1165,21 @@ namespace dmt {
             ret.pageSize          = pageSize;
             bool isLargePageAlloc = (allocationFlags & MEM_LARGE_PAGES) != 0;
 
-#if defined(DMT_DEBUG)
-            ctx.trace(
-                "Called allocatePage, allocated "
-                "at {} page of {} B. Printing Stacktrace",
-                {ret.address, StrBuf{toUnderlying(ret.pageSize), "0x%zx"}});
-            if (ctx.traceEnabled())
-            {
-                backward::Printer    p;
-                backward::StackTrace st;
-                st.load_here();
-                p.print(st);
-            }
-#else
             ctx.trace(
                 "Called allocatePage, allocated "
                 "at {} page of {}",
-                {ret.address, (void*)toUnderlying(ret.pageSize)});
-#endif
+                {ret.address, StrBuf{toUnderlying(ret.pageSize), "0x%zx"}});
+            ctx.dbgTraceStackTrace();
         }
         else
         {
-#if defined(DMT_DEBUG)
-            ctx.error("Printing stacktrace");
-            if (ctx.errorEnabled())
-            {
-                backward::Printer    p;
-                backward::StackTrace st;
-                st.load_here();
-                p.print(st);
-            }
-#endif
+            ctx.dbgErrorStackTrace();
         }
 
         return ret;
     }
 
-    bool PageAllocator::allocate2MB(PlatformContext& ctx, PageAllocation& out)
+    bool PageAllocator::allocate2MB(LoggingContext& ctx, PageAllocation& out)
     {
         HooksJanitor janitor{ctx, true};
         janitor.pHooks               = &m_hooks;
@@ -1293,7 +1231,7 @@ namespace dmt {
         return true;
     }
 
-    void PageAllocator::deallocatePage(PlatformContext& ctx, PageAllocation& alloc)
+    void PageAllocator::deallocatePage(LoggingContext& ctx, PageAllocation& alloc)
     {
         // the page allocation might be part of the memory portion itself, we need to copy it
         PageAllocation allocCopy = alloc;
@@ -1305,33 +1243,13 @@ namespace dmt {
         {
             uint32_t         errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
             std::string_view view{sErrorBuffer.data(), errorLength};
-#if defined(DMT_DEBUG)
-            ctx.error("Failed to Free memory at {}, error {}, Printing Stacktrace", {allocCopy.address, view});
-            if (ctx.errorEnabled())
-            {
-                backward::Printer    p;
-                backward::StackTrace st;
-                st.load_here();
-                p.print(st);
-            }
-#else
-#endif
+            ctx.error("Failed to Free memory at {}, error {}", {allocCopy.address, view});
+            ctx.dbgErrorStackTrace();
         }
         else
         {
-#if defined(DMT_DEBUG)
-            ctx.trace("Deallocated memory at {} size {}, Printing stacktrace",
-                      {allocCopy.address, toUnderlying(allocCopy.pageSize)});
-            if (ctx.traceEnabled())
-            {
-                backward::Printer    p;
-                backward::StackTrace st;
-                st.load_here();
-                p.print(st);
-            }
-#else
-            ctx.trace("Deallocated memory at {} size {}", {alloc.address, toUnderlying(alloc.pageSize)});
-#endif
+            ctx.trace("Deallocated memory at {} size {}", {allocCopy.address, toUnderlying(allocCopy.pageSize)});
+            ctx.dbgTraceStackTrace();
         }
     }
 
@@ -1341,7 +1259,7 @@ namespace dmt {
 
 #endif // DMT_OS_LINUX, DMT_OS_WINDOWS
 
-    void PageAllocator::deallocPage(PlatformContext& ctx, PageAllocation& alloc)
+    void PageAllocator::deallocPage(LoggingContext& ctx, PageAllocation& alloc)
     {
         PageAllocation allocCopy = alloc;
         PageAllocator::deallocatePage(ctx, alloc);
@@ -1350,11 +1268,11 @@ namespace dmt {
 
 
     AllocatePageForBytesResult PageAllocator::allocatePagesForBytes(
-        PlatformContext& ctx,
-        size_t           numBytes,
-        PageAllocation*  pOut,
-        uint32_t         inNum,
-        EPageSize        pageSize)
+        LoggingContext& ctx,
+        size_t          numBytes,
+        PageAllocation* pOut,
+        uint32_t        inNum,
+        EPageSize       pageSize)
     {
         static constexpr uint32_t maxAttempts         = 2048;
         uint32_t                  totalPagesAllocated = 0;
@@ -1379,7 +1297,7 @@ namespace dmt {
         return {.numBytes = allocated, .numPages = totalPagesAllocated};
     }
 
-    EPageSize PageAllocator::allocatePagesForBytesQuery(PlatformContext&            ctx,
+    EPageSize PageAllocator::allocatePagesForBytesQuery(LoggingContext&             ctx,
                                                         size_t                      numBytes,
                                                         uint32_t&                   inOutNum,
                                                         EPageAllocationQueryOptions opts)
@@ -1420,7 +1338,7 @@ namespace dmt {
         return pageSize;
     }
 
-    bool PageAllocator::checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize)
+    bool PageAllocator::checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize)
     { // TODO: don't commit memory or save it into a cache
         ctx.warn("Don't use me");
         // Attempt a small test allocation to verify if the page size is supported
@@ -1437,7 +1355,7 @@ namespace dmt {
 
     // PageAllocatorTracker -----------------------------------------------------------------------------------------------
 
-    static void logAndAbort(PlatformContext& ctx, std::string_view str, uint32_t initialNodeNum)
+    static void logAndAbort(LoggingContext& ctx, std::string_view str, uint32_t initialNodeNum)
     {
         ctx.error("Couldn't commit the first {} nodes into the reserved space", {initialNodeNum});
 #if defined(DMT_OS_WINDOWS)
@@ -1448,7 +1366,7 @@ namespace dmt {
         std::abort();
     }
 
-    PageAllocationsTracker::PageAllocationsTracker(PlatformContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity)
+    PageAllocationsTracker::PageAllocationsTracker(LoggingContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity)
     {
         using namespace std::string_view_literals;
         // reserve virtual address space the double ended buffer
@@ -1500,7 +1418,7 @@ namespace dmt {
 
     template <typename T>
         requires requires(T t) { t.address; }
-    static bool shouldTrack(PlatformContext& ctx, T const& alloc)
+    static bool shouldTrack(LoggingContext& ctx, T const& alloc)
     {
         bool ret = alloc.address != nullptr;
         if (!ret)
@@ -1510,7 +1428,7 @@ namespace dmt {
         return ret;
     }
 
-    void PageAllocationsTracker::track(PlatformContext& ctx, PageAllocation const& alloc)
+    void PageAllocationsTracker::track(LoggingContext& ctx, PageAllocation const& alloc)
     {
         ctx.trace("tracking allocation at address {}", {alloc.address});
         if (!m_pageTracking.m_freeHead)
@@ -1524,7 +1442,7 @@ namespace dmt {
         }
     }
 
-    void PageAllocationsTracker::untrack(PlatformContext& ctx, PageAllocation const& alloc)
+    void PageAllocationsTracker::untrack(LoggingContext& ctx, PageAllocation const& alloc)
     {
         ctx.trace("Untracking allocation at address {}", {alloc.address});
         if (m_pageTracking.removeNode(alloc))
@@ -1536,7 +1454,7 @@ namespace dmt {
         std::abort();
     }
 
-    void PageAllocationsTracker::track(PlatformContext& ctx, AllocationInfo const& alloc)
+    void PageAllocationsTracker::track(LoggingContext& ctx, AllocationInfo const& alloc)
     {
         ctx.trace("tracking allocation at address {}", {alloc.address});
         if (!m_allocTracking.m_freeHead)
@@ -1550,7 +1468,7 @@ namespace dmt {
         }
     }
 
-    void PageAllocationsTracker::untrack(PlatformContext& ctx, AllocationInfo const& alloc)
+    void PageAllocationsTracker::untrack(LoggingContext& ctx, AllocationInfo const& alloc)
     {
         ctx.trace("Untracking allocation at address {}", {alloc.address});
         if (m_allocTracking.removeNode(alloc))
@@ -1562,7 +1480,7 @@ namespace dmt {
         std::abort();
     }
 
-    void PageAllocationsTracker::claenTransients(PlatformContext& ctx)
+    void PageAllocationsTracker::claenTransients(LoggingContext& ctx)
     {
         ctx.log("Untracking (deallocating tracking data) for all transient allocations");
         m_allocTracking.removeTransientNodes();
@@ -1570,9 +1488,9 @@ namespace dmt {
 
     PageAllocationsTracker::~PageAllocationsTracker() noexcept
     {
-        PlatformContext::Table       nullTable;
-        PlatformContext::InlineTable nullInlineTable;
-        PlatformContext              nullCtx{nullptr, &nullTable, nullInlineTable};
+        LoggingContext::Table       nullTable;
+        LoggingContext::InlineTable nullInlineTable;
+        LoggingContext              nullCtx{nullptr, &nullTable, nullInlineTable};
         assert(!m_pageTracking.m_occupiedHead && !m_allocTracking.m_occupiedHead &&
                "some allocated memory is outliving the tracker");
 
@@ -1580,7 +1498,7 @@ namespace dmt {
     }
 
     // StackAllocator -----------------------------------------------------------------------------------------------------
-    StackAllocator::StackAllocator(PlatformContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks)
+    StackAllocator::StackAllocator(LoggingContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks)
     {
         // try to allocate the first 2MB stack buffer
         PageAllocation alloc;
@@ -1611,7 +1529,7 @@ namespace dmt {
         m_hooks = hooks;
     }
 
-    void StackAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator)
+    void StackAllocator::cleanup(LoggingContext& ctx, PageAllocator& pageAllocator)
     {
         std::lock_guard lock{m_mtx};
         m_hooks.cleanTransients(m_hooks.data, ctx);
@@ -1630,7 +1548,7 @@ namespace dmt {
         ctx.trace("Cleanup complete. All buffers have been deallocated.");
     }
 
-    void* StackAllocator::allocate(PlatformContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment)
+    void* StackAllocator::allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment)
     {
         if (size > bufferSize || (alignment & (alignment - 1)) != 0)
         {
@@ -1689,7 +1607,7 @@ namespace dmt {
         return nullptr;
     }
 
-    void StackAllocator::reset(PlatformContext& ctx, PageAllocator& pageAllocator)
+    void StackAllocator::reset(LoggingContext& ctx, PageAllocator& pageAllocator)
     {
         std::lock_guard lock{m_mtx};
         assert(m_pFirst);
@@ -1712,7 +1630,7 @@ namespace dmt {
         }
     }
 
-    bool StackAllocator::newBuffer(PlatformContext& ctx, PageAllocator& pageAllocator)
+    bool StackAllocator::newBuffer(LoggingContext& ctx, PageAllocator& pageAllocator)
     {
         assert(m_pLast);
         PageAllocation alloc;
@@ -1747,7 +1665,7 @@ namespace dmt {
         return {ptr, tag};
     }
 
-    MultiPoolAllocator::MultiPoolAllocator(PlatformContext&                    ctx,
+    MultiPoolAllocator::MultiPoolAllocator(LoggingContext&                     ctx,
                                            PageAllocator&                      pageAllocator,
                                            std::array<uint32_t, numBlockSizes> numBlocksPerPool,
                                            AllocatorHooks const&               hooks) :
@@ -1835,7 +1753,7 @@ namespace dmt {
         m_lastBuffer = m_firstBuffer;
     }
 
-    void MultiPoolAllocator::newBlock(PlatformContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr)
+    void MultiPoolAllocator::newBlock(LoggingContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr)
     {
         PageAllocation pageAlloc;
         if (!pageAllocator.allocate2MB(ctx, pageAlloc))
@@ -1873,7 +1791,7 @@ namespace dmt {
         }
     }
 
-    void MultiPoolAllocator::cleanup(PlatformContext& ctx, PageAllocator& pageAllocator)
+    void MultiPoolAllocator::cleanup(LoggingContext& ctx, PageAllocator& pageAllocator)
     {
         std::lock_guard lock{m_mtx};
 
@@ -1912,10 +1830,10 @@ namespace dmt {
         return result;
     }
 
-    TaggedPointer MultiPoolAllocator::allocateBlocks(PlatformContext& ctx,
-                                                     PageAllocator&   pageAllocator,
-                                                     uint32_t         numBlocks,
-                                                     EBlockSize       blockSize)
+    TaggedPointer MultiPoolAllocator::allocateBlocks(LoggingContext& ctx,
+                                                     PageAllocator&  pageAllocator,
+                                                     uint32_t        numBlocks,
+                                                     EBlockSize      blockSize)
     {
         std::lock_guard lock{m_mtx};
 
@@ -1935,7 +1853,7 @@ namespace dmt {
         {
             uintptr_t metadataAddr = std::bit_cast<uintptr_t>(currentBuffer) + sizeof(BufferHeader);
             uintptr_t poolBase     = currentBuffer->poolBase;
-            for (uint32_t i = 0; i < blockSizeIndex; ++i)
+            for (uint8_t i = 0; i < blockSizeIndex; ++i)
             {
                 poolBase += m_blocksPerPool[i] * toUnderlying(fromEncoding(i));
             }
@@ -2011,7 +1929,7 @@ namespace dmt {
         return allocateBlocks(ctx, pageAllocator, numBlocks, blockSize);
     }
 
-    void MultiPoolAllocator::freeBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr)
+    void MultiPoolAllocator::freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr)
     {
         std::lock_guard lock{m_mtx};
 
@@ -2043,7 +1961,7 @@ namespace dmt {
             return;
         }
 
-        for (uint32_t i = 0; i < blockSizeEnc; ++i)
+        for (uint8_t i = 0; i < blockSizeEnc; ++i)
         {
             poolBase += m_blocksPerPool[i] * toUnderlying(fromEncoding(i));
             bitsOffset += m_blocksPerPool[i];
@@ -2096,8 +2014,8 @@ namespace dmt {
     // MemoryContext ---------------------------------------------------------------------------------------------------------
 
     MemoryContext::MemoryContext(void*                                      platformContextData,
-                                 PlatformContext::Table const*              pTable,
-                                 PlatformContext::InlineTable const&        inlineTable,
+                                 LoggingContext::Table const*               pTable,
+                                 LoggingContext::InlineTable const&         inlineTable,
                                  uint32_t                                   pageTrackCapacity,
                                  uint32_t                                   allocTrackCapacity,
                                  std::array<uint32_t, numBlockSizes> const& numBlocksPerPool) :
@@ -2105,13 +2023,13 @@ namespace dmt {
     tracker{pctx, pageTrackCapacity, allocTrackCapacity},
     pageHooks{
         .allocHook =
-            [](void* data, PlatformContext& ctx, PageAllocation const& alloc)
+            [](void* data, LoggingContext& ctx, PageAllocation const& alloc)
         {
             auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
             tracker.track(ctx, alloc);
         },
         .freeHook =
-            [](void* data, PlatformContext& ctx, PageAllocation const& alloc)
+            [](void* data, LoggingContext& ctx, PageAllocation const& alloc)
         {
             auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
             tracker.untrack(ctx, alloc);
@@ -2120,19 +2038,19 @@ namespace dmt {
     },
     allocHooks{
         .allocHook =
-            [](void* data, PlatformContext& ctx, AllocationInfo const& alloc)
+            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc)
         {
             auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
             tracker.track(ctx, alloc);
         },
         .freeHook =
-            [](void* data, PlatformContext& ctx, AllocationInfo const& alloc)
+            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc)
         {
             auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
             tracker.untrack(ctx, alloc);
         },
         .cleanTransients =
-            [](void* data, PlatformContext& ctx)
+            [](void* data, LoggingContext& ctx)
         {
             auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
             tracker.claenTransients(ctx);

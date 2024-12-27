@@ -231,8 +231,8 @@ DMT_MODULE_EXPORT dmt {
 
     struct PageAllocatorHooks
     {
-        void (*allocHook)(void* data, PlatformContext& ctx, PageAllocation const& alloc);
-        void (*freeHook)(void* data, PlatformContext& ctx, PageAllocation const& alloc);
+        void (*allocHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
+        void (*freeHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
         void* data;
     };
 
@@ -245,7 +245,7 @@ DMT_MODULE_EXPORT dmt {
         static constexpr uint32_t num4KBIn2MB = toUnderlying(EPageSize::e2MB) / toUnderlying(EPageSize::e4KB);
 
         // -- Construtors/Copy Control --
-        PageAllocator(PlatformContext& ctx, PageAllocatorHooks const& hooks);
+        PageAllocator(LoggingContext& ctx, PageAllocatorHooks const& hooks);
         PageAllocator(PageAllocator const&)            = default;
         PageAllocator(PageAllocator&&) noexcept        = default;
         PageAllocator& operator=(PageAllocator const&) = default;
@@ -255,20 +255,20 @@ DMT_MODULE_EXPORT dmt {
         // -- Functions --
         // there's no alignment requirement being passed because we are allocating pages
         [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(
-            PlatformContext& ctx,
-            size_t           numBytes,
-            PageAllocation*  pOut,
-            uint32_t         inNum,
-            EPageSize        pageSize);
-        EPageSize      allocatePagesForBytesQuery(PlatformContext&            ctx,
+            LoggingContext& ctx,
+            size_t          numBytes,
+            PageAllocation* pOut,
+            uint32_t        inNum,
+            EPageSize       pageSize);
+        EPageSize      allocatePagesForBytesQuery(LoggingContext&             ctx,
                                                   size_t                      numBytes,
                                                   uint32_t&                   inOutNum,
                                                   EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
-        bool           checkPageSizeAvailability(PlatformContext& ctx, EPageSize pageSize);
-        bool           allocate2MB(PlatformContext& ctx, PageAllocation& out);
-        PageAllocation allocatePage(PlatformContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
-        static void    deallocatePage(PlatformContext& ctx, PageAllocation& alloc);
-        void           deallocPage(PlatformContext& ctx, PageAllocation& alloc);
+        bool           checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize);
+        bool           allocate2MB(LoggingContext& ctx, PageAllocation& out);
+        PageAllocation allocatePage(LoggingContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
+        static void    deallocatePage(LoggingContext& ctx, PageAllocation& alloc);
+        void           deallocPage(LoggingContext& ctx, PageAllocation& alloc);
 
         // TODO should test drive design?
 
@@ -278,20 +278,20 @@ DMT_MODULE_EXPORT dmt {
          * Check whether the current process token has "SeLockMemoryPrivilege". If it has it,
          * then enabled it if not enabled. If there's no privilege or cannot enable it, false
          */
-        static bool  checkAndAdjustPrivileges(PlatformContext& ctx,
-                                              void*            hProcessToken,
-                                              void const*      seLockMemoryPrivilegeLUID,
-                                              void*            pData);
-        static bool  enableLockPrivilege(PlatformContext& ctx,
-                                         void*            hProcessToken,
-                                         void const*      seLockMemoryPrivilegeLUID,
-                                         int64_t          seLockMemoryPrivilegeIndex,
-                                         void*            pData);
-        static bool  checkVirtualAlloc2InKernelbaseDll(PlatformContext& ctx);
-        static void* createImpersonatingThreadToken(PlatformContext& ctx, void* hProcessToken, void* pData);
+        static bool  checkAndAdjustPrivileges(LoggingContext& ctx,
+                                              void*           hProcessToken,
+                                              void const*     seLockMemoryPrivilegeLUID,
+                                              void*           pData);
+        static bool  enableLockPrivilege(LoggingContext& ctx,
+                                         void*           hProcessToken,
+                                         void const*     seLockMemoryPrivilegeLUID,
+                                         int64_t         seLockMemoryPrivilegeIndex,
+                                         void*           pData);
+        static bool  checkVirtualAlloc2InKernelbaseDll(LoggingContext& ctx);
+        static void* createImpersonatingThreadToken(LoggingContext& ctx, void* hProcessToken, void* pData);
 
         // TODO shared between windows and linux
-        void addAllocInfo(PlatformContext& ctx, bool isLargePageAlloc, PageAllocation& ret);
+        void addAllocInfo(LoggingContext& ctx, bool isLargePageAlloc, PageAllocation& ret);
 #endif
 
     private:
@@ -337,12 +337,12 @@ DMT_MODULE_EXPORT dmt {
 
     struct AllocatorHooks
     {
-        void (*allocHook)(void* data, PlatformContext& ctx, AllocationInfo const& alloc) =
-            [](void* data, PlatformContext& ctx, AllocationInfo const& alloc) {};
-        void (*freeHook)(void* data, PlatformContext& ctx, AllocationInfo const& alloc) =
-            [](void* data, PlatformContext& ctx, AllocationInfo const& alloc) {};
-        void (*cleanTransients)(void* data, PlatformContext& ctx) = [](void* data, PlatformContext& ctx) {};
-        void* data                                                = nullptr;
+        void (*allocHook)(void* data, LoggingContext& ctx, AllocationInfo const& alloc) =
+            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {};
+        void (*freeHook)(void* data, LoggingContext& ctx, AllocationInfo const& alloc) =
+            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {};
+        void (*cleanTransients)(void* data, LoggingContext& ctx) = [](void* data, LoggingContext& ctx) {};
+        void* data                                               = nullptr;
     };
 
     template <typename T>
@@ -624,7 +624,7 @@ DMT_MODULE_EXPORT dmt {
         };
 
         // Forward iterator for occupied list
-        PageAllocationsTracker(PlatformContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity);
+        PageAllocationsTracker(LoggingContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity);
         PageAllocationsTracker(PageAllocationsTracker const&)                = delete;
         PageAllocationsTracker(PageAllocationsTracker&&) noexcept            = delete;
         PageAllocationsTracker& operator=(PageAllocationsTracker const&)     = delete;
@@ -642,17 +642,17 @@ DMT_MODULE_EXPORT dmt {
         }
 
         // start simple: Handle embedded free list inside bootstrap page with allocation and deallocation functions
-        void track(PlatformContext& ctx, PageAllocation const& alloc);
-        void untrack(PlatformContext& ctx, PageAllocation const& alloc);
-        void track(PlatformContext& ctx, AllocationInfo const& alloc);
-        void untrack(PlatformContext& ctx, AllocationInfo const& alloc);
-        void claenTransients(PlatformContext& ctx);
+        void track(LoggingContext& ctx, PageAllocation const& alloc);
+        void untrack(LoggingContext& ctx, PageAllocation const& alloc);
+        void track(LoggingContext& ctx, AllocationInfo const& alloc);
+        void untrack(LoggingContext& ctx, AllocationInfo const& alloc);
+        void claenTransients(LoggingContext& ctx);
 
     private:
         static constexpr uint32_t initialNodeNum = 128;
         template <typename NodeType>
             requires(TemplateInstantiationOf<Node, NodeType>)
-        static void growFreeList(PlatformContext& ctx, FreeList<NodeType>& freeList, void* base)
+        static void growFreeList(LoggingContext& ctx, FreeList<NodeType>& freeList, void* base)
         {
             // Check if we can commit more memory
             if (freeList.m_freeSize >= freeList.m_capacity)
@@ -705,21 +705,21 @@ DMT_MODULE_EXPORT dmt {
     };
     static_assert(sizeof(PageAllocationsTracker) == 128 && alignof(PageAllocationsTracker) == 8);
 
-    //TODO for now you manually pass instances of PlatformContext and PageAllocator, work on a dependency injection tree
+    //TODO for now you manually pass instances of LoggingContext and PageAllocator, work on a dependency injection tree
     // class later
     class StackAllocator
     {
     public:
-        StackAllocator(PlatformContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks);
+        StackAllocator(LoggingContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks);
         StackAllocator(StackAllocator const&)                = delete;
         StackAllocator(StackAllocator&&) noexcept            = delete;
         StackAllocator& operator=(StackAllocator const&)     = delete;
         StackAllocator& operator=(StackAllocator&&) noexcept = delete;
         // To be called before destruction, eg with a janitor class. When DI works, remove this
-        void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator);
+        void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
 
-        void* allocate(PlatformContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment);
-        void  reset(PlatformContext& ctx, PageAllocator& pageAllocator);
+        void* allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment);
+        void  reset(LoggingContext& ctx, PageAllocator& pageAllocator);
 
     private:
         struct alignas(8) StackHeader
@@ -735,7 +735,7 @@ DMT_MODULE_EXPORT dmt {
         static constexpr size_t   bufferSize          = toUnderlying(EPageSize::e2MB);
         static constexpr uint32_t notUsedForThreshold = 10;
 
-        bool newBuffer(PlatformContext& ctx, PageAllocator& pageAllocator);
+        bool newBuffer(LoggingContext& ctx, PageAllocator& pageAllocator);
 
         // cleanup: until last is different than first, give back the buffer to the page tracker, which will be
         // allocated in the "bootstrap memory page", which is a minimuum (4KB) page containing whathever data the
@@ -808,7 +808,7 @@ DMT_MODULE_EXPORT dmt {
         static constexpr size_t   bufferSize        = toUnderlying(EPageSize::e2MB);
 
     public:
-        MultiPoolAllocator(PlatformContext&                    ctx,
+        MultiPoolAllocator(LoggingContext&                     ctx,
                            PageAllocator&                      pageAllocator,
                            std::array<uint32_t, numBlockSizes> numBlocksPerPool,
                            AllocatorHooks const&               hooks);
@@ -830,11 +830,11 @@ DMT_MODULE_EXPORT dmt {
         // To be called before destruction, eg with a janitor class. When DI works, remove this
         // WARNING: To be called, you need to be absolutely sure that all objects inside it have been destroyed
         // (or they are trivially destructible)
-        void cleanup(PlatformContext& ctx, PageAllocator& pageAllocator);
+        void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
 
         // 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
-        TaggedPointer allocateBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize);
-        void freeBlocks(PlatformContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
+        TaggedPointer allocateBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize);
+        void freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
 
     private:
         struct BufferHeader
@@ -845,7 +845,7 @@ DMT_MODULE_EXPORT dmt {
         };
         static_assert(sizeof(BufferHeader) == 40 && alignof(BufferHeader) == 8);
 
-        void newBlock(PlatformContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr);
+        void newBlock(LoggingContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr);
 
         mutable std::mutex                  m_mtx;
         std::array<uint32_t, numBlockSizes> m_blocksPerPool;
@@ -869,8 +869,8 @@ DMT_MODULE_EXPORT dmt {
     struct MemoryContext
     {
         MemoryContext(void*                                      platformContextData,
-                      PlatformContext::Table const*              pTable,
-                      PlatformContext::InlineTable const&        inlineTable,
+                      LoggingContext::Table const*               pTable,
+                      LoggingContext::InlineTable const&         inlineTable,
                       uint32_t                                   pageTrackCapacity,
                       uint32_t                                   allocTrackCapacity,
                       std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
@@ -886,7 +886,7 @@ DMT_MODULE_EXPORT dmt {
         // clean up everything (TODO: move to destructor)
         void cleanup();
 
-        PlatformContext        pctx;
+        LoggingContext         pctx;
         PageAllocationsTracker tracker;
         PageAllocatorHooks     pageHooks;
         AllocatorHooks         allocHooks;

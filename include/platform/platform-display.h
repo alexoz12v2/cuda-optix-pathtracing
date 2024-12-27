@@ -35,19 +35,45 @@ DMT_MODULE_EXPORT dmt {
         Display& operator=(Display&&) = delete;
 
         void ShowWindow();
-        
-        void Renderer();
 
     private:
+        static void HelpMarker(const char* desc)
+        {
+            ImGui::TextDisabled("(?)");
+            if (ImGui::BeginItemTooltip())
+            {
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+                ImGui::TextUnformatted(desc);
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+        }
+        
         static void GlfwErrorCallback(int error, char const* description)
         {
             std::cerr << "GLFW Error " << error << description << std::endl;
         }
         
         void ShowPropertyWindow(bool* pOpen, int displayW, int displayH);
+        void ShowPropertyWindowMenuBar();
+        void ShowMenuFile();
+        void InitPropertyWindow();
+        void PropertyWindowRenderer();
 
     private:
+        //glfw staff
         GLFWwindow*  m_window;
         GLFWmonitor* m_monitor;
+        const GLFWvidmode* m_mode;
+        int m_displayW;
+        int m_displayH;
+        //ImGui staff
+        bool scrollbar = false;
+        bool move = false;
+        bool close = false;
+        bool resize = false;
+        bool background = false;
+        ImGuiWindowFlags windowFlags = 0;
+        const ImGuiViewport* mainViewport;
     };
 }

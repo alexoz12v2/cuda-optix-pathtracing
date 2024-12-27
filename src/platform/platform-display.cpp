@@ -13,29 +13,67 @@ namespace dmt
 Display::Display()
 {
     if (!glfwInit())
+    {
+        std::cerr << "Unenable to initialize glfw" << std::endl;
         return;
+    }
 }
 
 Display::~Display()
 {
     if (m_window != NULL)
         glfwDestroyWindow(m_window);
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui::DestroyContext();
     glfwTerminate();
-}
-static void GlfwErrorCallback(int error, char const* description)
-{
-    std::cerr << "GLFW Error " << error << description << std::endl;
 }
 
 void Display::ShowWindow()
 {
+    //init window
+    Display::InitPropertyWindow();
+    //redering 
+    Display::PropertyWindowRenderer();
+}
+
+void Display::PropertyWindowRenderer()
+{
     //state imGui window
     bool showPropertyWindow = true;
 
-    glfwSetErrorCallback(GlfwErrorCallback);
+    while (!glfwWindowShouldClose(m_window))
+    {
+        glfwPollEvents();
 
-    if (!glfwInit())
-        return;
+        if (glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0)
+        {
+            ImGui_ImplGlfw_Sleep(10);
+            continue;
+        }
+
+        // Start the Dear ImGui frame
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        glfwGetFramebufferSize(m_window, &m_displayW, &m_displayH);
+        //display propertyWindow
+        Display::ShowPropertyWindow(&showPropertyWindow, m_displayW, m_displayH);
+        //rendering 
+        ImGui::Render();
+        
+        glViewport(0.2f*m_displayW, 0, 0.8*m_displayW, m_displayH);
+        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(m_window);
+    }
+}
+
+void Display::InitPropertyWindow()
+{
+    glfwSetErrorCallback(GlfwErrorCallback);
 
     //init staff for openGL
     char const* glsl_version = "#version 460";
@@ -45,11 +83,11 @@ void Display::ShowWindow()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     //obtain information about primary monitor
     m_monitor               = glfwGetPrimaryMonitor();
-    GLFWvidmode const* mode = glfwGetVideoMode(m_monitor);
-    glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-    glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-    glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-    glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+    m_mode = glfwGetVideoMode(m_monitor);
+    glfwWindowHint(GLFW_RED_BITS, m_mode->redBits);
+    glfwWindowHint(GLFW_GREEN_BITS, m_mode->greenBits);
+    glfwWindowHint(GLFW_BLUE_BITS, m_mode->blueBits);
+    glfwWindowHint(GLFW_REFRESH_RATE, m_mode->refreshRate);
 
     // Create window with graphics context
     m_window = glfwCreateWindow(640, 480, "DMT", m_monitor, NULL);
@@ -74,65 +112,18 @@ void Display::ShowWindow()
     //Setup Platform/renderer backends
     ImGui_ImplGlfw_InitForOpenGL(m_window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
-
-    //loop
-    while (!glfwWindowShouldClose(m_window))
-    {
-        glfwPollEvents();
-
-        if (glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0)
-        {
-            ImGui_ImplGlfw_Sleep(10);
-            continue;
-        }
-
-        // Start the Dear ImGui frame
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        int displayW, displayH;
-        glfwGetFramebufferSize(m_window, &displayW, &displayH);
-        //display propertyWindow
-        Display::ShowPropertyWindow(&showPropertyWindow, displayW, displayH);
-        //rendering 
-        ImGui::Render();
-        
-        glViewport(0.2f*displayW, 0, 0.8*displayW, displayH);
-        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(m_window);
-    }
-
-    //cleanup
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui::DestroyContext();
 }
 
 //to review 
 void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
 {
-    static ImGuiDemoWindowData demo_data;
-
-    if (demo_data.ShowMainMenuBar)          { ShowExampleAppMainMenuBar(); }
-    
-    bool scrollbar = false;
-    bool move = false;
-    bool close = false;
-    bool resize = false;
-    bool background = false;
-    
-    ImGuiWindowFlags windowFlags = 0;
-
     if (scrollbar)       windowFlags |= ImGuiWindowFlags_NoScrollbar;
     if (move)            windowFlags |= ImGuiWindowFlags_NoMove;
     if (resize)          windowFlags |= ImGuiWindowFlags_NoResize;
     if (background)      windowFlags |= ImGuiWindowFlags_NoBackground;
     if (close)           pOpen = NULL; 
 
-    const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+    mainViewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(mainViewport->WorkPos.x, mainViewport->WorkPos.y), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(displayW*0.2, displayH), ImGuiCond_FirstUseEver);
 
@@ -164,7 +155,7 @@ void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
             bool check = true;
             static char str0[128] = "Hello, world!";
             ImGui::InputText("input text", str0, IM_ARRAYSIZE(str0));
-            ImGui::SameLine(); HelpMarker(
+            ImGui::SameLine(); Display::HelpMarker(
                 "Type text\n");
             static int i0 = 123;
             ImGui::InputInt("input int", &i0);

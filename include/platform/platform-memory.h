@@ -868,10 +868,7 @@ DMT_MODULE_EXPORT dmt {
 
     struct MemoryContext
     {
-        MemoryContext(void*                                      platformContextData,
-                      LoggingContext::Table const*               pTable,
-                      LoggingContext::InlineTable const&         inlineTable,
-                      uint32_t                                   pageTrackCapacity,
+        MemoryContext(uint32_t                                   pageTrackCapacity,
                       uint32_t                                   allocTrackCapacity,
                       std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
 

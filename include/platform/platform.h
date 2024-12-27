@@ -24,10 +24,7 @@ import <platform/platform-threadPool.h>;
 DMT_MODULE_EXPORT dmt {
     struct AppContext : public InterfaceLogger<AppContext>
     {
-        AppContext(void*                                      platformContextData,
-                   LoggingContext::Table const*               pTable,
-                   LoggingContext::InlineTable const&         inlineTable,
-                   uint32_t                                   pageTrackCapacity,
+        AppContext(uint32_t                                   pageTrackCapacity,
                    uint32_t                                   allocTrackCapacity,
                    std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
         AppContext(AppContext const&)                = delete;
@@ -70,54 +67,6 @@ DMT_MODULE_EXPORT dmt {
         }
 
     private:
-        static inline void doWrite(void* data, ELogLevel level, std::string_view const& str, std::source_location const& loc)
-        {
-            Platform& self = *reinterpret_cast<Platform*>(data);
-            self.m_logger.write(level, str, loc);
-        }
-
-        static inline void doWriteArgs(void*                                data,
-                                       ELogLevel                            level,
-                                       std::string_view const&              str,
-                                       std::initializer_list<StrBuf> const& list,
-                                       std::source_location const&          loc)
-        {
-            Platform& self = *reinterpret_cast<Platform*>(data);
-            self.m_logger.write(level, str, list, loc);
-        }
-
-        static inline bool doCheckLevel(void* data, ELogLevel level)
-        {
-            Platform& self = *reinterpret_cast<Platform*>(data);
-            return self.m_logger.enabled(level);
-        }
-
-        static inline void doChangeLevel(void* data, ELogLevel level)
-        {
-            reinterpret_cast<Platform*>(data)->m_logger.setLevel(level);
-        }
-
-        LoggingContext::InlineTable inlineTable() const
-        {
-            LoggingContext::InlineTable ret;
-            ret.write      = doWrite;
-            ret.writeArgs  = doWriteArgs;
-            ret.checkLevel = doCheckLevel;
-            return ret;
-        }
-
-        // Threadpool m_threadpool
-        // Display m_display
-        // ...
-        ConsoleLogger         m_logger = ConsoleLogger::create();
-        LoggingContext::Table m_ctxTable{.changeLevel = doChangeLevel};
-        // clang-format off
-        AppContext             m_ctx{this,
-                                     &m_ctxTable,
-                                     inlineTable(),
-                                     toUnderlying(EPageSize::e1GB),
-                                     toUnderlying(EPageSize::e1GB),
-                                     {8192, 4096, 2048, 1024}};
-        // clang-format on
+        AppContext m_ctx{toUnderlying(EPageSize::e1GB), toUnderlying(EPageSize::e1GB), {8192, 4096, 2048, 1024}};
     };
 } // namespace dmt

@@ -1488,9 +1488,6 @@ namespace dmt {
 
     PageAllocationsTracker::~PageAllocationsTracker() noexcept
     {
-        LoggingContext::Table       nullTable;
-        LoggingContext::InlineTable nullInlineTable;
-        LoggingContext              nullCtx{nullptr, &nullTable, nullInlineTable};
         assert(!m_pageTracking.m_occupiedHead && !m_allocTracking.m_occupiedHead &&
                "some allocated memory is outliving the tracker");
 
@@ -2013,13 +2010,9 @@ namespace dmt {
 
     // MemoryContext ---------------------------------------------------------------------------------------------------------
 
-    MemoryContext::MemoryContext(void*                                      platformContextData,
-                                 LoggingContext::Table const*               pTable,
-                                 LoggingContext::InlineTable const&         inlineTable,
-                                 uint32_t                                   pageTrackCapacity,
+    MemoryContext::MemoryContext(uint32_t                                   pageTrackCapacity,
                                  uint32_t                                   allocTrackCapacity,
                                  std::array<uint32_t, numBlockSizes> const& numBlocksPerPool) :
-    pctx{platformContextData, pTable, inlineTable},
     tracker{pctx, pageTrackCapacity, allocTrackCapacity},
     pageHooks{
         .allocHook =

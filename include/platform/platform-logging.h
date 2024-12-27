@@ -3,6 +3,7 @@
 #include "dmtmacros.h"
 
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <format>
 #include <mutex>
@@ -997,7 +998,7 @@ concept AsyncIOManager = requires(T t) {
     class LoggingContext : public InterfaceLogger<LoggingContext>
     {
     public:
-        LoggingContext() : logger(ConsoleLogger::create())
+        LoggingContext() : logger(ConsoleLogger::create()), start(std::chrono::high_resolution_clock::now())
         {
         }
 
@@ -1071,6 +1072,14 @@ concept AsyncIOManager = requires(T t) {
 
         void dbgErrorStackTrace();
 
-        ConsoleLogger logger;
+        uint64_t millisFromStart() const
+        {
+            auto now      = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
+            return static_cast<uint64_t>(duration.count());
+        }
+
+        ConsoleLogger                                  logger;
+        std::chrono::high_resolution_clock::time_point start;
     };
 } // namespace dmt

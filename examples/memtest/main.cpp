@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 
 import platform;
 
@@ -23,6 +24,34 @@ struct TestObject
     }
 };
 
+static dmt::StrBuf formatAlloc(dmt::AllocationInfo const& alloc, char const* sidStr)
+{
+    static thread_local char storage[256]{};
+
+    // Format the information into the storage buffer
+    int len = std::snprintf(storage,
+                            sizeof(storage),
+                            "( Address: %p, AllocTime: %llu ms, FreeTime: %llu ms, Size: %zu bytes, "
+                            "SID: %s, Alignment: %u, Transient: %u, Tag: %s )",
+                            alloc.address,
+                            alloc.allocTime,
+                            alloc.freeTime,
+                            alloc.size,
+                            sidStr,
+                            alloc.alignment,
+                            alloc.transient,
+                            dmt::memoryTagStr(alloc.tag));
+
+    // Ensure the string is null-terminated and does not exceed the buffer
+    if (len < 0 || static_cast<size_t>(len) >= sizeof(storage))
+    {
+        // Handle formatting errors or truncation
+        storage[sizeof(storage) - 1] = '\0';
+    }
+
+    return {storage, len};
+}
+
 static void testChunkedFileReaderPData(dmt::AppContext& actx)
 {
     using namespace std::string_view_literals;
@@ -37,9 +66,12 @@ static void testChunkedFileReaderPData(dmt::AppContext& actx)
     size_t pointersSize = sizeof(uintptr_t) * numBuffers;
     size_t size         = dataSize + pointersSize;
 
-    uintptr_t* data = reinterpret_cast<uintptr_t*>(actx.mctx.stackAllocate(size, dataAlignment));
-    auto       addr = std::bit_cast<uintptr_t>(data);
-    uint64_t   off  = numBuffers * sizeof(uintptr_t);
+    dmt::sid_t sid = actx.mctx.strTable.intern("Test Read Chunked File Buffer From Stack"sv);
+
+    uintptr_t* data = reinterpret_cast<uintptr_t*>(
+        actx.mctx.stackAllocate(size, dataAlignment, dmt::EMemoryTag::eUnknown, sid));
+    auto     addr = std::bit_cast<uintptr_t>(data);
+    uint64_t off  = numBuffers * sizeof(uintptr_t);
     assert(data);
 
     // setup the array of pointers to `memSize` sized buffers
@@ -70,10 +102,9 @@ static void testChunkedFileReaderPData(dmt::AppContext& actx)
     // print and test memory allocation tracking
     for (auto const& alloc : actx.mctx.tracker.allocations())
     {
-        actx.log("Allocation Info: address: {}", {alloc.data.alloc.address});
+        actx.log("Allocation Info: {}",
+                 {formatAlloc(alloc.data.alloc, actx.mctx.strTable.lookup(alloc.data.alloc.sid).data())});
     }
-    dmt::sid_t sid = actx.mctx.strTable.intern("string interning test");
-    actx.log("Interned string: {}", {actx.mctx.strTable.lookup(sid)});
 
     actx.mctx.stackReset();
 }
@@ -190,11 +221,14 @@ void testThreadpool(dmt::AppContext& ctx)
 // 256B count: 1024
 int32_t main()
 {
+    using namespace std::string_view_literals;
     dmt::Platform platform;
     auto&         ctx = platform.ctx();
 
     ctx.log("Hello darkness my old friend");
-    auto ptr = ctx.mctx.poolAllocateBlocks(1, dmt::EBlockSize::e64B);
+    dmt::sid_t sid = ctx.mctx.strTable.intern("Test Pool Allocation block");
+
+    auto ptr = ctx.mctx.poolAllocateBlocks(1, dmt::EBlockSize::e64B, dmt::EMemoryTag::eUnknown, sid);
     if (ptr != dmt::taggedNullptr)
     {
         // Construct object in allocated memory
@@ -216,4 +250,13 @@ int32_t main()
     testThreadpool(ctx);
     testChunkedFileReaderPData(ctx);
     testChunkedFileReader(ctx.mctx.pctx);
+
+    // for each sliding window
+    for (auto const& allocRange : ctx.mctx.tracker.slidingWindow())
+    {
+        for (auto const& alloc : allocRange)
+        {
+            ctx.log("Allocation Info: {}", {formatAlloc(alloc, ctx.mctx.strTable.lookup(alloc.sid).data())});
+        }
+    }
 }

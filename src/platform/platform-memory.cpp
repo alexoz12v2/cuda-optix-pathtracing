@@ -46,6 +46,18 @@ module;
 module platform;
 
 namespace dmt {
+    char const* memoryTagStr(EMemoryTag tag)
+    {
+        // clang-format off
+        static char const* strs[toUnderlying(EMemoryTag::eCount)] {
+            "Unknown", "Debug", "Engine", "HashTable", "Buffer", "Blob", "Job", "Queue", "Scene", 
+            "AccelerationStructure", "Geometry", "Material", "Textures", "Spectrum"
+        };
+        // clang-format on
+        assert(tag < EMemoryTag::eCount);
+
+        return strs[toUnderlying(tag)];
+    }
 
 #if defined(DMT_OS_LINUX)
     inline constexpr uint32_t     howMany4KBsIn1GB = toUnderlying(EPageSize::e1GB) / toUnderlying(EPageSize::e4KB);
@@ -1311,6 +1323,108 @@ namespace dmt {
         return supported;
     }
 
+    // ObjectAllocationSlidingWindow --------------------------------------------------------------------------------------
+
+    ObjectAllocationsSlidingWindow::ObjectAllocationsSlidingWindow(size_t reservedSize) :
+    m_reservedSize(reservedSize),
+    m_activeIndex(0)
+    {
+        using HType = ObjectAllocationsSlidingWindow::Header;
+        // reserve memory
+        void* ptr = reserveVirtualAddressSpace(reservedSize);
+        if (!ptr)
+        {
+            std::abort();
+        }
+        uintptr_t    addr      = std::bit_cast<uintptr_t>(ptr);
+        size_t const sliceSize = reservedSize / numBlocks;
+        size_t const pageSize  = toUnderlying(EPageSize::e4KB);
+        assert(reservedSize % numBlocks == 0);
+        assert(pageSize <= sliceSize && sliceSize % pageSize == 0);
+
+        // split the reserved size into `numBlocks` slices and commit first page
+        for (uint32_t i = 0; i < numBlocks; ++i)
+        {
+            uintptr_t headerAddr = addr + i * sliceSize;
+            m_blocks[i]          = std::bit_cast<HType*>(headerAddr);
+            if (!commitPhysicalMemory(m_blocks[i], pageSize))
+            {
+                std::abort();
+            }
+
+            // initialize header data
+            HType& header            = *m_blocks[i];
+            header.firstNotCommitted = headerAddr + pageSize;
+            header.limit             = headerAddr + sliceSize;
+            header.size              = 0;
+        }
+    }
+
+    ObjectAllocationsSlidingWindow::~ObjectAllocationsSlidingWindow() noexcept
+    {
+        freeVirtualAddressSpace(m_blocks[0], m_reservedSize);
+    }
+
+    void ObjectAllocationsSlidingWindow::addToCurrent(AllocationInfo const& alloc)
+    {
+        using HType              = ObjectAllocationsSlidingWindow::Header;
+        HType*          pHeader  = m_blocks[m_activeIndex];
+        AllocationInfo* pNext    = firstAllocFromHeader(pHeader) + pHeader->size;
+        uintptr_t       nextAddr = std::bit_cast<uintptr_t>(pNext);
+
+        // if we are exceeding the limit, assert false in debug, otherwise just return (big address space)
+        if (nextAddr >= pHeader->limit)
+        {
+            assert(false && "Reserve more virtual address space");
+            return;
+        }
+
+        // if we are exceeding `firstNotCommitted`, commit the next page and update it
+        if (nextAddr >= pHeader->firstNotCommitted && !commitBlock())
+        {
+            assert(false && "Somehow, we couldn't commit a new page of memory");
+            return;
+        }
+
+        *pNext = alloc;
+
+        ++pHeader->size;
+    }
+
+    void ObjectAllocationsSlidingWindow::switchTonext()
+    {
+        m_activeIndex                 = (m_activeIndex + 1) % numBlocks;
+        m_blocks[m_activeIndex]->size = 0;
+    }
+
+    bool ObjectAllocationsSlidingWindow::commitBlock()
+    {
+        using HType    = ObjectAllocationsSlidingWindow::Header;
+        HType* pHeader = m_blocks[m_activeIndex];
+        size_t sz      = toUnderlying(EPageSize::e4KB);
+        bool   b       = commitPhysicalMemory(std::bit_cast<void*>(pHeader->firstNotCommitted), sz);
+        if (b)
+        {
+            pHeader->firstNotCommitted += sz;
+        }
+        return b;
+    }
+
+    void ObjectAllocationsSlidingWindow::touchFreeTime(void* address, uint64_t freeTime)
+    {
+        using HType             = ObjectAllocationsSlidingWindow::Header;
+        HType*          pHeader = m_blocks[m_activeIndex];
+        AllocationInfo* pBegin  = firstAllocFromHeader(pHeader);
+        AllocationInfo* pEnd    = firstAllocFromHeader(pHeader) + pHeader->size;
+        for (AllocationInfo* pCurr = pBegin; pCurr != pEnd; ++pCurr)
+        {
+            if (pCurr->address == address)
+            {
+                pCurr->freeTime = freeTime;
+            }
+        }
+    }
+
     // PageAllocatorTracker -----------------------------------------------------------------------------------------------
 
     static void logAndAbort(LoggingContext& ctx, std::string_view str, uint32_t initialNodeNum)
@@ -1423,6 +1537,7 @@ namespace dmt {
         if (shouldTrack(ctx, alloc))
         {
             m_allocTracking.addNode(alloc);
+            m_slidingWindow.addToCurrent(alloc);
         }
     }
 
@@ -1431,6 +1546,8 @@ namespace dmt {
         ctx.trace("Untracking allocation at address {}", {alloc.address});
         if (m_allocTracking.removeNode(alloc))
         {
+            uint64_t freeTime = ctx.millisFromStart();
+            m_slidingWindow.touchFreeTime(alloc.address, freeTime);
             return;
         }
 
@@ -1441,6 +1558,14 @@ namespace dmt {
     void PageAllocationsTracker::claenTransients(LoggingContext& ctx)
     {
         ctx.log("Untracking (deallocating tracking data) for all transient allocations");
+        uint64_t freeTime = ctx.millisFromStart();
+        m_allocTracking.forEachTransientNodes(this,
+                                              freeTime,
+                                              [](void* self, uint64_t freeTime, AllocationInfo const& alloc)
+                                              {
+                                                  auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(self);
+                                                  tracker.m_slidingWindow.touchFreeTime(alloc.address, freeTime);
+                                              });
         m_allocTracking.removeTransientNodes();
     }
 
@@ -1503,7 +1628,12 @@ namespace dmt {
         ctx.trace("Cleanup complete. All buffers have been deallocated.");
     }
 
-    void* StackAllocator::allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment)
+    void* StackAllocator::allocate(LoggingContext& ctx,
+                                   PageAllocator&  pageAllocator,
+                                   size_t          size,
+                                   size_t          alignment,
+                                   EMemoryTag      tag,
+                                   sid_t           sid)
     {
         if (size > bufferSize || (alignment & (alignment - 1)) != 0)
         {
@@ -1539,6 +1669,10 @@ namespace dmt {
                     allocInfo.size      = size;
                     allocInfo.alignment = alignment;
                     allocInfo.transient = 1;
+                    allocInfo.tag       = tag;
+                    allocInfo.sid       = sid;
+                    allocInfo.freeTime  = 0;
+                    allocInfo.allocTime = ctx.millisFromStart();
                     m_hooks.allocHook(m_hooks.data, ctx, allocInfo);
 
                     return ptr;
@@ -1785,10 +1919,13 @@ namespace dmt {
         return result;
     }
 
-    TaggedPointer MultiPoolAllocator::allocateBlocks(LoggingContext& ctx,
-                                                     PageAllocator&  pageAllocator,
-                                                     uint32_t        numBlocks,
-                                                     EBlockSize      blockSize)
+    TaggedPointer MultiPoolAllocator::allocateBlocks(
+        LoggingContext& ctx,
+        PageAllocator&  pageAllocator,
+        uint32_t        numBlocks,
+        EBlockSize      blockSize,
+        EMemoryTag      tag,
+        sid_t           sid)
     {
         std::lock_guard lock{m_mtx};
 
@@ -1858,6 +1995,10 @@ namespace dmt {
                     info.size      = blockSizeBytes * numBlocks;
                     info.alignment = poolBaseAlignment;
                     info.transient = 0;
+                    info.tag       = tag;
+                    info.sid       = sid;
+                    info.freeTime  = 0;
+                    info.allocTime = ctx.millisFromStart();
                     m_hooks.allocHook(m_hooks.data, ctx, info);
                     return encode(bufferIdx, blockSizeIndex, reinterpret_cast<void*>(blockAddr));
                 }
@@ -1881,7 +2022,7 @@ namespace dmt {
         m_lastBuffer       = newBuffer;
 
         // Retry allocation
-        return allocateBlocks(ctx, pageAllocator, numBlocks, blockSize);
+        return allocateBlocks(ctx, pageAllocator, numBlocks, blockSize, tag, sid);
     }
 
     void MultiPoolAllocator::freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr)
@@ -2015,9 +2156,9 @@ namespace dmt {
     }
 
     // stack methods
-    void* MemoryContext::stackAllocate(size_t size, size_t alignment)
+    void* MemoryContext::stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid)
     {
-        return stackAllocator.allocate(pctx, pageAllocator, size, alignment);
+        return stackAllocator.allocate(pctx, pageAllocator, size, alignment, tag, sid);
     }
 
     void MemoryContext::stackReset()
@@ -2026,9 +2167,9 @@ namespace dmt {
     }
 
     // pool methods
-    TaggedPointer MemoryContext::poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize)
+    TaggedPointer MemoryContext::poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid)
     {
-        return multiPoolAllocator.allocateBlocks(pctx, pageAllocator, numBlocks, blockSize);
+        return multiPoolAllocator.allocateBlocks(pctx, pageAllocator, numBlocks, blockSize, tag, sid);
     }
 
     void MemoryContext::poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr)

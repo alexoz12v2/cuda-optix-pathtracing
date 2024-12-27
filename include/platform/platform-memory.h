@@ -10,6 +10,7 @@
 
 #include <array>
 #include <bit>
+#include <iterator>
 #include <map>
 #include <memory_resource>
 #include <string_view>
@@ -27,24 +28,40 @@ import <platform/platform-logging.h>;
 #endif
 
 DMT_MODULE_EXPORT dmt {
+    /**
+     * Memory tags for meaningful object allocation tracking. Whenever you add something here, make sure to add a string representation
+     * in the `memoryTagStr` function
+     */
     enum class EMemoryTag : uint16_t
     {
-        Unknown,   /** temporary tag when you are unsure of what to tag */
-        Debug,     /** tag for anything which goes into debug memory */
-        Engine,    /** generic tag for whatever buffer is allocated by a system of the application CPU side */
-        HashTable, /** generic tag associated with an hash table */
-        Buffer,    /** generic tag associated with a dynamically allocated array */
-        Blob,      /** generic tag associated with I/O operations */
-        Job,       /** generic tag associated with job data */
-        Queue,     /** generic tag assiciated with Queues to be read by the GPU */
-        Scene,     /** generic tag for whatever data is associated to the scene. Prefer specific ones */
-        AccelerationStructure, /** tag associated to acceleration structures such as BVH nodes */
-        Geometry,              /** tag associated with triangular meshes and other types of geo */
-        Material,              /** tag associated with material information */
-        Textures,              /** tag associated with image textures */
-        Spectrum,              /** tag associated for a sampled light spectrum */
-        Count,
+        eUnknown = 0, /** temporary tag when you are unsure of what to tag */
+        eDebug,       /** tag for anything which goes into debug memory */
+        eEngine,      /** generic tag for whatever buffer is allocated by a system of the application CPU side */
+        eHashTable,   /** generic tag associated with an hash table */
+        eBuffer,      /** generic tag associated with a dynamically allocated array */
+        eBlob,        /** generic tag associated with I/O operations */
+        eJob,         /** generic tag associated with job data */
+        eQueue,       /** generic tag assiciated with Queues to be read by the GPU */
+        eScene,       /** generic tag for whatever data is associated to the scene. Prefer specific ones */
+        eAccelerationStructure, /** tag associated to acceleration structures such as BVH nodes */
+        eGeometry,              /** tag associated with triangular meshes and other types of geo */
+        eMaterial,              /** tag associated with material information */
+        eTextures,              /** tag associated with image textures */
+        eSpectrum,              /** tag associated for a sampled light spectrum */
+        eCount,
     };
+
+    inline constexpr uint16_t toUnderlying(EMemoryTag tag)
+    {
+        return static_cast<uint16_t>(tag);
+    }
+
+    inline constexpr std::strong_ordering operator<=>(EMemoryTag a, EMemoryTag b)
+    {
+        return toUnderlying(a) <=> toUnderlying(b);
+    }
+
+    char const* memoryTagStr(EMemoryTag tag);
 
     using sid_t = uint64_t;
 } // namespace dmt
@@ -458,15 +475,14 @@ DMT_MODULE_EXPORT dmt {
      */
     struct alignas(8) AllocationInfo
     {
-        void*      address;
-        uint64_t   allocTime; // millieconds from start of app
-        uint64_t   freeTime;  // 0 means not freed yet
-        size_t     size;
-        sid_t      sid;
-        uint32_t   alignment : 31;
-        uint32_t   transient : 1; // whether to automatically untrack this after 1 iteration
-        EMemoryTag tag;
-        //TODO handle source location
+        void*         address;
+        uint64_t      allocTime; // millieconds from start of app
+        uint64_t      freeTime;  // 0 means not freed yet
+        size_t        size;
+        sid_t         sid;
+        uint32_t      alignment : 31;
+        uint32_t      transient : 1; // whether to automatically untrack this after 1 iteration
+        EMemoryTag    tag;
         unsigned char padding[8];
     };
     static_assert(sizeof(AllocationInfo) == 56 && alignof(AllocationInfo) == 8);
@@ -660,6 +676,25 @@ DMT_MODULE_EXPORT dmt {
             m_freeSize += newNodes;
         }
 
+
+        void forEachTransientNodes(void*    data,
+                                   uint64_t freeTime,
+                                   void (*func)(void* data, uint64_t freeTime, NodeType::DType const& alloc))
+            requires requires(NodeType::DType t) { t.transient; }
+        {
+            NodeType* prev = nullptr;
+            NodeType* curr = m_occupiedHead;
+
+            while (curr)
+            {
+                if (curr->data.alloc.transient) // Check if node is transient
+                {
+                    func(data, freeTime, curr->data.alloc);
+                }
+                curr = getNextOccupied(curr);
+            }
+        }
+
         void removeTransientNodes()
             requires requires(NodeType::DType t) { t.transient; }
         {
@@ -726,6 +761,193 @@ DMT_MODULE_EXPORT dmt {
     };
     template class FreeList<PageNode>;
     template class FreeList<AllocNode>;
+
+    inline constexpr uint32_t log16GB = 30 + 4;
+    inline constexpr size_t   num16GB = 1ULL << log16GB;
+
+    // At construction, reserve a huge portion of the virtual address space, and partition it into 16 slices
+    //   For each slice, commit the first 4KB page.
+    // You will keep an array of pointers and an active index. Such buffers will have an header, having a uintptr_t to the first
+    //   address not yet committed, and a uintptr_t to the start of the next buffer (limit).
+    //   the uintptr_t to the start of the buffer is implicitly computed as alignToAddr(start + sizeof(Header), alignof(AllocInfo))
+    class ObjectAllocationsSlidingWindow
+    {
+    private:
+        struct Header
+        {
+            uintptr_t firstNotCommitted;
+            uintptr_t limit;
+            size_t    size;
+        };
+
+        static inline AllocationInfo* firstAllocFromHeader(Header* ptr)
+        {
+            uintptr_t pFirst = alignToAddr(std::bit_cast<uintptr_t>(ptr) + sizeof(Header), alignof(AllocationInfo));
+            return std::bit_cast<AllocationInfo*>(pFirst);
+        }
+
+        static inline AllocationInfo const* firstAllocFromHeaderConst(Header const* ptr)
+        {
+            uintptr_t pFirst = alignToAddr(std::bit_cast<uintptr_t>(ptr) + sizeof(Header), alignof(AllocationInfo));
+            return std::bit_cast<AllocationInfo const*>(pFirst);
+        }
+
+    public:
+        struct EndSentinel
+        {
+            constexpr EndSentinel(uintptr_t last) : last{last}
+            {
+            }
+            uintptr_t last;
+        };
+
+        struct AllocIterator
+        {
+        public:
+            using difference_type = std::ptrdiff_t;
+            using value_type      = AllocationInfo;
+            using reference_type  = AllocationInfo const&;
+
+            AllocIterator() : m_ptr(nullptr)
+            {
+            }
+            AllocIterator(AllocationInfo const* ptr) : m_ptr(ptr)
+            {
+            }
+
+            AllocationInfo const& operator*() const
+            {
+                return *m_ptr;
+            }
+
+            AllocIterator& operator++()
+            {
+                ++m_ptr;
+                return *this;
+            }
+
+            AllocIterator operator++(int)
+            {
+                auto tmp = *this;
+                ++*this;
+                return tmp;
+            }
+
+            bool operator==(AllocIterator const& other) const
+            {
+                return m_ptr == other.m_ptr;
+            }
+
+            bool operator==(EndSentinel end) const
+            {
+                return !m_ptr || std::bit_cast<uintptr_t>(m_ptr) >= end.last;
+            }
+
+        private:
+            AllocationInfo const* m_ptr;
+        };
+
+        struct AllocRange
+        {
+        public:
+            AllocRange(Header* block) : m_block(block)
+            {
+            }
+
+            AllocIterator begin() const
+            {
+                return {firstAllocFromHeaderConst(m_block)};
+            }
+
+            EndSentinel end() const
+            {
+                uintptr_t last = std::bit_cast<uintptr_t>(firstAllocFromHeader(m_block)) +
+                                 m_block->size * sizeof(AllocationInfo);
+                return {last};
+            }
+
+        private:
+            Header* m_block;
+        };
+
+        struct WindowIterator
+        {
+        public:
+            using difference_type = std::ptrdiff_t;
+            using value_type      = AllocRange;
+
+            WindowIterator() : m_block(nullptr)
+            {
+            }
+
+            WindowIterator(Header* start) : m_block(start)
+            {
+            }
+
+            AllocRange operator*() const
+            {
+                return {m_block};
+            }
+
+            WindowIterator& operator++()
+            {
+                m_block = std::bit_cast<decltype(m_block)>(m_block->limit);
+                return *this;
+            }
+
+            WindowIterator operator++(int)
+            {
+                auto tmp = *this;
+                ++*this;
+                return tmp;
+            }
+
+            bool operator==(WindowIterator const other) const
+            {
+                return m_block == other.m_block;
+            }
+
+            bool operator==(EndSentinel end) const
+            {
+                return !m_block || m_block->limit > end.last;
+            }
+
+        private:
+            Header* m_block;
+        };
+        static_assert(std::forward_iterator<WindowIterator>);
+        static_assert(std::forward_iterator<AllocIterator>);
+
+        static constexpr uint32_t numBlocks = 16;
+
+        ObjectAllocationsSlidingWindow(size_t reservedSize = num16GB);
+        ObjectAllocationsSlidingWindow(ObjectAllocationsSlidingWindow const&)                = delete;
+        ObjectAllocationsSlidingWindow(ObjectAllocationsSlidingWindow&&) noexcept            = delete;
+        ObjectAllocationsSlidingWindow& operator=(ObjectAllocationsSlidingWindow const&)     = delete;
+        ObjectAllocationsSlidingWindow& operator=(ObjectAllocationsSlidingWindow&&) noexcept = delete;
+        ~ObjectAllocationsSlidingWindow() noexcept;
+
+        void addToCurrent(AllocationInfo const& alloc);
+        void touchFreeTime(void* address, uint64_t freeTime);
+        void switchTonext();
+
+        WindowIterator begin() const
+        {
+            return {m_blocks[0]};
+        }
+
+        EndSentinel end() const
+        {
+            return {std::bit_cast<uintptr_t>(m_blocks[numBlocks - 1])};
+        }
+
+    private:
+        bool commitBlock();
+
+        Header*  m_blocks[numBlocks];
+        size_t   m_reservedSize;
+        uint32_t m_activeIndex;
+    };
 
     /**
      * Class which reserves a large portion of the virtual address to memory tracking and manage such space as two linked lists
@@ -828,6 +1050,16 @@ DMT_MODULE_EXPORT dmt {
          */
         void claenTransients(LoggingContext& ctx);
 
+        void nextCycle()
+        {
+            m_slidingWindow.switchTonext();
+        }
+
+        ObjectAllocationsSlidingWindow const& slidingWindow() const
+        {
+            return m_slidingWindow;
+        }
+
     private:
         static constexpr uint32_t initialNodeNum = 128;
         template <typename NodeType>
@@ -874,16 +1106,17 @@ DMT_MODULE_EXPORT dmt {
             freeList.growList(newNodes, newFreeListStart);
         }
 
-        FreeList<PageNode>  m_pageTracking;
-        FreeList<AllocNode> m_allocTracking;
-        void*               m_base   = nullptr;
-        void*               m_buffer = nullptr;
-        size_t              m_bufferBytes;
-        void*               m_pageBase;
-        void*               m_allocBase;
-        unsigned char       m_padding[24];
+        ObjectAllocationsSlidingWindow m_slidingWindow;
+        FreeList<PageNode>             m_pageTracking;
+        FreeList<AllocNode>            m_allocTracking;
+        void*                          m_base   = nullptr;
+        void*                          m_buffer = nullptr;
+        size_t                         m_bufferBytes;
+        void*                          m_pageBase;
+        void*                          m_allocBase;
+        char                           m_padding[8];
     };
-    static_assert(sizeof(PageAllocationsTracker) == 128 && alignof(PageAllocationsTracker) == 8);
+    static_assert(sizeof(PageAllocationsTracker) == 256 && alignof(PageAllocationsTracker) == 8);
 
     /**
      * Class to manage object allocation with a linked list of buffers, each managed as a stack
@@ -916,7 +1149,7 @@ DMT_MODULE_EXPORT dmt {
          * @param size number of bytes requested
          * @param alignment alignment requirement of the allocation
          */
-        void* allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment);
+        void* allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
 
         /**
          * Ends a reset cycle for the stack allocator, resetting all stack pointers, and deallocating all stack buffers
@@ -1073,7 +1306,12 @@ DMT_MODULE_EXPORT dmt {
          * @param blockSize size of the block
          * @return tagged pointer to allocated block. 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
          */
-        TaggedPointer allocateBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize);
+        TaggedPointer allocateBlocks(LoggingContext& ctx,
+                                     PageAllocator&  pageAllocator,
+                                     uint32_t        numBlocks,
+                                     EBlockSize      blockSize,
+                                     EMemoryTag      tag,
+                                     sid_t           sid);
 
         /**
          * Free `numBlocks` adjacent blocks previously allocated with the `MultiPoolAllocator`
@@ -1129,11 +1367,11 @@ DMT_MODULE_EXPORT dmt {
                       std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
 
         // stack methods
-        void* stackAllocate(size_t size, size_t alignment);
+        void* stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
         void  stackReset();
 
         // pool methods
-        TaggedPointer poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize);
+        TaggedPointer poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid);
         void          poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr);
 
         // clean up everything (TODO: move to destructor)

@@ -206,7 +206,8 @@ namespace dmt {
 
         // allocate the 256 Bytes block for the index
         // TODO: manage allocation of more blocks at a time
-        m_pIndex = ctx.poolAllocateBlocks(numBlocks, EBlockSize::e256B);
+        // TODO: sid
+        m_pIndex = ctx.poolAllocateBlocks(numBlocks, EBlockSize::e256B, EMemoryTag::eJob, 0);
         if (m_pIndex == taggedNullptr)
         {
             ctx.pctx.error("Couldn't allocate {} index blocks for threadPool", {numBlocks});
@@ -277,7 +278,7 @@ namespace dmt {
             for (uint32_t i = 0; i < additionalBlocks; ++i)
             {
                 uint8_t threadNum = static_cast<uint8_t>(i == additionalBlocks - 1 ? threadsResidual : ThreadBlob::numTs);
-                ptThreadsNext = ctx.poolAllocateBlocks(1, EBlockSize::e256B);
+                ptThreadsNext = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, 0);
                 if (ptThreadsNext == taggedNullptr)
                 {
                     ctx.pctx.error("Could not allocate additional block of 256 B index {} for the threadpool", {i});
@@ -441,7 +442,7 @@ namespace dmt {
 
     static TaggedPointer tryAlloc(MemoryContext& ctx, EJobLayer layer)
     {
-        TaggedPointer newJobBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B);
+        TaggedPointer newJobBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, 0);
         if (newJobBlock == taggedNullptr)
         {
             ctx.pctx.error("failed to allocate new job block for layer {}", {toUnderlying(layer)});
@@ -517,7 +518,7 @@ namespace dmt {
         }
 
         // if we exhausted the index, allocate a new block, for the index...
-        TaggedPointer newIndexBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B);
+        TaggedPointer newIndexBlock = ctx.poolAllocateBlocks(1, EBlockSize::e256B, EMemoryTag::eJob, 0);
         if (newIndexBlock == taggedNullptr)
         {
             ctx.pctx.error("Failed to allocate new index block for thread pool");

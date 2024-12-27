@@ -25,6 +25,7 @@ struct TestObject
 
 static void testChunkedFileReaderPData(dmt::AppContext& actx)
 {
+    using namespace std::string_view_literals;
     constexpr uint32_t dataChunkSize = 512;
     constexpr uint32_t dataAlignment = 8;
     char const*        filePath      = "..\\res\\test.txt";
@@ -65,6 +66,15 @@ static void testChunkedFileReaderPData(dmt::AppContext& actx)
     }
 
     actx.log("The string read from the file is {}...", {str.substr(0, 230)});
+
+    // print and test memory allocation tracking
+    for (auto const& alloc : actx.mctx.tracker.allocations())
+    {
+        actx.log("Allocation Info: address: {}", {alloc.data.alloc.address});
+    }
+    dmt::sid_t sid = actx.mctx.strTable.intern("string interning test");
+    actx.log("Interned string: {}", {actx.mctx.strTable.lookup(sid)});
+
     actx.mctx.stackReset();
 }
 

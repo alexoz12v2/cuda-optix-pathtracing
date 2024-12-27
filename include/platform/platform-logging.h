@@ -18,7 +18,9 @@
 #include <cstring>
 
 #if defined(DMT_INTERFACE_AS_HEADER)
-// add includes here if you add some imports on the .cppm
+#include <platform/platform-utils.h>
+#else
+import <platform/platform-utils.h>;
 #endif
 
 DMT_MODULE_EXPORT dmt {
@@ -382,6 +384,13 @@ DMT_MODULE_EXPORT dmt {
     class CircularOStringStream
     {
     public:
+        CircularOStringStream();
+        CircularOStringStream(CircularOStringStream const&) = delete;
+        CircularOStringStream(CircularOStringStream&&) noexcept;
+        CircularOStringStream& operator=(CircularOStringStream const&) = delete;
+        CircularOStringStream& operator=(CircularOStringStream&&) noexcept;
+        ~CircularOStringStream() noexcept;
+
         /**
          * fixed size of the circular buffer. Could be made a template param
          */
@@ -429,12 +438,12 @@ DMT_MODULE_EXPORT dmt {
         /**
          * character buffer
          */
-        char m_buffer[bufferSize]{}; // zero initialisation
+        char* m_buffer; // zero initialisation
 
         /**
          * Indicator of the first free character
          */
-        uint32_t m_pos{0};
+        uint32_t m_pos;
     };
 
     // clang-format off

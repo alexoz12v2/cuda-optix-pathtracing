@@ -2,19 +2,14 @@
 
 #include "dmtmacros.h"
 
+#include <bit>
 #include <concepts>
 #include <iterator>
 #include <source_location>
 
+#include <cassert>
 #include <cmath>
 #include <cstdint>
-
-#if defined(DMT_INTERFACE_AS_HEADER)
-// Keep in sync with .cppm
-#include <platform/platform-logging.h>
-#else
-import <platform/platform-logging.h>;
-#endif
 
 namespace dmt {
     void* reserveVirtualAddressSpace(size_t size);
@@ -206,111 +201,6 @@ DMT_MODULE_EXPORT dmt {
     };
     static_assert(sizeof(void*) == sizeof(TaggedPointer) && alignof(TaggedPointer) == alignof(void*));
     inline constexpr TaggedPointer taggedNullptr;
-
-    struct ChunkInfo
-    {
-        void*    buffer;
-        uint64_t indexData;
-        uint32_t numBytesRead;
-        uint32_t chunkNum;
-    };
-
-    class alignas(32) ChunkedFileReader
-    {
-    public:
-
-    private:
-        struct EndSentinel
-        {
-        };
-        struct InputIterator
-        {
-        public:
-            using difference_type = std::ptrdiff_t;
-            using value_type      = ChunkInfo;
-
-            InputIterator(void* pData, uint32_t chunkedNum, uint32_t numChunks) :
-            m_pData(pData),
-            m_chunkNum(chunkedNum),
-            m_current(chunkedNum),
-            m_numChunks(numChunks)
-            {
-            }
-
-            ChunkInfo operator*() const;
-
-            bool           operator==(EndSentinel const&) const;
-            InputIterator& operator++();
-            void           operator++(int)
-            {
-                ++*this;
-            }
-
-        private:
-            constexpr bool inRange() const
-            {
-                return m_current < m_chunkNum + m_numChunks;
-            }
-
-            void*    m_pData;
-            uint32_t m_chunkNum;
-            uint32_t m_current;
-            uint32_t m_numChunks;
-        };
-        static_assert(std::input_iterator<InputIterator>);
-
-        struct Range
-        {
-            constexpr Range(void* pData, uint32_t chunkNum, uint32_t numChunks) :
-            pData(pData),
-            chunkNum(chunkNum),
-            numChunks(numChunks)
-            {
-            }
-
-            InputIterator begin();
-
-            EndSentinel end()
-            {
-                return {};
-            }
-
-            void*    pData;
-            uint32_t chunkNum;
-            uint32_t numChunks;
-        };
-
-        friend struct InputIterator;
-
-    public:
-        static constexpr uint32_t maxNumBuffers = 72;
-        static constexpr uint32_t size          = 64;
-        static constexpr uint32_t alignment     = 32;
-        ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize);
-        ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize, uint8_t numBuffers, uintptr_t* pBuffers);
-        ChunkedFileReader(ChunkedFileReader const&)                = delete;
-        ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
-        ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;
-        ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
-        ~ChunkedFileReader() noexcept;
-
-        bool     requestChunk(LoggingContext& pctx, void* chunkBuffer, uint32_t chunkNum);
-        bool     waitForPendingChunk(LoggingContext& pctx, uint32_t timeoutMillis);
-        uint32_t lastNumBytesRead();
-        void     markFree(ChunkInfo const& chunkInfo);
-        uint32_t numChunks() const;
-        Range    range(uint32_t chunkNum, uint32_t numChunks)
-        {
-            return Range{&m_data, chunkNum, numChunks};
-        }
-
-        operator bool() const;
-
-        static size_t computeAlignedChunkSize(size_t chunkSize);
-
-    private:
-        alignas(alignment) unsigned char m_data[size];
-    };
 
     template <std::integral I>
     constexpr I ceilDiv(I num, I den)

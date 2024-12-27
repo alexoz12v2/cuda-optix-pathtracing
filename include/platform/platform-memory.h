@@ -1,9 +1,17 @@
+/**
+ * @file platform-memory.h
+ * @brief header file for the platform-memory.cppm module partition interface
+ * @defgroup platform platform Module
+ * @{
+ */
 #pragma once
 
 #include "dmtmacros.h"
 
 #include <array>
 #include <bit>
+#include <map>
+#include <memory_resource>
 #include <string_view>
 #include <thread>
 
@@ -13,9 +21,9 @@
 
 #if defined(DMT_INTERFACE_AS_HEADER)
 // Keep in sync with .cppm
-#include <platform/platform-utils.h>
+#include <platform/platform-logging.h>
 #else
-import <platform/platform-utils.h>;
+import <platform/platform-logging.h>;
 #endif
 
 DMT_MODULE_EXPORT dmt {
@@ -130,7 +138,7 @@ namespace dmt {
 DMT_MODULE_EXPORT dmt {
     /**
      * Operator to convert an ASCII string literal to its string id form with CRC64 algorithm
-     * to be preferred when you need constant time evaluation, eg in switch cases
+     * to be preferred when you need constant time evaluation. If you need to intern the string, use `StringTable`
      * @param str '\0' terminated string
      * @param sz unused, required for the operator to work
      * @return `sid_t` string id
@@ -140,34 +148,68 @@ DMT_MODULE_EXPORT dmt {
         return hashCRC64(str);
     }
 
-/**
- * Operator to convert an ASCII string literal to its string id form with CRC64 algorithm
- * When building a `Debug` or `RelWithDebInfo` build, this will also register a mapping in the
- * currently used string table
- * Prefer `_side` when you need constant time evaluation
- * @param str '\0' terminated string
- * @param sz unused, required for the operator to work
- * @return `sid_t` string id
- */
-#if defined(DMT_DEBUG)
-    inline constexpr uint32_t maxTaglength = 128;
-    void                      internStringToCurrent(sid_t sid, char const* str, uint64_t sz);
-    sid_t                     operator""_sid(char const* str, [[maybe_unused]] uint64_t sz)
+    /**
+     * Class responsible to intern a given string and give back a unique string identifier `sid_t` for the string, obtained
+     * with the CRC64 algorithm
+     * @warning for now, even if it lives in the `MemoryContext`, it doesn't use our own memory allocators
+     */
+    class alignas(8) StringTable
     {
-        assert(sz < maxTaglength);
-        sid_t sid = hashCRC64(str);
-        internStringToCurrent(sid, str, sz);
-        return sid;
-    }
-#else
-    sid_t operator""_sid(char const* str, [[maybe_unused]] uint64_t sz)
-    {
-        return hashCRC64(str);
-    }
-#endif
+    public:
+        static constexpr uint32_t MAX_SID_LEN = 256;
 
-    std::string_view lookupInternedStr(sid_t sid);
+        StringTable() : m_stringTable(&s_pool)
+        {
+        }
+        StringTable(StringTable const&)                = delete;
+        StringTable(StringTable&&) noexcept            = delete;
+        StringTable& operator=(StringTable const&)     = delete;
+        StringTable& operator=(StringTable&&) noexcept = delete;
+        ~StringTable() noexcept                        = default;
 
+        /**
+         * Method to store the association sid -> string into the `m_stringTable` Red Black Tree
+         * @param str string to be interned
+         * @return `sid_t` string id
+         */
+        sid_t intern(std::string_view str);
+
+        /**
+         * Method to store the association sid -> string into the `m_stringTable` Red Black Tree
+         * @param str string to be interned (not necessarely '\0' terminated)
+         * @param sz  number of characters (1 byte each, it's supposed to be ASCII)
+         * @return `sid_t` string id
+         */
+        sid_t intern(char const* str, uint64_t sz);
+
+        /**
+         * Method to return an interned string from its sid. If not found, the string `"NOT FOUND"` is returned
+         * @param sid string id
+         * @return `std::string_view` string associated to the sid
+         */
+        std::string_view lookup(sid_t sid) const;
+
+    private:
+        static inline std::pmr::pool_options const opts{
+            .max_blocks_per_chunk        = 8,
+            .largest_required_pool_block = 256,
+        };
+        static inline std::pmr::synchronized_pool_resource s_pool{opts};
+
+        /**
+         * Red Black Tree storing pairs of associated string ids and ASCII strings. They are stored `'\0'` terminated
+         */
+        std::pmr::map<sid_t, std::array<char, MAX_SID_LEN>> m_stringTable;
+
+        /**
+         * Synchronization primitive to ensure emplaces into the map work in a multithreaded environment
+         */
+        std::mutex m_mtx;
+    };
+
+    /**
+     * Enum class containing the possible sizes for the `PageAllocator` class
+     */
     enum class EPageSize : uint32_t
     {
         e4KB  = 1u << 12u,
@@ -176,16 +218,26 @@ DMT_MODULE_EXPORT dmt {
         Count = 3
     };
 
+    /**
+     * Boilerplate to extract the number from a strong enum type. C++23 standardised this
+     */
     constexpr uint32_t toUnderlying(EPageSize ePageSize)
     {
         return static_cast<uint32_t>(ePageSize);
     }
 
+    /**
+     * Boilerplate to compare strong enum types
+     */
     constexpr auto operator<=>(EPageSize lhs, EPageSize rhs) noexcept
     {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
 
+    /**
+     * Utility function used to scale to the next page size whenever a large/huge page allocation fails
+     * (Example: (Win32) lack of SeLockMemoryPrivilege, or (Linux) nr_hugepages == 0)
+     */
     EPageSize scaleDownPageSize(EPageSize pageSize)
     {
         switch (pageSize)
@@ -199,6 +251,9 @@ DMT_MODULE_EXPORT dmt {
         }
     }
 
+    /**
+     * Enum to customize the behaviour of the `PageAllocator` Allocate Bytes method
+     */
     enum class EPageAllocationQueryOptions : uint8_t
     {
         eNone = 0,
@@ -210,6 +265,9 @@ DMT_MODULE_EXPORT dmt {
 #if defined(_MSC_VER)
 #pragma pack(1)
 #endif
+    /**
+     * Tracking data for a page allocation
+     */
     struct alignas(8) PageAllocation
     {
         void*     address;
@@ -223,12 +281,21 @@ DMT_MODULE_EXPORT dmt {
 #endif
     static_assert(sizeof(PageAllocation) == 24 && alignof(PageAllocation) == 8);
 
+    /**
+     * struct for the return type of the `PageAllocator` allocate Bytes method
+     */
     struct AllocatePageForBytesResult
     {
         size_t   numBytes;
         uint32_t numPages;
     };
 
+    /**
+     * table of function pointers related to memory tracking, called by the `PageAllocator` upon successful
+     * page Allocation or deallocation.
+     * We use function pointers instead of directly injecting the type `PageAllocationTracker` to give the ability
+     * to turn off memory tracking at runtime
+     */
     struct PageAllocatorHooks
     {
         void (*allocHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
@@ -238,6 +305,10 @@ DMT_MODULE_EXPORT dmt {
 
     // TODO make OS specific protected functions which handle parts of the logic, such
     // TODO that we can test them individually by subclassing this
+    /**
+     * Class encapsulating the current machine's capability to perform large/huge page allocations, with methods to
+     * perform them
+     */
     class alignas(8) PageAllocator
     {
     public:
@@ -253,24 +324,85 @@ DMT_MODULE_EXPORT dmt {
         ~PageAllocator();
 
         // -- Functions --
-        // there's no alignment requirement being passed because we are allocating pages
+        /**
+         * Method to allocate, 1 page at a time of the maximum supported size, the requested number of bytes
+         * It's really slow. Prefer using the util function `reserveVirtualAddressSpace` of the `allocate2MB`.
+         * It's supposed to be used after `allocatePagesForBytesQuery` to know how many `PageAllocation` structs
+         * the caller needs to allocate
+         * @note there's no alignment requirement being passed because we are allocating pages
+         * @param ctx `LoggingContext` to perform necessary logging to console
+         * @param numBytes lower bound of bytes to allocate
+         * @param pOut `PageAllocation` array
+         * @param inNum length of the `pOut` array
+         * @param pageSize page size override (instead of preferring the maximum possible)
+         * @return `AllocatePageForBytesResult` allocated pages information (bytes and number of pages)
+         */
         [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(
             LoggingContext& ctx,
             size_t          numBytes,
             PageAllocation* pOut,
             uint32_t        inNum,
             EPageSize       pageSize);
-        EPageSize      allocatePagesForBytesQuery(LoggingContext&             ctx,
-                                                  size_t                      numBytes,
-                                                  uint32_t&                   inOutNum,
-                                                  EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
-        bool           checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize);
-        bool           allocate2MB(LoggingContext& ctx, PageAllocation& out);
-        PageAllocation allocatePage(LoggingContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
-        static void    deallocatePage(LoggingContext& ctx, PageAllocation& alloc);
-        void           deallocPage(LoggingContext& ctx, PageAllocation& alloc);
 
-        // TODO should test drive design?
+        /**
+         * Method to query for the number of `PageAllocation` struct you need to prepare. It's actually hard to do and
+         * it's not 100% reliable, as large/huge allocations can fail depending on the current workload of the memory system and
+         * configuration of the (Win32) Registry or (Linux) `/sys/kernel/mm/hugepages/`. Therefore, the only reliable way to make
+         * this work is to use `EPageAllocationQueryOptions::eForce4KB`, ie. assume the smallest page possible
+         * @param ctx `LoggingContext` to perform informative logging to console only
+         * @param numBytes lower bound on the number of bytes to allocate
+         * @param inOutNum number of `PageAllocation` the caller needs to allocate to call `allocatePagesForBytes`
+         * @param opts enum options for the behaviour of the function
+         * @return `EPageSize` page size used for the `inOutNum` computation
+         */
+        EPageSize allocatePagesForBytesQuery(LoggingContext&             ctx,
+                                             size_t                      numBytes,
+                                             uint32_t&                   inOutNum,
+                                             EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
+
+        /**
+         * @warning do not use this
+         * method called by the `allocatePagesForBytesQuery` when not in `eForce4KB` mode. To check whether large/huge page
+         * allocation is actually available at the moment, the method tries to allocate and then immediately deallocate a page.
+         * It's bad and you shouldn't use it
+         * @param ctx `LoggingContext` to perform console only logs
+         * @param pageSize the page size we want to check availability for
+         */
+        bool checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize);
+
+        /**
+         * Allocate 2MB of memory using the larges page size possible, ie. either a 2MB page or a bunch of 4KB pages
+         * @param ctx `LoggingContext` to perforn console only logging
+         * @param out `PageAllocation` containing, among other things, a pointer to the allocated page
+         * @retuns `true` if the allocation was successful, `false` otherwise
+         */
+        bool allocate2MB(LoggingContext& ctx, PageAllocation& out);
+
+        /**
+         * Allocate the largest page available on the system (or the page size suggested from the override parameter).
+         * Whenever the requested page size allocation fails, it scales down the page size and tries again.
+         * @warning Since you don't know how much memory is being allocated, you shouldn't use this. Prefer the utils method
+         * `reserveVirtualAddressSpace`, or, if you need tracking, `allocate2MB`
+         * @param ctx `LoggingContext` console only logging facility
+         * @param sizeOverride page size override
+         * @return `PageAllocation` struct containing the address to the allocated memory and its size, or `nullptr` if it failed
+         */
+        PageAllocation allocatePage(LoggingContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
+
+        /**
+         * Static method which performs a page deallocation without updating a tracker
+         * @warning Don't use this. use `deallocPage`
+         * @param ctx `LoggingContext` console only logging
+         * @param alloc page(s) to deallocate
+         */
+        static void deallocatePage(LoggingContext& ctx, PageAllocation& alloc);
+
+        /**
+         * Method to deallocate a page allocated with `allocate2MB`, `allocatePage` or `AllocatePagesForBytes`
+         * @param ctx `LoggingContext` console only logging
+         * @param alloc page(s) to deallocate
+         */
+        void deallocPage(LoggingContext& ctx, PageAllocation& alloc);
 
     protected:
 #if defined(DMT_OS_WINDOWS)
@@ -320,6 +452,10 @@ DMT_MODULE_EXPORT dmt {
 
     static_assert(alignof(PageAllocator) == 8 && sizeof(PageAllocator) == 48);
 
+    /**
+     * Tracking data for an *Object* allocation, ie. coming from the `StackAllocator`, `MultiPoolAllocator`, or any other
+     * Allocation function which uses a `PageAllocator` instance as its memory backing
+     */
     struct alignas(8) AllocationInfo
     {
         void*      address;
@@ -335,6 +471,12 @@ DMT_MODULE_EXPORT dmt {
     };
     static_assert(sizeof(AllocationInfo) == 56 && alignof(AllocationInfo) == 8);
 
+    /**
+     * table of function pointers related to memory tracking, called by any allocation strategy using `PageAllocator` as
+     * its memory backing upon successful object Allocation or deallocation.
+     * We use function pointers instead of directly injecting the type `PageAllocationTracker` to give the ability
+     * to turn off memory tracking at runtime
+     */
     struct AllocatorHooks
     {
         void (*allocHook)(void* data, LoggingContext& ctx, AllocationInfo const& alloc) =
@@ -345,6 +487,10 @@ DMT_MODULE_EXPORT dmt {
         void* data                                               = nullptr;
     };
 
+    /**
+     * Free List element, containing two possible states. "Free" and "Occupied". The "Free" state is active if
+     * the first 8 bytes of the Node are all sst to 1
+     */
     template <typename T>
         requires(std::is_standard_layout_v<T> && std::is_trivially_destructible_v<T>)
     union Node
@@ -373,7 +519,11 @@ DMT_MODULE_EXPORT dmt {
     static_assert(TemplateInstantiationOf<Node, PageNode>);
     static_assert(TemplateInstantiationOf<Node, AllocNode>);
 
-
+    /**
+     * Data structure holding, in a non owning way, a buffer, over which it constructs two linked lists
+     * A first one of free nodes of fixed size, and a second one of occupied nodes of the same size
+     * Used by the `PageAllocationsMemoryTracker` to hold tracking information
+     */
     template <typename NodeType>
         requires(TemplateInstantiationOf<Node, NodeType>)
     class FreeList
@@ -577,14 +727,10 @@ DMT_MODULE_EXPORT dmt {
     template class FreeList<PageNode>;
     template class FreeList<AllocNode>;
 
-    // reserve a large portion of the virtual address to memory tracking and treat it like a stack
-    // on one end we'll track page allocations, on the other object allocation. Since we are not committing
-    // all memory at once
-    // TODO = for now it works with 1 page, then write a per-platform method to reserve virtual address space and
-    // commit on usage
-    // with a single 4KB bootstrap page, you can allocate 128 nodes (ie pages), which corresponds to 512 KB if all
-    // pages are of 4KB. Theferore we need more memory. A good strategy would be to allocate a big enough portion
-    // of the virtual address space.
+    /**
+     * Class which reserves a large portion of the virtual address to memory tracking and manage such space as two linked lists
+     * on one end we'll track page allocations, on the other object allocation.
+     */
     class alignas(8) PageAllocationsTracker
     {
     public:
@@ -623,7 +769,6 @@ DMT_MODULE_EXPORT dmt {
             FreeList<AllocNode>* m_allocTracking;
         };
 
-        // Forward iterator for occupied list
         PageAllocationsTracker(LoggingContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity);
         PageAllocationsTracker(PageAllocationsTracker const&)                = delete;
         PageAllocationsTracker(PageAllocationsTracker&&) noexcept            = delete;
@@ -631,21 +776,56 @@ DMT_MODULE_EXPORT dmt {
         PageAllocationsTracker& operator=(PageAllocationsTracker&&) noexcept = delete;
         ~PageAllocationsTracker() noexcept;
 
+        /**
+         * Getter to an iterable type to cycle through all tracked page allocations
+         */
         PageAllocationView pageAllocations()
         {
             return {&m_pageTracking};
         }
 
+        /**
+         * Getter to an iterable type to cycle through all tracked object allocations
+         */
         AllocationView allocations()
         {
             return {&m_allocTracking};
         }
 
-        // start simple: Handle embedded free list inside bootstrap page with allocation and deallocation functions
+        /**
+         * Method to track a page allocation into the `m_pageTracking` occupied linked list
+         * @param ctx `LoggingContext` console only logging
+         * @param alloc page allocation information
+         */
         void track(LoggingContext& ctx, PageAllocation const& alloc);
+
+        /**
+         * Method to remove a page allocation information from the `m_pageTracking` occupied linked list and
+         * put back its node into the `m_pageTracking` free linked list
+         * @param ctx `LoggingContext` console only logging
+         * @param alloc page allocation information (search by comparing address)
+         */
         void untrack(LoggingContext& ctx, PageAllocation const& alloc);
+
+        /**
+         * Method to track a page allocation into the `m_allocTracking` occupied linked list
+         * @param ctx `LoggingContext` console only logging
+         * @param alloc object allocation information
+         */
         void track(LoggingContext& ctx, AllocationInfo const& alloc);
+
+        /**
+         * Method to remove a page allocation information from the `m_allocTracking` occupied linked list and
+         * put back its node into the `m_allocTracking` free linked list
+         * @param ctx `LoggingContext` console only logging
+         * @param alloc object allocation information (search by comparing address)
+         */
         void untrack(LoggingContext& ctx, AllocationInfo const& alloc);
+
+        /**
+         * Remove all object allocations from the `m_allocTracking` marked with the `transient` bit set (see `AllocationInfo`)
+         * @param ctx `LoggingContext` console only logging
+         */
         void claenTransients(LoggingContext& ctx);
 
     private:
@@ -705,8 +885,14 @@ DMT_MODULE_EXPORT dmt {
     };
     static_assert(sizeof(PageAllocationsTracker) == 128 && alignof(PageAllocationsTracker) == 8);
 
-    //TODO for now you manually pass instances of LoggingContext and PageAllocator, work on a dependency injection tree
-    // class later
+    /**
+     * Class to manage object allocation with a linked list of buffers, each managed as a stack
+     * To allocate `size` bytes with a given`alignment`, check whether the current stack holds enough space.
+     * If yes, advance the stack pointer and return its previous position (alignment accounted). Otherwise,
+     * Try the next buffer (allocate it if needed)
+     * If a stack buffer different from the first one is not used for `notUsedForThreshold` `reset` cycles, it
+     * is deallocated (Invariant: a given stack in the linked list has the `notUsedFor` less than or equal to all the previous stacks)
+     */
     class StackAllocator
     {
     public:
@@ -715,11 +901,32 @@ DMT_MODULE_EXPORT dmt {
         StackAllocator(StackAllocator&&) noexcept            = delete;
         StackAllocator& operator=(StackAllocator const&)     = delete;
         StackAllocator& operator=(StackAllocator&&) noexcept = delete;
-        // To be called before destruction, eg with a janitor class. When DI works, remove this
+
+        /**
+         * Method to free all allocated pages used by the stack allocator.
+         * @param ctx `LoggingContext` console only logging
+         * @param pageAllocator pageAllocator
+         */
         void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
 
+        /**
+         * Method to allocate some space, with a given `size` and `alignment` on a free enough stack
+         * @param ctx `LoggingContext` console only logging
+         * @param pageAllocator used only if we need to allocate a new stack
+         * @param size number of bytes requested
+         * @param alignment alignment requirement of the allocation
+         */
         void* allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment);
-        void  reset(LoggingContext& ctx, PageAllocator& pageAllocator);
+
+        /**
+         * Ends a reset cycle for the stack allocator, resetting all stack pointers, and deallocating all stack buffers
+         * whose `notUsedFor` member in the header of the buffer crossed the `notUsedForThreshold`
+         * @warning since the stack allocator doesn't care about the objects stored inside it when it resets its buffers, they should
+         * be objects which are not needed after the reset and trivially destructible
+         * @param ctx `LoggingContext` console only logging
+         * @param pageAllocator pageAllocator
+         */
+        void reset(LoggingContext& ctx, PageAllocator& pageAllocator);
 
     private:
         struct alignas(8) StackHeader
@@ -749,8 +956,9 @@ DMT_MODULE_EXPORT dmt {
         StackHeader*       m_pLast;
     };
 
-    // MultiPoolAllocator
-    // should handle pool sizes from 32 bytes to 256 bytes
+    /**
+     * block sizes supported by the `MultiPoolAllocator`
+     */
     enum class EBlockSize : uint16_t
     {
         e32B  = 32u,
@@ -758,11 +966,21 @@ DMT_MODULE_EXPORT dmt {
         e128B = 128u,
         e256B = 256u,
     };
+
+    /**
+     * Boilerplate to extract the number from a strong enum type. C++23 standardised this
+     */
     constexpr uint16_t toUnderlying(EBlockSize blkSize)
     {
         return static_cast<uint16_t>(blkSize);
     }
 
+    /**
+     * `MultiPoolAllocator` makes use of `TaggedPointesr`, as all allocations are 32 byte aligned (5 least significant bits free to use)
+     * and we are supporting only x86_64 (hence 57 bit wide virtual addresses), gaining a total of 12 bits for a tag. Of these,
+     * 2 bits are used to encode the block size of the allocation
+     * The remaining 10 are for the buffer index, as the `MultiPoolAllocator`, like the `StackAllocator`, manages a linked list of buffers
+     */
     constexpr uint8_t blockSizeEncoding(EBlockSize blkSize)
     {
         switch (blkSize)
@@ -782,6 +1000,9 @@ DMT_MODULE_EXPORT dmt {
         return 0;
     }
 
+    /**
+     * Boilerplate to get the size of the block from the encoded information inside a `TaggedPointer` returned by `MultiPoolAllocator`
+     */
     constexpr EBlockSize fromEncoding(uint8_t encoding)
     {
         using enum EBlockSize;
@@ -802,6 +1023,13 @@ DMT_MODULE_EXPORT dmt {
     }
 
     inline constexpr uint32_t numBlockSizes = 4;
+
+    /**
+     * Class managing a linked list of buffers. Each buffer contains a header and a data space.
+     * - The Data space is subdivided into 4 lists of blocks of ascending size
+     * - The header contains, among others, a pointer to the next buffer, and a bit vector, associating 1 bit for each
+     *   block. If the bit is set, then the block is occupied, otherwise it is free
+     */
     class MultiPoolAllocator
     {
         static constexpr uint32_t poolBaseAlignment = 32; // we need 5 bits for the tagged pointer
@@ -827,13 +1055,33 @@ DMT_MODULE_EXPORT dmt {
             return tag & 0x3;
         }
 
-        // To be called before destruction, eg with a janitor class. When DI works, remove this
-        // WARNING: To be called, you need to be absolutely sure that all objects inside it have been destroyed
-        // (or they are trivially destructible)
+        /**
+         * method to let the PageAllocator yield all pages allocated by the MultiPoolAllocator to the system
+         * @warning To be called, you need to be absolutely sure that all objects inside it have been destroyed
+         * (or they are trivially destructible)
+         * @param ctx `LoggingContext` console only logging
+         * @param pageAllocator pageAllocator
+         */
         void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
 
-        // 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
+        /**
+         * Allocate `numBlocks` adjacent 32 byte aligned block of the requested size
+         * @warning `numBlocks < m_blocksPerPool[blockSizeEncoding(blockSize)]`
+         * @param ctx `LoggingContext` console only logging
+         * @param pageAllocator pageAllocator
+         * @param numBlocks number of adjacent blocks
+         * @param blockSize size of the block
+         * @return tagged pointer to allocated block. 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
+         */
         TaggedPointer allocateBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, EBlockSize blockSize);
+
+        /**
+         * Free `numBlocks` adjacent blocks previously allocated with the `MultiPoolAllocator`
+         * @param ctx `LoggingContext` console only logging
+         * @param pageAllocator pageAllocator (not sure it's needed here)
+         * @param numBlocks numbers of blocks to free. Should be equal to the number passed to `allocateBlocks`
+         * @param ptr Tagged pointer obtained by a previous call to `allocateBlocks`
+         */
         void freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
 
     private:
@@ -858,6 +1106,10 @@ DMT_MODULE_EXPORT dmt {
     };
 
 
+    /**
+     * Helper type to construct a linked list from nodes allocated with the `MultiPoolAllocator`.
+     * (Example: Used by the `ThreadPoolV2` class)
+     */
     template <typename T, EBlockSize size>
         requires(sizeof(T) + sizeof(uintptr_t) == toUnderlying(size))
     struct alignas(32) PoolNode
@@ -866,6 +1118,10 @@ DMT_MODULE_EXPORT dmt {
         TaggedPointer next;
     };
 
+    /**
+     * Class holding a `LoggingContext` plus all functionalities declared inside the `platform-memory` module partition,
+     * Bundled to allow easier dependency injection
+     */
     struct MemoryContext
     {
         MemoryContext(uint32_t                                   pageTrackCapacity,
@@ -890,5 +1146,8 @@ DMT_MODULE_EXPORT dmt {
         PageAllocator          pageAllocator;
         StackAllocator         stackAllocator;
         MultiPoolAllocator     multiPoolAllocator;
+        StringTable            strTable;
     };
 } // namespace dmt
+
+/** @} */

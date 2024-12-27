@@ -66,83 +66,39 @@ namespace dmt {
     static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 #endif
 
-// StringTable --------------------------------------------------------------------------------------------------------
-#if defined(DMT_DEBUG)
+    // StringTable --------------------------------------------------------------------------------------------------------
 
-    // m_pool represents the Debug Memory. If there is a need to store something else
-    // inside debug memory other than the string table, refactor this class
-    class StringTable
+    sid_t StringTable::intern(std::string_view str)
     {
-    public:
-        static constexpr uint32_t MAX_SID_LEN = 256;
+        return intern(str.data(), str.size());
+    }
 
-        StringTable() : m_pool(opts)
-        {
-            std::construct_at<decltype(U::stringTable)>(&u.stringTable, &m_pool);
-        }
-        StringTable(StringTable const&)                = delete;
-        StringTable(StringTable&&) noexcept            = delete;
-        StringTable& operator=(StringTable const&)     = delete;
-        StringTable& operator=(StringTable&&) noexcept = delete;
-        ~StringTable() noexcept
-        {
-            std::destroy_at<decltype(U::stringTable)>(&u.stringTable);
-        }
-
-        void intern(sid_t sid, char const* str, uint64_t sz);
-
-        union U
-        {
-            // clang-format off
-        U() { }
-        ~U() { }
-            // clang-format on
-            std::pmr::map<sid_t, std::array<char, MAX_SID_LEN>> stringTable;
-        };
-        U u;
-
-    private:
-        static inline std::pmr::pool_options const opts{
-            .max_blocks_per_chunk        = 8,
-            .largest_required_pool_block = 256,
-        };
-        std::pmr::synchronized_pool_resource m_pool;
-        std::mutex                           m_mtx;
-    };
-
-    static StringTable s_stringTable;
-
-    void StringTable::intern(sid_t sid, char const* str, uint64_t sz)
+    sid_t StringTable::intern(char const* str, uint64_t sz)
     {
         assert(sz < MAX_SID_LEN);
         std::lock_guard lock{m_mtx};
+        sid_t           sid = hashCRC64(str);
 
-        auto const& [it, wasInserted] = s_stringTable.u.stringTable.try_emplace(sid);
+        auto const& [it, wasInserted] = m_stringTable.try_emplace(sid);
         if (wasInserted)
         {
             std::memcpy(it->second.data(), str, sz);
             it->second[sz] = '\0';
         }
+
+        return sid;
     }
 
-    void internStringToCurrent(sid_t sid, char const* str, uint64_t sz)
-    {
-        s_stringTable.intern(sid, str, sz);
-    }
-#endif
-
-    std::string_view lookupInternedStr(sid_t sid)
+    std::string_view StringTable::lookup(sid_t sid) const
     {
         using namespace std::string_view_literals;
-        static std::string_view empty = "NOT FOUND"sv;
-#if defined(DMT_DEBUG)
-        auto it = s_stringTable.u.stringTable.find(sid);
-        if (it != s_stringTable.u.stringTable.cend())
+        std::string_view empty = "NOT FOUND"sv;
+        auto             it    = m_stringTable.find(sid);
+        if (it != m_stringTable.cend())
         {
             std::string_view str{it->second.data()};
             return str;
         }
-#endif
 
         return empty;
     }

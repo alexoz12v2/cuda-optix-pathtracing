@@ -32,6 +32,44 @@ module;
 module platform;
 
 namespace dmt {
+    // CircularOStringStream ------------------------------------------------------------------------------------------
+    CircularOStringStream::CircularOStringStream() :
+    m_buffer{reinterpret_cast<char*>(reserveVirtualAddressSpace(bufferSize))},
+    m_pos{0}
+    {
+        if (!m_buffer || !commitPhysicalMemory(m_buffer, bufferSize))
+        {
+            std::abort();
+        }
+    }
+
+    CircularOStringStream::CircularOStringStream(CircularOStringStream&& other) noexcept :
+    m_buffer{std::exchange(other.m_buffer, nullptr)},
+    m_pos{std::exchange(other.m_pos, 0)}
+    {
+    }
+
+    CircularOStringStream& CircularOStringStream::operator=(CircularOStringStream&& other) noexcept
+    {
+        if (this == &other || !m_buffer)
+        {
+            return *this;
+        }
+
+        freeVirtualAddressSpace(m_buffer, bufferSize);
+        m_buffer = std::exchange(other.m_buffer, nullptr);
+        m_pos    = std::exchange(other.m_pos, 0);
+        return *this;
+    }
+
+    CircularOStringStream::~CircularOStringStream() noexcept
+    {
+        if (m_buffer)
+        {
+            freeVirtualAddressSpace(m_buffer, bufferSize);
+        }
+    }
+
 
     // Method to simulate writing to the buffer
     CircularOStringStream& CircularOStringStream::operator<<(StrBuf const& buf)

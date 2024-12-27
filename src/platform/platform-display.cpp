@@ -141,7 +141,7 @@ void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
     // Most "big" widgets share a common width settings by default. See 'Demo->Layout->Widgets Width' for details.
     ImGui::PushItemWidth(ImGui::GetFontSize() * -12); 
     //Menu bar
-    ShowPropertyWindowMenuBar();
+    Display::ShowPropertyWindowMenuBar();
     ImGui::Text("DMT Properties");
     ImGui::Spacing();
     //Header for the tracer configuration
@@ -159,13 +159,31 @@ void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
                 "Type text\n");
             static int i0 = 123;
             ImGui::InputInt("input int", &i0);
-        }
-    }
 
-    
+            ImGui::TreePop();
+            ImGui::Spacing();
+        }
+    } 
+
+    ImGui::PopItemWidth();
+    ImGui::End();
 }
 
-void ShowMenuFile()
+void Display::ShowPropertyWindowMenuBar()
+{
+    if (ImGui::BeginMenuBar())
+    {
+        if (ImGui::BeginMenu("Menu"))
+        {
+            Display::ShowMenuFile();
+            ImGui::EndMenu();
+        }
+
+        ImGui::EndMenuBar();
+    }
+}
+
+void Display::ShowMenuFile()
 {
     if (ImGui::MenuItem("Open Scene", "Ctrl+O")) {}
     if (ImGui::MenuItem("Play Rendering", "Ctrl+P")) {}

@@ -20,6 +20,27 @@
 
 
 DMT_MODULE_EXPORT dmt {
+
+    typedef struct DMTwindowGLFW
+    {
+        GLFWwindow*  window;
+        GLFWmonitor* monitor;
+        const GLFWvidmode* mode;
+        int displayW;
+        int displayH;
+    }DMTwindowGLFW;
+
+    typedef struct DMTwindowImGui
+    {
+        bool scrollbar = false;
+        bool move = false;
+        bool close = false;
+        bool resize = false;
+        bool background = false;
+        ImGuiWindowFlags windowFlags = 0;
+        const ImGuiViewport* mainViewport;
+    }DMTwindowImGui;
+
     class Display
     {
     public:
@@ -48,7 +69,7 @@ DMT_MODULE_EXPORT dmt {
                 ImGui::EndTooltip();
             }
         }
-        
+
         static void GlfwErrorCallback(int error, char const* description)
         {
             std::cerr << "GLFW Error " << error << description << std::endl;
@@ -62,18 +83,7 @@ DMT_MODULE_EXPORT dmt {
 
     private:
         //glfw staff
-        GLFWwindow*  m_window;
-        GLFWmonitor* m_monitor;
-        const GLFWvidmode* m_mode;
-        int m_displayW;
-        int m_displayH;
-        //ImGui staff
-        bool scrollbar = false;
-        bool move = false;
-        bool close = false;
-        bool resize = false;
-        bool background = false;
-        ImGuiWindowFlags windowFlags = 0;
-        const ImGuiViewport* mainViewport;
+        DMTwindowGLFW m_winGLFW;
+        DMTwindowImGui m_winImGui;
     };
 }

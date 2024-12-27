@@ -21,8 +21,8 @@ Display::Display()
 
 Display::~Display()
 {
-    if (m_window != NULL)
-        glfwDestroyWindow(m_window);
+    if (m_winGLFW.window != NULL)
+        glfwDestroyWindow(m_winGLFW.window);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext();
@@ -42,11 +42,11 @@ void Display::PropertyWindowRenderer()
     //state imGui window
     bool showPropertyWindow = true;
 
-    while (!glfwWindowShouldClose(m_window))
+    while (!glfwWindowShouldClose(m_winGLFW.window))
     {
         glfwPollEvents();
 
-        if (glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0)
+        if (glfwGetWindowAttrib(m_winGLFW.window, GLFW_ICONIFIED) != 0)
         {
             ImGui_ImplGlfw_Sleep(10);
             continue;
@@ -56,18 +56,18 @@ void Display::PropertyWindowRenderer()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        glfwGetFramebufferSize(m_window, &m_displayW, &m_displayH);
+        glfwGetFramebufferSize(m_winGLFW.window, &m_winGLFW.displayW, &m_winGLFW.displayH);
         //display propertyWindow
-        Display::ShowPropertyWindow(&showPropertyWindow, m_displayW, m_displayH);
+        Display::ShowPropertyWindow(&showPropertyWindow, m_winGLFW.displayW, m_winGLFW.displayH);
         //rendering 
         ImGui::Render();
         
-        glViewport(0.2f*m_displayW, 0, 0.8*m_displayW, m_displayH);
+        glViewport(0.2f*m_winGLFW.displayW, 0, 0.8*m_winGLFW.displayW, m_winGLFW.displayH);
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        glfwSwapBuffers(m_window);
+        glfwSwapBuffers(m_winGLFW.window);
     }
 }
 
@@ -82,20 +82,20 @@ void Display::InitPropertyWindow()
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // 3.2+ only
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     //obtain information about primary monitor
-    m_monitor               = glfwGetPrimaryMonitor();
-    m_mode = glfwGetVideoMode(m_monitor);
-    glfwWindowHint(GLFW_RED_BITS, m_mode->redBits);
-    glfwWindowHint(GLFW_GREEN_BITS, m_mode->greenBits);
-    glfwWindowHint(GLFW_BLUE_BITS, m_mode->blueBits);
-    glfwWindowHint(GLFW_REFRESH_RATE, m_mode->refreshRate);
+    m_winGLFW.monitor               = glfwGetPrimaryMonitor();
+    m_winGLFW.mode = glfwGetVideoMode(m_winGLFW.monitor);
+    glfwWindowHint(GLFW_RED_BITS, m_winGLFW.mode->redBits);
+    glfwWindowHint(GLFW_GREEN_BITS, m_winGLFW.mode->greenBits);
+    glfwWindowHint(GLFW_BLUE_BITS, m_winGLFW.mode->blueBits);
+    glfwWindowHint(GLFW_REFRESH_RATE, m_winGLFW.mode->refreshRate);
 
     // Create window with graphics context
-    m_window = glfwCreateWindow(640, 480, "DMT", m_monitor, NULL);
+    m_winGLFW.window = glfwCreateWindow(640, 480, "DMT", m_winGLFW.monitor, NULL);
 
-    if (m_window == NULL)
+    if (m_winGLFW.window == NULL)
         return;
 
-    glfwMakeContextCurrent(m_window);
+    glfwMakeContextCurrent(m_winGLFW.window);
     glfwSwapInterval(1);
 
     //Steup ImGUI context
@@ -107,30 +107,30 @@ void Display::InitPropertyWindow()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     //Setup Dear ImGui style
-    //ImGui::StyleColorDark();
+    ImGui::StyleColorsDark();
 
     //Setup Platform/renderer backends
-    ImGui_ImplGlfw_InitForOpenGL(m_window, true);
+    ImGui_ImplGlfw_InitForOpenGL(m_winGLFW.window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 }
 
 //to review 
 void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
 {
-    if (scrollbar)       windowFlags |= ImGuiWindowFlags_NoScrollbar;
-    if (move)            windowFlags |= ImGuiWindowFlags_NoMove;
-    if (resize)          windowFlags |= ImGuiWindowFlags_NoResize;
-    if (background)      windowFlags |= ImGuiWindowFlags_NoBackground;
-    if (close)           pOpen = NULL; 
+    if (m_winImGui.scrollbar)       m_winImGui.windowFlags |= ImGuiWindowFlags_NoScrollbar;
+    if (m_winImGui.move)            m_winImGui.windowFlags |= ImGuiWindowFlags_NoMove;
+    if (m_winImGui.resize)          m_winImGui.windowFlags |= ImGuiWindowFlags_NoResize;
+    if (m_winImGui.background)      m_winImGui.windowFlags |= ImGuiWindowFlags_NoBackground;
+    if (m_winImGui.close)           pOpen = NULL; 
 
-    mainViewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(mainViewport->WorkPos.x, mainViewport->WorkPos.y), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(displayW*0.2, displayH), ImGuiCond_FirstUseEver);
+    m_winImGui.mainViewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(m_winImGui.mainViewport->WorkPos.x, m_winImGui.mainViewport->WorkPos.y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(m_winGLFW.displayW*0.2, m_winGLFW.displayH), ImGuiCond_FirstUseEver);
 
 
     
     //create a window 
-    if (!ImGui::Begin("Property DMT", pOpen, windowFlags))
+    if (!ImGui::Begin("Property DMT", pOpen, m_winImGui.windowFlags))
     {
         // Early out if the window is collapsed, as an optimization.
         ImGui::End();

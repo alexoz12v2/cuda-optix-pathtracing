@@ -7,6 +7,7 @@
 #include <limits>
 #include <string_view>
 
+#include <compare>
 #include <cstdint>
 
 #if defined(DMT_INTERFACE_AS_HEADER)
@@ -408,16 +409,16 @@ DMT_MODULE_EXPORT dmt {
     // wavefront or gpu
     enum class EIntegratorType : uint8_t
     {
-        eVolpath = 0,
-        eAmbientocclusion,
+        eVolPath = 0,
+        eAmbientOcclusion,
         eBdpt,
-        eLightpath,
-        eMlt,
+        eLightPath,
+        eMLT,
         ePath,
-        eRandomwalk,
-        eSimplepath,
-        eSimplevolpath,
-        eSppm, // stochastic progressive photon mapping
+        eRandomWalk,
+        eSimplePath,
+        eSimpleVolPath,
+        eSPPM, // stochastic progressive photon mapping
         eCount
     };
 
@@ -477,7 +478,7 @@ DMT_MODULE_EXPORT dmt {
         uint32_t maxDepth = 5; // all but ambient occlusion
 
         ELightSampler   lightSampler = ELightSampler::eBVH; // path, volpath, gpu, wavefront
-        EIntegratorType type         = EIntegratorType::eVolpath;
+        EIntegratorType type         = EIntegratorType::eVolPath;
     };
 
     // Acceletators ---------------------------------------------------------------------------------------------------
@@ -530,6 +531,97 @@ DMT_MODULE_EXPORT dmt {
     // Participating Media -------------------------------------------------------------
     // present both in global fragment (where the camera ray starts in) and after the `WorldBegin`
     // Parsing --------------------------------------------------------------------------------------------------------
+    class WordParser
+    {
+    public:
+        std::string_view nextWord(std::string_view str);
+        bool             needsContinuation() const;
+        uint32_t         numCharReadLast() const;
+
+    private:
+        char             decodeEscaped(char c);
+        char             getChar(std::string_view str, size_t idx);
+        void             copyToBuffer(std::string_view str);
+        std::string_view catResult(std::string_view str, size_t start, size_t end);
+        bool             endOfStr(std::string_view str, size_t idx) const;
+
+        uint32_t m_bufferLength        = 0;
+        uint32_t m_numCharReadLastTime = 0;
+        char     m_buffer[256]{};
+        char     m_escapedBuffer[64]{};
+        bool     m_needsContinuation = false;
+        bool     m_haveEscaped       = false;
+    };
+
+    enum class EHeaderTokenType : uint8_t
+    {
+        eCamera,
+        eSampler,
+        eColorSpace,
+        eFilm,
+        eFilter,
+        eIntegrator,
+        eAccelerator,
+        // eNamedMedia, TODO
+        eCount
+    };
+
+    inline constexpr std::strong_ordering operator<=>(EHeaderTokenType a, EHeaderTokenType b)
+    {
+        return toUnderlying(a) <=> toUnderlying(b);
+    }
+
+    class HeaderTokenizer
+    {
+    private:
+        static constexpr uint32_t size = std::max(
+            {sizeof(CameraSpec),
+             sizeof(SamplerSpec),
+             sizeof(ColorSpaceSpec),
+             sizeof(FilmSpec),
+             sizeof(FilterSpec),
+             sizeof(IntegratorSpec),
+             sizeof(AcceleratorSpec)});
+        static constexpr uint32_t alignment = std::max(
+            {alignof(CameraSpec),
+             alignof(SamplerSpec),
+             alignof(ColorSpaceSpec),
+             alignof(FilmSpec),
+             alignof(FilterSpec),
+             alignof(IntegratorSpec),
+             alignof(AcceleratorSpec)});
+
+    public:
+        struct Storage
+        {
+            alignas(alignment) std::array<unsigned char, size> bytes;
+        };
+
+        HeaderTokenizer(std::string_view prevChunk, uint32_t prevOffset, std::string_view currChunk) :
+        m_prevChunk(prevChunk),
+        m_currChunk(currChunk),
+        m_prevOffset(prevOffset)
+        {
+        }
+
+        void    advance();
+        bool    hasToken() const;
+        Storage retrieveToken(EHeaderTokenType& outTokenType) const;
+        size_t  offsetFromCurrent() const;
+
+    private:
+        bool parseNext(std::string_view* pChunk, size_t& inOutoffset);
+
+        Storage          m_storage;
+        std::string_view m_prevChunk;
+        std::string_view m_currChunk;
+        size_t           m_prevOffset;
+        size_t           m_offset       = 0ULL; // relative to prevOffset
+        EHeaderTokenType m_currentToken = EHeaderTokenType::eCount;
+        uint32_t         m_started  : 1 = false;
+        uint32_t         m_useCurr  : 1 = false;
+        uint32_t         m_finished : 1 = false;
+    };
 }
 
 DMT_MODULE_EXPORT dmt::model {}

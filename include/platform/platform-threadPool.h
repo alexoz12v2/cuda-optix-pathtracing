@@ -349,6 +349,7 @@ DMT_MODULE_EXPORT dmt {
 
         bool     requestChunk(LoggingContext& pctx, void* chunkBuffer, uint32_t chunkNum);
         bool     waitForPendingChunk(LoggingContext& pctx, uint32_t timeoutMillis);
+        bool     waitForPendingChunk(LoggingContext& pctx);
         uint32_t lastNumBytesRead();
         void     markFree(ChunkInfo const& chunkInfo);
         uint32_t numChunks() const;

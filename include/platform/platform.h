@@ -38,6 +38,7 @@ DMT_MODULE_EXPORT dmt {
                    std::string_view const&              str,
                    std::initializer_list<StrBuf> const& list,
                    std::source_location const&          loc);
+        void addJob(Job const& job, EJobLayer layer);
 
         MemoryContext mctx;
         ThreadPoolV2  threadPool;

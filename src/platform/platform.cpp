@@ -29,6 +29,11 @@ namespace dmt {
         mctx.pctx.write(level, str, list, loc);
     }
 
+    void AppContext::addJob(Job const& job, EJobLayer layer)
+    {
+        threadPool.addJob(mctx, job, layer);
+    }
+
     AppContext::~AppContext()
     {
         threadPool.cleanup(mctx);

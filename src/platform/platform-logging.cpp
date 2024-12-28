@@ -431,11 +431,14 @@ namespace dmt {
 
     bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
     {
+        // TODO it seems that, in a multithreaded environment, the logger breaks if you don't wait
+        // fix this
+        waitForEvents(INFINITE, true);
         OverlappedWrite& aioStruct = *reinterpret_cast<OverlappedWrite*>(&m_aioQueue[idx]);
-        if (WaitForSingleObject(aioStruct.overlapped.hEvent, INFINITE) != WAIT_OBJECT_0)
-        {
-            return true;
-        }
+        //if (WaitForSingleObject(aioStruct.overlapped.hEvent, INFINITE) != WAIT_OBJECT_0)
+        //{
+        //    return true;
+        //}
 
         aioStruct.overlapped.Offset     = 0xFFFF'FFFF;
         aioStruct.overlapped.OffsetHigh = 0xFFFF'FFFF;

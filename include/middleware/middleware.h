@@ -335,18 +335,18 @@ DMT_MODULE_EXPORT dmt {
         // common params
         std::string_view fileName = "pbrt.exr";
 
-        uint32_t xResolution = 1280;
-        uint32_t yResolution = 720;
-        std::array<float, 4> cropWindow{0.f, 1.f, 0.f, 1.f}; // TODO change type
+        uint32_t                xResolution = 1280;
+        uint32_t                yResolution = 720;
+        std::array<float, 4>    cropWindow{0.f, 1.f, 0.f, 1.f}; // TODO change type
         std::array<uint32_t, 4> pixelBounds{0u, xResolution, 0u, yResolution};
 
-        float diagonal = 35.f; // mm
-        float iso      = 100.f;
-        float whiteBalance = 0.f;
+        float diagonal          = 35.f; // mm
+        float iso               = 100.f;
+        float whiteBalance      = 0.f;
         float maxComponentValue = std::numeric_limits<float>::infinity();
 
         // spectral only
-        uint16_t nBuckets = 16;
+        uint16_t nBuckets  = 16;
         float    lambdaMin = 360.f;
         float    lambdaMax = 830.f;
 
@@ -355,14 +355,181 @@ DMT_MODULE_EXPORT dmt {
 
         // common params
         bool      savefp16 = true;
-        ESensor   sensor = ESensor::eCIE1931;
-        EFilmType type = EFilmType::eRGB;
+        ESensor   sensor   = ESensor::eCIE1931;
+        EFilmType type     = EFilmType::eRGB;
     };
 
     // Filters --------------------------------------------------------------------------------------------------------
+    enum class EFilterType : uint8_t
+    {
+        eGaussian = 0,
+        eBox,
+        eMitchell,
+        eSinc,
+        eTriangle,
+        eCount
+    };
+
+    struct FilterSpec
+    {
+        struct Gaussian
+        {
+            float sigma = 0.5f;
+        };
+        struct Mitchell
+        {
+            static constexpr float oneThird = 0x1.3333333p-2f;
+
+            float b = oneThird;
+            float c = oneThird;
+        };
+        struct Sinc
+        {
+            float tau = 3.f;
+        };
+        union Params
+        {
+            Gaussian gaussian;
+            Mitchell mitchell;
+            Sinc     sinc;
+        };
+
+        Params      params;
+        float       xRadius;
+        float       yRadius;
+        EFilterType type;
+    };
+
+    EFilterType filterTypeFromStr(char const* str);
+    float       defaultRadiusFromFilterType(EFilterType e);
+
     // Integrators ----------------------------------------------------------------------------------------------------
+    // default is volpath, but if --gpu or --wavefront are specified, the type from file is ignored and set to
+    // wavefront or gpu
+    enum class EIntegratorType : uint8_t
+    {
+        eVolpath = 0,
+        eAmbientocclusion,
+        eBdpt,
+        eLightpath,
+        eMlt,
+        ePath,
+        eRandomwalk,
+        eSimplepath,
+        eSimplevolpath,
+        eSppm, // stochastic progressive photon mapping
+        eCount
+    };
+
+    EIntegratorType integratorTypeFromStr(char const* str);
+
+    enum class ELightSampler : uint8_t
+    {
+        eBVH = 0,
+        eUniform,
+        ePower,
+        eCount
+    };
+
+    ELightSampler lightSamplerFromStr(char const* str);
+
+    struct IntegratorSpec
+    {
+        struct AmbientOcclusion
+        {
+            float maxDistance = std::numeric_limits<float>::infinity();
+            bool  cosSample   = true;
+        };
+        struct BiDirPathTracing
+        {
+            float    sigma                  = 0.01f;
+            float    largestStepProbability = 0.3f;
+            uint32_t mutationsPerPixel      = 100u;
+            uint32_t chains                 = 1000u;
+            uint32_t bootstraqpSamples      = 100000u;
+        };
+        struct MetropolisTransport
+        {
+            bool visualizeWeights    = false;
+            bool visualizeStrategies = false;
+        };
+        struct SimplePath
+        {
+            bool sampleBSDF   = true;
+            bool sampleLights = true;
+        };
+        struct StocProgPhotMap
+        {
+            int32_t  photonsPerIteration = -1;
+            float    radius              = 0;
+            uint32_t seed                = 0;
+        };
+        union Params
+        {
+            AmbientOcclusion    ao;
+            BiDirPathTracing    bdpt;
+            MetropolisTransport mlt;
+            SimplePath          simplePath;
+            StocProgPhotMap     sppm;
+        };
+        Params params;
+
+        uint32_t maxDepth = 5; // all but ambient occlusion
+
+        ELightSampler   lightSampler = ELightSampler::eBVH; // path, volpath, gpu, wavefront
+        EIntegratorType type         = EIntegratorType::eVolpath;
+    };
+
     // Acceletators ---------------------------------------------------------------------------------------------------
-    // Participating Media --------------------------------------------------------------------------------------------
+    enum class EAcceletatorType : uint8_t
+    {
+        eBVH = 0,
+        eKdTree,
+        eCount
+    };
+
+    EAcceletatorType acceleratorTypeFromStr(char const* str);
+
+    enum class EBVHSplitMethod : uint8_t
+    {
+        eSAH = 0,
+        eMiddle,
+        eEqual,
+        eHLBVH,
+        eCount
+    };
+
+    EBVHSplitMethod bvhSplitMethodFromStr(char const* str);
+
+    struct AcceleratorSpec
+    {
+        struct BVH
+        {
+            uint32_t        maxNodePrims = 4;
+            EBVHSplitMethod splitMethod  = EBVHSplitMethod::eSAH;
+        };
+        struct KDTree
+        {
+            uint32_t intersectCost = 5;
+            uint32_t traversalCost = 1;
+            float    emptyBonus    = 0.5f;
+            uint32_t maxPrims      = 1;
+            int32_t  maxDepth      = -1;
+        };
+        union Params
+        {
+            BVH    bvh;
+            KDTree kdtree;
+        };
+
+        Params           params;
+        EAcceletatorType type;
+    };
+
+    // WorldBegin -----------------------------------------------------------------------------------------------------
+    // Participating Media -------------------------------------------------------------
+    // present both in global fragment (where the camera ray starts in) and after the `WorldBegin`
+    // Parsing --------------------------------------------------------------------------------------------------------
 }
 
 DMT_MODULE_EXPORT dmt::model {}
@@ -370,10 +537,14 @@ DMT_MODULE_EXPORT dmt::model {}
 DMT_MODULE_EXPORT dmt::job {
     struct ParseSceneHeaderData
     {
-        std::atomic<uint32_t> done;
-        dmt::AppContext&      actx;
-        Options               outOptions;
+        std::string_view      filePath;
+        dmt::AppContext*      actx;
+        Options*              pInOutOptions; // when job kicked, you caller must wait on atomic
+        std::atomic<uint32_t> done;          // should be zero when the job is kicked
         uint32_t              numChunkWorldBegin;
         uint32_t              offsetWorldBegin;
+        uint32_t              numChunks;
     };
+
+    void parseSceneHeader(uintptr_t address);
 }

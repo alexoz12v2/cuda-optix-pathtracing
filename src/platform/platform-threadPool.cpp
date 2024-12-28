@@ -907,6 +907,19 @@ namespace dmt {
         return 0;
     }
 
+    bool ChunkedFileReader::waitForPendingChunk(LoggingContext& pctx)
+    {
+        uint32_t timeoutMillis;
+#if defined(DMT_OS_WINDOWS)
+        timeoutMillis = INFINITE;
+#elif defined(DMT_OS_LINUX)
+#error "todo"
+#else
+#error "platform not supported"
+#endif
+        return waitForPendingChunk(pctx, timeoutMillis);
+    }
+
     bool ChunkedFileReader::waitForPendingChunk(LoggingContext& pctx, uint32_t timeoutMillis)
     {
 #if defined(DMT_OS_WINDOWS)
@@ -917,7 +930,7 @@ namespace dmt {
             return false;
         }
 
-        if (DWORD err = GetLastError(); err != ERROR_SUCCESS)
+        if (DWORD err = GetLastError(); err != ERROR_SUCCESS && err != ERROR_IO_PENDING)
         {
             SetLastError(err);
             uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);

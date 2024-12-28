@@ -3,6 +3,8 @@ module;
 #include "dmtmacros.h"
 
 #include <array>
+#include <atomic>
+#include <bit>
 #include <string_view>
 #include <type_traits>
 
@@ -68,8 +70,7 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<ERandomization> count = toUnderlying(ERandomization::eCount);
-        static constexpr std::array<std::string_view, count>
-            types{"fastowen"sv, "none"sv, "permutedigits"sv, "owen"sv};
+        static constexpr std::array<std::string_view, count> types{"fastowen"sv, "none"sv, "permutedigits"sv, "owen"sv};
 
         return ::enumFromStr(str, types, ERandomization::eFastOwen);
     }
@@ -127,10 +128,138 @@ namespace dmt {
 
         return ::enumFromStr(str, types, EGVufferCoordSys::eCamera);
     }
+
+    EFilterType filterTypeFromStr(char const* str)
+    {
+        using namespace std::string_view_literals;
+        static constexpr std::underlying_type_t<EFilterType> count = toUnderlying(EFilterType::eCount);
+        static constexpr std::array<std::string_view, count> types{
+            "box"sv,
+            "gaussian"sv,
+            "mitchell"sv,
+            "sinc"sv,
+            "triangle"sv,
+        };
+
+        return ::enumFromStr(str, types, EFilterType::eGaussian);
+    }
+
+    float defaultRadiusFromFilterType(EFilterType e)
+    {
+        switch (e)
+        {
+            using enum EFilterType;
+            case eBox:
+                return 0.5f;
+            case eMitchell:
+                return 2.f;
+            case eSinc:
+                return 4.f;
+            case eTriangle:
+                return 2.f;
+            case eGaussian:
+                [[fallthrough]];
+            default:
+                return 1.5f;
+        }
+    }
+
+    EIntegratorType integratorTypeFromStr(char const* str)
+    {
+        using namespace std::string_view_literals;
+        static constexpr std::underlying_type_t<EIntegratorType> count = toUnderlying(EIntegratorType::eCount);
+        static constexpr std::array<std::string_view, count>
+            types{"volpath"sv,
+                  "ambientocclusion"sv,
+                  "bdpt"sv,
+                  "lightpath"sv,
+                  "mlt"sv,
+                  "path"sv,
+                  "randomwalk"sv,
+                  "simplepath"sv,
+                  "simplevolpath"sv,
+                  "sppm"sv};
+
+        return ::enumFromStr(str, types, EIntegratorType::eVolpath);
+    }
+
+    ELightSampler lightSamplerFromStr(char const* str)
+    {
+        using namespace std::string_view_literals;
+        static constexpr std::underlying_type_t<ELightSampler> count = toUnderlying(ELightSampler::eCount);
+        static constexpr std::array<std::string_view, count>   types{"bvh"sv, "uniform"sv, "power"sv};
+
+        return ::enumFromStr(str, types, ELightSampler::eBVH);
+    }
+
+    EAcceletatorType acceleratorTypeFromStr(char const* str)
+    {
+        using namespace std::string_view_literals;
+        static constexpr std::underlying_type_t<EAcceletatorType> count = toUnderlying(EAcceletatorType::eCount);
+        static constexpr std::array<std::string_view, count>      types{"bvh"sv, "kdtree"sv};
+
+        return ::enumFromStr(str, types, EAcceletatorType::eBVH);
+    }
+
+    EBVHSplitMethod bvhSplitMethodFromStr(char const* str)
+    {
+        using namespace std::string_view_literals;
+        static constexpr std::underlying_type_t<EBVHSplitMethod> count = toUnderlying(EBVHSplitMethod::eCount);
+        static constexpr std::array<std::string_view, count>     types{"sah"sv, "middle"sv, "equal"sv, "hlbvh"sv};
+
+        return ::enumFromStr(str, types, EBVHSplitMethod::eSAH);
+    }
 } // namespace dmt
 
 namespace dmt::model {
 } // namespace dmt::model
 
 namespace dmt::job {
-}
+    void parseSceneHeader(uintptr_t address)
+    {
+        using namespace dmt;
+        char                  buffer[512]{};
+        ParseSceneHeaderData& data = *std::bit_cast<ParseSceneHeaderData*>(address);
+        AppContext&           actx = *data.actx;
+        actx.log("Starting Parse Scene Header Job");
+        bool error = false;
+
+        ChunkedFileReader reader{actx.mctx.pctx, data.filePath.data(), 512};
+        if (reader)
+        {
+            for (uint32_t chunkNum = 0; chunkNum < reader.numChunks(); ++chunkNum)
+            {
+                bool status = reader.requestChunk(actx.mctx.pctx, buffer, chunkNum);
+                if (!status)
+                {
+                    error = true;
+                    break;
+                }
+
+                status = reader.waitForPendingChunk(actx.mctx.pctx);
+                if (!status)
+                {
+                    error = true;
+                    break;
+                }
+
+                uint32_t         size = reader.lastNumBytesRead();
+                std::string_view chunkView{buffer, size};
+                actx.log("Read chunk content:\n{}\n", {chunkView});
+            }
+        }
+        else
+        {
+            actx.error("Couldn't open file \"{}\"", {data.filePath});
+        }
+
+        if (error)
+        {
+            actx.error("Something went wrong during job execution");
+        }
+
+        actx.log("Parse Scene Header Job Finished");
+        std::atomic_thread_fence(std::memory_order_release);
+        std::atomic_store_explicit(&data.done, 1, std::memory_order_relaxed);
+    }
+} // namespace dmt::job

@@ -87,6 +87,11 @@ DMT_MODULE_EXPORT dmt {
         inline constexpr std::string_view const brightYellow = "\033[93m";
 
         /**
+         *  ASCII sequence for a darker tint of yellow
+         */
+        inline constexpr std::string_view const darkYellow = "\033[33m";
+
+        /**
          *  ASCII sequence for a greyish green
          */
         inline constexpr std::string_view const greyGreen = "\033[38;5;102m";
@@ -119,7 +124,7 @@ DMT_MODULE_EXPORT dmt {
         inline constexpr std::string_view colorFromLevel(ELogLevel level)
         {
             assert(level != ELogLevel::NONE);
-            constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, brightYellow, red};
+            constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, darkYellow, red};
             return colors[toUnderlying(level)];
         }
     } // namespace logcolor

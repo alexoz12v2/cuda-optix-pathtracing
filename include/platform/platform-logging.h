@@ -39,17 +39,6 @@ DMT_MODULE_EXPORT dmt {
     };
 
     /**
-     * function to convert from a strongly typed enum `ELogLevel` to its numerical representation to make the compiler
-     * happy
-     * @param level log level
-     * @return numerical representation of the log level
-     */
-    constexpr uint8_t toUnderlying(ELogLevel level)
-    {
-        return static_cast<uint8_t>(level);
-    }
-
-    /**
      * Spaceship operator (three-way comparison) to generate log level comparison operators
      * @param lhs log level no 1
      * @param rhs log level no 2

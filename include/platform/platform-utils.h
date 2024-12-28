@@ -6,6 +6,7 @@
 #include <concepts>
 #include <iterator>
 #include <source_location>
+#include <type_traits>
 
 #include <cassert>
 #include <cmath>
@@ -24,6 +25,25 @@ namespace dmt {
 } // namespace dmt
 
 DMT_MODULE_EXPORT dmt {
+    template <typename Enum>
+        requires(std::is_enum_v<Enum>)
+    inline constexpr std::underlying_type_t<Enum> toUnderlying(Enum e)
+    {
+        return static_cast<std::underlying_type_t<Enum>>(e);
+    }
+
+    template <typename E>
+        requires((std::is_enum_v<E>) && requires() { E::eCount; })
+    inline constexpr E fromUnderlying(std::underlying_type_t<E> i)
+    {
+        if (i < toUnderlying(E::eCount))
+        {
+            return static_cast<E>(i);
+        }
+
+        return static_cast<E>(0);
+    }
+
     // Primary template (matches nothing by default)
     template <template <typename...> class Template, typename T>
     struct is_template_instantiation : std::false_type

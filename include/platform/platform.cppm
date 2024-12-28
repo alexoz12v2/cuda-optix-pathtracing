@@ -21,6 +21,6 @@ export import :threadPool;
 export import :memory;
 export import :utils; /** Note: Utils contains private, possibly OS specific, functionality + PlatformContext */
 
-export import <platform.h>;
+export import <platform/platform.h>;
 
 /** @} */

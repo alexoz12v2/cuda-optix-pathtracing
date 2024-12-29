@@ -70,25 +70,23 @@ AttributeEnd
         std::vector<std::string> tokens;
         tokens.reserve(128);
 
-        size_t chunkSize = 9;
+        size_t chunkSize = 512;
         size_t offset    = 0;
         bool   stop      = false;
 
-        while (!stop)
+        while (offset < input.size())
         {
             bool             needAdvance = true;
-            size_t           chunkOff    = offset;
-            size_t           chunky      = chunkSize;
-            std::string_view chunk       = input.substr(chunkOff, chunky);
+            std::string_view chunk       = input.substr(offset, chunkSize);
             while (needAdvance)
             {
                 std::string_view token = parser.nextWord(chunk);
                 if (token.empty() && !parser.needsContinuation())
-                {
-                    stop = true;
-                    break;
+                { // you found only whitespaces, need to go to next chunk
+                    chunk       = chunk.substr(parser.numCharReadLast());
+                    needAdvance = false;
                 }
-                if (!parser.needsContinuation())
+                else if (!parser.needsContinuation())
                 {
                     chunk = chunk.substr(parser.numCharReadLast());
                     tokens.emplace_back(token);

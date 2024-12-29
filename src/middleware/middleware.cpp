@@ -271,19 +271,28 @@ namespace dmt {
     {
         if (m_needsContinuation)
         {
-            assert(m_bufferLength + str.size() < 256);
-            assert(end > start + m_bufferLength);
-            m_numCharReadLastTime += end - start - m_bufferLength;
             m_needsContinuation = false;
-            std::string_view s  = str.substr(0, m_numCharReadLastTime);
-            std::memcpy(m_buffer + m_bufferLength, s.data(), s.size());
-            m_bufferLength += static_cast<uint32_t>(s.size());
+            if (end > start + m_bufferLength) // if you read past the buffer
+            {
+                size_t len = end - start - m_bufferLength;
+                assert(m_bufferLength + len < 256);
+                m_numCharReadLastTime += len;
+                std::string_view s = str.substr(0, len);
+                std::memcpy(m_buffer + m_bufferLength, s.data(), s.size());
+                m_bufferLength += static_cast<uint32_t>(s.size());
+            }
+            else // you read only the m_buffer (the whole thing, so no need to change buffer langth)
+            {
+                m_numCharReadLastTime = 0;
+            }
         }
         else
         {
             assert(end > start);
-            m_numCharReadLastTime += end - start;
-            copyToBuffer(str.substr(start, m_numCharReadLastTime));
+            assert(end - start <= 256);
+            size_t len = end - start;
+            m_numCharReadLastTime += len;
+            copyToBuffer(str.substr(start, len));
         }
 
         return {m_buffer, m_bufferLength};
@@ -358,12 +367,6 @@ namespace dmt {
                         else if (c == '\\')
                         {
                             m_haveEscaped = true;
-                            if ((c = getChar(str, i++)) == EOF)
-                            { // the string was interrupded by the end of the chunk
-                                copyToBuffer(str.substr(start, i - start));
-                                m_needsContinuation = true;
-                                return "";
-                            }
                         }
                     }
                     else
@@ -399,12 +402,21 @@ namespace dmt {
             } // end parse string
             else if (c == '[' || c == ']') // parse begin/end array
             {
+                m_needsContinuation = false;
                 return catResult(str, start, start + 1);
             }
             else if (c == '#') // comment. Scan until EOL or EOF
             {
-                while ((c = getChar(str, i++)) != EOF)
+                while (true)
                 {
+                    if (endOfStr(str, i))
+                    {
+                        copyToBuffer(str.substr(start, i - start));
+                        m_needsContinuation = true;
+                        return "";
+                    }
+
+                    c = getChar(str, i++);
                     if (c == '\n' || c == '\r')
                     {
                         --i;
@@ -437,6 +449,7 @@ namespace dmt {
             }
         }
 
+        // you found only whitespaces
         m_needsContinuation = false;
         return "";
     }

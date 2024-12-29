@@ -7,6 +7,7 @@
 #include <limits>
 #include <string_view>
 
+#include <cassert>
 #include <compare>
 #include <cstdint>
 
@@ -16,8 +17,111 @@
 import platform;
 #endif
 
-// stuff related to .pbrt file parsing
+// stuff related to .pbrt file parsing + data structures
 DMT_MODULE_EXPORT dmt {
+    inline size_t alignedSize(size_t elementSize, size_t alignment)
+    {
+        assert(alignment > 0 && "Alignment must be greater than 0");
+        assert((alignment & (alignment - 1)) == 0 && "Alignment must be a power of 2");
+
+        // Compute the aligned size of each element
+        size_t alignedSize = (elementSize + alignment - 1) & ~(alignment - 1);
+        return alignedSize;
+    }
+
+    inline size_t computeMaxElements(size_t bufferSize, size_t elementSize, size_t alignment)
+    {
+        size_t alignedSz = alignedSize(elementSize, alignment);
+
+        // Return the number of elements that fit in the buffer
+        return bufferSize / alignedSz;
+    }
+
+    struct AllocatorTable
+    {
+        TaggedPointer (*allocate)(MemoryContext& mctx, size_t size, size_t alignment);
+        void (*free)(MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment);
+        void* (*rawPtr)(TaggedPointer pt);
+    };
+
+    class CTrie
+    {
+    public:
+        CTrie(MemoryContext& mctx, AllocatorTable const& table, size_t valueSize, size_t valueAlign);
+
+        bool        insert(MemoryContext& mctx, uint32_t keyHash, void const* pValue);
+        void const* lookupConstRef(uint32_t keyHash);
+        void*       lookupRef(uint32_t keyHash);
+        bool remove(MemoryContext& mctx, uint32_t keyHash); // false if lookupRef returns nullptr (ctx to free if snode empty)
+        void finishRead(void** ppElem);
+        void lookupCopy(uint32_t keyHash, void** ppStorage);
+
+        void cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr));
+
+    private:
+        struct SNode // don't trust its alignment, its just to know the offsetof the bitmap
+        {
+            alignas(8) unsigned char data[256];
+            // 00 = free,
+            // 01 = can be locked for read,
+            // 10 = locked exl. for write,
+            // 11 = node not used (allocated, but neither read nor write locked)
+            std::atomic<uint64_t> bitmap;
+        };
+        struct INode
+        {
+            TaggedPointer children[32]; // nullptr or something
+                                        // (something)
+            // - 00 = SNode
+            // - 01 = Allocation in progress
+            // - 10 = INode
+            // - 11 = Not Allocated
+            std::atomic<uint64_t> bitmap;
+        };
+        static_assert(sizeof(SNode) == sizeof(INode));
+
+        // node of 256 bytes, of which the last 4 are dedicated to full/empty bits (std::atomic<uint32_t>)
+        // if at least 1 bit is set => this node is a CNode and contains pointers
+        // if all bits are 0        => this node contains elements
+        // CNode => 31 pointers at offsets [0,7], [8,15], ..., [240,247]
+        // SNode => computeMaxElements(256, m_sNodeSize, m_sNodeAlign) each spaced alignedSize(m_sNodeSize, m_sNodeAlign)
+        //          from each other
+        // the main methods are `insert(key, value)` (struct { value, hash(key) } of m_sNodeSize and m_sNodeAlign)
+        //                      `remove(key)`
+        //                      `lookupConstRef(key)`
+        //                      `lookupRef(key)`
+        // whenever an SNode needs to be converted into a CNode, we just allocate a new thing and perform some rewiring
+        // when in SNode mode, the atomic number is used to ensure atomic access to the elements themselves. A constLooup
+        // shouldn't block you
+        enum class EResult : uint8_t
+        {
+            eOk = 0,
+            eError,
+            eRestart,
+        };
+        EResult     iinsert(MemoryContext& mctx, INode* pNode, uint32_t keyHash, void const* pValue);
+        void const* lookupConstRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
+
+        static bool isINode(INode const* parent, uint32_t childIdx);
+        static bool isChildNotAllocated(INode const* parent, uint32_t childIdx);
+        static bool isReadLockable(SNode const* self, uint32_t elementIdx);
+        static bool isFullElement(SNode const* self, uint32_t elementIdx);
+        static bool isFree(SNode const* self, uint32_t elementIdx);
+        static void lockForWrite(SNode* self, uint32_t elementIdx);
+        static void lockForRead(SNode* self, uint32_t elementIdx);
+        static bool lockForAlloc(INode* self, uint32_t childIdx, bool force = false);
+        static void unlockForAlloc(INode* self, uint32_t childIdx, uint64_t desired);
+        static void unlockForWrite(SNode* self, uint32_t elementIdx);
+
+        AllocatorTable        m_table;
+        TaggedPointer         m_root; // assume this is always INode state
+        size_t                m_sNodeSize;
+        size_t                m_sNodeAlign;
+        std::atomic<uint32_t> m_size;
+        uint32_t              m_paddingAfterValue;
+        uint32_t              m_paddingEnd;
+    };
+
     enum class ERenderCoordSys : uint8_t
     {
         eCameraWorld = 0,

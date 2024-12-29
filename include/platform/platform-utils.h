@@ -44,6 +44,57 @@ DMT_MODULE_EXPORT dmt {
         return static_cast<E>(0);
     }
 
+    template <std::integral T>
+    inline constexpr T popCount(T v)
+    {
+        v   = v - ((v >> 1) & (T) ~(T)0 / 3);                             // temp
+        v   = (v & (T) ~(T)0 / 15 * 3) + ((v >> 2) & (T) ~(T)0 / 15 * 3); // temp
+        v   = (v + (v >> 4)) & (T) ~(T)0 / 255 * 15;                      // temp
+        T c = (T)(v * ((T) ~(T)0 / 255)) >> (sizeof(T) - 1) * CHAR_BIT;   // count
+        return c;
+    }
+
+    inline constexpr uint32_t countTrailingZeros(uint32_t v)
+    {
+        uint32_t c = 32; // c will be the number of zero bits on the right
+        v &= -signed(v);
+        if (v)
+            c--;
+        if (v & 0x0000FFFF)
+            c -= 16;
+        if (v & 0x00FF00FF)
+            c -= 8;
+        if (v & 0x0F0F0F0F)
+            c -= 4;
+        if (v & 0x33333333)
+            c -= 2;
+        if (v & 0x55555555)
+            c -= 1;
+        return c;
+    }
+
+    inline constexpr uint32_t countTrailingZeros(uint64_t v)
+    {
+        uint32_t c = 64; // c will be the number of zero bits on the right
+        v &= -signed(v); // Isolate the lowest set bit
+        if (v)
+            c--;
+        if (v & 0x00000000FFFFFFFF) // Check the lower 32 bits
+            c -= 32;
+        if (v & 0x0000FFFF0000FFFF) // Check the lower 16 bits in each 32-bit half
+            c -= 16;
+        if (v & 0x00FF00FF00FF00FF) // Check the lower 8 bits in each 16-bit half
+            c -= 8;
+        if (v & 0x0F0F0F0F0F0F0F0F) // Check the lower 4 bits in each 8-bit half
+            c -= 4;
+        if (v & 0x3333333333333333) // Check the lower 2 bits in each 4-bit half
+            c -= 2;
+        if (v & 0x5555555555555555) // Check the lower 1 bit in each 2-bit half
+            c -= 1;
+
+        return c;
+    }
+
     // Primary template (matches nothing by default)
     template <template <typename...> class Template, typename T>
     struct is_template_instantiation : std::false_type

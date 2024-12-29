@@ -126,6 +126,34 @@ AttributeEnd
         std::atomic_thread_fence(std::memory_order_acquire);
         actx.warn("Finished job");
     }
+
+    void testCTrie(dmt::AppContext& actx)
+    {
+        // clang-format off
+        dmt::AllocatorTable const table {
+            .allocate = [](dmt::MemoryContext& mctx, size_t size, size_t alignment) -> dmt::TaggedPointer 
+            { 
+                uint32_t numBlocks = static_cast<uint32_t>(dmt::ceilDiv(size, static_cast<size_t>(dmt::toUnderlying(dmt::EBlockSize::e32B))));
+                return mctx.poolAllocateBlocks(numBlocks, dmt::EBlockSize::e32B, dmt::EMemoryTag::eUnknown, 0); 
+            },
+            .free = [](dmt::MemoryContext& mctx, dmt::TaggedPointer pt, size_t size, size_t alignment)
+            { 
+                uint32_t numBlocks = static_cast<uint32_t>(dmt::ceilDiv(size, static_cast<size_t>(dmt::toUnderlying(dmt::EBlockSize::e32B))));
+                mctx.poolFreeBlocks(numBlocks, pt); 
+            },
+            .rawPtr = [](dmt::TaggedPointer pt) -> void* { 
+                return pt.pointer(); 
+            }
+        };
+        // clang-format on
+
+        dmt::CTrie ctrie{actx.mctx, table, sizeof(uint32_t), alignof(uint32_t)};
+        uint32_t   value = 43u;
+        ctrie.insert(actx.mctx, 0u, &value);
+        uint32_t const* res = std::bit_cast<uint32_t const*>(ctrie.lookupConstRef(0u));
+        actx.log("Tried to insert something in the ctrie, true val {}, got {}", {value, *res});
+        ctrie.cleanup(actx.mctx, [](dmt::MemoryContext& mctx, void* ptr) {});
+    }
 } // namespace
 
 int32_t main()
@@ -133,6 +161,7 @@ int32_t main()
     dmt::Platform platform;
     auto&         actx = platform.ctx();
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
-    testWordTokenization(actx);
+    testCTrie(actx);
+    //testWordTokenization(actx);
     //testJob(actx);
 }

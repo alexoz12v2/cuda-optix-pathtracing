@@ -212,6 +212,498 @@ namespace dmt {
         return ::enumFromStr(str, types, EBVHSplitMethod::eSAH);
     }
 
+    // CTrie ----------------------------------------------------------------------------------------------------------
+
+    CTrie::CTrie(MemoryContext& mctx, AllocatorTable const& table, size_t valueSize, size_t valueAlign) :
+    m_table(table),
+    m_root(taggedNullptr),
+    m_size(0),
+    m_sNodeSize(0),
+    m_sNodeAlign(std::max(valueAlign, alignof(std::atomic<uint32_t>)))
+    {
+        m_paddingAfterValue = (alignof(uint32_t) - (valueSize % alignof(uint32_t))) % alignof(uint32_t);
+        m_paddingEnd        = (valueSize + sizeof(uint32_t)) % m_sNodeAlign;
+        m_sNodeSize         = valueSize + m_paddingAfterValue + sizeof(uint32_t) + m_paddingEnd;
+
+        m_root = m_table.allocate(mctx, sizeof(SNode), alignof(SNode));
+        if (m_root == taggedNullptr)
+        {
+            mctx.pctx.error("Couldn't allocate first block for CTrie");
+            mctx.pctx.dbgErrorStackTrace();
+            std::abort();
+        }
+        INode* pRoot = std::bit_cast<INode*>(m_table.rawPtr(m_root));
+        std::memset(pRoot, 0, sizeof(INode));
+        pRoot->bitmap.store(std::numeric_limits<uint64_t>::max(), std::memory_order_release);
+    }
+
+    void CTrie::cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr))
+    {
+#if 0
+        // TODO deallocate all nodes
+        m_table.free(mctx, m_root, sizeof(SNode), alignof(SNode));
+        m_root = taggedNullptr;
+#else
+        // Recursive lambda for cleaning up nodes
+        auto cleanupNode = [&](auto&& self, TaggedPointer taggedPtr, bool _isINode) -> void
+        {
+            if (taggedPtr == taggedNullptr) // Skip null nodes
+                return;
+
+            void* rawPtr = m_table.rawPtr(taggedPtr);
+
+            if (_isINode)
+            {
+                INode* iNode = std::bit_cast<INode*>(rawPtr);
+
+                // Traverse all children of the INode
+                for (uint32_t i = 0; i < 32; ++i)
+                {
+                    TaggedPointer childPtr = iNode->children[i];
+                    // Determine if the child is an INode or SNode
+                    bool childIsINode = isINode(iNode, i);
+                    self(self, childPtr, childIsINode);
+                }
+
+                // Free the INode
+                m_table.free(mctx, taggedPtr, sizeof(INode), alignof(INode));
+            }
+            else
+            {
+                SNode* sNode = std::bit_cast<SNode*>(rawPtr);
+
+                // Call destructor on all elements in the SNode
+                size_t maxIdx = computeMaxElements(256, m_sNodeSize, m_sNodeAlign);
+                for (uint32_t i = 0; i < maxIdx; ++i)
+                {
+                    if (!isFree(sNode, i)) // Only call destructor for non-free slots
+                    {
+                        void* pData    = sNode->data;
+                        void* dataAddr = std::bit_cast<void*>(std::bit_cast<uintptr_t>(pData) + i * m_sNodeSize);
+                        dctor(mctx, dataAddr); // Call the user-provided destructor
+                    }
+                }
+
+                // Free the SNode
+                m_table.free(mctx, taggedPtr, sizeof(SNode), alignof(SNode));
+            }
+        };
+
+        // Start cleanup from the root
+        cleanupNode(cleanupNode, m_root, true);
+
+        // Reset the root pointer
+        m_root = taggedNullptr;
+#endif
+    }
+
+    bool CTrie::insert(MemoryContext& mctx, uint32_t keyHash, void const* pValue)
+    {
+        INode*  pRoot = std::bit_cast<INode*>(m_table.rawPtr(m_root));
+        EResult res   = EResult::eRestart;
+        while (res == EResult::eRestart)
+        {
+            res = iinsert(mctx, pRoot, keyHash, pValue);
+        }
+        return res != EResult::eError;
+    }
+
+    void const* CTrie::lookupConstRef(uint32_t keyHash)
+    {
+        // the given 32 bit index is split into packets of 5 bits
+        uint32_t mask   = 0xF800'0000;
+        INode*   parent = std::bit_cast<INode*>(m_table.rawPtr(m_root));
+        return lookupConstRefFrom(parent, mask, keyHash);
+    }
+
+    void CTrie::finishRead(void** ppElem)
+    {
+        // TODO touch the bits of the element and mark as free, release mem barrier (or seq cst)
+    }
+
+    void CTrie::lookupCopy(uint32_t keyHash, void** ppStorage)
+    {
+        // TODO similiar to lookupRefConst, but you unlock the read lock before returning, as we create a copy of the value
+    }
+
+    void const* CTrie::lookupConstRefFrom(INode* inode, uint32_t mask, uint32_t keyHash)
+    {
+        uint32_t shamt  = countTrailingZeros(mask);
+        uint32_t packet = (keyHash & mask) >> shamt;
+        mask >>= 5;
+        if (isINode(inode, packet))
+        {
+            inode = std::bit_cast<INode*>(m_table.rawPtr(inode->children[packet]));
+            return lookupConstRefFrom(inode, mask, keyHash);
+        }
+        else
+        {
+            SNode* self   = std::bit_cast<SNode*>(m_table.rawPtr(inode->children[packet]));
+            size_t maxIdx = computeMaxElements(256, m_sNodeSize, m_sNodeAlign);
+            // linear search and match the full key in each element
+            for (uint32_t i = 0; i < maxIdx; ++i)
+            {
+                if (!isFullElement(self, i))
+                    continue;
+
+                lockForRead(self, i);
+
+                void const*     data     = self->data;
+                uintptr_t       elemAddr = std::bit_cast<uintptr_t>(data) + i * m_sNodeSize;
+                uintptr_t       keyAddr  = elemAddr + m_sNodeSize - sizeof(uint32_t) - m_paddingEnd;
+                uint32_t const& key      = *std::bit_cast<uint32_t const*>(keyAddr);
+                if (key == keyHash)
+                {
+                    assert(elemAddr == alignToAddr(elemAddr, m_sNodeAlign));
+                    return std::bit_cast<void const*>(elemAddr);
+                }
+            }
+
+            return nullptr;
+        }
+    }
+
+    void* CTrie::lookupRef(uint32_t keyHash)
+    {
+        // TODO similiar to lookupConstRef, but return a mutable thing
+        return nullptr;
+    }
+
+    bool CTrie::remove(MemoryContext& mctx, uint32_t keyHash)
+    {
+        // TODO
+        return false;
+    }
+
+    CTrie::EResult CTrie::iinsert(MemoryContext& mctx, INode* pNode, uint32_t keyHash, void const* pValue)
+    {
+        uint32_t mask   = 0xF800'0000; // Initial mask for top-level (e.g., first 5 bits)
+        uint32_t shamt  = countTrailingZeros(mask);
+        uint32_t packet = (keyHash & mask) >> shamt;
+
+        // Traverse down to the correct SNode or INode level
+        while (true)
+        {
+            if (isINode(pNode, packet))
+            { // If we encounter an INode, continue traversal down
+                pNode = std::bit_cast<INode*>(m_table.rawPtr(pNode->children[packet]));
+                mask >>= 5;
+                shamt  = countTrailingZeros(mask);
+                packet = (keyHash & mask) >> shamt;
+            }
+            else
+            { // We're at an SNode, attempt to insert the value
+                SNode* sNode    = std::bit_cast<SNode*>(m_table.rawPtr(pNode->children[packet]));
+                size_t maxIdx   = computeMaxElements(256, m_sNodeSize, m_sNodeAlign);
+                bool   inserted = false;
+
+                // Look for an available slot in the SNode
+                if (isChildNotAllocated(pNode, packet))
+                {
+                    assert(!sNode);
+                    if (lockForAlloc(pNode, packet))
+                    {
+                        pNode->children[packet] = m_table.allocate(mctx, sizeof(SNode), alignof(SNode));
+                        sNode                   = std::bit_cast<SNode*>(m_table.rawPtr(pNode->children[packet]));
+                        std::memset(sNode, 0, sizeof(SNode));
+                        unlockForAlloc(pNode, packet, 0b00);
+                    }
+                }
+
+                if (!sNode)
+                {
+                    mctx.pctx.error("Couldn't allocate memory for a CTrie node");
+                    return EResult::eError;
+                }
+
+                // ensure that nobody touches our node while we try insertion
+                while (!lockForAlloc(pNode, packet, true))
+                {
+                    std::this_thread::yield();
+                }
+
+                for (uint32_t i = 0; i < maxIdx; ++i)
+                {
+                    if (!sNode || !isFree(sNode, i)) // Check if the slot is free (0b00 in the bitmap)
+                        continue;
+
+                    // Lock the slot for insertion
+                    lockForWrite(sNode, i);
+
+                    // Insert the element here
+                    void*     data     = sNode->data;
+                    uintptr_t elemAddr = std::bit_cast<uintptr_t>(data) + i * m_sNodeSize;
+                    uintptr_t keyAddr  = elemAddr + m_sNodeSize - sizeof(uint32_t) - m_paddingEnd;
+                    uint32_t& key      = *std::bit_cast<uint32_t*>(keyAddr);
+                    key                = keyHash;
+
+                    // Copy the value into the element
+                    uint64_t valueSize = m_sNodeSize - m_paddingAfterValue - m_paddingEnd - sizeof(uint32_t);
+                    std::memcpy(std::bit_cast<void*>(elemAddr), pValue, valueSize);
+
+                    // Update the bitmap and other state
+                    m_size.fetch_add(1, std::memory_order_release); // Update the size
+
+                    inserted = true;
+                    unlockForWrite(sNode, i); // also sets read lockable
+                    break;
+                }
+                unlockForAlloc(pNode, packet, 0b00);
+
+                if (!inserted)
+                {
+                    while (!lockForAlloc(pNode, packet, true))
+                        std::this_thread::yield();
+
+                    TaggedPointer& childPtr    = pNode->children[packet];
+                    void*          childRawPtr = m_table.rawPtr(childPtr);
+
+                    // The child cannot be an INode (shouldn't happen)
+                    assert(!isINode(pNode, packet));
+                    assert(childRawPtr);
+
+                    // The child must be a full SNode, perform the conversion to an INode
+                    SNode* oldSNode = std::bit_cast<SNode*>(childRawPtr);
+
+                    // Allocate a new INode to replace the old SNode
+                    childPtr        = m_table.allocate(mctx, sizeof(INode), alignof(INode));
+                    INode* newINode = std::bit_cast<INode*>(m_table.rawPtr(childPtr));
+
+                    // Initialize the new INode (right shift by 4 as the first 2 nodes are SNodes)
+                    std::memset(newINode->children, 0, sizeof(newINode->children));
+                    newINode->bitmap.store(std::numeric_limits<uint64_t>::max() >> 4, std::memory_order_acq_rel);
+
+                    // Place the old SNode as the first child of the new INode
+                    uint32_t firstPacket            = (keyHash & mask) >> (shamt - 5); // First level packet index
+                    newINode->children[firstPacket] = m_table.allocate(mctx, sizeof(SNode), alignof(SNode));
+                    std::memcpy(std::bit_cast<void*>(m_table.rawPtr(newINode->children[firstPacket])),
+                                oldSNode,
+                                sizeof(SNode));
+
+                    // Allocate a new SNode for the second child
+                    uint32_t secondPacket            = (keyHash & mask) >> (shamt - 5);
+                    newINode->children[secondPacket] = m_table.allocate(mctx, sizeof(SNode), alignof(SNode));
+                    SNode* newChildSNode = std::bit_cast<SNode*>(m_table.rawPtr(newINode->children[secondPacket]));
+
+                    // Initialize the new SNode
+                    std::memset(newChildSNode->data, 0, sizeof(newChildSNode->data));
+                    newChildSNode->bitmap.store(0, std::memory_order_release); // Empty initially
+
+                    unlockForAlloc(pNode, packet, 0b10);
+
+                    // Perform the insertion in the new SNode
+                    return iinsert(mctx, std::bit_cast<INode*>(newChildSNode), keyHash, pValue);
+                }
+
+                // Successfully inserted
+                return EResult::eOk;
+            }
+        }
+    }
+
+    bool CTrie::lockForAlloc(INode* self, uint32_t childIdx, bool force)
+    {
+        // Read the bitmap for the slot
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+
+        // Shift to the correct position for the element in the bitmap
+        uint32_t shamt = childIdx << 1;
+        uint64_t mask  = 0b11 << shamt;
+
+        uint64_t bits = (bitmap & mask) >> shamt;
+
+        // if somebody already allocated this in the meantime, bail out
+        if (!force && bits != 0b11)
+        {
+            // if the allocation is still in progress, wait
+            while (bits == 0b01)
+            {
+                std::this_thread::yield();
+
+                // Re-read the bitmap to get the latest state
+                bitmap = self->bitmap.load(std::memory_order_acquire);
+                bits   = (bitmap & mask) >> shamt;
+            }
+
+            return false;
+        }
+
+        // Attempt to lock the slot for "allocation in progress"
+        uint64_t desired = (bitmap & ~mask) | (0b01 << shamt); // Set to 0b10 (locked for allocation in progress)
+
+        // Compare-and-swap to atomically update the bitmap
+        bool success = self->bitmap.compare_exchange_strong(bitmap, desired, std::memory_order_seq_cst, std::memory_order_acquire);
+
+        // If the CAS failed, retry until successful
+        if (!success)
+        {
+            return lockForAlloc(self, childIdx);
+        }
+        else
+        {
+            return true;
+        }
+    }
+
+    void CTrie::unlockForAlloc(INode* self, uint32_t childIdx, uint64_t desired)
+    {
+        assert(desired == 0b00 || desired == 0b10); // should be either SNode or INode
+
+        // Read the bitmap for the slot
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+
+        // Shift to the correct position for the element in the bitmap
+        uint32_t shamt = childIdx << 1;
+        uint64_t mask  = 0b11 << shamt;
+
+        uint64_t bits = (bitmap & mask) >> shamt;
+        assert(bits == 0b01); // an allocation should be in progress
+
+        // Attempt to lock the slot for "allocation in progress"
+        desired = (bitmap & ~mask) | (desired << shamt);
+        bool success = self->bitmap.compare_exchange_strong(bitmap, desired, std::memory_order_seq_cst, std::memory_order_seq_cst);
+    }
+
+    bool CTrie::isINode(INode const* parent, uint32_t childIdx)
+    {
+        assert(childIdx < 32);
+        uint64_t bitmap = parent->bitmap.load(std::memory_order_acquire);
+        uint32_t shamt  = childIdx << 1;
+        uint64_t bits   = (bitmap & (0b11 << shamt)) >> shamt;
+        return bits == 0b10;
+    }
+
+    bool CTrie::isReadLockable(SNode const* self, uint32_t elementIdx)
+    {
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+        uint32_t shamt  = elementIdx << 1;
+        uint64_t bits   = (bitmap & (0b11 << shamt)) >> shamt;
+        return bits == 0b01 || bits == 0b11;
+    }
+
+    bool CTrie::isFullElement(SNode const* self, uint32_t elementIdx)
+    {
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+        uint32_t shamt  = elementIdx << 1;
+        uint64_t bits   = (bitmap & (0b11 << shamt)) >> shamt;
+        return bits != 0b00;
+    }
+
+    bool CTrie::isFree(SNode const* self, uint32_t elementIdx)
+    {
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+        uint32_t shamt  = elementIdx << 1;
+        uint64_t bits   = (bitmap & (0b11 << shamt)) >> shamt;
+        return bits == 0b00;
+    }
+
+    bool CTrie::isChildNotAllocated(INode const* parent, uint32_t childIdx)
+    {
+        assert(childIdx < 32);
+        uint64_t bitmap = parent->bitmap.load(std::memory_order_acquire);
+        uint32_t shamt  = childIdx << 1;
+        uint64_t bits   = (bitmap & (0b11 << shamt)) >> shamt;
+        return bits == 0b11;
+    }
+
+    void CTrie::lockForWrite(SNode* self, uint32_t elementIdx)
+    {
+        // Read the bitmap for the slot
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+
+        // Shift to the correct position for the element in the bitmap
+        uint32_t shamt = elementIdx << 1;
+        uint64_t mask  = 0b11 << shamt;
+
+        uint64_t bits = (bitmap & mask) >> shamt;
+
+        // Keep checking until it is not locked for read or write (0b10 or 0b01)
+        while (bits == 0b10 || bits == 0b01)
+        {
+            // Yield to allow other threads to proceed
+            std::this_thread::yield();
+
+            // Re-read the bitmap to get the latest state
+            bitmap = self->bitmap.load(std::memory_order_acquire);
+            bits   = (bitmap & mask) >> shamt;
+        }
+
+        // Attempt to lock the slot for writing (set the bits to 0b10)
+        uint64_t desired = (bitmap & ~mask) | (0b10 << shamt); // Set to 0b10 (locked for write)
+
+        // Compare-and-swap to atomically update the bitmap
+        bool success = self->bitmap.compare_exchange_strong(bitmap, desired, std::memory_order_seq_cst, std::memory_order_acquire);
+
+        // If the CAS failed, retry until successful
+        if (!success)
+        {
+            lockForWrite(self, elementIdx);
+        }
+    }
+
+    void CTrie::lockForRead(SNode* self, uint32_t elementIdx)
+    {
+        // Read the bitmap for the slot
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+
+        // Shift to the correct position for the element in the bitmap
+        uint32_t shamt = elementIdx << 1;
+        uint64_t mask  = 0b11 << shamt;
+
+        uint64_t bits = (bitmap & mask) >> shamt;
+        assert(bits != 0b00); // should be alread allocated and not null
+
+        // Keep checking until it is not write locked
+        while (bits == 0b10)
+        {
+            // Yield to allow other threads to proceed
+            std::this_thread::yield();
+
+            // Re-read the bitmap to get the latest state
+            bitmap = self->bitmap.load(std::memory_order_acquire);
+            bits   = (bitmap & mask) >> shamt;
+        }
+
+        // Attempt to lock the slot for writing (set the bits to 0b10)
+        uint64_t desired = (bitmap & ~mask) | (0b01 << shamt); // Set to 0b01 (locked for read)
+
+        // Compare-and-swap to atomically update the bitmap
+        bool success = self->bitmap.compare_exchange_strong(bitmap, desired, std::memory_order_seq_cst, std::memory_order_acquire);
+
+        // If the CAS failed, retry until successful
+        if (!success)
+        {
+            lockForRead(self, elementIdx);
+        }
+    }
+
+    void CTrie::unlockForWrite(SNode* self, uint32_t elementIdx)
+    {
+        // Read the bitmap for the slot
+        uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
+
+        // Shift to the correct position for the element in the bitmap
+        uint32_t shamt = elementIdx << 1;
+        uint64_t mask  = 0b11 << shamt;
+
+        uint64_t bits = (bitmap & mask) >> shamt;
+
+        // Ensure that the slot is currently locked for write (0b10)
+        assert(bits == 0b10);
+
+        // Change the bitmap to set the element back to 0b01 (read-lockable)
+        uint64_t desired = (bitmap & ~mask) | (0b11 << shamt); // Set to 0b11 (unused)
+
+        // Atomically update the bitmap using compare-and-swap
+        bool success = self->bitmap.compare_exchange_strong(bitmap, desired, std::memory_order_acq_rel, std::memory_order_acquire);
+
+        // If the CAS failed, retry until successful
+        if (!success)
+        {
+            unlockForWrite(self, elementIdx);
+        }
+    }
+
     // Parsing --------------------------------------------------------------------------------------------------------
     // https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/src/pbrt/parser.cpp
     char WordParser::decodeEscaped(char c)

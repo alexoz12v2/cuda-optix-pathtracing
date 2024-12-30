@@ -90,7 +90,7 @@ void Display::InitPropertyWindow()
     glfwWindowHint(GLFW_REFRESH_RATE, m_winGLFW.mode->refreshRate);
 
     // Create window with graphics context
-    m_winGLFW.window = glfwCreateWindow(640, 480, "DMT", m_winGLFW.monitor, NULL);
+    m_winGLFW.window = glfwCreateWindow(m_winGLFW.mode->width, m_winGLFW.mode->height, "DMT", m_winGLFW.monitor, NULL);
 
     if (m_winGLFW.window == NULL)
         return;

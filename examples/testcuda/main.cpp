@@ -175,8 +175,8 @@ void display(dmt::ConsoleLogger& logger)
         glClear(GL_COLOR_BUFFER_BIT);
 
         // CUDA!
-        dmt::RegImg(janitor.texture, 800, 600);
-
+        //dmt::RegImg(janitor.texture, 800, 600);
+        dmt::RegImgSurf(janitor.texture, janitor.vbo, 800, 600);
         glUseProgram(janitor.shaderProgram);
         glBindVertexArray(janitor.vao);
 

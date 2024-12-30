@@ -298,7 +298,7 @@ int main()
     oss.logInitList(formatStr, {arg, pi, dmt::StrBuf(pi, "%.5f"), thou, b});
     std::cout << oss.str() << std::endl;
     dmt::ConsoleLogger logger = dmt::ConsoleLogger::create();
-    
+
 
     printSome(logger);
     testLoggingInMultithreadedEnvironment(logger);

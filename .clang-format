@@ -72,12 +72,14 @@ BraceWrapping:
     AfterExternBlock: true
     BeforeCatch: false
     BeforeElse: true
-    BeforeLambdaBody: true
+    BeforeLambdaBody: false 
     BeforeWhile: false
     IndentBraces: false
     SplitEmptyFunction: true
     SplitEmptyRecord: true
     SplitEmptyNamespace: true
+
+LambdaBodyIndentation: OuterScope
 
 # Namespaces
 NamespaceMacros:

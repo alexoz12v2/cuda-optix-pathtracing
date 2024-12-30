@@ -47,19 +47,28 @@ DMT_MODULE_EXPORT dmt {
     class CTrie
     {
     public:
+        class ForwardReadLockIterator;
+        struct EndSentinel
+        {
+        };
         CTrie(MemoryContext& mctx, AllocatorTable const& table, size_t valueSize, size_t valueAlign);
 
-        bool        insert(MemoryContext& mctx, uint32_t keyHash, void const* pValue);
-        void const* lookupConstRef(uint32_t keyHash);
-        void*       lookupRef(uint32_t keyHash);
-        void*       remove(MemoryContext& mctx, uint32_t keyHash, void (*dctor)(MemoryContext& mctx, void* elem));
-        void finishRead(void const** ppElem);
-        void finishWrite(void** ppElem);
-        void lookupCopy(uint32_t keyHash, void** ppStorage);
-        void cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr));
-        size_t      size() const;
+        bool   insert(MemoryContext& mctx, uint32_t keyHash, void const* pValue);
+        bool   lookupConstRef(uint32_t keyHash, void* data, void (*func)(void* data, void const* elem));
+        bool   lookupRef(uint32_t keyHash, void* data, void (*func)(void* data, void* elem));
+        void*  remove(MemoryContext& mctx, uint32_t keyHash, void (*dctor)(MemoryContext& mctx, void* elem));
+        void   lookupCopy(uint32_t keyHash, void** ppStorage);
+        void   cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr));
+        size_t size() const;
+
+
+        ForwardReadLockIterator begin();
+        EndSentinel             end();
 
     private:
+        CTrie() : m_root(taggedNullptr)
+        {
+        }
         struct SNode // don't trust its alignment, its just to know the offsetof the bitmap
         {
             alignas(8) unsigned char data[256];
@@ -100,15 +109,19 @@ DMT_MODULE_EXPORT dmt {
             eError,
             eRestart,
         };
-        EResult     iinsert(MemoryContext& mctx, INode* pNode, uint32_t keyHash, void const* pValue);
-        void const* lookupConstRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
-        void*       lookupRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
-        size_t      getValueSize() const;
-        void*       removeFrom(MemoryContext& mctx,
-                               INode*         inode,
-                               uint32_t       mask,
-                               uint32_t       keyHash,
-                               void (*dctor)(MemoryContext& mctx, void* elem));
+        EResult iinsert(MemoryContext& mctx, INode* pNode, uint32_t keyHash, void const* pValue);
+        bool    lookupConstRefFrom(INode*   inode,
+                                   uint32_t mask,
+                                   uint32_t keyHash,
+                                   void*    data,
+                                   void (*func)(void* data, void const* elem));
+        bool lookupRefFrom(INode* inode, uint32_t mask, uint32_t keyHash, void* data, void (*func)(void* data, void* elem));
+        size_t getValueSize() const;
+        void*  removeFrom(MemoryContext& mctx,
+                          INode*         inode,
+                          uint32_t       mask,
+                          uint32_t       keyHash,
+                          void (*dctor)(MemoryContext& mctx, void* elem));
 
         static bool isINode(INode const* parent, uint32_t childIdx);
         static bool isChildNotAllocated(INode const* parent, uint32_t childIdx);
@@ -130,6 +143,43 @@ DMT_MODULE_EXPORT dmt {
         uint32_t              m_paddingAfterValue;
         uint32_t              m_paddingEnd;
     };
+
+    class CTrie::ForwardReadLockIterator
+    {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type        = void*; // Or a more specific type if known
+        using difference_type   = std::ptrdiff_t;
+        using pointer           = value_type*;
+        using reference         = value_type&;
+
+        ForwardReadLockIterator(CTrie& trie, INode* inode, uint32_t mask, uint32_t keyHashStart = 0);
+        ForwardReadLockIterator& operator++();
+        value_type               operator*() const;
+
+        bool operator==(ForwardReadLockIterator const& other) const;
+        bool operator==(EndSentinel end) const;
+
+        uint32_t getCurrentPacket() const;
+
+    private:
+        void findNextValidElement();
+
+        CTrie&   m_trie;
+        INode*   m_inode;
+        uint32_t m_mask;
+        uint32_t m_currentElementIndex;
+        uint32_t m_keyHash;
+    };
+
+    CTrie::ForwardReadLockIterator CTrie::begin()
+    {
+        return ForwardReadLockIterator(*this, std::bit_cast<INode*>(m_table.rawPtr(m_root)), 0xF800'0000);
+    }
+    CTrie::EndSentinel CTrie::end()
+    {
+        return {};
+    }
 
     enum class ERenderCoordSys : uint8_t
     {

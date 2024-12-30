@@ -6,12 +6,15 @@
 #include <thread>
 #include <vector>
 
+#include <cassert>
 #include <cstdint>
 
 import platform;
 import middleware;
 
 namespace {
+    static constexpr auto doNothing = [](dmt::MemoryContext& mctx, void* ptr) {};
+
     void testWordTokenization(dmt::AppContext& actx)
     {
         std::string_view input = R"(
@@ -127,17 +130,132 @@ AttributeEnd
         actx.warn("Finished job");
     }
 
+    struct Data
+    {
+        Data(dmt::AppContext& actx, uint32_t key, uint32_t value) : actx(actx), key(key), value(value)
+        {
+        }
+        dmt::AppContext& actx;
+        uint32_t         key;
+        uint32_t         value;
+    };
+
+    void testInsertSingle(dmt::CTrie& ctrie, dmt::AppContext& actx, uint32_t key, uint32_t value)
+    {
+        ctrie.insert(actx.mctx, key, &value);
+        Data data{actx, key, value};
+        ctrie.lookupConstRef(key, &data, [](void* p, void const* res) {
+            auto&    data  = *reinterpret_cast<Data*>(p);
+            auto&    actx  = data.actx;
+            uint32_t value = data.value;
+            uint32_t key   = data.key;
+            actx.log("Inserted value {} for key {}: got {}", {value, key, *std::bit_cast<uint32_t const*>(res)});
+        });
+    }
+
+    void testInsertMultiple(dmt::CTrie& ctrie, dmt::AppContext& actx)
+    {
+        uint32_t val1 = 10, val2 = 20, val3 = 30;
+
+        ctrie.insert(actx.mctx, 1, &val1);
+        ctrie.insert(actx.mctx, 2, &val2);
+        ctrie.insert(actx.mctx, 3, &val3);
+
+        ctrie.lookupConstRef(1, &actx, [](void* p, void const* pElem) {
+            auto& actx = *reinterpret_cast<dmt::AppContext*>(p);
+            actx.log("Inserted Value 1: {}", {*reinterpret_cast<uint32_t const*>(pElem)});
+        });
+        ctrie.lookupConstRef(2, &actx, [](void* p, void const* pElem) {
+            auto& actx = *reinterpret_cast<dmt::AppContext*>(p);
+            actx.log("Inserted Value 2: {}", {*reinterpret_cast<uint32_t const*>(pElem)});
+        });
+        ctrie.lookupConstRef(3, &actx, [](void* p, void const* pElem) {
+            auto& actx = *reinterpret_cast<dmt::AppContext*>(p);
+            actx.log("Inserted Value 3: {}", {*reinterpret_cast<uint32_t const*>(pElem)});
+        });
+    }
+
+    void testLookupExist(dmt::CTrie& ctrie, dmt::AppContext& actx, uint32_t key, uint32_t expected)
+    {
+        Data data{actx, key, expected};
+        ctrie.lookupConstRef(key, &data, [](void* p, void const* pElem) {
+            auto&    data     = *reinterpret_cast<Data*>(p);
+            auto&    actx     = data.actx;
+            uint32_t expected = data.value;
+            uint32_t key      = data.key;
+            assert(*std::bit_cast<uint32_t const*>(pElem) == expected);
+            actx.log("Looked up key {}: got {}", {key, *reinterpret_cast<uint32_t const*>(pElem)});
+        });
+    }
+
+    void testLookupNonExist(dmt::CTrie& ctrie, dmt::AppContext& actx, uint32_t key)
+    {
+        Data data{actx, key, 0};
+        bool found = ctrie.lookupConstRef(key, &data, [](void* p, void const* res) {
+            auto&    data = *reinterpret_cast<Data*>(p);
+            auto&    actx = data.actx;
+            uint32_t key  = data.key;
+            actx.log("Unexpected result when looking up key {}: got {}", {key, *std::bit_cast<uint32_t const*>(res)});
+        });
+
+        if (!found)
+        {
+            actx.log("Key {} not found as expected", {key});
+        }
+    }
+
+    void testLookupAfterRemove(dmt::CTrie& ctrie, dmt::AppContext& actx, uint32_t key)
+    {
+        Data data{actx, key, 0};
+        ctrie.remove(actx.mctx, key, doNothing);
+        bool found = ctrie.lookupConstRef(key, &data, [](void* p, void const* res) {
+            auto&    data = *reinterpret_cast<Data*>(p);
+            auto&    actx = data.actx;
+            uint32_t key  = data.key;
+            actx.log("Unexpected result when looking up key {} after removal: got {}",
+                     {key, *std::bit_cast<uint32_t const*>(res)});
+        });
+
+        if (!found)
+        {
+            actx.log("Successfully removed key {} and cannot find it", {key});
+        }
+    }
+
+    void testRemoveAndSize(dmt::CTrie& ctrie, dmt::AppContext& actx)
+    {
+        actx.log("Size before removal: {}", {ctrie.size()});
+        uint32_t val = 42;
+        ctrie.insert(actx.mctx, 4, &val); // Insert a new value before removal
+
+        ctrie.remove(actx.mctx, 4, doNothing); // Remove the inserted value
+        actx.log("Size after removal: {}", {ctrie.size()});
+    }
+
+    void testCTrieCopy(dmt::CTrie& ctrie, dmt::AppContext& actx)
+    {
+        uint32_t receiver  = 0;
+        void*    pReceiver = &receiver;
+        ctrie.lookupCopy(0, &pReceiver);
+        if (pReceiver)
+        {
+            actx.log("Copied data key 0 as expected, value: {}", {receiver});
+        }
+        else
+        {
+            actx.error("Couldn't find index 0");
+        }
+    }
+
     void testCTrie(dmt::AppContext& actx)
     {
         // clang-format off
         dmt::AllocatorTable const table {
-            .allocate = [](dmt::MemoryContext& mctx, size_t size, size_t alignment) -> dmt::TaggedPointer 
-            { 
+            .allocate = [](dmt::MemoryContext& mctx, size_t size, size_t alignment) -> dmt::TaggedPointer { 
                 uint32_t numBlocks = static_cast<uint32_t>(dmt::ceilDiv(size, static_cast<size_t>(dmt::toUnderlying(dmt::EBlockSize::e32B))));
                 return mctx.poolAllocateBlocks(numBlocks, dmt::EBlockSize::e32B, dmt::EMemoryTag::eUnknown, 0); 
             },
-            .free = [](dmt::MemoryContext& mctx, dmt::TaggedPointer pt, size_t size, size_t alignment)
-            { 
+            .free = [](dmt::MemoryContext& mctx, dmt::TaggedPointer pt, size_t size, size_t alignment) { 
                 uint32_t numBlocks = static_cast<uint32_t>(dmt::ceilDiv(size, static_cast<size_t>(dmt::toUnderlying(dmt::EBlockSize::e32B))));
                 mctx.poolFreeBlocks(numBlocks, pt); 
             },
@@ -146,35 +264,23 @@ AttributeEnd
             }
         };
         // clang-format on
-        static constexpr auto doNothing = [](dmt::MemoryContext& mctx, void* ptr) {};
 
         dmt::CTrie ctrie{actx.mctx, table, sizeof(uint32_t), alignof(uint32_t)};
-        uint32_t   value = 43u;
-        ctrie.insert(actx.mctx, 0u, &value);
-        void const* res = ctrie.lookupConstRef(0u);
-        actx.log("Tried to insert something in the ctrie, true val {}, got {}", {value, *std::bit_cast<uint32_t const*>(res)});
-        ctrie.finishRead(&res);
 
-        // test lookup copy
-        uint32_t receiver = 0;
-        void*    pStorage = &receiver;
-        ctrie.lookupCopy(0, &pStorage);
-        actx.log("Copy retrieved: {}", {receiver});
+        testInsertSingle(ctrie, actx, 0, 43u);
+        testInsertMultiple(ctrie, actx);
+        testCTrieCopy(ctrie, actx);
+        testLookupExist(ctrie, actx, 0, 43u);
+        testLookupNonExist(ctrie, actx, 99);
 
-        // test lookupRef
-        void* mutRes = ctrie.lookupRef(0);
-        actx.log("Tried to retrieve mutable something in the ctrie, true val {}, got {}", {value, *std::bit_cast<uint32_t*>(mutRes)});
-        *reinterpret_cast<uint32_t*>(mutRes) = 73;
-        actx.log("Mutated Value: {}", {*std::bit_cast<uint32_t*>(mutRes)});
-        ctrie.finishWrite(&mutRes);
+        for (auto it = ctrie.begin(); it != ctrie.end(); ++it)
+        {
+            void const* ptr = *it;
+            actx.log("Iterating : {}", {*reinterpret_cast<uint32_t const*>(ptr)});
+        }
 
-        ctrie.lookupCopy(0, &pStorage);
-        actx.log("New copy retrieved: {}", {receiver});
-
-        // remove test
-        actx.log("The size before remove is {}", {ctrie.size()});
-        ctrie.remove(actx.mctx, 0, doNothing);
-        actx.log("The size after remove is {}", {ctrie.size()});
+        testLookupAfterRemove(ctrie, actx, 0);
+        testRemoveAndSize(ctrie, actx);
 
         ctrie.cleanup(actx.mctx, doNothing);
     }

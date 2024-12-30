@@ -791,8 +791,7 @@ concept AsyncIOManager = requires(T t) {
                    std::string_view const& functionName,
                    uint32_t                line,
                    std::string_view const& levelStr,
-                   std::string_view const& content)
-            {
+                   std::string_view const& content) {
                 T&       clazz   = *reinterpret_cast<T*>(pClazz);
                 uint32_t freeIdx = clazz.findFirstFreeBlocking();
                 int32_t  sz      = std::snprintf(clazz[freeIdx],
@@ -809,8 +808,9 @@ concept AsyncIOManager = requires(T t) {
                 assert(sz > 0 && "could not log to buffer");
                 return clazz.enqueue(freeIdx, static_cast<uint32_t>(sz));
             };
-            logger.m_IOClassInterface.destructor = [](unsigned char* pClazz)
-            { std::destroy_at<T>(reinterpret_cast<T*>(pClazz)); };
+            logger.m_IOClassInterface.destructor = [](unsigned char* pClazz) {
+                std::destroy_at<T>(reinterpret_cast<T*>(pClazz));
+            };
             return logger;
         }
 

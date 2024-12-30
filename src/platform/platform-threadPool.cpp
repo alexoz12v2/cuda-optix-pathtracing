@@ -88,11 +88,9 @@ namespace dmt {
             m_threadPool->busyThreads--;
             //thrad stops and gives back the mutex until it is woken up again
             //it will check the condition-> true continue, false go back into sleep
-            m_threadPool->m_conditionVariable.wait(lock,
-                                                   [this] {
-                                                       return this->m_threadPool->m_shutdownRequested ||
-                                                              !this->m_threadPool->m_queue.empty();
-                                                   });
+            m_threadPool->m_conditionVariable.wait(lock, [this] {
+                return this->m_threadPool->m_shutdownRequested || !this->m_threadPool->m_queue.empty();
+            });
             m_threadPool->busyThreads++;
             //check if there is a task
             if (!this->m_threadPool->m_queue.empty())
@@ -167,11 +165,10 @@ namespace dmt {
                 }
 
                 EJobLayer activeLayer = currentLayer;
-                threadPool->m_cv.wait(lk,
-                                      [&threadPool, &activeLayer]() {
-                                          return (threadPool->m_ready && !threadPool->otherLayerActive(activeLayer)) ||
-                                                 threadPool->m_shutdownRequested;
-                                      });
+                threadPool->m_cv.wait(lk, [&threadPool, &activeLayer]() {
+                    return (threadPool->m_ready && !threadPool->otherLayerActive(activeLayer)) ||
+                           threadPool->m_shutdownRequested;
+                });
                 if (threadPool->m_shutdownRequested)
                 {
                     break;
@@ -386,14 +383,12 @@ namespace dmt {
     {
         // cycle through all Tagged pointers and count the number of true taggeed pointers
         uint32_t       trueTaggedPointerCount = 0;
-        constexpr auto incrementCount         = [](void* p, TaggedPointer tp)
-        {
+        constexpr auto incrementCount         = [](void* p, TaggedPointer tp) {
             assert(tp.tag() != nullTag);
             auto& cnt = *reinterpret_cast<uint32_t*>(p);
             ++cnt;
         };
-        constexpr auto storePtr = [](void* p, TaggedPointer tp)
-        {
+        constexpr auto storePtr = [](void* p, TaggedPointer tp) {
             auto& pair           = *reinterpret_cast<BufferCountPair*>(p);
             pair.p[pair.count++] = tp;
         };

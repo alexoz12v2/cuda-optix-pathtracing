@@ -35,8 +35,7 @@ namespace // all functions declared in an anonymous namespace (from the global n
         std::atomic<int32_t> completedThreads{0};
 
         // Lambda function for thread execution
-        auto logTask = [&logger, &completedThreads](int32_t id)
-        {
+        auto logTask = [&logger, &completedThreads](int32_t id) {
             using namespace std::string_view_literals;
 
             // Each thread logs different messages
@@ -154,30 +153,30 @@ int main()
     dmt::PageAllocatorHooks hooks{
         .allocHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
-                uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
-                if (counter++ % 50 == 0)
-                    ctx.log("Inside allocation hook!");
-            },
+        uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
+        if (counter++ % 50 == 0)
+            ctx.log("Inside allocation hook!");
+    },
         .freeHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
-                uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
-                if (counter++ % 50 == 0)
-                    ctx.log("inside deallocation Hook!");
-            },
+        uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
+        if (counter++ % 50 == 0)
+            ctx.log("inside deallocation Hook!");
+    },
         .data = &counter,
     };
     dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
     dmt::PageAllocatorHooks     testhooks{
             .allocHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
-                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-                tracker.track(ctx, alloc);
-            },
+        auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+        tracker.track(ctx, alloc);
+    },
             .freeHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
-                auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
-                tracker.untrack(ctx, alloc);
-            },
+        auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
+        tracker.untrack(ctx, alloc);
+    },
             .data = &tracker,
     };
     dmt::PageAllocator pageAllocator{ctx, testhooks};

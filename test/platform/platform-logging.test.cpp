@@ -181,8 +181,7 @@ static_assert(dmt::AsyncIOManager<MockAsyncIOManager>);
 
 TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLogger]")
 {
-    constexpr auto lambda = [](std::string& captureBuffer)
-    {
+    constexpr auto lambda = [](std::string& captureBuffer) {
         size_t idx = captureBuffer.find("<> ");
         CHECK(idx != std::string::npos);
         captureBuffer = captureBuffer.substr(idx + 3);                                // count length of "<> "
@@ -201,8 +200,8 @@ TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLog
         {
             capture::CaptureStdout cap(           //
                 [&](char const* buf, size_t sz) { //
-                    captureBuffer += std::string(buf, sz);
-                });
+                captureBuffer += std::string(buf, sz);
+            });
             logger.log("fdsjkafhdslafjl");
         }
         CHECK(captureBuffer.empty());
@@ -225,8 +224,8 @@ TEST_CASE("[platform-logging] Console Logger public functionality", "[ConsoleLog
         {
             capture::CaptureStdout cap(           //
                 [&](char const* buf, size_t sz) { //
-                    captureBuffer += std::string(buf, sz);
-                });
+                captureBuffer += std::string(buf, sz);
+            });
             logger.log("fdsjkafhdslafjl");
         }
         lambda(captureBuffer);

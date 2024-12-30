@@ -1559,13 +1559,10 @@ namespace dmt {
     {
         ctx.log("Untracking (deallocating tracking data) for all transient allocations");
         uint64_t freeTime = ctx.millisFromStart();
-        m_allocTracking.forEachTransientNodes(this,
-                                              freeTime,
-                                              [](void* self, uint64_t freeTime, AllocationInfo const& alloc)
-                                              {
-                                                  auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(self);
-                                                  tracker.m_slidingWindow.touchFreeTime(alloc.address, freeTime);
-                                              });
+        m_allocTracking.forEachTransientNodes(this, freeTime, [](void* self, uint64_t freeTime, AllocationInfo const& alloc) {
+            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(self);
+            tracker.m_slidingWindow.touchFreeTime(alloc.address, freeTime);
+        });
         m_allocTracking.removeTransientNodes();
     }
 
@@ -2115,38 +2112,33 @@ namespace dmt {
     tracker{pctx, pageTrackCapacity, allocTrackCapacity},
     pageHooks{
         .allocHook =
-            [](void* data, LoggingContext& ctx, PageAllocation const& alloc)
-        {
-            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-            tracker.track(ctx, alloc);
-        },
+            [](void* data, LoggingContext& ctx, PageAllocation const& alloc) {
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.track(ctx, alloc);
+            },
         .freeHook =
-            [](void* data, LoggingContext& ctx, PageAllocation const& alloc)
-        {
-            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-            tracker.untrack(ctx, alloc);
-        },
+            [](void* data, LoggingContext& ctx, PageAllocation const& alloc) {
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.untrack(ctx, alloc);
+            },
         .data = &tracker,
     },
     allocHooks{
         .allocHook =
-            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc)
-        {
-            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-            tracker.track(ctx, alloc);
-        },
+            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.track(ctx, alloc);
+            },
         .freeHook =
-            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc)
-        {
-            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-            tracker.untrack(ctx, alloc);
-        },
+            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.untrack(ctx, alloc);
+            },
         .cleanTransients =
-            [](void* data, LoggingContext& ctx)
-        {
-            auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-            tracker.claenTransients(ctx);
-        },
+            [](void* data, LoggingContext& ctx) {
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.claenTransients(ctx);
+            },
         .data = &tracker,
     },
     pageAllocator{pctx, pageHooks},

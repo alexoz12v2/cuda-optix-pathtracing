@@ -156,8 +156,7 @@ void testThreadpool(dmt::AppContext& ctx)
     JobData test1Data{ctx};
 
     // Define jobs for layer eTest0
-    auto jobTest0 = [](uintptr_t data)
-    {
+    auto jobTest0 = [](uintptr_t data) {
         JobData* jobData = reinterpret_cast<JobData*>(data);
         std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Simulate work
         ++jobData->counter;
@@ -165,8 +164,7 @@ void testThreadpool(dmt::AppContext& ctx)
     };
 
     // Define jobs for layer eTest1
-    auto jobTest1 = [](uintptr_t data)
-    {
+    auto jobTest1 = [](uintptr_t data) {
         JobData* jobData = reinterpret_cast<JobData*>(data);
         std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Simulate work
         ++jobData->counter;

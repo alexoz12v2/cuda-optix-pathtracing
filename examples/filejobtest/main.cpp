@@ -146,6 +146,7 @@ AttributeEnd
             }
         };
         // clang-format on
+        static constexpr auto doNothing = [](dmt::MemoryContext& mctx, void* ptr) {};
 
         dmt::CTrie ctrie{actx.mctx, table, sizeof(uint32_t), alignof(uint32_t)};
         uint32_t   value = 43u;
@@ -170,7 +171,12 @@ AttributeEnd
         ctrie.lookupCopy(0, &pStorage);
         actx.log("New copy retrieved: {}", {receiver});
 
-        ctrie.cleanup(actx.mctx, [](dmt::MemoryContext& mctx, void* ptr) {});
+        // remove test
+        actx.log("The size before remove is {}", {ctrie.size()});
+        ctrie.remove(actx.mctx, 0, doNothing);
+        actx.log("The size after remove is {}", {ctrie.size()});
+
+        ctrie.cleanup(actx.mctx, doNothing);
     }
 } // namespace
 

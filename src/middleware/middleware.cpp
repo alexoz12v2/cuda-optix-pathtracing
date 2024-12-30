@@ -470,19 +470,75 @@ namespace dmt {
 
     void* CTrie::lookupRef(uint32_t keyHash)
     {
-        // TODO similiar to lookupConstRef, but return a mutable thing
         // the given 32 bit index is split into packets of 5 bits
         uint32_t mask   = 0xF800'0000;
         INode*   parent = std::bit_cast<INode*>(m_table.rawPtr(m_root));
         return lookupRefFrom(parent, mask, keyHash);
     }
 
-    bool CTrie::remove(MemoryContext& mctx, uint32_t keyHash)
+    size_t CTrie::size() const
     {
-        // TODO
-        return false;
+        return m_size.load(std::memory_order_seq_cst);
     }
 
+    void* CTrie::removeFrom(MemoryContext& mctx, INode* inode, uint32_t mask, uint32_t keyHash, void (*dctor)(MemoryContext& mctx, void* elem))
+    {
+        uint32_t shamt  = countTrailingZeros(mask);
+        uint32_t packet = (keyHash & mask) >> shamt;
+        mask >>= 5;
+
+        if (isINode(inode, packet))
+        {
+            inode = std::bit_cast<INode*>(m_table.rawPtr(inode->children[packet]));
+            return removeFrom(mctx, inode, mask, keyHash, dctor);
+        }
+        else
+        {
+            SNode* self   = std::bit_cast<SNode*>(m_table.rawPtr(inode->children[packet]));
+            size_t maxIdx = computeMaxElements(256, m_sNodeSize, m_sNodeAlign);
+
+            for (uint32_t i = 0; i < maxIdx; ++i)
+            {
+                if (!isFullElement(self, i))
+                    continue;
+
+                lockForWrite(self, i);
+
+                void const* data     = self->data;
+                uintptr_t   elemAddr = std::bit_cast<uintptr_t>(data) + i * m_sNodeSize;
+
+                uintptr_t       keyAddr = getKeyAddress(elemAddr, m_sNodeSize, m_paddingEnd);
+                uint32_t const& key     = *std::bit_cast<uint32_t const*>(keyAddr);
+
+                if (key == keyHash)
+                {
+                    // Found the key, so perform the removal
+                    assert(elemAddr == alignToAddr(elemAddr, m_sNodeAlign));
+
+                    // Run the destructor to clean up the element
+                    dctor(mctx, std::bit_cast<void*>(elemAddr));
+
+                    // Optionally, remove or mark the element as removed here
+                    m_size.fetch_sub(1, std::memory_order_release);
+
+                    unlockForWrite(self, i, 0b00);
+                    return std::bit_cast<void*>(elemAddr); // Returning the SNode or element as per the requirement
+                }
+
+                unlockForWrite(self, i);
+            }
+
+            return nullptr;
+        }
+    }
+
+    void* CTrie::remove(MemoryContext& mctx, uint32_t keyHash, void (*dctor)(MemoryContext& mctx, void* elem))
+    {
+        // the given 32-bit index is split into packets of 5 bits
+        uint32_t mask   = 0xF800'0000;
+        INode*   parent = std::bit_cast<INode*>(m_table.rawPtr(m_root));
+        return removeFrom(mctx, parent, mask, keyHash, dctor);
+    }
 
     size_t CTrie::getValueSize() const
     {
@@ -790,8 +846,9 @@ namespace dmt {
         uint32_t count = refCounter->fetch_add(1, std::memory_order_acquire);
     }
 
-    void CTrie::unlockForWrite(SNode* self, uint32_t elementIdx)
+    void CTrie::unlockForWrite(SNode* self, uint32_t elementIdx, uint64_t desired)
     {
+        assert(desired == 0b11 || desired == 0b00);
         // Read the bitmap for the slot
         uint64_t bitmap = self->bitmap.load(std::memory_order_acquire);
 
@@ -805,15 +862,15 @@ namespace dmt {
         assert(bits == 0b10);
 
         // Change the bitmap to set the element back to 0b01 (read-lockable)
-        uint64_t desired = (bitmap & ~mask) | (0b11 << shamt); // Set to 0b11 (unused)
+        uint64_t desiredMask = (bitmap & ~mask) | (desired << shamt); // Set to 0b11 (unused)
 
         // Atomically update the bitmap using compare-and-swap
-        bool success = self->bitmap.compare_exchange_strong(bitmap, desired, std::memory_order_acq_rel, std::memory_order_acquire);
+        bool success = self->bitmap.compare_exchange_strong(bitmap, desiredMask, std::memory_order_acq_rel, std::memory_order_acquire);
 
         // If the CAS failed, retry until successful
         if (!success)
         {
-            unlockForWrite(self, elementIdx);
+            unlockForWrite(self, elementIdx, desired);
         }
     }
 

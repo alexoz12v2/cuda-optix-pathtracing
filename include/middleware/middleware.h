@@ -52,19 +52,19 @@ DMT_MODULE_EXPORT dmt {
         bool        insert(MemoryContext& mctx, uint32_t keyHash, void const* pValue);
         void const* lookupConstRef(uint32_t keyHash);
         void*       lookupRef(uint32_t keyHash);
-        bool remove(MemoryContext& mctx, uint32_t keyHash); // false if lookupRef returns nullptr (ctx to free if snode empty)
+        void*       remove(MemoryContext& mctx, uint32_t keyHash, void (*dctor)(MemoryContext& mctx, void* elem));
         void finishRead(void const** ppElem);
         void finishWrite(void** ppElem);
         void lookupCopy(uint32_t keyHash, void** ppStorage);
-
         void cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr));
+        size_t      size() const;
 
     private:
         struct SNode // don't trust its alignment, its just to know the offsetof the bitmap
         {
             alignas(8) unsigned char data[256];
             // 00 = free,
-            // 01 = can be locked for read,
+            // 01 = locked for read (shared, ref counted),
             // 10 = locked exl. for write,
             // 11 = node not used (allocated, but neither read nor write locked)
             std::atomic<uint64_t> bitmap;
@@ -104,6 +104,11 @@ DMT_MODULE_EXPORT dmt {
         void const* lookupConstRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
         void*       lookupRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
         size_t      getValueSize() const;
+        void*       removeFrom(MemoryContext& mctx,
+                               INode*         inode,
+                               uint32_t       mask,
+                               uint32_t       keyHash,
+                               void (*dctor)(MemoryContext& mctx, void* elem));
 
         static bool isINode(INode const* parent, uint32_t childIdx);
         static bool isChildNotAllocated(INode const* parent, uint32_t childIdx);
@@ -114,7 +119,7 @@ DMT_MODULE_EXPORT dmt {
         static void lockForRead(SNode* self, uint32_t elementIdx, size_t nodeSize, uint32_t paddingEnd);
         static bool lockForAlloc(INode* self, uint32_t childIdx, bool force = false);
         static void unlockForAlloc(INode* self, uint32_t childIdx, uint64_t desired);
-        static void unlockForWrite(SNode* self, uint32_t elementIdx);
+        static void unlockForWrite(SNode* self, uint32_t elementIdx, uint64_t desired = 0b11);
         static void unlockForRead(SNode* self, uint32_t elementIdx, size_t nodeSize, uint32_t paddingEnd);
 
         AllocatorTable        m_table;

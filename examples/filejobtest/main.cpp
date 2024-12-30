@@ -150,8 +150,26 @@ AttributeEnd
         dmt::CTrie ctrie{actx.mctx, table, sizeof(uint32_t), alignof(uint32_t)};
         uint32_t   value = 43u;
         ctrie.insert(actx.mctx, 0u, &value);
-        uint32_t const* res = std::bit_cast<uint32_t const*>(ctrie.lookupConstRef(0u));
-        actx.log("Tried to insert something in the ctrie, true val {}, got {}", {value, *res});
+        void const* res = ctrie.lookupConstRef(0u);
+        actx.log("Tried to insert something in the ctrie, true val {}, got {}", {value, *std::bit_cast<uint32_t const*>(res)});
+        ctrie.finishRead(&res);
+
+        // test lookup copy
+        uint32_t receiver = 0;
+        void*    pStorage = &receiver;
+        ctrie.lookupCopy(0, &pStorage);
+        actx.log("Copy retrieved: {}", {receiver});
+
+        // test lookupRef
+        void* mutRes = ctrie.lookupRef(0);
+        actx.log("Tried to retrieve mutable something in the ctrie, true val {}, got {}", {value, *std::bit_cast<uint32_t*>(mutRes)});
+        *reinterpret_cast<uint32_t*>(mutRes) = 73;
+        actx.log("Mutated Value: {}", {*std::bit_cast<uint32_t*>(mutRes)});
+        ctrie.finishWrite(&mutRes);
+
+        ctrie.lookupCopy(0, &pStorage);
+        actx.log("New copy retrieved: {}", {receiver});
+
         ctrie.cleanup(actx.mctx, [](dmt::MemoryContext& mctx, void* ptr) {});
     }
 } // namespace

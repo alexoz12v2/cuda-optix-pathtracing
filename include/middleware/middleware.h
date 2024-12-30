@@ -53,7 +53,8 @@ DMT_MODULE_EXPORT dmt {
         void const* lookupConstRef(uint32_t keyHash);
         void*       lookupRef(uint32_t keyHash);
         bool remove(MemoryContext& mctx, uint32_t keyHash); // false if lookupRef returns nullptr (ctx to free if snode empty)
-        void finishRead(void** ppElem);
+        void finishRead(void const** ppElem);
+        void finishWrite(void** ppElem);
         void lookupCopy(uint32_t keyHash, void** ppStorage);
 
         void cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr));
@@ -101,6 +102,8 @@ DMT_MODULE_EXPORT dmt {
         };
         EResult     iinsert(MemoryContext& mctx, INode* pNode, uint32_t keyHash, void const* pValue);
         void const* lookupConstRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
+        void*       lookupRefFrom(INode* inode, uint32_t mask, uint32_t keyHash);
+        size_t      getValueSize() const;
 
         static bool isINode(INode const* parent, uint32_t childIdx);
         static bool isChildNotAllocated(INode const* parent, uint32_t childIdx);
@@ -108,10 +111,11 @@ DMT_MODULE_EXPORT dmt {
         static bool isFullElement(SNode const* self, uint32_t elementIdx);
         static bool isFree(SNode const* self, uint32_t elementIdx);
         static void lockForWrite(SNode* self, uint32_t elementIdx);
-        static void lockForRead(SNode* self, uint32_t elementIdx);
+        static void lockForRead(SNode* self, uint32_t elementIdx, size_t nodeSize, uint32_t paddingEnd);
         static bool lockForAlloc(INode* self, uint32_t childIdx, bool force = false);
         static void unlockForAlloc(INode* self, uint32_t childIdx, uint64_t desired);
         static void unlockForWrite(SNode* self, uint32_t elementIdx);
+        static void unlockForRead(SNode* self, uint32_t elementIdx, size_t nodeSize, uint32_t paddingEnd);
 
         AllocatorTable        m_table;
         TaggedPointer         m_root; // assume this is always INode state

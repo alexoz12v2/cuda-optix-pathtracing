@@ -276,7 +276,7 @@ namespace dmt {
                 size_t maxIdx = computeMaxElements(256, m_sNodeSize, m_sNodeAlign);
                 for (uint32_t i = 0; i < maxIdx; ++i)
                 {
-                    if (!isFree(sNode, i)) // Only call destructor for non-free slots
+                    if (!isFree(sNode, i)) // Only call destructor for non-free slots (TODO lock for write)
                     {
                         void* pData    = sNode->data;
                         void* dataAddr = std::bit_cast<void*>(std::bit_cast<uintptr_t>(pData) + i * m_sNodeSize);

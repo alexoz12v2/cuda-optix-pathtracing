@@ -1967,7 +1967,6 @@ namespace dmt {
                     if (metadata[byteIndex] & byteMask) // not sure this works
                     {
                         isRegionFree = false;
-                        ++bufferIdx;
                         break;
                     }
                 }
@@ -2004,6 +2003,7 @@ namespace dmt {
                 }
             }
 
+            ++bufferIdx;
             currentBuffer = currentBuffer->next;
         }
 

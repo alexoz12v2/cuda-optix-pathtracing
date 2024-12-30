@@ -9,6 +9,9 @@ module platform;
 
 namespace dmt
 {
+    //glfw staff
+    DMTwindowGLFW Display::m_winGLFW;
+    DMTwindowImGui Display::m_winImGui;
 
 Display::Display()
 {
@@ -23,7 +26,6 @@ Display::~Display()
 {
     if (m_winGLFW.window != NULL)
         glfwDestroyWindow(m_winGLFW.window);
-    ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui::DestroyContext();
     glfwTerminate();
@@ -97,6 +99,11 @@ void Display::InitPropertyWindow()
 
     glfwMakeContextCurrent(m_winGLFW.window);
     glfwSwapInterval(1);
+
+    glfwSetWindowSizeCallback(m_winGLFW.window, WindowSizeCallback);
+    glfwSetKeyCallback(m_winGLFW.window, KeyEscCallback);
+    glfwSetWindowSizeLimits(m_winGLFW.window,640, 480,GLFW_DONT_CARE, GLFW_DONT_CARE); 	
+    m_winGLFW.fullScreenState = true;
 
     //Steup ImGUI context
     IMGUI_CHECKVERSION();
@@ -190,5 +197,15 @@ void Display::ShowMenuFile()
     if (ImGui::MenuItem("Save Image", "Ctrl+S")) {}
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "Alt+F4")) {}
+}
+
+void Display::SetFullScreen(bool value)
+{
+    m_winGLFW.fullScreenState=value;
+}
+
+bool Display::IsFullScreen()
+{
+    return m_winGLFW.fullScreenState;   
 }
 } // namespace dmt

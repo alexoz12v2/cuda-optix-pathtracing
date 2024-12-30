@@ -28,6 +28,7 @@ DMT_MODULE_EXPORT dmt {
         const GLFWvidmode* mode;
         int displayW;
         int displayH;
+        bool fullScreenState;
     }DMTwindowGLFW;
 
     typedef struct DMTwindowImGui
@@ -56,6 +57,8 @@ DMT_MODULE_EXPORT dmt {
         Display& operator=(Display&&) = delete;
 
         void ShowWindow();
+        void SetFullScreen(bool value);
+        bool IsFullScreen();
 
     private:
         static void HelpMarker(const char* desc)
@@ -74,6 +77,25 @@ DMT_MODULE_EXPORT dmt {
         {
             std::cerr << "GLFW Error " << error << description << std::endl;
         }
+
+        static void WindowSizeCallback(GLFWwindow* window, int width, int height)
+        {
+            std::cout << "Resize: " << width << ", " << height << std::endl;
+            glfwSetWindowSize(window, width, height);
+            //SetFullScreen(false);
+            m_winGLFW.fullScreenState = false;
+        }
+
+        static void KeyEscCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+        {
+            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+            {
+                m_winGLFW.fullScreenState = false;
+                //SetFullScreen(false);
+                glfwSetWindowMonitor(window, NULL, 10, 10, 640, 480, 60);
+	
+            }
+        }
         
         void ShowPropertyWindow(bool* pOpen, int displayW, int displayH);
         void ShowPropertyWindowMenuBar();
@@ -81,9 +103,7 @@ DMT_MODULE_EXPORT dmt {
         void InitPropertyWindow();
         void PropertyWindowRenderer();
 
-    private:
-        //glfw staff
-        DMTwindowGLFW m_winGLFW;
-        DMTwindowImGui m_winImGui;
+        static DMTwindowGLFW m_winGLFW;
+        static DMTwindowImGui m_winImGui;
     };
 }

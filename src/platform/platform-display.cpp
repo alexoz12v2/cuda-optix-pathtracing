@@ -216,7 +216,6 @@ void Display::InitPropertyWindow()
 
 }
 
-//to review
 void Display::ShowPropertyWindow(bool* pOpen)
 {
     if (m_winImGui.noScrollbar)
@@ -231,6 +230,8 @@ void Display::ShowPropertyWindow(bool* pOpen)
         m_winImGui.windowFlags |= ImGuiWindowFlags_MenuBar;
     if (m_winImGui.alwaysAutoResize)
         m_winImGui.windowFlags |= ImGuiWindowFlags_AlwaysAutoResize;
+    if (m_winImGui.noCollapse)
+        m_winImGui.windowFlags |= ImGuiWindowFlags_NoCollapse;
     if (m_winImGui.close)
         pOpen = NULL;
 

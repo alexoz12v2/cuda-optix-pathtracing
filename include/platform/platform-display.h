@@ -39,6 +39,7 @@ DMT_MODULE_EXPORT dmt {
         bool                 menuBar          = true;
         bool                 close            = false;
         bool                 alwaysAutoResize = false;
+        bool                 noCollapse = true;
         ImGuiWindowFlags     windowFlags      = 0;
         const ImGuiViewport* mainViewport;
     } DMTwindowImGui;

@@ -28,17 +28,18 @@ DMT_MODULE_EXPORT dmt {
         const GLFWvidmode* mode;
         int displayW;
         int displayH;
-        bool fullScreenState;
+        bool fullScreenState = true;
     }DMTwindowGLFW;
 
     typedef struct DMTwindowImGui
     {
         bool noScrollbar = false;
         bool noMove = true;        
-        bool noResize = false;
+        bool noResize = true;
         bool noBackground = false;
         bool menuBar = true;
         bool close = false;
+        bool alwaysAutoResize = false;
         ImGuiWindowFlags windowFlags = 0;
         const ImGuiViewport* mainViewport;
     }DMTwindowImGui;
@@ -81,24 +82,32 @@ DMT_MODULE_EXPORT dmt {
 
         static void WindowSizeCallback(GLFWwindow* window, int width, int height)
         {
-            std::cout << "Resize: " << width << ", " << height << std::endl;
+            //std::cout << "Resize: " << width << ", " << height << std::endl;
             glfwSetWindowSize(window, width, height);
-            //SetFullScreen(false);
-            m_winGLFW.fullScreenState = false;
+        }
+
+        static void WindowMaximizeCallback(GLFWwindow* window, int maximized)
+        {
+            if(maximized == GLFW_TRUE)
+            {
+                m_winGLFW.fullScreenState = true;
+                glfwSetWindowMonitor(window, m_winGLFW.monitor, 0, 0, m_winGLFW.mode->width, m_winGLFW.mode->height, m_winGLFW.mode->refreshRate); 
+            }
         }
 
         static void KeyEscCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
         {
-            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+            //std::cout << "action: " << action << std::endl;
+            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS && m_winGLFW.fullScreenState)
             {
                 m_winGLFW.fullScreenState = false;
-                //SetFullScreen(false);
-                glfwSetWindowMonitor(window, NULL, 10, 10, 640, 480, 60);
-	
+                glfwSetWindowMonitor(window, NULL, 50, 50, 640, 480, m_winGLFW.mode->refreshRate);
             }
+            else if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS && !m_winGLFW.fullScreenState)
+                glfwSetWindowShouldClose(window, GLFW_TRUE);
         }
         
-        void ShowPropertyWindow(bool* pOpen, int displayW, int displayH);
+        void ShowPropertyWindow(bool* pOpen);
         void ShowPropertyWindowMenuBar();
         void ShowMenuFile();
         void InitPropertyWindow();

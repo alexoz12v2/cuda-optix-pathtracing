@@ -63,7 +63,7 @@ void Display::PropertyWindowRenderer()
         ImGui::NewFrame();
         glfwGetFramebufferSize(m_winGLFW.window, &m_winGLFW.displayW, &m_winGLFW.displayH);
         //display propertyWindow
-        Display::ShowPropertyWindow(&showPropertyWindow, m_winGLFW.displayW, m_winGLFW.displayH);
+        Display::ShowPropertyWindow(&showPropertyWindow);
         //rendering 
         ImGui::Render();
         
@@ -103,9 +103,13 @@ void Display::InitPropertyWindow()
     glfwMakeContextCurrent(m_winGLFW.window);
     glfwSwapInterval(1);
 
+    //set callbacks functions
     glfwSetWindowSizeCallback(m_winGLFW.window, WindowSizeCallback);
     glfwSetKeyCallback(m_winGLFW.window, KeyEscCallback);
+    glfwSetWindowMaximizeCallback(m_winGLFW.window, WindowMaximizeCallback);
+    //set limits minimum size window
     glfwSetWindowSizeLimits(m_winGLFW.window,640, 480,GLFW_DONT_CARE, GLFW_DONT_CARE); 	
+    
     m_winGLFW.fullScreenState = true;
 
     //Steup ImGUI context
@@ -125,18 +129,19 @@ void Display::InitPropertyWindow()
 }
 
 //to review 
-void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
+void Display::ShowPropertyWindow(bool* pOpen)
 {
     if (m_winImGui.noScrollbar)       m_winImGui.windowFlags |= ImGuiWindowFlags_NoScrollbar;
     if (m_winImGui.noMove)            m_winImGui.windowFlags |= ImGuiWindowFlags_NoMove;
     if (m_winImGui.noResize)          m_winImGui.windowFlags |= ImGuiWindowFlags_NoResize;
     if (m_winImGui.noBackground)      m_winImGui.windowFlags |= ImGuiWindowFlags_NoBackground;
     if (m_winImGui.menuBar)           m_winImGui.windowFlags |= ImGuiWindowFlags_MenuBar;
+    if (m_winImGui.alwaysAutoResize)  m_winImGui.windowFlags |= ImGuiWindowFlags_AlwaysAutoResize;
     if (m_winImGui.close)           pOpen = NULL; 
 
     m_winImGui.mainViewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(m_winImGui.mainViewport->WorkPos.x, m_winImGui.mainViewport->WorkPos.y), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(m_winGLFW.displayW*0.2, m_winGLFW.displayH), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(m_winGLFW.displayW * 0.2, m_winGLFW.displayH), 0);
 
 
     

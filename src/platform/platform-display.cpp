@@ -24,10 +24,13 @@ Display::Display()
 
 Display::~Display()
 {
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
     if (m_winGLFW.window != NULL)
         glfwDestroyWindow(m_winGLFW.window);
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui::DestroyContext();
+
     glfwTerminate();
 }
 
@@ -124,10 +127,11 @@ void Display::InitPropertyWindow()
 //to review 
 void Display::ShowPropertyWindow(bool* pOpen, int displayW, int displayH)
 {
-    if (m_winImGui.scrollbar)       m_winImGui.windowFlags |= ImGuiWindowFlags_NoScrollbar;
-    if (m_winImGui.move)            m_winImGui.windowFlags |= ImGuiWindowFlags_NoMove;
-    if (m_winImGui.resize)          m_winImGui.windowFlags |= ImGuiWindowFlags_NoResize;
-    if (m_winImGui.background)      m_winImGui.windowFlags |= ImGuiWindowFlags_NoBackground;
+    if (m_winImGui.noScrollbar)       m_winImGui.windowFlags |= ImGuiWindowFlags_NoScrollbar;
+    if (m_winImGui.noMove)            m_winImGui.windowFlags |= ImGuiWindowFlags_NoMove;
+    if (m_winImGui.noResize)          m_winImGui.windowFlags |= ImGuiWindowFlags_NoResize;
+    if (m_winImGui.noBackground)      m_winImGui.windowFlags |= ImGuiWindowFlags_NoBackground;
+    if (m_winImGui.menuBar)           m_winImGui.windowFlags |= ImGuiWindowFlags_MenuBar;
     if (m_winImGui.close)           pOpen = NULL; 
 
     m_winImGui.mainViewport = ImGui::GetMainViewport();

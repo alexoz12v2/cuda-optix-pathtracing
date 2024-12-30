@@ -33,11 +33,12 @@ DMT_MODULE_EXPORT dmt {
 
     typedef struct DMTwindowImGui
     {
-        bool scrollbar = false;
-        bool move = false;
+        bool noScrollbar = false;
+        bool noMove = true;        
+        bool noResize = false;
+        bool noBackground = false;
+        bool menuBar = true;
         bool close = false;
-        bool resize = false;
-        bool background = false;
         ImGuiWindowFlags windowFlags = 0;
         const ImGuiViewport* mainViewport;
     }DMTwindowImGui;

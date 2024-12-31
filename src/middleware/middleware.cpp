@@ -409,9 +409,14 @@ namespace dmt {
 
     bool CTrie::insert(MemoryContext& mctx, uint32_t key, void const* value)
     {
+        static constexpr uint32_t dataSize = sizeof(SNode::Data); // SNode data size
+        uint32_t elementSize = elemSize(m_valueSize, m_valueAlign);
+        uint32_t numElements = dataSize / elementSize;
+
         INode*   inode = reinterpret_cast<INode*>(m_table.rawPtr(m_root));
         SNode*   snode = nullptr;
         uint32_t level = 0;
+        uint32_t parentPos = 0;
         while (level < 5)
         {
             if (!snode) // current node is inode
@@ -445,6 +450,8 @@ namespace dmt {
                     assert(false);
                     return false;
                 }
+
+                parentPos = pos;
             }
             else
             {
@@ -461,11 +468,100 @@ namespace dmt {
                 }
                 else
                 { // TODO collision! 
-                    return false;
+                    uint64_t prevState = inode->bits.getValue(parentPos);
+                    if (inode->bits.setOccupied(parentPos, true)) // Lock the parent position
+                    {
+                        TaggedPointer newINodePtr = newINode(mctx);
+                        if (newINodePtr == taggedNullptr)
+                        {
+                            inode->bits.setValue(prevState, parentPos); // Restore state
+                            return false;
+                        }
+
+                        INode* newINode = reinterpret_cast<INode*>(m_table.rawPtr(newINodePtr));
+
+                        // Reinsert all elements from the SNode into the new INode
+                        for (uint32_t i = 0; i < numElements; ++i)
+                        {
+                            if (!snode->bits.checkUnused(i))
+                            {
+                                uint32_t existingKey   = snode->keyRef(i, m_valueSize, m_valueAlign);
+                                void*    existingValue = snode->valueAt(i, m_valueSize, m_valueAlign);
+
+                                // Perform recursive insertion at the next level
+                                if (!reinsert(mctx, newINode, existingKey, existingValue, level + 1))
+                                {
+                                    // Cleanup on failure
+                                    inode->bits.setValue(prevState, parentPos);
+                                    return false;
+                                }
+                            }
+                        }
+
+                        // Replace SNode with the new INode in the parent
+                        inode->children[parentPos] = newINodePtr;
+                        inode->bits.setINode(parentPos);
+
+                                            // Lock all non-free elements and deallocate the old SNode
+                        for (uint32_t i = 0; i < numElements; ++i)
+                        {
+                            if (!snode->bits.checkFree(i))
+                            {
+                                while (!snode->bits.casFreeToWriteLocked(i, SNodeBitmap::unused))
+                                    std::this_thread::yield();
+                            }
+                        }
+                        m_table.free(mctx, inode->children[parentPos], sizeof(SNode), alignof(SNode));
+
+                        // Restart the insertion process into the new INode
+                        inode = newINode;
+                        snode = nullptr;
+                    }
+                    else
+                        return false;
                 }
             }
 
             ++level;
+        }
+
+        return false;
+    }
+
+    
+    bool CTrie::reinsert(MemoryContext& mctx, INode* inode, uint32_t key, void const* value, uint32_t level)
+    {
+        uint32_t pos = posINode(key, level);
+
+        if (inode->bits.checkFree(pos) && inode->bits.setOccupied(pos))
+        { // Allocate a new SNode
+            TaggedPointer ptr = newSNode(mctx);
+            if (ptr == taggedNullptr)
+            {
+                inode->bits.setFree(pos);
+                return false;
+            }
+            inode->children[pos] = ptr;
+            inode->bits.setSNode(pos);
+        }
+
+        if (inode->bits.checkINode(pos))
+        {
+            INode* childINode = reinterpret_cast<INode*>(m_table.rawPtr(inode->children[pos]));
+            return reinsert(mctx, childINode, key, value, level + 1);
+        }
+        else if (inode->bits.checkSNode(pos))
+        {
+            SNode*   childSNode = reinterpret_cast<SNode*>(m_table.rawPtr(inode->children[pos]));
+            uint32_t sPos       = posSNode(key, level, m_valueSize, m_valueAlign);
+            if (childSNode->bits.checkFree(sPos) && childSNode->bits.casFreeToWriteLocked(sPos))
+            {
+                std::memcpy(childSNode->valueAt(sPos, m_valueSize, m_valueAlign), value, m_valueSize);
+                childSNode->keyRef(sPos, m_valueSize, m_valueAlign) = key;
+                childSNode->refCounterAt(sPos, m_valueSize, m_valueAlign).store(0, std::memory_order_seq_cst);
+                childSNode->bits.setUnused(sPos);
+                return true;
+            }
         }
 
         return false;

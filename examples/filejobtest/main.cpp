@@ -134,7 +134,8 @@ AttributeEnd
     {
         dmt::CTrie ctrie{actx.mctx, dmt::AllocatorTable::fromPool(actx.mctx), sizeof(uint32_t), alignof(uint32_t)};
         uint32_t   testValue = 43;
-        ctrie.insert(actx.mctx, 0, &testValue);
+        ctrie.insert(actx.mctx, 0x0000'0000, &testValue);
+        ctrie.insert(actx.mctx, 0x8000'0000, &testValue);
         actx.log("inserted value {}", {testValue});
         ctrie.cleanup(actx.mctx, doNothing);
     }

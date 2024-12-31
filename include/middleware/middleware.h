@@ -74,17 +74,27 @@ DMT_MODULE_EXPORT dmt {
 
         std::atomic<uint64_t> map;
 
-    protected:
-        bool checkValue(uint64_t value, uint64_t index) const
+        uint64_t getValue(uint64_t index)  const
         {
             assert(index < 32);
-            assert((value & ~0b11ULL) == 0);
             uint64_t const shamt = index << 1;
             uint64_t const mask  = 0b11ULL << shamt;
 
             uint64_t mapVal = map.load(std::memory_order_relaxed);
-            uint64_t bits   = mapVal & mask;
-            return bits == value;
+            uint64_t bits   = (mapVal & mask) >> shamt;
+            return bits;
+        }
+
+        bool setValue(uint64_t value, uint64_t index)
+        {
+            return cas(value, index, false, 0, 0);
+        }
+
+    protected:
+        bool checkValue(uint64_t value, uint64_t index) const
+        {
+            assert((value & ~0b11ULL) == 0);
+            return getValue(index) == value;
         }
 
         void waitForValue(uint64_t value, uint64_t index) const
@@ -216,6 +226,7 @@ DMT_MODULE_EXPORT dmt {
         void cleanupINode(MemoryContext& mctx, INode* inode, void(*dctor)(MemoryContext& mctx, void* value));
         void cleanupSNode(MemoryContext& mctx, SNode* inode, void(*dctor)(MemoryContext& mctx, void* value));
         //bool iinsert(MemoryContext& mctx, TaggedPointer node, uint32_t key, void const* value, uint32_t level, INode* parent);
+        bool reinsert(MemoryContext& mctx, INode* inode, uint32_t key, void const* value, uint32_t level);
 
         TaggedPointer newINode(MemoryContext& mctx) const;
         TaggedPointer newSNode(MemoryContext& mctx) const;

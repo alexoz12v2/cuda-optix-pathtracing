@@ -6,6 +6,7 @@
 #include <atomic>
 #include <limits>
 #include <string_view>
+#include <thread>
 
 #include <cassert>
 #include <compare>
@@ -39,147 +40,195 @@ DMT_MODULE_EXPORT dmt {
 
     struct AllocatorTable
     {
+        static AllocatorTable fromPool(MemoryContext& mctx);
+
         TaggedPointer (*allocate)(MemoryContext& mctx, size_t size, size_t alignment);
         void (*free)(MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment);
         void* (*rawPtr)(TaggedPointer pt);
     };
 
+    AllocatorTable AllocatorTable::fromPool(MemoryContext& mctx)
+    {
+        AllocatorTable table;
+        table.allocate = [](MemoryContext& mctx, size_t size, size_t alignment) {
+            uint32_t numBlocks = static_cast<uint32_t>(ceilDiv(size, static_cast<size_t>(toUnderlying(EBlockSize::e32B))));
+            return mctx.poolAllocateBlocks(numBlocks, EBlockSize::e32B, EMemoryTag::eUnknown, 0);
+        };
+        table.free     = [](MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment) {
+            uint32_t numBlocks = static_cast<uint32_t>(ceilDiv(size, static_cast<size_t>(toUnderlying(EBlockSize::e32B))));
+            mctx.poolFreeBlocks(numBlocks, pt);
+        };
+        table.rawPtr = [](TaggedPointer pt) { 
+            return pt.pointer();
+        };
+        return table;
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    struct Bitmap
+    {
+        Bitmap() : map(0)
+        {
+        }
+
+        std::atomic<uint64_t> map;
+
+    protected:
+        bool checkValue(uint64_t value, uint64_t index) const
+        {
+            assert(index < 32);
+            assert((value & ~0b11ULL) == 0);
+            uint64_t const shamt = index << 1;
+            uint64_t const mask  = 0b11ULL << shamt;
+
+            uint64_t mapVal = map.load(std::memory_order_relaxed);
+            uint64_t bits   = mapVal & mask;
+            return bits == value;
+        }
+
+        void waitForValue(uint64_t value, uint64_t index) const
+        {
+            assert(index < 32);
+            assert((value & ~0b11ULL) == 0);
+            uint64_t const shamt  = index << 1;
+            uint64_t const mask   = 0b11ULL << shamt;
+            uint64_t       mapVal = map.load(std::memory_order_relaxed);
+            uint64_t       bits   = mapVal & mask;
+            while (bits != value)
+            {
+                std::this_thread::yield();
+                mapVal = map.load(std::memory_order_relaxed);
+                bits   = mapVal & mask;
+            }
+        }
+
+        bool cas(uint64_t value, uint64_t index, bool checkFor, uint64_t expected0, uint64_t expected1)
+        {
+            assert(index < 32);
+            assert((value & ~0b11ULL) == 0);
+            assert((expected0 & ~0b11ULL) == 0);
+            assert((expected1 & ~0b11ULL) == 0);
+
+            uint64_t const shamt = index << 1;       // Shift amount for 2-bit slots
+            uint64_t const mask  = 0b11ULL << shamt; // Mask for the target slot
+
+            uint64_t mapVal = map.load(std::memory_order_relaxed);
+            uint64_t bits   = (mapVal & mask) >> shamt; // Extract the bits for the given index
+
+            if (checkFor)
+            {
+                // If checkFor is true, the value at the index must match one of the expected values
+                if (bits != expected0 && bits != expected1)
+                {
+                    return false; // Value doesn't match either expected value
+                }
+            }
+
+            // Perform the unconditional update if checkFor is false, or update after match if true
+            uint64_t const desired = (mapVal & ~mask) | (value << shamt);
+            return map.compare_exchange_strong(mapVal, desired, std::memory_order_seq_cst, std::memory_order_relaxed);
+        }
+    };
+
+    struct SNodeBitmap : public Bitmap
+    {
+        static constexpr uint64_t free        = 0b00;
+        static constexpr uint64_t readLocked  = 0b01;
+        static constexpr uint64_t writeLocked = 0b10;
+        static constexpr uint64_t unused      = 0b11;
+
+        // clang-format off
+        bool checkFree(uint64_t index) const { return checkValue(free, index); }
+        bool checkReadLocked(uint64_t index) const { return checkValue(readLocked, index); }
+        bool checkWriteLocked(uint64_t index) const { return checkValue(writeLocked, index); }
+        bool checkUnused(uint64_t index) const { return checkValue(unused, index); }
+
+        bool setFree(uint64_t index) { return cas(free, index, false, 0, 0); }
+        bool casToReadLocked(uint64_t index) { return cas(readLocked, index, true, free, readLocked); }
+        bool casFreeToWriteLocked(uint64_t index, uint64_t exp = free) { return cas(writeLocked, index, true, exp, exp); }
+        bool setUnused(uint64_t index) { return cas(unused, index, false, 0, 0); }
+        // clang-format on
+    };
+
+    struct INodeBitmap : public Bitmap
+    {
+        static constexpr uint64_t free     = 0b00;
+        static constexpr uint64_t inode    = 0b01;
+        static constexpr uint64_t snode    = 0b10;
+        static constexpr uint64_t occupied = 0b11;
+
+        // clang-format off
+        bool checkFree(uint64_t index) const { return checkValue(free, index); }
+        bool checkINode(uint64_t index) const { return checkValue(inode, index); }
+        bool checkSNode(uint64_t index) const { return checkValue(snode, index); }
+        bool checkOccupied(uint64_t index) const { return checkValue(occupied, index); }
+        
+        bool setOccupied(uint64_t index, bool checkTag) { return cas(occupied, index, true, inode, snode); }
+        bool setOccupied(uint64_t index) { return cas(occupied, index, false, 0, 0); }
+        bool setSNode(uint64_t index) { return cas(snode, index, false, 0, 0); }
+        bool setINode(uint64_t index) { return cas(inode, index, false, 0, 0); }
+        bool setFree(uint64_t index) { return cas(free, index, false, 0, 0); }
+        // clang-format on
+    };
+
+    inline constexpr uint32_t branchFactorINode = 5;
+    inline constexpr uint32_t cardinalityINode  = 1u << 5;
+
+    struct SNode
+    {
+    public:
+        uint32_t    incrRefCounter(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        uint32_t    decrRefCounter(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        uint32_t&   keyRef(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        void const* valueConstAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const;
+        void*       valueAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        std::atomic<uint32_t>& refCounterAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+
+    private:
+        uintptr_t              getElementBaseAddress(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const;
+
+
+    public:
+        using Data = std::array<unsigned char, 256>;
+        alignas(8) std::array<unsigned char, 256> data;
+        SNodeBitmap bits;
+    };
+
+    struct INode
+    {
+    public:
+        std::array<TaggedPointer, cardinalityINode> children;
+        INodeBitmap                                 bits;
+    };
+    static_assert(sizeof(SNode) == sizeof(INode));
+
     class CTrie
     {
     public:
-        class ForwardReadLockIterator;
-        struct EndSentinel
-        {
-        };
-        CTrie(MemoryContext& mctx, AllocatorTable const& table, size_t valueSize, size_t valueAlign);
+        CTrie(MemoryContext& mctx, AllocatorTable const& table, uint32_t valueSize, uint32_t valueAlign);
+        void cleanup(MemoryContext& mctx, void(*dctor)(MemoryContext& mctx, void* value));
 
-        bool   insert(MemoryContext& mctx, uint32_t keyHash, void const* pValue);
-        bool   lookupConstRef(uint32_t keyHash, void* data, void (*func)(void* data, void const* elem));
-        bool   lookupRef(uint32_t keyHash, void* data, void (*func)(void* data, void* elem));
-        void*  remove(MemoryContext& mctx, uint32_t keyHash, void (*dctor)(MemoryContext& mctx, void* elem));
-        void   lookupCopy(uint32_t keyHash, void** ppStorage);
-        void   cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* ptr));
-        size_t size() const;
-
-
-        ForwardReadLockIterator begin();
-        EndSentinel             end();
+        bool insert(MemoryContext& mctx, uint32_t key, void const* value);
+        //bool remove(MemoryContext& mctx, uint32_t key);
 
     private:
-        CTrie() : m_root(taggedNullptr)
-        {
-        }
-        struct SNode // don't trust its alignment, its just to know the offsetof the bitmap
-        {
-            alignas(8) unsigned char data[256];
-            // 00 = free,
-            // 01 = locked for read (shared, ref counted),
-            // 10 = locked exl. for write,
-            // 11 = node not used (allocated, but neither read nor write locked)
-            std::atomic<uint64_t> bitmap;
-        };
-        struct INode
-        {
-            TaggedPointer children[32]; // nullptr or something
-                                        // (something)
-            // - 00 = SNode
-            // - 01 = Allocation in progress
-            // - 10 = INode
-            // - 11 = Not Allocated
-            std::atomic<uint64_t> bitmap;
-        };
-        static_assert(sizeof(SNode) == sizeof(INode));
+        void cleanupINode(MemoryContext& mctx, INode* inode, void(*dctor)(MemoryContext& mctx, void* value));
+        void cleanupSNode(MemoryContext& mctx, SNode* inode, void(*dctor)(MemoryContext& mctx, void* value));
+        //bool iinsert(MemoryContext& mctx, TaggedPointer node, uint32_t key, void const* value, uint32_t level, INode* parent);
 
-        // node of 256 bytes, of which the last 4 are dedicated to full/empty bits (std::atomic<uint32_t>)
-        // if at least 1 bit is set => this node is a CNode and contains pointers
-        // if all bits are 0        => this node contains elements
-        // CNode => 31 pointers at offsets [0,7], [8,15], ..., [240,247]
-        // SNode => computeMaxElements(256, m_sNodeSize, m_sNodeAlign) each spaced alignedSize(m_sNodeSize, m_sNodeAlign)
-        //          from each other
-        // the main methods are `insert(key, value)` (struct { value, hash(key) } of m_sNodeSize and m_sNodeAlign)
-        //                      `remove(key)`
-        //                      `lookupConstRef(key)`
-        //                      `lookupRef(key)`
-        // whenever an SNode needs to be converted into a CNode, we just allocate a new thing and perform some rewiring
-        // when in SNode mode, the atomic number is used to ensure atomic access to the elements themselves. A constLooup
-        // shouldn't block you
-        enum class EResult : uint8_t
-        {
-            eOk = 0,
-            eError,
-            eRestart,
-        };
-        EResult iinsert(MemoryContext& mctx, INode* pNode, uint32_t keyHash, void const* pValue);
-        bool    lookupConstRefFrom(INode*   inode,
-                                   uint32_t mask,
-                                   uint32_t keyHash,
-                                   void*    data,
-                                   void (*func)(void* data, void const* elem));
-        bool lookupRefFrom(INode* inode, uint32_t mask, uint32_t keyHash, void* data, void (*func)(void* data, void* elem));
-        size_t getValueSize() const;
-        void*  removeFrom(MemoryContext& mctx,
-                          INode*         inode,
-                          uint32_t       mask,
-                          uint32_t       keyHash,
-                          void (*dctor)(MemoryContext& mctx, void* elem));
-
-        static bool isINode(INode const* parent, uint32_t childIdx);
-        static bool isChildNotAllocated(INode const* parent, uint32_t childIdx);
-        static bool isReadLockable(SNode const* self, uint32_t elementIdx);
-        static bool isFullElement(SNode const* self, uint32_t elementIdx);
-        static bool isFree(SNode const* self, uint32_t elementIdx);
-        static void lockForWrite(SNode* self, uint32_t elementIdx);
-        static void lockForRead(SNode* self, uint32_t elementIdx, size_t nodeSize, uint32_t paddingEnd);
-        static bool lockForAlloc(INode* self, uint32_t childIdx, bool force = false);
-        static void unlockForAlloc(INode* self, uint32_t childIdx, uint64_t desired);
-        static void unlockForWrite(SNode* self, uint32_t elementIdx, uint64_t desired = 0b11);
-        static void unlockForRead(SNode* self, uint32_t elementIdx, size_t nodeSize, uint32_t paddingEnd);
-
-        AllocatorTable        m_table;
-        TaggedPointer         m_root; // assume this is always INode state
-        size_t                m_sNodeSize;
-        size_t                m_sNodeAlign;
-        std::atomic<uint32_t> m_size;
-        uint32_t              m_paddingAfterValue;
-        uint32_t              m_paddingEnd;
-    };
-
-    class CTrie::ForwardReadLockIterator
-    {
-    public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type        = void*; // Or a more specific type if known
-        using difference_type   = std::ptrdiff_t;
-        using pointer           = value_type*;
-        using reference         = value_type&;
-
-        ForwardReadLockIterator(CTrie& trie, INode* inode, uint32_t mask, uint32_t keyHashStart = 0);
-        ForwardReadLockIterator& operator++();
-        value_type               operator*() const;
-
-        bool operator==(ForwardReadLockIterator const& other) const;
-        bool operator==(EndSentinel end) const;
-
-        uint32_t getCurrentPacket() const;
+        TaggedPointer newINode(MemoryContext& mctx) const;
+        TaggedPointer newSNode(MemoryContext& mctx) const;
 
     private:
-        void findNextValidElement();
-
-        CTrie&   m_trie;
-        INode*   m_inode;
-        uint32_t m_mask;
-        uint32_t m_currentElementIndex;
-        uint32_t m_keyHash;
+        AllocatorTable m_table;
+        TaggedPointer  m_root;
+        uint32_t       m_valueSize;
+        uint32_t       m_valueAlign;
     };
 
-    CTrie::ForwardReadLockIterator CTrie::begin()
-    {
-        return ForwardReadLockIterator(*this, std::bit_cast<INode*>(m_table.rawPtr(m_root)), 0xF800'0000);
-    }
-    CTrie::EndSentinel CTrie::end()
-    {
-        return {};
-    }
+
+    // ----------------------------------------------------------------------------------------------------------------
 
     enum class ERenderCoordSys : uint8_t
     {

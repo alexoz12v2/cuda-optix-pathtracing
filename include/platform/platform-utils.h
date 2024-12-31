@@ -44,6 +44,43 @@ DMT_MODULE_EXPORT dmt {
         return static_cast<E>(0);
     }
 
+    inline constexpr uint32_t smallestPOTMask(uint32_t value)
+    {
+        // If value is 0, smallest POT is 1 (mask = 0x0000'0001)
+        if (value == 0)
+            return 1;
+
+        // Calculate the smallest power of 2 >= value
+        --value;
+        value |= value >> 1;
+        value |= value >> 2;
+        value |= value >> 4;
+        value |= value >> 8;
+        value |= value >> 16;
+        ++value;
+
+        // Return the power of 2 as the mask
+        return value - 1;
+    }
+
+    template <std::integral T>
+    constexpr T clamp(T val, T min_val, T max_val) noexcept
+    {
+        if constexpr (std::is_signed_v<T>)
+        {
+            if (val < min_val)
+                return min_val;
+            if (val > max_val)
+                return max_val;
+            return val;
+        }
+        else
+        {
+            return std::min(std::max(val, min_val), max_val);
+        }
+    }
+
+
     template <std::integral T>
     inline constexpr T popCount(T v)
     {

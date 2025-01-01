@@ -155,6 +155,7 @@ DMT_MODULE_EXPORT dmt {
         bool setFree(uint64_t index) { return cas(free, index, false, 0, 0); }
         bool casToReadLocked(uint64_t index) { return cas(readLocked, index, true, unused, readLocked); }
         bool casFreeToWriteLocked(uint64_t index, uint64_t exp = free, uint64_t exp2 = free) { return cas(writeLocked, index, true, exp, exp2); }
+        bool upgradeLock(uint64_t index) { return cas(writeLocked, index, true, readLocked, readLocked); }
         bool setUnused(uint64_t index) { return cas(unused, index, false, 0, 0); }
         // clang-format on
     };

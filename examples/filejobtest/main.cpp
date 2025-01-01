@@ -130,12 +130,13 @@ AttributeEnd
     }
 
     constexpr auto doNothing = [](dmt::MemoryContext& mctx, void* value) {};
-    void testCTrie(dmt::AppContext& actx)
+    void           testCTrie(dmt::AppContext& actx)
     {
         dmt::CTrie ctrie{actx.mctx, dmt::AllocatorTable::fromPool(actx.mctx), sizeof(uint32_t), alignof(uint32_t)};
-        uint32_t   testValue = 43;
+        uint32_t   testValue  = 43;
+        uint32_t   testValue2 = 80;
         ctrie.insert(actx.mctx, 0x0000'0000, &testValue);
-        ctrie.insert(actx.mctx, 0x8000'0000, &testValue);
+        ctrie.insert(actx.mctx, 0x2900'0000, &testValue2);
         actx.log("inserted value {}", {testValue});
         ctrie.cleanup(actx.mctx, doNothing);
     }

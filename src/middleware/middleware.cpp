@@ -241,6 +241,11 @@ namespace dmt {
         return refCounterAt(index, valueSize, valueAlign).fetch_sub(1, std::memory_order_seq_cst) - 1;
     }
 
+    uint32_t SNode::keyCopy(uint32_t index, uint32_t valueSize, uint32_t valueAlign)
+    {
+        return keyRef(index, valueSize, valueAlign);
+    }
+
     uint32_t& SNode::keyRef(uint32_t index, uint32_t valueSize, uint32_t valueAlign)
     {
         uintptr_t elemBaseAddr = reinterpret_cast<uintptr_t>(data.data()) + index * valueSize;
@@ -256,6 +261,23 @@ namespace dmt {
         uintptr_t keyAddr        = refCounterAddr + sizeof(uint32_t);
 
         return *reinterpret_cast<uint32_t*>(keyAddr);
+    }
+
+    bool SNode::tryReadLock(uint32_t index, uint32_t valueSize, uint32_t valueAlign)
+    {
+        bool res = bits.casToReadLocked(index);
+        if (res)
+            incrRefCounter(index, valueSize, valueAlign);
+        return res;
+    }
+
+    bool SNode::releaseReadLock(uint32_t index, uint32_t valueSize, uint32_t valueAlign)
+    {
+        uint32_t val = decrRefCounter(index, valueSize, valueAlign);
+        if (val == 0)
+            return bits.setUnused(index);
+        else
+            return false;
     }
 
     uintptr_t SNode::getElementBaseAddress(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const
@@ -313,14 +335,8 @@ namespace dmt {
         }
     }
 
-    inline constexpr uint32_t posINode(uint32_t hash, uint32_t level)
-    {
-        uint32_t index = (hash >> level) & (cardinalityINode - 1);
-        return index;
-    }
-
     inline constexpr uint32_t elemSize(uint32_t valueSize, uint32_t valueAlign)
-    { 
+    {
         // 2. Padding to ensure valueAlign alignment for the ref counter + key.
         uint32_t alignedOffset = (valueSize + valueAlign - 1) & ~(valueAlign - 1);
 
@@ -332,6 +348,14 @@ namespace dmt {
         return elementSize;
     }
 
+    inline constexpr uint32_t posINode(uint32_t hash, uint32_t level)
+    {
+        // Extract the 5-bit packet corresponding to the current level.
+        uint32_t shiftAmount = level * 5;
+        uint32_t index       = (hash >> shiftAmount) & ((1u << 5) - 1); // Mask to extract 5 bits.
+        return index;
+    }
+
     inline constexpr uint32_t posSNode(uint32_t hash, uint32_t level, uint32_t valueSize, uint32_t valueAlign)
     {
         uint32_t elementSize = elemSize(valueSize, valueAlign);
@@ -341,12 +365,13 @@ namespace dmt {
         uint32_t           numElements = dataSize / elementSize;
 
         // Calculate the position.
-        uint32_t pos = (hash >> level) & smallestPOTMask(numElements);
+        uint32_t shiftAmount = (level * 5); // Adjust based on 5-bit packet per level.
+        uint32_t pos         = (hash >> shiftAmount) & smallestPOTMask(numElements); // Mask to extract relevant bits.
 
         return clamp(pos, 0u, numElements - 1u);
     }
 
-    void CTrie::cleanupINode(MemoryContext& mctx, INode* inode, void(*dctor)(MemoryContext& mctx, void* value))
+    void CTrie::cleanupINode(MemoryContext& mctx, INode* inode, void (*dctor)(MemoryContext& mctx, void* value))
     {
         for (uint32_t i = 0; i < cardinalityINode; ++i)
         {
@@ -361,8 +386,8 @@ namespace dmt {
                 while (!inode->bits.setOccupied(i, true))
                     std::this_thread::yield();
 
-                TaggedPointer pt = inode->children[i];
-                INode* child = reinterpret_cast<INode*>(m_table.rawPtr(pt));
+                TaggedPointer pt    = inode->children[i];
+                INode*        child = reinterpret_cast<INode*>(m_table.rawPtr(pt));
                 cleanupINode(mctx, child, dctor);
                 m_table.free(mctx, pt, sizeof(INode), alignof(INode));
             }
@@ -371,8 +396,8 @@ namespace dmt {
                 while (!inode->bits.setOccupied(i, true))
                     std::this_thread::yield();
 
-                TaggedPointer pt = inode->children[i];
-                SNode* snode = reinterpret_cast<SNode*>(m_table.rawPtr(pt));
+                TaggedPointer pt    = inode->children[i];
+                SNode*        snode = reinterpret_cast<SNode*>(m_table.rawPtr(pt));
                 cleanupSNode(mctx, snode, dctor);
                 m_table.free(mctx, pt, sizeof(SNode), alignof(SNode));
             }
@@ -381,7 +406,7 @@ namespace dmt {
         }
     }
 
-    void CTrie::cleanupSNode(MemoryContext& mctx, SNode* snode, void(*dctor)(MemoryContext& mctx, void* value))
+    void CTrie::cleanupSNode(MemoryContext& mctx, SNode* snode, void (*dctor)(MemoryContext& mctx, void* value))
     {
         uint32_t elementSize = elemSize(m_valueSize, m_valueAlign);
         uint32_t capacity    = sizeof(SNode::Data) / elementSize;
@@ -400,7 +425,7 @@ namespace dmt {
         }
     }
 
-    void CTrie::cleanup(MemoryContext& mctx, void(*dctor)(MemoryContext& mctx, void* value))
+    void CTrie::cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* value))
     {
         INode* pRoot = reinterpret_cast<INode*>(m_table.rawPtr(m_root));
         cleanupINode(mctx, pRoot, dctor);
@@ -409,15 +434,15 @@ namespace dmt {
 
     bool CTrie::insert(MemoryContext& mctx, uint32_t key, void const* value)
     {
-        static constexpr uint32_t dataSize = sizeof(SNode::Data); // SNode data size
-        uint32_t elementSize = elemSize(m_valueSize, m_valueAlign);
-        uint32_t numElements = dataSize / elementSize;
+        static constexpr uint32_t dataSize    = sizeof(SNode::Data); // SNode data size
+        uint32_t                  elementSize = elemSize(m_valueSize, m_valueAlign);
+        uint32_t                  numElements = dataSize / elementSize;
 
-        INode*   inode = reinterpret_cast<INode*>(m_table.rawPtr(m_root));
-        SNode*   snode = nullptr;
-        uint32_t level = 0;
+        INode*   inode     = reinterpret_cast<INode*>(m_table.rawPtr(m_root));
+        SNode*   snode     = nullptr;
+        uint32_t level     = 0;
         uint32_t parentPos = 0;
-        while (level < 5)
+        while (level < 6)
         {
             if (!snode) // current node is inode
             {
@@ -467,7 +492,18 @@ namespace dmt {
                     return true;
                 }
                 else
-                { // TODO collision! 
+                { // TODO collision!
+                    if (snode->tryReadLock(pos, m_valueSize, m_valueAlign))
+                    { // if the key is already there, don't insert
+                        if (uint32_t keyEx = snode->keyCopy(pos, m_valueSize, m_valueAlign); keyEx == key)
+                        {
+                            snode->releaseReadLock(pos, m_valueSize, m_valueAlign);
+                            return false;
+                        }
+                        else
+                            snode->releaseReadLock(pos, m_valueSize, m_valueAlign);
+                    }
+
                     uint64_t prevState = inode->bits.getValue(parentPos);
                     if (inode->bits.setOccupied(parentPos, true)) // Lock the parent position
                     {
@@ -479,12 +515,16 @@ namespace dmt {
                         }
 
                         INode* newINode = reinterpret_cast<INode*>(m_table.rawPtr(newINodePtr));
+                        assert(newINode != inode);
 
                         // Reinsert all elements from the SNode into the new INode
                         for (uint32_t i = 0; i < numElements; ++i)
                         {
-                            if (!snode->bits.checkUnused(i))
+                            if (!snode->bits.checkFree(i))
                             {
+                                while (!snode->tryReadLock(i, m_valueSize, m_valueAlign))
+                                    std::this_thread::yield();
+
                                 uint32_t existingKey   = snode->keyRef(i, m_valueSize, m_valueAlign);
                                 void*    existingValue = snode->valueAt(i, m_valueSize, m_valueAlign);
 
@@ -493,25 +533,25 @@ namespace dmt {
                                 {
                                     // Cleanup on failure
                                     inode->bits.setValue(prevState, parentPos);
+                                    snode->bits.setUnused(i);
                                     return false;
                                 }
+                                snode->releaseReadLock(i, m_valueSize, m_valueAlign);
                             }
                         }
 
                         // Replace SNode with the new INode in the parent
+                        TaggedPointer snodePtr     = inode->children[parentPos];
                         inode->children[parentPos] = newINodePtr;
                         inode->bits.setINode(parentPos);
 
-                                            // Lock all non-free elements and deallocate the old SNode
+                        // Lock all non-free elements and deallocate the old SNode
                         for (uint32_t i = 0; i < numElements; ++i)
                         {
-                            if (!snode->bits.checkFree(i))
-                            {
-                                while (!snode->bits.casFreeToWriteLocked(i, SNodeBitmap::unused))
-                                    std::this_thread::yield();
-                            }
+                            while (!snode->bits.casFreeToWriteLocked(i, SNodeBitmap::unused))
+                                std::this_thread::yield();
                         }
-                        m_table.free(mctx, inode->children[parentPos], sizeof(SNode), alignof(SNode));
+                        m_table.free(mctx, snodePtr, sizeof(SNode), alignof(SNode));
 
                         // Restart the insertion process into the new INode
                         inode = newINode;
@@ -519,6 +559,8 @@ namespace dmt {
                     }
                     else
                         return false;
+
+                    --level;
                 }
             }
 
@@ -528,7 +570,7 @@ namespace dmt {
         return false;
     }
 
-    
+
     bool CTrie::reinsert(MemoryContext& mctx, INode* inode, uint32_t key, void const* value, uint32_t level)
     {
         uint32_t pos = posINode(key, level);
@@ -547,8 +589,8 @@ namespace dmt {
 
         if (inode->bits.checkINode(pos))
         {
-            INode* childINode = reinterpret_cast<INode*>(m_table.rawPtr(inode->children[pos]));
-            return reinsert(mctx, childINode, key, value, level + 1);
+            assert(false);
+            return false;
         }
         else if (inode->bits.checkSNode(pos))
         {

@@ -47,20 +47,18 @@ DMT_MODULE_EXPORT dmt {
         void* (*rawPtr)(TaggedPointer pt);
     };
 
-    AllocatorTable AllocatorTable::fromPool(MemoryContext& mctx)
+    AllocatorTable AllocatorTable::fromPool(MemoryContext & mctx)
     {
         AllocatorTable table;
         table.allocate = [](MemoryContext& mctx, size_t size, size_t alignment) {
             uint32_t numBlocks = static_cast<uint32_t>(ceilDiv(size, static_cast<size_t>(toUnderlying(EBlockSize::e32B))));
             return mctx.poolAllocateBlocks(numBlocks, EBlockSize::e32B, EMemoryTag::eUnknown, 0);
         };
-        table.free     = [](MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment) {
+        table.free = [](MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment) {
             uint32_t numBlocks = static_cast<uint32_t>(ceilDiv(size, static_cast<size_t>(toUnderlying(EBlockSize::e32B))));
             mctx.poolFreeBlocks(numBlocks, pt);
         };
-        table.rawPtr = [](TaggedPointer pt) { 
-            return pt.pointer();
-        };
+        table.rawPtr = [](TaggedPointer pt) { return pt.pointer(); };
         return table;
     }
 
@@ -74,7 +72,7 @@ DMT_MODULE_EXPORT dmt {
 
         std::atomic<uint64_t> map;
 
-        uint64_t getValue(uint64_t index)  const
+        uint64_t getValue(uint64_t index) const
         {
             assert(index < 32);
             uint64_t const shamt = index << 1;
@@ -155,8 +153,8 @@ DMT_MODULE_EXPORT dmt {
         bool checkUnused(uint64_t index) const { return checkValue(unused, index); }
 
         bool setFree(uint64_t index) { return cas(free, index, false, 0, 0); }
-        bool casToReadLocked(uint64_t index) { return cas(readLocked, index, true, free, readLocked); }
-        bool casFreeToWriteLocked(uint64_t index, uint64_t exp = free) { return cas(writeLocked, index, true, exp, exp); }
+        bool casToReadLocked(uint64_t index) { return cas(readLocked, index, true, unused, readLocked); }
+        bool casFreeToWriteLocked(uint64_t index, uint64_t exp = free, uint64_t exp2 = free) { return cas(writeLocked, index, true, exp, exp2); }
         bool setUnused(uint64_t index) { return cas(unused, index, false, 0, 0); }
         // clang-format on
     };
@@ -188,15 +186,18 @@ DMT_MODULE_EXPORT dmt {
     struct SNode
     {
     public:
-        uint32_t    incrRefCounter(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
-        uint32_t    decrRefCounter(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
-        uint32_t&   keyRef(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
-        void const* valueConstAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const;
-        void*       valueAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        bool                   tryReadLock(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        bool                   releaseReadLock(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        uint32_t               incrRefCounter(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        uint32_t               decrRefCounter(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        uint32_t&              keyRef(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        uint32_t               keyCopy(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
+        void const*            valueConstAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const;
+        void*                  valueAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
         std::atomic<uint32_t>& refCounterAt(uint32_t index, uint32_t valueSize, uint32_t valueAlign);
 
     private:
-        uintptr_t              getElementBaseAddress(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const;
+        uintptr_t getElementBaseAddress(uint32_t index, uint32_t valueSize, uint32_t valueAlign) const;
 
 
     public:
@@ -217,14 +218,14 @@ DMT_MODULE_EXPORT dmt {
     {
     public:
         CTrie(MemoryContext& mctx, AllocatorTable const& table, uint32_t valueSize, uint32_t valueAlign);
-        void cleanup(MemoryContext& mctx, void(*dctor)(MemoryContext& mctx, void* value));
+        void cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* value));
 
         bool insert(MemoryContext& mctx, uint32_t key, void const* value);
         //bool remove(MemoryContext& mctx, uint32_t key);
 
     private:
-        void cleanupINode(MemoryContext& mctx, INode* inode, void(*dctor)(MemoryContext& mctx, void* value));
-        void cleanupSNode(MemoryContext& mctx, SNode* inode, void(*dctor)(MemoryContext& mctx, void* value));
+        void cleanupINode(MemoryContext& mctx, INode* inode, void (*dctor)(MemoryContext& mctx, void* value));
+        void cleanupSNode(MemoryContext& mctx, SNode* inode, void (*dctor)(MemoryContext& mctx, void* value));
         //bool iinsert(MemoryContext& mctx, TaggedPointer node, uint32_t key, void const* value, uint32_t level, INode* parent);
         bool reinsert(MemoryContext& mctx, INode* inode, uint32_t key, void const* value, uint32_t level);
 

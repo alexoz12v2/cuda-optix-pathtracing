@@ -165,6 +165,19 @@ DMT_MODULE_EXPORT dmt {
         return hashCRC64(str);
     }
 
+    struct SText
+    {
+        constexpr SText() : sid(0)
+        {
+        }
+        constexpr SText(std::string_view s) : str(s), sid(hashCRC64(str.data()))
+        {
+        }
+
+        std::string_view str;
+        sid_t            sid;
+    };
+
     /**
      * Class responsible to intern a given string and give back a unique string identifier `sid_t` for the string, obtained
      * with the CRC64 algorithm

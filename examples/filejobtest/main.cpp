@@ -1,6 +1,8 @@
 
+#include <array>
 #include <atomic>
 #include <bit>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -64,17 +66,28 @@ AttributeBegin
   AttributeEnd
 AttributeEnd
 )=";
-
-
     void testWordTokenization(dmt::AppContext& actx)
     {
-        dmt::WordParser          parser;
-        std::vector<std::string> tokens;
-        tokens.reserve(128);
+        using CharBuffer = std::array<char, 256>;
+        dmt::OneShotStackMemoryResource mem{&actx.mctx};
+        dmt::WordParser parser;
 
-        size_t chunkSize = 512;
-        size_t offset    = 0;
-        bool   stop      = false;
+        size_t tokenCapacity = 8;
+        void*  rawMemory     = mem.allocate(tokenCapacity * sizeof(CharBuffer), alignof(CharBuffer));
+        if (!rawMemory)
+        {
+            assert(false);
+            actx.error("Couldn't allocate stack memory. Stack buffer too small or memory exhausted");
+            return;
+        }
+        auto* arrayPtr = static_cast<CharBuffer*>(rawMemory);
+
+        std::unique_ptr<CharBuffer[], dmt::StackArrayDeleter<CharBuffer>> tokens{arrayPtr, dmt::StackArrayDeleter<CharBuffer>{}};
+
+        size_t   chunkSize    = 512;
+        size_t   offset       = 0;
+        bool     stop         = false;
+        uint32_t currentIndex = 0;
 
         while (offset < input.size())
         {
@@ -91,7 +104,13 @@ AttributeEnd
                 else if (!parser.needsContinuation())
                 {
                     chunk = chunk.substr(parser.numCharReadLast());
-                    tokens.emplace_back(token);
+                    std::memcpy(tokens[currentIndex].data(), token.data(), token.size());
+                    tokens[currentIndex][token.size()] = '\0';
+                    ++currentIndex;
+                    if (currentIndex >= tokenCapacity)
+                    { // Consume tokens
+                        currentIndex = 0;
+                    }
                 }
                 else
                 {
@@ -137,6 +156,7 @@ AttributeEnd
         uint32_t   testValue2 = 80;
         ctrie.insert(actx.mctx, 0x0000'0000, &testValue);
         ctrie.insert(actx.mctx, 0x2900'0000, &testValue2);
+        ctrie.remove(actx.mctx, 0x2900'0000);
         actx.log("inserted value {}", {testValue});
         ctrie.cleanup(actx.mctx, doNothing);
     }
@@ -147,7 +167,7 @@ int32_t main()
     dmt::Platform platform;
     auto&         actx = platform.ctx();
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
-    testCTrie(actx);
-    //testWordTokenization(actx);
+    //testCTrie(actx);
+    testWordTokenization(actx);
     //testJob(actx);
 }

@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <limits>
+#include <memory_resource>
 #include <string_view>
 #include <thread>
 
@@ -61,6 +62,62 @@ DMT_MODULE_EXPORT dmt {
         table.rawPtr = [](TaggedPointer pt) { return pt.pointer(); };
         return table;
     }
+
+    class OneShotStackMemoryResource : public std::pmr::memory_resource
+    {
+    public:
+        explicit OneShotStackMemoryResource(MemoryContext* memoryContext, size_t alignment = alignof(std::max_align_t)) :
+        m_memoryContext(memoryContext),
+        m_alignment(alignment),
+        m_allocated(false)
+        {
+            assert(m_memoryContext);
+        }
+
+    protected:
+        void* do_allocate(size_t bytes, size_t alignment) override
+        {
+            if (m_allocated)
+            { // Subsequent allocations are not allowed.
+                return nullptr;
+            }
+
+            // Use the stack allocator for the first allocation.
+            void* ptr = m_memoryContext->stackAllocate(bytes, std::max(alignment, m_alignment), EMemoryTag::eUnknown, 0);
+            m_allocated = true;
+            return ptr;
+        }
+
+        void do_deallocate(void* /*ptr*/, size_t /*bytes*/, size_t /*alignment*/) override
+        {
+            // Deallocate does nothing.
+        }
+
+        bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override
+        {
+            // Equality based on type and MemoryContext pointer.
+            auto otherResource = dynamic_cast<OneShotStackMemoryResource const*>(&other);
+            return otherResource && otherResource->m_memoryContext == m_memoryContext;
+        }
+
+    private:
+        /**
+         * Exception to the rule dependency injection through function parameter passing, as required 
+         * by the `std::memory_resource` interface
+         */
+        MemoryContext* m_memoryContext; // Pointer to the MemoryContext used for allocations.
+        size_t         m_alignment;     // Alignment for stack allocation.
+        bool           m_allocated;     // Whether the first allocation has already occurred.
+    };
+ 
+    template <typename T>
+    class StackArrayDeleter
+    {
+    public:
+        void operator()(T* ptr) const
+        {
+        }
+    };
 
     // ----------------------------------------------------------------------------------------------------------------
 
@@ -155,7 +212,6 @@ DMT_MODULE_EXPORT dmt {
         bool setFree(uint64_t index) { return cas(free, index, false, 0, 0); }
         bool casToReadLocked(uint64_t index) { return cas(readLocked, index, true, unused, readLocked); }
         bool casFreeToWriteLocked(uint64_t index, uint64_t exp = free, uint64_t exp2 = free) { return cas(writeLocked, index, true, exp, exp2); }
-        bool upgradeLock(uint64_t index) { return cas(writeLocked, index, true, readLocked, readLocked); }
         bool setUnused(uint64_t index) { return cas(unused, index, false, 0, 0); }
         // clang-format on
     };
@@ -222,12 +278,11 @@ DMT_MODULE_EXPORT dmt {
         void cleanup(MemoryContext& mctx, void (*dctor)(MemoryContext& mctx, void* value));
 
         bool insert(MemoryContext& mctx, uint32_t key, void const* value);
-        //bool remove(MemoryContext& mctx, uint32_t key);
+        bool remove(MemoryContext& mctx, uint32_t key);
 
     private:
         void cleanupINode(MemoryContext& mctx, INode* inode, void (*dctor)(MemoryContext& mctx, void* value));
         void cleanupSNode(MemoryContext& mctx, SNode* inode, void (*dctor)(MemoryContext& mctx, void* value));
-        //bool iinsert(MemoryContext& mctx, TaggedPointer node, uint32_t key, void const* value, uint32_t level, INode* parent);
         bool reinsert(MemoryContext& mctx, INode* inode, uint32_t key, void const* value, uint32_t level);
 
         TaggedPointer newINode(MemoryContext& mctx) const;
@@ -288,22 +343,22 @@ DMT_MODULE_EXPORT dmt {
 
     inline constexpr EBoolOptions operator|(EBoolOptions lhs, EBoolOptions rhs)
     {
-        return static_cast<EBoolOptions>(static_cast<uint16_t>(lhs) | static_cast<uint16_t>(rhs));
+        return static_cast<EBoolOptions>(toUnderlying(lhs) | toUnderlying(rhs));
     }
 
     inline constexpr EBoolOptions operator&(EBoolOptions lhs, EBoolOptions rhs)
     {
-        return static_cast<EBoolOptions>(static_cast<uint16_t>(lhs) & static_cast<uint16_t>(rhs));
+        return static_cast<EBoolOptions>(toUnderlying(lhs) & toUnderlying(rhs));
     }
 
     inline constexpr EBoolOptions operator^(EBoolOptions lhs, EBoolOptions rhs)
     {
-        return static_cast<EBoolOptions>(static_cast<uint16_t>(lhs) ^ static_cast<uint16_t>(rhs));
+        return static_cast<EBoolOptions>(toUnderlying(lhs) ^ toUnderlying(rhs));
     }
 
     inline constexpr EBoolOptions operator~(EBoolOptions val)
     {
-        return static_cast<EBoolOptions>(~static_cast<uint16_t>(val));
+        return static_cast<EBoolOptions>(~toUnderlying(val));
     }
 
     inline constexpr EBoolOptions& operator|=(EBoolOptions& lhs, EBoolOptions rhs)
@@ -407,7 +462,8 @@ DMT_MODULE_EXPORT dmt {
         struct Projecting           // perspective or orthographic
         {                           // params are all lowercase in the file
             float frameAspectRatio; // computed from film
-            float screenWindow;     // [-1, 1] along shorter axis, [-screnWindow, +screenWindow] in longer axis
+            // [-1, 1] along shorter axis, [-screnWindow, +screenWindow] in longer axis. Default = aspect ratio if > 1, otherwise 1/aspect ratio
+            float screenWindow;     
             float lensRadius    = 0;
             float focalDistance = 1e30f; // 10^30 is near the float limit
             float fov           = 90.f;  // Used only by perspective
@@ -426,6 +482,7 @@ DMT_MODULE_EXPORT dmt {
 
         union Params
         {
+            Params() : p({}) { } 
             Realistic  r;
             Projecting p;
             Spherical  s;
@@ -439,7 +496,7 @@ DMT_MODULE_EXPORT dmt {
         float shutterclose = 1;
 
         // 1 byte aligned
-        ECameraType type;
+        ECameraType type = ECameraType::ePerspective;
     };
 
     // Samplers -------------------------------------------------------------------------------------------------------
@@ -480,18 +537,20 @@ DMT_MODULE_EXPORT dmt {
 
         union Samples
         {
+            Samples() : num(16) {}
+
             // StatifiedSampler only
             StratifiedSamples stratified;
             // everyone but StratifiedSampler
-            int32_t num = 16;
+            int32_t num;
         };
         Samples samples;
 
         // Low discrepancy sampleers (halton, padded sobol, sobol, zsobol)
-        ERandomization randomization;
+        ERandomization randomization = ERandomization::eFastOwen;
 
         // everyone
-        ESamplerType type;
+        ESamplerType type = ESamplerType::eZSobol;
     };
 
     // Color Spaces ---------------------------------------------------------------------------------------------------
@@ -508,7 +567,7 @@ DMT_MODULE_EXPORT dmt {
 
     struct ColorSpaceSpec
     {
-        EColorSpaceType type;
+        EColorSpaceType type = EColorSpaceType::eSRGB;
     };
 
     // Film -----------------------------------------------------------------------------------------------------------
@@ -577,7 +636,7 @@ DMT_MODULE_EXPORT dmt {
         float    lambdaMax = 830.f;
 
         // gbuffer only
-        EGVufferCoordSys coordSys;
+        EGVufferCoordSys coordSys = EGVufferCoordSys::eCamera;
 
         // common params
         bool      savefp16 = true;
@@ -595,6 +654,9 @@ DMT_MODULE_EXPORT dmt {
         eTriangle,
         eCount
     };
+
+    EFilterType filterTypeFromStr(char const* str);
+    float       defaultRadiusFromFilterType(EFilterType e);
 
     struct FilterSpec
     {
@@ -615,19 +677,18 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
+            Params() : gaussian({}) {}
+
             Gaussian gaussian;
             Mitchell mitchell;
             Sinc     sinc;
         };
 
         Params      params;
-        float       xRadius;
-        float       yRadius;
-        EFilterType type;
+        float       xRadius = defaultRadiusFromFilterType(EFilterType::eGaussian);
+        float       yRadius = defaultRadiusFromFilterType(EFilterType::eGaussian);
+        EFilterType type = EFilterType::eGaussian;
     };
-
-    EFilterType filterTypeFromStr(char const* str);
-    float       defaultRadiusFromFilterType(EFilterType e);
 
     // Integrators ----------------------------------------------------------------------------------------------------
     // default is volpath, but if --gpu or --wavefront are specified, the type from file is ignored and set to
@@ -692,6 +753,8 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
+            Params() {}
+
             AmbientOcclusion    ao;
             BiDirPathTracing    bdpt;
             MetropolisTransport mlt;
@@ -744,21 +807,35 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
+            Params() : bvh({}) {}
+
             BVH    bvh;
             KDTree kdtree;
         };
 
         Params           params;
-        EAcceletatorType type;
+        EAcceletatorType type = EAcceletatorType::eBVH;
     };
 
     // WorldBegin -----------------------------------------------------------------------------------------------------
     // Participating Media -------------------------------------------------------------
     // present both in global fragment (where the camera ray starts in) and after the `WorldBegin`
     // Parsing --------------------------------------------------------------------------------------------------------
+
+    /**
+     * If this gives problems of stack overflow, either allocate it on the stack allocator, or let this class take
+     * the memory context and allocate the buffer somewhere else
+     */
     class WordParser
     {
     public:
+        /**
+         * number of max ASCII characters in a token (concert only for names and comments, which are the 
+         * longset tokens)
+         */
+        static constexpr uint32_t maxTokenSize = 256;
+        using CharBuffer = std::array<char, maxTokenSize>;
+
         std::string_view nextWord(std::string_view str);
         bool             needsContinuation() const;
         uint32_t         numCharReadLast() const;
@@ -772,8 +849,8 @@ DMT_MODULE_EXPORT dmt {
 
         uint32_t m_bufferLength        = 0;
         uint32_t m_numCharReadLastTime = 0;
-        char     m_buffer[256]{};
-        char     m_escapedBuffer[64]{};
+        char     m_buffer[maxTokenSize]{};
+        char     m_escapedBuffer[maxTokenSize]{};
         bool     m_needsContinuation = false;
         bool     m_haveEscaped       = false;
     };
@@ -796,57 +873,42 @@ DMT_MODULE_EXPORT dmt {
         return toUnderlying(a) <=> toUnderlying(b);
     }
 
+    struct ArrayData
+    {
+        static constexpr uint32_t countPenNode = 248u / sizeof(int32_t);
+        union U
+        {
+            std::array<int32_t, countPenNode> is;
+            std::array<float, countPenNode> fs;
+        };
+        U arr;
+    };
+    template struct PoolNode<ArrayData, EBlockSize::e256B>;
+    using ArrayNode256B = PoolNode<ArrayData, EBlockSize::e256B>;
+
+    /**
+     * surely pool allocated
+     */
     class HeaderTokenizer
     {
-    private:
-        static constexpr uint32_t size = std::max(
-            {sizeof(CameraSpec),
-             sizeof(SamplerSpec),
-             sizeof(ColorSpaceSpec),
-             sizeof(FilmSpec),
-             sizeof(FilterSpec),
-             sizeof(IntegratorSpec),
-             sizeof(AcceleratorSpec)});
-        static constexpr uint32_t alignment = std::max(
-            {alignof(CameraSpec),
-             alignof(SamplerSpec),
-             alignof(ColorSpaceSpec),
-             alignof(FilmSpec),
-             alignof(FilterSpec),
-             alignof(IntegratorSpec),
-             alignof(AcceleratorSpec)});
-
     public:
-        struct Storage
-        {
-            alignas(alignment) std::array<unsigned char, size> bytes;
-        };
+        void selectNextType(AppContext &actx, std::string_view token);
+        void parseOptions(AppContext &actx, Options const& options);
 
-        HeaderTokenizer(std::string_view prevChunk, uint32_t prevOffset, std::string_view currChunk) :
-        m_prevChunk(prevChunk),
-        m_currChunk(currChunk),
-        m_prevOffset(prevOffset)
-        {
-        }
-
-        void    advance();
-        bool    hasToken() const;
-        Storage retrieveToken(EHeaderTokenType& outTokenType) const;
-        size_t  offsetFromCurrent() const;
+        CameraSpec cameraSpec;
+        SamplerSpec samplerSpec;
+        ColorSpaceSpec colorSpaceSpec;
+        FilmSpec filmSpec;
+        FilterSpec filterSpec;
+        IntegratorSpec integratorSpec;
+        AcceleratorSpec acceleratorSpec;
 
     private:
-        bool parseNext(std::string_view* pChunk, size_t& inOutoffset);
-
-        Storage          m_storage;
-        std::string_view m_prevChunk;
-        std::string_view m_currChunk;
-        size_t           m_prevOffset;
-        size_t           m_offset       = 0ULL; // relative to prevOffset
-        EHeaderTokenType m_currentToken = EHeaderTokenType::eCount;
-        uint32_t         m_started  : 1 = false;
-        uint32_t         m_useCurr  : 1 = false;
-        uint32_t         m_finished : 1 = false;
+        EHeaderTokenType m_type = EHeaderTokenType::eCount;
+        TaggedPointer    m_array = taggedNullptr;
+        uint32_t         m_arrayLength = 0;
     };
+    static_assert(sizeof(HeaderTokenizer) <= toUnderlying(EBlockSize::e256B));
 }
 
 DMT_MODULE_EXPORT dmt::model {}

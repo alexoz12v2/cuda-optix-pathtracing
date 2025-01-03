@@ -102,14 +102,14 @@ DMT_MODULE_EXPORT dmt {
 
     private:
         /**
-         * Exception to the rule dependency injection through function parameter passing, as required 
+         * Exception to the rule dependency injection through function parameter passing, as required
          * by the `std::memory_resource` interface
          */
         MemoryContext* m_memoryContext; // Pointer to the MemoryContext used for allocations.
         size_t         m_alignment;     // Alignment for stack allocation.
         bool           m_allocated;     // Whether the first allocation has already occurred.
     };
- 
+
     template <typename T>
     class StackArrayDeleter
     {
@@ -463,7 +463,7 @@ DMT_MODULE_EXPORT dmt {
         {                           // params are all lowercase in the file
             float frameAspectRatio; // computed from film
             // [-1, 1] along shorter axis, [-screnWindow, +screenWindow] in longer axis. Default = aspect ratio if > 1, otherwise 1/aspect ratio
-            float screenWindow;     
+            float screenWindow;
             float lensRadius    = 0;
             float focalDistance = 1e30f; // 10^30 is near the float limit
             float fov           = 90.f;  // Used only by perspective
@@ -482,7 +482,9 @@ DMT_MODULE_EXPORT dmt {
 
         union Params
         {
-            Params() : p({}) { } 
+            Params() : p({})
+            {
+            }
             Realistic  r;
             Projecting p;
             Spherical  s;
@@ -537,7 +539,9 @@ DMT_MODULE_EXPORT dmt {
 
         union Samples
         {
-            Samples() : num(16) {}
+            Samples() : num(16)
+            {
+            }
 
             // StatifiedSampler only
             StratifiedSamples stratified;
@@ -677,7 +681,9 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
-            Params() : gaussian({}) {}
+            Params() : gaussian({})
+            {
+            }
 
             Gaussian gaussian;
             Mitchell mitchell;
@@ -687,7 +693,7 @@ DMT_MODULE_EXPORT dmt {
         Params      params;
         float       xRadius = defaultRadiusFromFilterType(EFilterType::eGaussian);
         float       yRadius = defaultRadiusFromFilterType(EFilterType::eGaussian);
-        EFilterType type = EFilterType::eGaussian;
+        EFilterType type    = EFilterType::eGaussian;
     };
 
     // Integrators ----------------------------------------------------------------------------------------------------
@@ -753,7 +759,9 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
-            Params() {}
+            Params()
+            {
+            }
 
             AmbientOcclusion    ao;
             BiDirPathTracing    bdpt;
@@ -807,7 +815,9 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
-            Params() : bvh({}) {}
+            Params() : bvh({})
+            {
+            }
 
             BVH    bvh;
             KDTree kdtree;
@@ -830,11 +840,11 @@ DMT_MODULE_EXPORT dmt {
     {
     public:
         /**
-         * number of max ASCII characters in a token (concert only for names and comments, which are the 
+         * number of max ASCII characters in a token (concert only for names and comments, which are the
          * longset tokens)
          */
         static constexpr uint32_t maxTokenSize = 256;
-        using CharBuffer = std::array<char, maxTokenSize>;
+        using CharBuffer                       = std::array<char, maxTokenSize>;
 
         std::string_view nextWord(std::string_view str);
         bool             needsContinuation() const;
@@ -879,7 +889,7 @@ DMT_MODULE_EXPORT dmt {
         union U
         {
             std::array<int32_t, countPenNode> is;
-            std::array<float, countPenNode> fs;
+            std::array<float, countPenNode>   fs;
         };
         U arr;
     };
@@ -892,20 +902,20 @@ DMT_MODULE_EXPORT dmt {
     class HeaderTokenizer
     {
     public:
-        void selectNextType(AppContext &actx, std::string_view token);
-        void parseOptions(AppContext &actx, Options const& options);
+        void selectNextType(AppContext& actx, std::string_view token);
+        void parseOptions(AppContext& actx, Options const& options);
 
-        CameraSpec cameraSpec;
-        SamplerSpec samplerSpec;
-        ColorSpaceSpec colorSpaceSpec;
-        FilmSpec filmSpec;
-        FilterSpec filterSpec;
-        IntegratorSpec integratorSpec;
+        CameraSpec      cameraSpec;
+        SamplerSpec     samplerSpec;
+        ColorSpaceSpec  colorSpaceSpec;
+        FilmSpec        filmSpec;
+        FilterSpec      filterSpec;
+        IntegratorSpec  integratorSpec;
         AcceleratorSpec acceleratorSpec;
 
     private:
-        EHeaderTokenType m_type = EHeaderTokenType::eCount;
-        TaggedPointer    m_array = taggedNullptr;
+        EHeaderTokenType m_type        = EHeaderTokenType::eCount;
+        TaggedPointer    m_array       = taggedNullptr;
         uint32_t         m_arrayLength = 0;
     };
     static_assert(sizeof(HeaderTokenizer) <= toUnderlying(EBlockSize::e256B));

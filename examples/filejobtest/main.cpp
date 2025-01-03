@@ -66,11 +66,11 @@ AttributeBegin
   AttributeEnd
 AttributeEnd
 )=";
-    void testWordTokenization(dmt::AppContext& actx)
+    void             testWordTokenization(dmt::AppContext& actx)
     {
         using CharBuffer = std::array<char, 256>;
         dmt::OneShotStackMemoryResource mem{&actx.mctx};
-        dmt::WordParser parser;
+        dmt::WordParser                 parser;
 
         size_t tokenCapacity = 8;
         void*  rawMemory     = mem.allocate(tokenCapacity * sizeof(CharBuffer), alignof(CharBuffer));
@@ -82,7 +82,8 @@ AttributeEnd
         }
         auto* arrayPtr = static_cast<CharBuffer*>(rawMemory);
 
-        std::unique_ptr<CharBuffer[], dmt::StackArrayDeleter<CharBuffer>> tokens{arrayPtr, dmt::StackArrayDeleter<CharBuffer>{}};
+        std::unique_ptr<CharBuffer[], dmt::StackArrayDeleter<CharBuffer>> tokens{arrayPtr,
+                                                                                 dmt::StackArrayDeleter<CharBuffer>{}};
 
         size_t   chunkSize    = 512;
         size_t   offset       = 0;

@@ -12,18 +12,12 @@ module testdmtpartitions; // implementation units for partitions do not redeclar
 class OutputRedirect
 {
 public:
-    OutputRedirect() : m_originalCoutBuffer(std::cout.rdbuf())
-    {
-        std::cout.rdbuf(m_mockCout.rdbuf());
-    }
+    OutputRedirect() : m_originalCoutBuffer(std::cout.rdbuf()) { std::cout.rdbuf(m_mockCout.rdbuf()); }
     OutputRedirect(OutputRedirect const&)            = delete;
     OutputRedirect(OutputRedirect&&)                 = delete;
     OutputRedirect& operator=(OutputRedirect const&) = delete;
     OutputRedirect& operator=(OutputRedirect&&)      = delete;
-    ~OutputRedirect()
-    {
-        std::cout.rdbuf(m_originalCoutBuffer);
-    }
+    ~OutputRedirect() { std::cout.rdbuf(m_originalCoutBuffer); }
 
     std::string getContent()
     {

@@ -29,10 +29,7 @@ namespace dmt {
         mctx.pctx.write(level, str, list, loc);
     }
 
-    void AppContext::addJob(Job const& job, EJobLayer layer)
-    {
-        threadPool.addJob(mctx, job, layer);
-    }
+    void AppContext::addJob(Job const& job, EJobLayer layer) { threadPool.addJob(mctx, job, layer); }
 
     AppContext::~AppContext()
     {
@@ -40,26 +37,14 @@ namespace dmt {
         mctx.cleanup();
     }
 
-    Platform::Platform()
-    {
-    }
+    Platform::Platform() {}
 
-    Platform::Platform(Platform&&) noexcept
-    {
-    }
+    Platform::Platform(Platform&&) noexcept {}
 
-    uint64_t Platform::getSize() const
-    {
-        return 4096;
-    }
+    uint64_t Platform::getSize() const { return 4096; }
 
-    Platform& Platform::operator=(Platform&&) noexcept
-    {
-        return *this;
-    }
+    Platform& Platform::operator=(Platform&&) noexcept { return *this; }
 
-    Platform::~Platform() noexcept
-    {
-    }
+    Platform::~Platform() noexcept {}
 
 } // namespace dmt

@@ -51,10 +51,7 @@ DMT_MODULE_EXPORT dmt {
         eCount,
     };
 
-    inline constexpr uint16_t toUnderlying(EMemoryTag tag)
-    {
-        return static_cast<uint16_t>(tag);
-    }
+    inline constexpr uint16_t toUnderlying(EMemoryTag tag) { return static_cast<uint16_t>(tag); }
 
     inline constexpr std::strong_ordering operator<=>(EMemoryTag a, EMemoryTag b)
     {
@@ -140,19 +137,19 @@ namespace dmt {
      * the CRC algorithm is an iterative one and needs a starting value.
      */
     inline constexpr uint64_t initialCrc64 = crc64Table[107];
-
-    constexpr uint64_t hashCRC64(char const* str)
-    {
-        uint64_t crc = initialCrc64;
-        while (*str)
-        {
-            crc = crc64Table[static_cast<uint8_t>((crc >> 56) ^ static_cast<uint64_t>(*str++))] ^ (crc << 8);
-        }
-        return crc;
-    }
 } // namespace dmt
 
 DMT_MODULE_EXPORT dmt {
+    inline constexpr uint64_t hashCRC64(std::string_view str)
+    {
+        uint64_t crc = initialCrc64;
+        for (char ch : str)
+        {
+            crc = crc64Table[static_cast<uint8_t>((crc >> 56) ^ static_cast<uint64_t>(ch))] ^ (crc << 8);
+        }
+        return crc;
+    }
+
     /**
      * Operator to convert an ASCII string literal to its string id form with CRC64 algorithm
      * to be preferred when you need constant time evaluation. If you need to intern the string, use `StringTable`
@@ -160,19 +157,12 @@ DMT_MODULE_EXPORT dmt {
      * @param sz unused, required for the operator to work
      * @return `sid_t` string id
      */
-    sid_t consteval operator""_side(char const* str, [[maybe_unused]] uint64_t sz)
-    {
-        return hashCRC64(str);
-    }
+    sid_t consteval operator""_side(char const* str, [[maybe_unused]] uint64_t sz) { return hashCRC64({str, sz}); }
 
     struct SText
     {
-        constexpr SText() : sid(0)
-        {
-        }
-        constexpr SText(std::string_view s) : str(s), sid(hashCRC64(str.data()))
-        {
-        }
+        constexpr SText() : sid(0) {}
+        constexpr SText(std::string_view s) : str(s), sid(hashCRC64(str.data())) {}
 
         std::string_view str;
         sid_t            sid;
@@ -188,9 +178,7 @@ DMT_MODULE_EXPORT dmt {
     public:
         static constexpr uint32_t MAX_SID_LEN = 256;
 
-        StringTable() : m_stringTable(&s_pool)
-        {
-        }
+        StringTable() : m_stringTable(&s_pool) {}
         StringTable(StringTable const&)                = delete;
         StringTable(StringTable&&) noexcept            = delete;
         StringTable& operator=(StringTable const&)     = delete;
@@ -251,10 +239,7 @@ DMT_MODULE_EXPORT dmt {
     /**
      * Boilerplate to extract the number from a strong enum type. C++23 standardised this
      */
-    constexpr uint32_t toUnderlying(EPageSize ePageSize)
-    {
-        return static_cast<uint32_t>(ePageSize);
-    }
+    constexpr uint32_t toUnderlying(EPageSize ePageSize) { return static_cast<uint32_t>(ePageSize); }
 
     /**
      * Boilerplate to compare strong enum types
@@ -272,12 +257,9 @@ DMT_MODULE_EXPORT dmt {
     {
         switch (pageSize)
         {
-            case EPageSize::e1GB:
-                return EPageSize::e2MB;
-            case EPageSize::e2MB:
-                return EPageSize::e4KB;
-            default:
-                return EPageSize::e4KB;
+            case EPageSize::e1GB: return EPageSize::e2MB;
+            case EPageSize::e2MB: return EPageSize::e4KB;
+            default: return EPageSize::e4KB;
         }
     }
 
@@ -457,9 +439,7 @@ DMT_MODULE_EXPORT dmt {
 #endif
 
     private:
-        explicit PageAllocator(PageAllocatorHooks const& hooks) : m_hooks(hooks)
-        {
-        }
+        explicit PageAllocator(PageAllocatorHooks const& hooks) : m_hooks(hooks) {}
 
         //-- Members --
 #if defined(DMT_OS_LINUX)
@@ -565,9 +545,7 @@ DMT_MODULE_EXPORT dmt {
         class Iterator
         {
         public:
-            explicit Iterator(NodeType* node) : m_current(node)
-            {
-            }
+            explicit Iterator(NodeType* node) : m_current(node) {}
 
             Iterator& operator++()
             {
@@ -577,33 +555,18 @@ DMT_MODULE_EXPORT dmt {
                 return *this;
             }
 
-            bool operator!=(Iterator const& other) const
-            {
-                return m_current != other.m_current;
-            }
+            bool operator!=(Iterator const& other) const { return m_current != other.m_current; }
 
-            NodeType& operator*() const
-            {
-                return *m_current;
-            }
+            NodeType& operator*() const { return *m_current; }
 
-            NodeType* operator->() const
-            {
-                return m_current;
-            }
+            NodeType* operator->() const { return m_current; }
 
         private:
             NodeType* m_current = nullptr;
         };
 
-        Iterator beginAllocated()
-        {
-            return Iterator(m_occupiedHead);
-        }
-        Iterator endAllocated()
-        {
-            return Iterator(nullptr);
-        }
+        Iterator beginAllocated() { return Iterator(m_occupiedHead); }
+        Iterator endAllocated() { return Iterator(nullptr); }
 
         // Add a node to the occupied list from the free list
         void addNode(typename NodeType::DType const& data)
@@ -745,20 +708,14 @@ DMT_MODULE_EXPORT dmt {
         bool      m_growBackwards = false;   // Growth direction
 
         // Helper functions for managing free and occupied nodes
-        NodeType* getNextFree(NodeType* node) const
-        {
-            return reinterpret_cast<NodeType*>(node->free.nextFree);
-        }
+        NodeType* getNextFree(NodeType* node) const { return reinterpret_cast<NodeType*>(node->free.nextFree); }
 
         void setNextFree(NodeType* node, NodeType* next) const
         {
             node->free.nextFree = reinterpret_cast<NodeType*>(next);
         }
 
-        NodeType* getNextOccupied(NodeType* node) const
-        {
-            return reinterpret_cast<NodeType*>(node->data.next);
-        }
+        NodeType* getNextOccupied(NodeType* node) const { return reinterpret_cast<NodeType*>(node->data.next); }
 
         void setNextOccupied(NodeType* node, NodeType* next) const
         {
@@ -808,9 +765,7 @@ DMT_MODULE_EXPORT dmt {
     public:
         struct EndSentinel
         {
-            constexpr EndSentinel(uintptr_t last) : last{last}
-            {
-            }
+            constexpr EndSentinel(uintptr_t last) : last{last} {}
             uintptr_t last;
         };
 
@@ -821,17 +776,10 @@ DMT_MODULE_EXPORT dmt {
             using value_type      = AllocationInfo;
             using reference_type  = AllocationInfo const&;
 
-            AllocIterator() : m_ptr(nullptr)
-            {
-            }
-            AllocIterator(AllocationInfo const* ptr) : m_ptr(ptr)
-            {
-            }
+            AllocIterator() : m_ptr(nullptr) {}
+            AllocIterator(AllocationInfo const* ptr) : m_ptr(ptr) {}
 
-            AllocationInfo const& operator*() const
-            {
-                return *m_ptr;
-            }
+            AllocationInfo const& operator*() const { return *m_ptr; }
 
             AllocIterator& operator++()
             {
@@ -846,15 +794,9 @@ DMT_MODULE_EXPORT dmt {
                 return tmp;
             }
 
-            bool operator==(AllocIterator const& other) const
-            {
-                return m_ptr == other.m_ptr;
-            }
+            bool operator==(AllocIterator const& other) const { return m_ptr == other.m_ptr; }
 
-            bool operator==(EndSentinel end) const
-            {
-                return !m_ptr || std::bit_cast<uintptr_t>(m_ptr) >= end.last;
-            }
+            bool operator==(EndSentinel end) const { return !m_ptr || std::bit_cast<uintptr_t>(m_ptr) >= end.last; }
 
         private:
             AllocationInfo const* m_ptr;
@@ -863,14 +805,9 @@ DMT_MODULE_EXPORT dmt {
         struct AllocRange
         {
         public:
-            AllocRange(Header* block) : m_block(block)
-            {
-            }
+            AllocRange(Header* block) : m_block(block) {}
 
-            AllocIterator begin() const
-            {
-                return {firstAllocFromHeaderConst(m_block)};
-            }
+            AllocIterator begin() const { return {firstAllocFromHeaderConst(m_block)}; }
 
             EndSentinel end() const
             {
@@ -889,18 +826,11 @@ DMT_MODULE_EXPORT dmt {
             using difference_type = std::ptrdiff_t;
             using value_type      = AllocRange;
 
-            WindowIterator() : m_block(nullptr)
-            {
-            }
+            WindowIterator() : m_block(nullptr) {}
 
-            WindowIterator(Header* start) : m_block(start)
-            {
-            }
+            WindowIterator(Header* start) : m_block(start) {}
 
-            AllocRange operator*() const
-            {
-                return {m_block};
-            }
+            AllocRange operator*() const { return {m_block}; }
 
             WindowIterator& operator++()
             {
@@ -915,15 +845,9 @@ DMT_MODULE_EXPORT dmt {
                 return tmp;
             }
 
-            bool operator==(WindowIterator const other) const
-            {
-                return m_block == other.m_block;
-            }
+            bool operator==(WindowIterator const other) const { return m_block == other.m_block; }
 
-            bool operator==(EndSentinel end) const
-            {
-                return !m_block || m_block->limit > end.last;
-            }
+            bool operator==(EndSentinel end) const { return !m_block || m_block->limit > end.last; }
 
         private:
             Header* m_block;
@@ -944,15 +868,9 @@ DMT_MODULE_EXPORT dmt {
         void touchFreeTime(void* address, uint64_t freeTime);
         void switchTonext();
 
-        WindowIterator begin() const
-        {
-            return {m_blocks[0]};
-        }
+        WindowIterator begin() const { return {m_blocks[0]}; }
 
-        EndSentinel end() const
-        {
-            return {std::bit_cast<uintptr_t>(m_blocks[numBlocks - 1])};
-        }
+        EndSentinel end() const { return {std::bit_cast<uintptr_t>(m_blocks[numBlocks - 1])}; }
 
     private:
         bool commitBlock();
@@ -971,34 +889,18 @@ DMT_MODULE_EXPORT dmt {
     public:
         struct PageAllocationView
         {
-            PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking)
-            {
-            }
-            auto begin()
-            {
-                return m_pageTracking->beginAllocated();
-            }
-            auto end()
-            {
-                return m_pageTracking->endAllocated();
-            }
+            PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking) {}
+            auto begin() { return m_pageTracking->beginAllocated(); }
+            auto end() { return m_pageTracking->endAllocated(); }
 
         private:
             FreeList<PageNode>* m_pageTracking;
         };
         struct AllocationView
         {
-            AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking)
-            {
-            }
-            auto begin()
-            {
-                return m_allocTracking->beginAllocated();
-            }
-            auto end()
-            {
-                return m_allocTracking->endAllocated();
-            }
+            AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking) {}
+            auto begin() { return m_allocTracking->beginAllocated(); }
+            auto end() { return m_allocTracking->endAllocated(); }
 
         private:
             FreeList<AllocNode>* m_allocTracking;
@@ -1014,18 +916,12 @@ DMT_MODULE_EXPORT dmt {
         /**
          * Getter to an iterable type to cycle through all tracked page allocations
          */
-        PageAllocationView pageAllocations()
-        {
-            return {&m_pageTracking};
-        }
+        PageAllocationView pageAllocations() { return {&m_pageTracking}; }
 
         /**
          * Getter to an iterable type to cycle through all tracked object allocations
          */
-        AllocationView allocations()
-        {
-            return {&m_allocTracking};
-        }
+        AllocationView allocations() { return {&m_allocTracking}; }
 
         /**
          * Method to track a page allocation into the `m_pageTracking` occupied linked list
@@ -1063,15 +959,9 @@ DMT_MODULE_EXPORT dmt {
          */
         void claenTransients(LoggingContext& ctx);
 
-        void nextCycle()
-        {
-            m_slidingWindow.switchTonext();
-        }
+        void nextCycle() { m_slidingWindow.switchTonext(); }
 
-        ObjectAllocationsSlidingWindow const& slidingWindow() const
-        {
-            return m_slidingWindow;
-        }
+        ObjectAllocationsSlidingWindow const& slidingWindow() const { return m_slidingWindow; }
 
     private:
         static constexpr uint32_t initialNodeNum = 128;
@@ -1216,10 +1106,7 @@ DMT_MODULE_EXPORT dmt {
     /**
      * Boilerplate to extract the number from a strong enum type. C++23 standardised this
      */
-    constexpr uint16_t toUnderlying(EBlockSize blkSize)
-    {
-        return static_cast<uint16_t>(blkSize);
-    }
+    constexpr uint16_t toUnderlying(EBlockSize blkSize) { return static_cast<uint16_t>(blkSize); }
 
     /**
      * `MultiPoolAllocator` makes use of `TaggedPointesr`, as all allocations are 32 byte aligned (5 least significant bits free to use)
@@ -1232,14 +1119,10 @@ DMT_MODULE_EXPORT dmt {
         switch (blkSize)
         {
             using enum EBlockSize;
-            case e32B:
-                return 0;
-            case e64B:
-                return 1;
-            case e128B:
-                return 2;
-            case e256B:
-                return 3;
+            case e32B: return 0;
+            case e64B: return 1;
+            case e128B: return 2;
+            case e256B: return 3;
         }
 
         assert(false && "unknown block size");
@@ -1254,14 +1137,10 @@ DMT_MODULE_EXPORT dmt {
         using enum EBlockSize;
         switch (encoding)
         {
-            case 0:
-                return e32B;
-            case 1:
-                return e64B;
-            case 2:
-                return e128B;
-            case 3:
-                return e256B;
+            case 0: return e32B;
+            case 1: return e64B;
+            case 2: return e128B;
+            case 3: return e256B;
         }
 
         assert(false && "invalid value");

@@ -200,10 +200,7 @@ namespace dmt {
     {
     }
 
-    LinuxAsyncIOManager::~LinuxAsyncIOManager() noexcept
-    {
-        cleanup();
-    }
+    LinuxAsyncIOManager::~LinuxAsyncIOManager() noexcept { cleanup(); }
 
     LinuxAsyncIOManager& LinuxAsyncIOManager::operator=(LinuxAsyncIOManager&& other) noexcept
     {
@@ -216,10 +213,7 @@ namespace dmt {
         return *this;
     }
 
-    char* LinuxAsyncIOManager::operator[](uint32_t idx)
-    {
-        return m_lines[idx].buf;
-    }
+    char* LinuxAsyncIOManager::operator[](uint32_t idx) { return m_lines[idx].buf; }
 
     uint32_t LinuxAsyncIOManager::findFirstFreeBlocking()
     {
@@ -320,10 +314,7 @@ namespace dmt {
         }
     }
 
-    char* WindowsAsyncIOManager::operator[](uint32_t idx)
-    {
-        return m_lines[idx].buf;
-    }
+    char* WindowsAsyncIOManager::operator[](uint32_t idx) { return m_lines[idx].buf; }
 
     uint32_t WindowsAsyncIOManager::findFirstFreeBlocking()
     {
@@ -424,10 +415,7 @@ namespace dmt {
         std::free(m_lines);
     }
 
-    WindowsAsyncIOManager::~WindowsAsyncIOManager() noexcept
-    {
-        cleanup();
-    }
+    WindowsAsyncIOManager::~WindowsAsyncIOManager() noexcept { cleanup(); }
 
     bool WindowsAsyncIOManager::enqueue(int32_t idx, size_t size)
     {
@@ -474,10 +462,7 @@ namespace dmt {
      * -----------------------------------END OS SPECIFIC SECTION-------------------------------------------------
      */
 
-    ConsoleLogger::~ConsoleLogger()
-    {
-        m_IOClassInterface.destructor(m_asyncIOClass);
-    }
+    ConsoleLogger::~ConsoleLogger() { m_IOClassInterface.destructor(m_asyncIOClass); }
 
     void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::source_location const& loc)
     {

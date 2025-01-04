@@ -3,12 +3,15 @@
 #include "dmtmacros.h"
 
 #include <bit>
+#include <charconv> // For std::from_chars
 #include <concepts>
 #include <iterator>
 #include <source_location>
+#include <string_view>
 #include <type_traits>
 
 #include <cassert>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 
@@ -80,6 +83,87 @@ DMT_MODULE_EXPORT dmt {
         }
     }
 
+    template <typename Enum>
+        requires(std::is_enum_v<Enum>)
+    inline constexpr bool isAnyEnum(Enum e, std::initializer_list<Enum> const& values)
+    {
+        for (auto const& value : values)
+        {
+            if (e == value)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    template <std::integral I, std::forward_iterator It>
+    inline constexpr bool oneOf(I value, It const& begin, It const& end)
+    {
+        for (auto it = begin; it != end; ++it)
+        {
+            auto const& item = *it;
+            if (value == item)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    inline constexpr bool parseFloat(std::string_view input, float& outValue)
+    {
+        // Remove leading and trailing whitespace
+        while (!input.empty() && std::isspace(input.front()))
+        {
+            input.remove_prefix(1);
+        }
+        while (!input.empty() && std::isspace(input.back()))
+        {
+            input.remove_suffix(1);
+        }
+
+        if (input.empty())
+        {
+            return false; // Empty input is not a valid float
+        }
+
+        // Parse the float
+        char const* begin = input.data();
+        char const* end   = input.data() + input.size();
+
+        auto result = std::from_chars(begin, end, outValue);
+        if (result.ec != std::errc() || result.ptr != end)
+        {
+            return false; // Error in parsing or extra characters
+        }
+
+        return true;
+    }
+
+    template <std::integral I>
+    inline constexpr bool parseInt(std::string_view str, I & outValue)
+    {
+        if (str.empty())
+        {
+            return false;
+        }
+
+        auto const [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), outValue);
+        return ec == std::errc{};
+    }
+
+    inline constexpr bool endsWithAny(std::string_view str, std::initializer_list<std::string_view> const& suffixes)
+    {
+        for (auto const& suffix : suffixes)
+        {
+            if (str.ends_with(suffix))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     template <std::integral T>
     inline constexpr T popCount(T v)
@@ -108,6 +192,42 @@ DMT_MODULE_EXPORT dmt {
         if (v & 0x55555555)
             c -= 1;
         return c;
+    }
+
+    inline constexpr size_t findFirstWhitespace(std::string_view str)
+    {
+        for (size_t i = 0; i < str.size(); ++i)
+        {
+            if (std::isspace(static_cast<unsigned char>(str[i])))
+            {
+                return i;
+            }
+        }
+        return std::string_view::npos;
+    }
+
+    inline constexpr std::string_view trimStartWhitespace(std::string_view str)
+    {
+        size_t start = 0;
+        while (start < str.size() && std::isspace(static_cast<unsigned char>(str[start])))
+        {
+            ++start;
+        }
+        return str.substr(start);
+    }
+
+    inline constexpr bool startsWithEndsWith(std::string_view str, char start, char end)
+    {
+        return str.starts_with(start) && str.ends_with(end);
+    }
+
+    inline constexpr std::string_view dequoteString(std::string_view str)
+    {
+        if (str.size() >= 2 && (str.front() == '"' || str.front() == '\'') && str.back() == str.front())
+        {
+            return str.substr(1, str.size() - 2); // Remove the first and last characters
+        }
+        return str; // Return as-is if not quoted
     }
 
     inline constexpr uint32_t countTrailingZeros(uint64_t v)
@@ -151,6 +271,16 @@ DMT_MODULE_EXPORT dmt {
     // Concept using the helper
     template <template <typename...> class Template, typename T>
     concept TemplateInstantiationOf = is_template_instantiation_v<Template, T>;
+
+    // TODO move to cpp all not inline
+    char pathSeparator()
+    {
+#if defined(DMT_OS_WINDOWS)
+        return '\\';
+#else
+        return '/';
+#endif
+    }
 
     void* alignTo(void* address, size_t alignment)
     {
@@ -214,14 +344,9 @@ DMT_MODULE_EXPORT dmt {
     {
     public:
         // Constructor
-        constexpr TaggedPointer(std::nullptr_t null = nullptr) : m_taggedPtr(0)
-        {
-        }
+        constexpr TaggedPointer(std::nullptr_t null = nullptr) : m_taggedPtr(0) {}
 
-        constexpr TaggedPointer(void* ptr, uint16_t tag = 0)
-        {
-            set(std::bit_cast<uintptr_t>(ptr), tag);
-        }
+        constexpr TaggedPointer(void* ptr, uint16_t tag = 0) { set(std::bit_cast<uintptr_t>(ptr), tag); }
 
         // Set pointer and tag
         constexpr void set(uintptr_t ptr, uint16_t tag)
@@ -259,10 +384,7 @@ DMT_MODULE_EXPORT dmt {
             return address;
         }
 
-        constexpr bool operator==(TaggedPointer other) const
-        {
-            return m_taggedPtr == other.m_taggedPtr;
-        }
+        constexpr bool operator==(TaggedPointer other) const { return m_taggedPtr == other.m_taggedPtr; }
 
         template <typename T>
         constexpr bool operator==(T* other) const

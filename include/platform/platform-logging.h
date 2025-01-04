@@ -152,41 +152,31 @@ DMT_MODULE_EXPORT dmt {
          * @param len length of the pointed string, excluding the '\0' (expected positive)
          *
          */
-        constexpr StrBuf(char const* str, int32_t len) : str(str), len(len)
-        {
-        }
+        constexpr StrBuf(char const* str, int32_t len) : str(str), len(len) {}
 
         /**
          * Constructor which initializes from a \0 terminated string with strlen
          * @param str
          */
-        StrBuf(char const* str) : str(str), len(static_cast<int32_t>(std::strlen(str)))
-        {
-        }
+        StrBuf(char const* str) : str(str), len(static_cast<int32_t>(std::strlen(str))) {}
 
         /**
          * Converting constructor from a string_view. NOT `explicit` on purpose
          * @param view
          */
-        constexpr StrBuf(std::string_view const& view) : str(view.data()), len(static_cast<int32_t>(view.length()))
-        {
-        }
+        constexpr StrBuf(std::string_view const& view) : str(view.data()), len(static_cast<int32_t>(view.length())) {}
 
         /**
          * Converting constructor from a string_view. NOT `explicit` on purpose
          * @param view
          */
-        constexpr StrBuf(std::string const& view) : str(view.c_str()), len(static_cast<int32_t>(view.length()))
-        {
-        }
+        constexpr StrBuf(std::string const& view) : str(view.c_str()), len(static_cast<int32_t>(view.length())) {}
 
         /**
          * Converting constructor for formatting booleans
          * @param b
          */
-        constexpr StrBuf(bool b) : StrBuf(b ? strue : sfalse)
-        {
-        }
+        constexpr StrBuf(bool b) : StrBuf(b ? strue : sfalse) {}
 
         /**
          * Constructor from a floating point value. If the format string is reasonable, it shouldn't allocate and use
@@ -596,82 +586,55 @@ concept LogDisplay = requires(T t)
          * Setter for the `m_level`
          * @param level new level
          */
-        void setLevel(ELogLevel level)
-        {
-            m_level = level;
-        }
+        void setLevel(ELogLevel level) { m_level = level; }
 
         /**
          * check if the given log level is enabled
          * @param level log level
          * @return boolean indicating whether the given log level is enabled
          */
-        [[nodiscard]] bool enabled(ELogLevel level) const
-        {
-            return m_level <= level;
-        }
+        [[nodiscard]] bool enabled(ELogLevel level) const { return m_level <= level; }
 
         /**
          * Checks if the `LOG` log level is enabled
          * @return boolean indicating whether the `LOG` log level is enabled
          */
-        [[nodiscard]] bool logEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::LOG);
-        }
+        [[nodiscard]] bool logEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::LOG); }
 
         /**
          * Checks if the `ERROR` log level is enabled
          * @return boolean indicating whether the `ERROR` log level is enabled
          */
-        [[nodiscard]] bool errorEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::ERR);
-        }
+        [[nodiscard]] bool errorEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::ERR); }
 
         /**
          * Checks if the `TRACE` log level is enabled
          * @return boolean indicating whether the `TRACE` log level is enabled
          */
-        [[nodiscard]] bool traceEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::TRACE);
-        }
+        [[nodiscard]] bool traceEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::TRACE); }
 
         /**
          * Checks if the `WARN` log level is enabled
          * @return boolean indicating whether the `WARN` log level is enabled
          */
-        [[nodiscard]] bool warnEnabled()
-        {
-            return static_cast<Derived*>(this)->enabled(ELogLevel::WARNING);
-        }
+        [[nodiscard]] bool warnEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::WARNING); }
         /**
          * Checks if the `LOG` log level is enabled
          * @return boolean indicating whether the `LOG` log level is enabled
          */
-        [[nodiscard]] bool logEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::LOG);
-        }
+        [[nodiscard]] bool logEnabled() const { return static_cast<Derived const*>(this)->enabled(ELogLevel::LOG); }
 
         /**
          * Checks if the `ERROR` log level is enabled
          * @return boolean indicating whether the `ERROR` log level is enabled
          */
-        [[nodiscard]] bool errorEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::ERR);
-        }
+        [[nodiscard]] bool errorEnabled() const { return static_cast<Derived const*>(this)->enabled(ELogLevel::ERR); }
 
         /**
          * Checks if the `TRACE` log level is enabled
          * @return boolean indicating whether the `TRACE` log level is enabled
          */
-        [[nodiscard]] bool traceEnabled() const
-        {
-            return static_cast<Derived const*>(this)->enabled(ELogLevel::TRACE);
-        }
+        [[nodiscard]] bool traceEnabled() const { return static_cast<Derived const*>(this)->enabled(ELogLevel::TRACE); }
 
         /**
          * Checks if the `WARN` log level is enabled
@@ -716,20 +679,11 @@ concept AsyncIOManager = requires(T t) {
     class alignas(8) NullAsyncIOManager : public BaseAsyncIOManager
     {
     public:
-        char* operator[](uint32_t i)
-        {
-            return m_padding;
-        }
+        char* operator[](uint32_t i) { return m_padding; }
 
-        uint32_t findFirstFreeBlocking() const
-        {
-            return 0;
-        }
+        uint32_t findFirstFreeBlocking() const { return 0; }
 
-        bool enqueue(uint32_t idx, size_t sz) const
-        {
-            return true;
-        }
+        bool enqueue(uint32_t idx, size_t sz) const { return true; }
 
     private:
         char m_padding[asyncIOClassSize]{};
@@ -866,9 +820,7 @@ concept AsyncIOManager = requires(T t) {
 
     private:
         // -- Constructors --
-        explicit ConsoleLogger(ELogLevel level) : BaseLogger<ConsoleLogger>(level)
-        {
-        }
+        explicit ConsoleLogger(ELogLevel level) : BaseLogger<ConsoleLogger>(level) {}
 
         // -- Types --
         /**
@@ -992,19 +944,14 @@ concept AsyncIOManager = requires(T t) {
     class LoggingContext : public InterfaceLogger<LoggingContext>
     {
     public:
-        LoggingContext() : logger(ConsoleLogger::create()), start(std::chrono::high_resolution_clock::now())
-        {
-        }
+        LoggingContext() : logger(ConsoleLogger::create()), start(std::chrono::high_resolution_clock::now()) {}
 
         /**
          * Setter for the `m_level`
          * @param level new level
          * @warning Purposefully name hiding the `BaseLogger`
          */
-        void setLevel(ELogLevel level)
-        {
-            logger.setLevel(level);
-        }
+        void setLevel(ELogLevel level) { logger.setLevel(level); }
 
         /**
          * Write function mandated by the CRTP pattern of the class `BaseLogger`
@@ -1037,30 +984,15 @@ concept AsyncIOManager = requires(T t) {
          * @param level log level requested
          * @return bool signaling whether the requested log level is enabled
          */
-        bool enabled(ELogLevel level)
-        {
-            return logger.enabled(level);
-        }
+        bool enabled(ELogLevel level) { return logger.enabled(level); }
 
-        bool traceEnabled()
-        {
-            return enabled(ELogLevel::TRACE);
-        }
+        bool traceEnabled() { return enabled(ELogLevel::TRACE); }
 
-        bool logEnabled()
-        {
-            return enabled(ELogLevel::LOG);
-        }
+        bool logEnabled() { return enabled(ELogLevel::LOG); }
 
-        bool warnEnabled()
-        {
-            return enabled(ELogLevel::WARNING);
-        }
+        bool warnEnabled() { return enabled(ELogLevel::WARNING); }
 
-        bool errorEnabled()
-        {
-            return enabled(ELogLevel::ERR);
-        }
+        bool errorEnabled() { return enabled(ELogLevel::ERR); }
 
         void dbgTraceStackTrace();
 

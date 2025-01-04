@@ -38,10 +38,7 @@ namespace dmt {
          * @brief Prints a predefined message.
          * Displays "Hello darkness my old Friend" to the standard output.
          */
-        static void printStuff()
-        {
-            std::cout << "Hello darkness my old Friend\n";
-        }
+        static void printStuff() { std::cout << "Hello darkness my old Friend\n"; }
     };
 } // namespace dmt
 /** @} */ // End of group testdmt

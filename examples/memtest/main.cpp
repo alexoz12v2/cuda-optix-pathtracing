@@ -15,13 +15,8 @@ struct TestObject
 {
     int              x, y;
     dmt::AppContext& ctx;
-    TestObject(int a, int b, dmt::AppContext& ctx) : x(a), y(b), ctx(ctx)
-    {
-    }
-    ~TestObject()
-    {
-        ctx.log("Destruction TestObject");
-    }
+    TestObject(int a, int b, dmt::AppContext& ctx) : x(a), y(b), ctx(ctx) {}
+    ~TestObject() { ctx.log("Destruction TestObject"); }
 };
 
 static dmt::StrBuf formatAlloc(dmt::AllocationInfo const& alloc, char const* sidStr)
@@ -146,9 +141,7 @@ void testThreadpool(dmt::AppContext& ctx)
         std::atomic<int> counter;
         dmt::AppContext& ctx;
 
-        JobData(dmt::AppContext& ctx) : counter(0), ctx(ctx)
-        {
-        }
+        JobData(dmt::AppContext& ctx) : counter(0), ctx(ctx) {}
     };
 
     // Create job data shared between jobs

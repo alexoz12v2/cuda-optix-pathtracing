@@ -11,10 +11,7 @@ namespace dmt {
     FAKE_VALUE_FUNC(float, myCos, float);
 }
 
-void resetMyCos()
-{
-    RESET_FAKE(dmt::myCos);
-}
+void resetMyCos() { RESET_FAKE(dmt::myCos); }
 
 TEST_CASE("[testdmtpartitions:moretrig] Test case")
 {

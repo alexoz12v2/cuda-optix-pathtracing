@@ -7,4 +7,5 @@ dmt_add_module_library(dmt-middleware middleware
 target_link_libraries(dmt-middleware 
   PUBLIC
     dmt::platform
+    glm::glm
 )

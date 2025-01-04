@@ -92,3 +92,18 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
 - [ ] Implementazione con OptiX
   - [ ] Formazione
 - [ ] GUI imgui implot
+
+
+Submodule 'src/ext/filesystem' (https://github.com/wjakob/filesystem.git) registered for path 'src/ext/filesystem'
+Submodule 'src/ext/glfw' (https://github.com/glfw/glfw.git) registered for path 'src/ext/glfw'
+Submodule 'src/ext/libdeflate' (https://github.com/mmp/libdeflate.git) registered for path 'src/ext/libdeflate'
+Submodule 'src/ext/lodepng' (https://github.com/lvandeve/lodepng.git) registered for path 'src/ext/lodepng'
+Submodule 'src/ext/openexr' (https://github.com/mmp/openexr.git) registered for path 'src/ext/openexr'
+Submodule 'src/ext/openvdb' (https://github.com/AcademySoftwareFoundation/openvdb.git) registered for path 'src/ext/openvdb'
+Submodule 'src/ext/ptex' (https://github.com/wdas/ptex.git) registered for path 'src/ext/ptex'
+Submodule 'src/ext/qoi' (https://github.com/phoboslab/qoi.git) registered for path 'src/ext/qoi'
+Submodule 'src/ext/stb' (https://github.com/nothings/stb.git) registered for path 'src/ext/stb'
+Submodule 'src/ext/utf8proc' (https://github.com/JuliaStrings/utf8proc.git) registered for path 'src/ext/utf8proc'
+Submodule 'src/ext/zlib' (https://github.com/mitsuba-renderer/zlib.git) registered for path 'src/ext/zlib'
+
+cmake .. -DCMAKE_BUILD_TYPE=Debug -G "Visual Studio 17 2022" -DPBRT_OPTIX7_PATH="C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.7.0"

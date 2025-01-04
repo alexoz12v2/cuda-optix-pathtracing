@@ -61,10 +61,7 @@ DMT_MODULE_EXPORT dmt {
 
         [[nodiscard]] uint64_t getSize() const;
 
-        AppContext& ctx() &
-        {
-            return m_ctx;
-        }
+        AppContext& ctx() & { return m_ctx; }
 
     private:
         AppContext m_ctx{toUnderlying(EPageSize::e1GB), toUnderlying(EPageSize::e1GB), {8192, 4096, 2048, 1024}};

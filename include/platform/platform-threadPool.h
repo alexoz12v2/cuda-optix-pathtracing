@@ -62,15 +62,9 @@ DMT_MODULE_EXPORT dmt {
         eEmpty   = static_cast<uint32_t>(-1),
     };
 
-    constexpr uint32_t toUnderlying(EJobLayer a)
-    {
-        return static_cast<uint32_t>(a);
-    }
+    constexpr uint32_t toUnderlying(EJobLayer a) { return static_cast<uint32_t>(a); }
 
-    constexpr std::strong_ordering operator<=>(EJobLayer a, EJobLayer b)
-    {
-        return toUnderlying(a) <=> toUnderlying(b);
-    }
+    constexpr std::strong_ordering operator<=>(EJobLayer a, EJobLayer b) { return toUnderlying(a) <=> toUnderlying(b); }
 
     struct Job
     {
@@ -148,10 +142,7 @@ DMT_MODULE_EXPORT dmt {
         bool otherLayerActive(EJobLayer& layer) const;
 
     private:
-        static constexpr bool isTrueTaggedPointer(TaggedPointer ptr)
-        {
-            return ptr.tag() != nullTag;
-        }
+        static constexpr bool isTrueTaggedPointer(TaggedPointer ptr) { return ptr.tag() != nullTag; }
 
         Job nextJob(bool& otherJobsRemaining, EJobLayer& outLayer);
 
@@ -294,16 +285,10 @@ DMT_MODULE_EXPORT dmt {
 
             bool           operator==(EndSentinel const&) const;
             InputIterator& operator++();
-            void           operator++(int)
-            {
-                ++*this;
-            }
+            void           operator++(int) { ++*this; }
 
         private:
-            constexpr bool inRange() const
-            {
-                return m_current < m_chunkNum + m_numChunks;
-            }
+            constexpr bool inRange() const { return m_current < m_chunkNum + m_numChunks; }
 
             void*    m_pData;
             uint32_t m_chunkNum;
@@ -323,10 +308,7 @@ DMT_MODULE_EXPORT dmt {
 
             InputIterator begin();
 
-            EndSentinel end()
-            {
-                return {};
-            }
+            EndSentinel end() { return {}; }
 
             void*    pData;
             uint32_t chunkNum;
@@ -339,8 +321,12 @@ DMT_MODULE_EXPORT dmt {
         static constexpr uint32_t maxNumBuffers = 72;
         static constexpr uint32_t size          = 64;
         static constexpr uint32_t alignment     = 32;
-        ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize);
-        ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize, uint8_t numBuffers, uintptr_t* pBuffers);
+        ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize); // udata mode
+        ChunkedFileReader(LoggingContext& pctx,
+                          char const*     filePath,
+                          uint32_t        chunkSize,
+                          uint8_t         numBuffers,
+                          uintptr_t*      pBuffers); // pdata mode
         ChunkedFileReader(ChunkedFileReader const&)                = delete;
         ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
         ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;
@@ -353,10 +339,7 @@ DMT_MODULE_EXPORT dmt {
         uint32_t lastNumBytesRead();
         void     markFree(ChunkInfo const& chunkInfo);
         uint32_t numChunks() const;
-        Range    range(uint32_t chunkNum, uint32_t numChunks)
-        {
-            return Range{&m_data, chunkNum, numChunks};
-        }
+        Range    range(uint32_t chunkNum, uint32_t numChunks) { return Range{&m_data, chunkNum, numChunks}; }
 
         operator bool() const;
 

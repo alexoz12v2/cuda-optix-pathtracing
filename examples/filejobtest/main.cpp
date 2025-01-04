@@ -161,6 +161,16 @@ AttributeEnd
         actx.log("inserted value {}", {testValue});
         ctrie.cleanup(actx.mctx, doNothing);
     }
+
+    void textParsing(dmt::AppContext& actx)
+    {
+        using namespace std::string_view_literals;
+        dmt::Options         opt;
+        dmt::HeaderTokenizer parser{opt};
+        auto                 filePath = "../res/scenes/disney-cloud/disney-cloud.pbrt"sv;
+
+        parser.parseHeader(actx, filePath);
+    }
 } // namespace
 
 int32_t main()
@@ -171,4 +181,5 @@ int32_t main()
     //testCTrie(actx);
     testWordTokenization(actx);
     //testJob(actx);
+    textParsing(actx);
 }

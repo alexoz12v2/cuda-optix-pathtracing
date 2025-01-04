@@ -41,10 +41,7 @@ namespace dmt {
         }
     }
 
-    ThreadPool::~ThreadPool()
-    {
-        Shutdown();
-    }
+    ThreadPool::~ThreadPool() { Shutdown(); }
 
     void ThreadPool::Shutdown()
     {
@@ -73,9 +70,7 @@ namespace dmt {
     }
 
     //set the pointer of the pool so the worker can access to the shared queue and mutex
-    ThreadPool::ThreadWorker::ThreadWorker(ThreadPool* pool) : m_threadPool(pool)
-    {
-    }
+    ThreadPool::ThreadWorker::ThreadWorker(ThreadPool* pool) : m_threadPool(pool) {}
     //execute immediately starts to execute
     void ThreadPool::ThreadWorker::operator()()
     {
@@ -135,10 +130,7 @@ namespace dmt {
         return !lock_.load(std::memory_order_relaxed) && !lock_.exchange(true, std::memory_order_acquire);
     }
 
-    void SpinLock::unlock() noexcept
-    {
-        lock_.store(false, std::memory_order_release);
-    }
+    void SpinLock::unlock() noexcept { lock_.store(false, std::memory_order_release); }
 
     // ThreadPoolV2 ---------------------------------------------------------------------------------------------------
     struct BufferCountPair
@@ -860,6 +852,12 @@ namespace dmt {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
         assert(chunkNum < data.numChunks);
 
+        if (alignTo(chunkBuffer, 8) != chunkBuffer)
+        {
+            pctx.error("invalid chunk buffer, nned it aligned to a 8 byte boundary");
+            return false;
+        }
+
         if (data.u.pData.magic == Win32ChunkedFileReader::theMagic)
         {
             pctx.error("invalid state. initialized for multi chunk operator, tried single buffer op");
@@ -1147,13 +1145,9 @@ namespace dmt {
 
                         break;
                     }
-                    case bufferFinished:
-                        return *this;
-                        break;
-                    case bufferOccupied:
-                        [[fallthrough]];
-                    default:
-                        break;
+                    case bufferFinished: return *this; break;
+                    case bufferOccupied: [[fallthrough]];
+                    default: break;
                 }
             }
         }

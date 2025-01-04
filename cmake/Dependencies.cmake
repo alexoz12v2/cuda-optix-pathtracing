@@ -29,4 +29,14 @@ macro(dmt_setup_dependencies)
     )
     FetchContent_MakeAvailable(backward)
   endif()
+
+  if(NOT TARGET glm::glm)
+    FetchContent_Declare(
+	    glm
+	    GIT_REPOSITORY	https://github.com/g-truc/glm.git
+	    GIT_TAG 	bf71a834948186f4097caa076cd2663c69a10e1e #refs/tags/1.0.1
+    )
+    FetchContent_MakeAvailable(glm)
+    add_compile_definitions(GLM_CONFIG_XYZW_ONLY=1)
+  endif()
 endmacro()

@@ -5,19 +5,33 @@
 #include <array>
 #include <atomic>
 #include <limits>
+#include <map>
 #include <memory_resource>
+#include <set>
+#include <stack>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <cassert>
 #include <compare>
 #include <cstdint>
+
+#include <glm/vec3.hpp> // glm::vec3
+#include <glm/vec4.hpp> // glm::vec4
+#include <glm/mat4x4.hpp> // glm::mat4
+#include <glm/ext/matrix_transform.hpp> // glm::translate, glm::rotate, glm::scale
+#include <glm/ext/matrix_clip_space.hpp> // glm::perspective
+#include <glm/ext/scalar_constants.hpp> // glm::pi
 
 #if defined(DMT_INTERFACE_AS_HEADER)
 #include <platform/platform.h>
 #else
 import platform;
 #endif
+
+// TODO switch all structures with stack allocator
+// TODO remove default values from clases and leave them only in parsing functions
 
 // stuff related to .pbrt file parsing + data structures
 DMT_MODULE_EXPORT dmt {
@@ -66,7 +80,7 @@ DMT_MODULE_EXPORT dmt {
     class OneShotStackMemoryResource : public std::pmr::memory_resource
     {
     public:
-        explicit OneShotStackMemoryResource(MemoryContext* memoryContext, size_t alignment = alignof(std::max_align_t)) :
+        OneShotStackMemoryResource(MemoryContext* memoryContext, size_t alignment = alignof(std::max_align_t)) :
         m_memoryContext(memoryContext),
         m_alignment(alignment),
         m_allocated(false)
@@ -114,18 +128,14 @@ DMT_MODULE_EXPORT dmt {
     class StackArrayDeleter
     {
     public:
-        void operator()(T* ptr) const
-        {
-        }
+        void operator()(T* ptr) const {}
     };
 
     // ----------------------------------------------------------------------------------------------------------------
 
     struct Bitmap
     {
-        Bitmap() : map(0)
-        {
-        }
+        Bitmap() : map(0) {}
 
         std::atomic<uint64_t> map;
 
@@ -140,10 +150,7 @@ DMT_MODULE_EXPORT dmt {
             return bits;
         }
 
-        bool setValue(uint64_t value, uint64_t index)
-        {
-            return cas(value, index, false, 0, 0);
-        }
+        bool setValue(uint64_t value, uint64_t index) { return cas(value, index, false, 0, 0); }
 
     protected:
         bool checkValue(uint64_t value, uint64_t index) const
@@ -324,7 +331,7 @@ DMT_MODULE_EXPORT dmt {
 
         ecDisableImageTextures  = 1u << 6u,
         ecUseGPU                = 1u << 7u,
-        ecWavefront             = 1u << 8u,
+        ecWavefront             = 1u << 8u, // cam be set by file too
         ecInteractive           = 1u << 9u,
         ecFullscreen            = 1u << 10u,
         ecLogUtilization        = 1u << 11u,
@@ -356,10 +363,7 @@ DMT_MODULE_EXPORT dmt {
         return static_cast<EBoolOptions>(toUnderlying(lhs) ^ toUnderlying(rhs));
     }
 
-    inline constexpr EBoolOptions operator~(EBoolOptions val)
-    {
-        return static_cast<EBoolOptions>(~toUnderlying(val));
-    }
+    inline constexpr EBoolOptions operator~(EBoolOptions val) { return static_cast<EBoolOptions>(~toUnderlying(val)); }
 
     inline constexpr EBoolOptions& operator|=(EBoolOptions& lhs, EBoolOptions rhs)
     {
@@ -379,10 +383,7 @@ DMT_MODULE_EXPORT dmt {
         return lhs;
     }
 
-    inline constexpr bool hasFlag(EBoolOptions value, EBoolOptions flag)
-    {
-        return (value & flag) == flag;
-    }
+    inline constexpr bool hasFlag(EBoolOptions value, EBoolOptions flag) { return (value & flag) == flag; }
 
     /**
      * Rendering options parsed from command line and from the input file
@@ -427,6 +428,11 @@ DMT_MODULE_EXPORT dmt {
     static_assert(std::is_trivially_destructible_v<Options> && std::is_standard_layout_v<Options>);
     static_assert(sizeof(Options) == 128 && alignof(Options) == 8);
 
+    inline bool wavefrontOrGPU(Options const& options)
+    {
+        return hasFlag(options.flags, EBoolOptions::ecUseGPU | EBoolOptions::ecWavefront);
+    }
+
     // Camera ---------------------------------------------------------------------------------------------------------
     // https://pbrt.org/fileformat-v4#cameras
     enum class ECameraType : uint8_t
@@ -459,6 +465,20 @@ DMT_MODULE_EXPORT dmt {
 
     struct CameraSpec
     {
+        CameraSpec()                                 = default;
+        CameraSpec(CameraSpec const&)                = default;
+        CameraSpec(CameraSpec&&) noexcept            = default;
+        CameraSpec& operator=(CameraSpec const&)     = default;
+        CameraSpec& operator=(CameraSpec&&) noexcept = default;
+        ~CameraSpec() noexcept
+        {
+            if (type == ECameraType::eRealistic)
+            {
+                std::destroy_at(&params.r.lensfile);
+                std::destroy_at(&params.r.aperture);
+            }
+        }
+
         struct Projecting           // perspective or orthographic
         {                           // params are all lowercase in the file
             float frameAspectRatio; // computed from film
@@ -474,17 +494,16 @@ DMT_MODULE_EXPORT dmt {
         };
         struct Realistic
         {
-            std::string_view lensfile;
-            std::string_view aperture; // either a starndar one or a file
-            float            apertureDiameter = 1.f;
-            float            focusDistance    = 10.f;
+            std::string lensfile;
+            std::string aperture; // either a starndar one or a file
+            float       apertureDiameter = 1.f;
+            float       focusDistance    = 10.f;
         };
 
         union Params
         {
-            Params() : p({})
-            {
-            }
+            Params() : p({}) {}
+            ~Params() {}
             Realistic  r;
             Projecting p;
             Spherical  s;
@@ -530,8 +549,9 @@ DMT_MODULE_EXPORT dmt {
     {
         struct StratifiedSamples
         {
-            int32_t x = 4;
-            int32_t y = 4;
+            int32_t x      = 4;
+            int32_t y      = 4;
+            bool    jitter = true;
         };
 
         // everyone
@@ -539,9 +559,7 @@ DMT_MODULE_EXPORT dmt {
 
         union Samples
         {
-            Samples() : num(16)
-            {
-            }
+            Samples() : num(16) {}
 
             // StatifiedSampler only
             StratifiedSamples stratified;
@@ -622,12 +640,12 @@ DMT_MODULE_EXPORT dmt {
     struct FilmSpec
     {
         // common params
-        std::string_view fileName = "pbrt.exr";
+        std::string fileName = "pbrt.exr";
 
-        uint32_t                xResolution = 1280;
-        uint32_t                yResolution = 720;
-        std::array<float, 4>    cropWindow{0.f, 1.f, 0.f, 1.f}; // TODO change type
-        std::array<uint32_t, 4> pixelBounds{0u, xResolution, 0u, yResolution};
+        int32_t                xResolution = 1280;
+        int32_t                yResolution = 720;
+        std::array<float, 4>   cropWindow{0.f, 1.f, 0.f, 1.f}; // TODO change type
+        std::array<int32_t, 4> pixelBounds{0, xResolution, 0, yResolution};
 
         float diagonal          = 35.f; // mm
         float iso               = 100.f;
@@ -635,9 +653,9 @@ DMT_MODULE_EXPORT dmt {
         float maxComponentValue = std::numeric_limits<float>::infinity();
 
         // spectral only
-        uint16_t nBuckets  = 16;
-        float    lambdaMin = 360.f;
-        float    lambdaMax = 830.f;
+        int16_t nBuckets  = 16;
+        float   lambdaMin = 360.f;
+        float   lambdaMax = 830.f;
 
         // gbuffer only
         EGVufferCoordSys coordSys = EGVufferCoordSys::eCamera;
@@ -681,9 +699,7 @@ DMT_MODULE_EXPORT dmt {
         };
         union Params
         {
-            Params() : gaussian({})
-            {
-            }
+            Params() : gaussian({}) {}
 
             Gaussian gaussian;
             Mitchell mitchell;
@@ -733,18 +749,18 @@ DMT_MODULE_EXPORT dmt {
             float maxDistance = std::numeric_limits<float>::infinity();
             bool  cosSample   = true;
         };
-        struct BiDirPathTracing
-        {
-            float    sigma                  = 0.01f;
-            float    largestStepProbability = 0.3f;
-            uint32_t mutationsPerPixel      = 100u;
-            uint32_t chains                 = 1000u;
-            uint32_t bootstraqpSamples      = 100000u;
-        };
         struct MetropolisTransport
         {
-            bool visualizeWeights    = false;
+            float   sigma                  = 0.01f;
+            float   largestStepProbability = 0.3f;
+            int32_t mutationsPerPixel      = 100;
+            int32_t chains                 = 1000;
+            int32_t bootstraqpSamples      = 100000;
+        };
+        struct BiDirPathTracing
+        {
             bool visualizeStrategies = false;
+            bool visualizeWeights    = false;
         };
         struct SimplePath
         {
@@ -753,15 +769,13 @@ DMT_MODULE_EXPORT dmt {
         };
         struct StocProgPhotMap
         {
-            int32_t  photonsPerIteration = -1;
-            float    radius              = 0;
-            uint32_t seed                = 0;
+            int32_t photonsPerIteration = -1;
+            float   radius              = 0;
+            int32_t seed                = 0;
         };
         union Params
         {
-            Params()
-            {
-            }
+            Params() {}
 
             AmbientOcclusion    ao;
             BiDirPathTracing    bdpt;
@@ -771,8 +785,8 @@ DMT_MODULE_EXPORT dmt {
         };
         Params params;
 
-        uint32_t maxDepth = 5; // all but ambient occlusion
-
+        int32_t         maxDepth     = 5; // all but ambient occlusion
+        bool            regularize   = false;
         ELightSampler   lightSampler = ELightSampler::eBVH; // path, volpath, gpu, wavefront
         EIntegratorType type         = EIntegratorType::eVolPath;
     };
@@ -802,22 +816,20 @@ DMT_MODULE_EXPORT dmt {
     {
         struct BVH
         {
-            uint32_t        maxNodePrims = 4;
+            int32_t         maxNodePrims = 4;
             EBVHSplitMethod splitMethod  = EBVHSplitMethod::eSAH;
         };
         struct KDTree
         {
-            uint32_t intersectCost = 5;
-            uint32_t traversalCost = 1;
-            float    emptyBonus    = 0.5f;
-            uint32_t maxPrims      = 1;
-            int32_t  maxDepth      = -1;
+            int32_t intersectCost = 5;
+            int32_t traversalCost = 1;
+            float   emptyBonus    = 0.5f;
+            int32_t maxPrims      = 1;
+            int32_t maxDepth      = -1;
         };
         union Params
         {
-            Params() : bvh({})
-            {
-            }
+            Params() : bvh({}) {}
 
             BVH    bvh;
             KDTree kdtree;
@@ -865,24 +877,6 @@ DMT_MODULE_EXPORT dmt {
         bool     m_haveEscaped       = false;
     };
 
-    enum class EHeaderTokenType : uint8_t
-    {
-        eCamera,
-        eSampler,
-        eColorSpace,
-        eFilm,
-        eFilter,
-        eIntegrator,
-        eAccelerator,
-        // eNamedMedia, TODO
-        eCount
-    };
-
-    inline constexpr std::strong_ordering operator<=>(EHeaderTokenType a, EHeaderTokenType b)
-    {
-        return toUnderlying(a) <=> toUnderlying(b);
-    }
-
     struct ArrayData
     {
         static constexpr uint32_t countPenNode = 248u / sizeof(int32_t);
@@ -896,15 +890,188 @@ DMT_MODULE_EXPORT dmt {
     template struct PoolNode<ArrayData, EBlockSize::e256B>;
     using ArrayNode256B = PoolNode<ArrayData, EBlockSize::e256B>;
 
+    // ----------------------------------------------------------------------------------------------------------------
+    enum class ETypeModifier : uint8_t
+    {
+        eEmpty          = 0,
+        eScalar         = 1u << 0u,
+        eArray          = 1u << 1u,
+        eUnboundedArray = 0u << 2u,
+        e1Elem          = 1u << 2u,
+        e2Elem          = 2u << 2u,
+        e3Elem          = 3u << 2u,
+        eTexture        = 1u << 4u,
+        eEnum           = 1u << 5u,
+    };
+    constexpr ETypeModifier operator|(ETypeModifier lhs, ETypeModifier rhs) noexcept
+    {
+        return static_cast<ETypeModifier>(toUnderlying(lhs) | toUnderlying(rhs));
+    }
+    constexpr ETypeModifier operator&(ETypeModifier lhs, ETypeModifier rhs) noexcept
+    {
+        return static_cast<ETypeModifier>(toUnderlying(lhs) & toUnderlying(rhs));
+    }
+    constexpr ETypeModifier operator~(ETypeModifier value) noexcept
+    {
+        return static_cast<ETypeModifier>(~toUnderlying(value));
+    }
+    constexpr ETypeModifier operator^(ETypeModifier lhs, ETypeModifier rhs) noexcept
+    {
+        return static_cast<ETypeModifier>(toUnderlying(lhs) ^ toUnderlying(rhs));
+    }
+    constexpr ETypeModifier& operator|=(ETypeModifier& lhs, ETypeModifier rhs) noexcept
+    {
+        lhs = lhs | rhs;
+        return lhs;
+    }
+    constexpr ETypeModifier& operator&=(ETypeModifier& lhs, ETypeModifier rhs) noexcept
+    {
+        lhs = lhs & rhs;
+        return lhs;
+    }
+    constexpr ETypeModifier& operator^=(ETypeModifier& lhs, ETypeModifier rhs) noexcept
+    {
+        lhs = lhs ^ rhs;
+        return lhs;
+    }
+
+    struct TypeTuple
+    {
+        static constexpr uint32_t              maxNumTypes = 3;
+        std::array<sid_t, maxNumTypes>         sids;
+        uint64_t                               count;
+        std::array<ETypeModifier, maxNumTypes> mods;
+        unsigned char                          padding[5];
+    };
+    static_assert(sizeof(TypeTuple) == 40 && alignof(TypeTuple) == 8);
+
+    struct Parameter
+    {
+        Parameter(TypeTuple tup) : allowedTypes(tup) {}
+        TypeTuple allowedTypes;
+        // sid_t     sid; implicitly stored as map key
+    };
+
+    struct Argument
+    {
+        sid_t type;
+    };
+
+    enum class EDirectivePos : uint8_t
+    {
+        eNothing        = 0,
+        eHeaderBlock    = 1u << 0u,
+        eWorldBlock     = 1u << 1u,
+        eAttributeBlock = 1u << 2u, // note: attributes can be nested
+        eObjectBlock    = 1u << 3u,
+        eAll            = std::numeric_limits<uint8_t>::max()
+    };
+    constexpr EDirectivePos operator|(EDirectivePos lhs, EDirectivePos rhs) noexcept
+    {
+        return static_cast<EDirectivePos>(toUnderlying(lhs) | toUnderlying(rhs));
+    }
+    constexpr EDirectivePos operator&(EDirectivePos lhs, EDirectivePos rhs) noexcept
+    {
+        return static_cast<EDirectivePos>(toUnderlying(lhs) & toUnderlying(rhs));
+    }
+    constexpr EDirectivePos operator~(EDirectivePos value) noexcept
+    {
+        return static_cast<EDirectivePos>(~toUnderlying(value));
+    }
+    constexpr EDirectivePos operator^(EDirectivePos lhs, EDirectivePos rhs) noexcept
+    {
+        return static_cast<EDirectivePos>(toUnderlying(lhs) ^ toUnderlying(rhs));
+    }
+    constexpr EDirectivePos& operator|=(EDirectivePos& lhs, EDirectivePos rhs) noexcept
+    {
+        lhs = lhs | rhs;
+        return lhs;
+    }
+    constexpr EDirectivePos& operator&=(EDirectivePos& lhs, EDirectivePos rhs) noexcept
+    {
+        lhs = lhs & rhs;
+        return lhs;
+    }
+    constexpr EDirectivePos& operator^=(EDirectivePos& lhs, EDirectivePos rhs) noexcept
+    {
+        lhs = lhs ^ rhs;
+        return lhs;
+    }
+    constexpr bool canBeInHeaderBlock(EDirectivePos pos) noexcept
+    {
+        return (pos & EDirectivePos::eHeaderBlock) == EDirectivePos::eHeaderBlock;
+    }
+    constexpr bool canBeInWorldBlock(EDirectivePos pos) noexcept
+    {
+        return (pos & EDirectivePos::eWorldBlock) == EDirectivePos::eWorldBlock;
+    }
+
+    struct Directive
+    {
+        using ParamsMap = std::pmr::map<sid_t, Parameter>;
+        Directive(std::pmr::memory_resource* mem) :
+        args(mem),
+        allowedParams(mem),
+        maxParams(0),
+        allowedPos(EDirectivePos::eNothing)
+        {
+        }
+        std::pmr::vector<Argument> args;
+        ParamsMap                  allowedParams;
+        uint32_t                   maxParams; // 0 means unlimited, and if there are duplicates consider the last one
+        EDirectivePos              allowedPos;
+    };
+
+    enum class EHeaderBlockState : uint32_t
+    {
+        eNone = 0,
+        eDirectiveRead,
+        eArgsReading,
+        eArgsRead,
+        eParamsReading,
+        eInsideArray,
+    };
+
+    struct ParamPair
+    {
+        using ValueList = std::vector<std::string>;
+        constexpr explicit ParamPair(sid_t type) : type(type) {}
+
+        void addParamValue(std::string_view value) { values.emplace_back(value); }
+
+        std::string_view valueAt(uint32_t i) const { return values[i]; }
+
+        uint32_t numParams() const { return static_cast<uint32_t>(values.size()); }
+
+        // TODO better (char buffer fixed)
+        std::vector<std::string> values;
+
+        sid_t type;
+    };
+
+    using ParamMap = std::map<sid_t, ParamPair>;
+    enum class EScope
+    {
+        eAttribute,
+        eObject,
+    };
+
     /**
      * surely pool allocated
      */
     class HeaderTokenizer
     {
     public:
-        void selectNextType(AppContext& actx, std::string_view token);
-        void parseOptions(AppContext& actx, Options const& options);
+        HeaderTokenizer(Options const& cmdOptions) : fileOptions(cmdOptions) {}
 
+        struct Ret
+        {
+            size_t   worldBlockOffset;
+            uint32_t numWorldBlockChunk;
+        };
+        Ret parseHeader(AppContext& actx, std::string_view filePath);
+
+        Options         fileOptions;
         CameraSpec      cameraSpec;
         SamplerSpec     samplerSpec;
         ColorSpaceSpec  colorSpaceSpec;
@@ -912,13 +1079,33 @@ DMT_MODULE_EXPORT dmt {
         FilterSpec      filterSpec;
         IntegratorSpec  integratorSpec;
         AcceleratorSpec acceleratorSpec;
+        // TODO list of media/materials/any declaration the header can have
 
     private:
-        EHeaderTokenType m_type        = EHeaderTokenType::eCount;
-        TaggedPointer    m_array       = taggedNullptr;
-        uint32_t         m_arrayLength = 0;
+        void parseFile(AppContext& actx, std::string_view basePath, std::string_view includeArgument);
+        void consumeToken(AppContext& actx, std::string_view basePath, std::string_view token);
+        void reestState();
+
+        void setCurrentParam(sid_t type, sid_t name);
+        void setClassArg(std::string_view token, sid_t arg);
+        void handleDirective(AppContext& actx, sid_t directive);
+        void handleArgument(AppContext& actx, std::string_view token);
+        void handleFirstTokenAfterDirective(AppContext& actx, std::string_view token);
+        void insertParameterValue(AppContext& actx, sid_t name, std::string_view token);
+
+        // TODO maybe
+        std::map<sid_t, ParamPair>              m_params;
+        std::stack<EScope, std::vector<EScope>> m_blockStack;
+        EHeaderBlockState                       m_state = EHeaderBlockState::eNone;
+        std::string_view                        m_dequotedArg;
+        sid_t                                   m_insideDirective  = 0;
+        sid_t                                   m_currentParamType = 0;
+        sid_t                                   m_currentParamName = 0;
+        sid_t                                   m_classArg         = 0;
+        uint32_t                                m_argsRead         = 0;
+        uint32_t                                m_paramsRead       = 0;
+        bool                                    m_inWorldBlock     = false;
     };
-    static_assert(sizeof(HeaderTokenizer) <= toUnderlying(EBlockSize::e256B));
 }
 
 DMT_MODULE_EXPORT dmt::model {}

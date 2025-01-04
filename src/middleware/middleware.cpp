@@ -5,8 +5,11 @@ module;
 #include <array>
 #include <atomic>
 #include <bit>
+#include <map>
+#include <memory_resource>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #include <cassert>
 #include <cctype>
@@ -14,6 +17,11 @@ module;
 #include <cstring>
 
 module middleware;
+
+// TODO if this appears after the integrator has bee3n already parsed, you need to modify it somehow
+// Option "bool wavefront" true
+// TODO if this asppears after the sampler has been alread, you need to modify it somehow
+// Option "integer seed" 15
 
 template <typename Enum, size_t N>
     requires(std::is_enum_v<Enum>)
@@ -31,52 +39,86 @@ static constexpr Enum enumFromStr(char const* str, std::array<std::string_view, 
 
 namespace dmt {
     // values can also be closed into arrays even if something expects a scalar. parameters are unordered
+    // all filenames are either absolute or relative to the starting pbrt file
+    // "Import statement only allowed inside world definition block."
     namespace dict {
         using namespace std::string_view_literals;
 
-        // Begin of line keywords
-        static constexpr SText Option         = "Option"sv;
-        static constexpr SText Camera         = "Camera"sv;
-        static constexpr SText Sampler        = "Sampler"sv;
-        static constexpr SText ColorSpace     = "ColorSpace"sv;
-        static constexpr SText Film           = "Film"sv;
-        static constexpr SText Filter         = "Filter"sv;
-        static constexpr SText Integrator     = "Integrator"sv;
-        static constexpr SText Accelerator    = "Accelerator"sv;
-        static constexpr SText WorldBegin     = "WorldBegin"sv;
-        static constexpr SText AttributeBegin = "AttributeBegin"sv;
-        static constexpr SText AttributeEnd   = "AttributeEnd"sv;
-        static constexpr SText Include = "Include"sv; // supports another pbrt file, literal or compressed with gzip,
+        namespace target {
+            static constexpr SText shape    = "shape"sv;
+            static constexpr SText light    = "light"sv;
+            static constexpr SText material = "material"sv;
+            static constexpr SText medium   = "medium"sv;
+            static constexpr SText texture  = "texture"sv;
+        } // namespace target
 
-        // transformations on the CTM (Current Transformation Matrix) (reset to Identity at world begin)
-        static constexpr SText LookAt    = "LookAt"sv;    // expects a 9 element array
-        static constexpr SText Translate = "Translate"sv; // expects x y z
-        static constexpr SText Scale     = "Scale"sv;
-        static constexpr SText Rotate    = "Rotate"sv;                  // expects 4 eleemnt array
-        static constexpr SText CoordinateSystem = "CoordinateSystem"sv; // follows a name, saves a snapshot of the current CTM
-        static constexpr SText CoordSysTransform = "CoordSysTransform"sv; // sets a named transform for usage
-        static constexpr SText Transform         = "Transform"sv;         // 16 floats
-        static constexpr SText ConcatTransform   = "ConcatTransform"sv;   // 16 floats
-        static constexpr SText TransformTimes    = "TransformTimes"sv;    // in header, expects 2 floats (not array)
-        static constexpr SText ActiveTransform = "ActiveTransform"sv; // expects either "StartTime", "EndTime" or "All"
+        // directives (update array at the end of the namnespace if you chnage this)
+        namespace directive {
+            static constexpr SText Option         = "Option"sv;
+            static constexpr SText Camera         = "Camera"sv;
+            static constexpr SText Sampler        = "Sampler"sv;
+            static constexpr SText ColorSpace     = "ColorSpace"sv;
+            static constexpr SText Film           = "Film"sv;
+            static constexpr SText PixelFilter    = "PixelFilter"sv;
+            static constexpr SText Integrator     = "Integrator"sv;
+            static constexpr SText Accelerator    = "Accelerator"sv;
+            static constexpr SText WorldBegin     = "WorldBegin"sv;
+            static constexpr SText AttributeBegin = "AttributeBegin"sv;
+            static constexpr SText AttributeEnd   = "AttributeEnd"sv;
+            static constexpr SText Include = "Include"sv; // supports another pbrt file, literal or compressed with gzip,
+            static constexpr SText Import = "Import"sv; // supports another pbrt file, literal, imports only named entities. only in world block
 
-        // misc
-        static constexpr SText ReverseOrientation = "ReverseOrientation"sv; // reverses normals of all sequet shapes (and therefore their area lights) (another is the Option "twosided")
+            // transformations on the CTM (Current Transformation Matrix) (reset to Identity at world begin)
+            static constexpr SText Identity = "Identity"sv
+            static constexpr SText LookAt    = "LookAt"sv;    // expects a 9 element array
+            static constexpr SText Translate = "Translate"sv; // expects x y z
+            static constexpr SText Scale     = "Scale"sv;
+            static constexpr SText Rotate    = "Rotate"sv;                  // expects 4 eleemnt array
+            static constexpr SText CoordinateSystem = "CoordinateSystem"sv; // follows a name, saves a snapshot of the current CTM
+            static constexpr SText CoordSysTransform = "CoordSysTransform"sv; // sets a named transform for usage
+            static constexpr SText Transform         = "Transform"sv;         // 16 floats
+            static constexpr SText ConcatTransform   = "ConcatTransform"sv;   // 16 floats
+            static constexpr SText TransformTimes    = "TransformTimes"sv;    // in header, expects 2 floats (not array)
+            static constexpr SText ActiveTransform = "ActiveTransform"sv; // expects either "StartTime", "EndTime" or "All"
+
+            // misc
+            static constexpr SText ReverseOrientation = "ReverseOrientation"sv; // reverses normals of all sequet shapes (and therefore their area lights) (another is the Option "twosided")
+
+            // describing the scene:
+            static constexpr SText Attribute = "Attribute"sv; // specify attribute off the line instead of inline. it wants a quoted target, one of "shape" "light", "material", "texture"
+            static constexpr SText Shape = "Shape"sv; // expects a name and a parameter lists. name is one of "bilinearmesh", "curve", "cylinder", "disk", "sphere", "trianglemesh",
+            static constexpr SText ObjectBegin    = "ObjectBegin"sv; // expects a name
+            static constexpr SText ObjectEnd      = "ObjectEnd"sv;
+            static constexpr SText ObjectInstance = "ObjectInstance"sv; // expects a ObjectBegin name. Takes the CTM
+            static constexpr SText LightSource = "LightSource"sv; // takes a quoted type, "point", "distant", "goniometric", "infinite", "point", "projection", "spot"
+            static constexpr SText AreaLightSource = "AreaLightSource"sv;
+            static constexpr SText Material = "Material"sv; // expects a type and param list. each param can be either a value, rgb, spectrum, or a texture. sets the current material. if you want to declare it and use it later, use a named material
+            static constexpr SText MakeNamedMaterial = "MakeNamedMaterial"sv;
+            static constexpr SText NamedMaterial     = "NamedMaterial"sv;
+            static constexpr SText Texture           = "Texture"sv;       // expects name, type, class param list
+            static constexpr SText MakeNamedMedium = "MakeNamedMedium"sv; // declares a medium, expects name type param list
+            static constexpr SText MediumInterface = "MediumInterface"sv;
+        } // namespace directive
 
         // data types
-        static constexpr SText tBool      = "bool"sv;
-        static constexpr SText tFloat     = "float"sv;
-        static constexpr SText tInteger   = "integer"sv;
-        static constexpr SText tString    = "string"sv;
-        static constexpr SText tRGB       = "rgb"sv;
-        static constexpr SText tPoint2    = "point2"sv;
-        static constexpr SText tPoint3    = "point3"sv;
-        static constexpr SText tPoint     = "point"sv; // synonym of point3
-        static constexpr SText tNormal    = "normal"sv;
-        static constexpr SText tBlackbody = "blackbody"sv;
-        static constexpr SText tSpectrum  = "spectrum"sv;
-        static constexpr SText tVector3   = "vector3"sv;
-        static constexpr SText tVector    = "vector"sv; // synonym of vector3
+        namespace types {
+            static constexpr SText tVector    = "vector"sv; // synonym of vector3
+            static constexpr SText tPoint     = "point"sv;  // synonym of point3
+            static constexpr SText tNormal    = "normal"sv;
+            static constexpr SText tBool      = "bool"sv;
+            static constexpr SText tFloat     = "float"sv;
+            static constexpr SText tInteger   = "integer"sv;
+            static constexpr SText tString    = "string"sv;
+            static constexpr SText tRGB       = "rgb"sv;
+            static constexpr SText tPoint2    = "point2"sv;
+            static constexpr SText tPoint3    = "point3"sv;
+            static constexpr SText tNormal3   = "normal3"sv;
+            static constexpr SText tBlackbody = "blackbody"sv;
+            static constexpr SText tSpectrum  = "spectrum"sv;
+            static constexpr SText tVector2   = "vector2"sv;
+            static constexpr SText tVector3   = "vector3"sv;
+            static constexpr SText tTexture   = "texture"sv;
+        } // namespace types
 
         // acene wide rendering options: general options
         namespace opts {
@@ -310,21 +352,6 @@ namespace dmt {
         // MakeNamedMedium are allowed even before the World Block, and a single call to MediumInterface is also allowed,
         // to specify only the exterior medium, in which the camera starts in. Default is vacuum
 
-        // describing the scene:
-        static constexpr SText Attribute = "Attribute"sv; // specify attribute off the line instead of inline. it wants a quoted target, one of "shape" "light", "material", "texture"
-        static constexpr SText Shape = "Shape"sv; // expects a name and a parameter lists. name is one of "bilinearmesh", "curve", "cylinder", "disk", "sphere", "trianglemesh",
-        static constexpr SText ObjectBegin    = "ObjectBegin"sv; // expects a name
-        static constexpr SText ObjectEnd      = "ObjectEnd"sv;
-        static constexpr SText ObjectInstance = "ObjectInstance"sv; // expects a ObjectBegin name. Takes the CTM
-        static constexpr SText LightSource = "LightSource"sv; // takes a quoted type, "point", "distant", "goniometric", "infinite", "point", "projection", "spot"
-        static constexpr SText AreaLightSource = "AreaLightSource"sv;
-        static constexpr SText Material = "Material"sv; // expects a type and param list. each param can be either a value, rgb, spectrum, or a texture. sets the current material. if you want to declare it and use it later, use a named material
-        static constexpr SText MakeNamedMaterial = "MakeNamedMaterial"sv;
-        static constexpr SText NamedMaterial     = "NamedMaterial"sv;
-        static constexpr SText Texture           = "Texture"sv;       // expects name, type, class param list
-        static constexpr SText MakeNamedMedium = "MakeNamedMedium"sv; // declares a medium, expects name type param list
-        static constexpr SText MediumInterface = "MediumInterface"sv;
-
         // describing the scene: shapes
         namespace shape {
             // shape types
@@ -339,7 +366,7 @@ namespace dmt {
             // common
             static constexpr SText alpha = "alpha"sv; // either a float or texture (def float 1)
             // spceific (namespaces due to the fact they have clashing options)
-            namespace curve {
+            namespace curve_params {
                 static constexpr SText P     = "P"sv;
                 static constexpr SText basis = "basis"sv;
                 namespace basis_literals {
@@ -358,43 +385,43 @@ namespace dmt {
                 static constexpr SText width0     = "width0"sv;     // float 1
                 static constexpr SText width1     = "width1"sv;     // float 1
                 static constexpr SText splitdepth = "splitdepth"sv; // integer 3
-            } // namespace curve
-            namespace cylinder {
+            } // namespace curve_params
+            namespace cylinder_params {
                 static constexpr SText radius = "radius"sv; // float 1
                 static constexpr SText zmin   = "zmin"sv;   // float -1
                 static constexpr SText zmax   = "zmax"sv;   // float 1
                 static constexpr SText phimax = "phimax"sv; // float 360
-            } // namespace cylinder
-            namespace disk {
+            } // namespace cylinder_params
+            namespace disk_params {
                 static constexpr SText height      = "height"sv;      // float 0
                 static constexpr SText radius      = "radius"sv;      // radius 1
                 static constexpr SText innerradius = "innerradius"sv; // float 0
                 static constexpr SText phimax      = "phimax"sv;      // float 360
-            } // namespace disk
-            namespace sphere {
+            } // namespace disk_params
+            namespace sphere_params {
                 static constexpr SText radius = "radius"sv; // float 1
                 static constexpr SText zmin   = "zmin"sv;   // float -radius
                 static constexpr SText zmax   = "zmax"sv;   // float radius
                 static constexpr SText phimax = "phimax"sv; // float 360
-            } // namespace sphere
-            namespace trianglemesh {
+            } // namespace sphere_params
+            namespace trianglemesh_params {
                 // P N S uv must be same size. only P is required
                 static constexpr SText indices = "indices"sv; // required unless there are only 3 vertices, integer[]
                 static constexpr SText P       = "P"sv;       // point3[]
                 static constexpr SText N  = "N"sv;  // normal[], if present, shading normals are computed using these
                 static constexpr SText S  = "S"sv;  // vector3[], per-vertex tangents
                 static constexpr SText uv = "uv"sv; // point2[]
-            } // namespace trianglemesh
-            namespace plymesh {
+            } // namespace trianglemesh_params
+            namespace plymesh_params {
                 static constexpr SText filename = "filename"sv; // relative path of .ply or .ply.gz (gzip compressed)
                 static constexpr SText displacement = "displacement"sv; // displacement texture
                 static constexpr SText edgelength = "edgelength"sv; // edges of a triangle are split until this is met, def. 1.f
-            } // namespace plymesh
-            namespace loopsubdiv {                            // mesh which is subdivided
+            } // namespace plymesh_params
+            namespace loopsubdiv_params {                     // mesh which is subdivided
                 static constexpr SText levels  = "levels"sv;  // integer 3
                 static constexpr SText indices = "indices"sv; // integer[]
                 static constexpr SText P       = "P"sv;       // point[]
-            } // namespace loopsubdiv
+            } // namespace loopsubdiv_params
         } // namespace shape
 
         // describing the scene: lights
@@ -410,37 +437,37 @@ namespace dmt {
             static constexpr SText power       = "power"sv;
             static constexpr SText illuminance = "illuminance"sv;
             static constexpr SText scale       = "scale"sv;
-            namespace distant {
+            namespace distant_params {
                 static constexpr SText L = "L"sv; // spectrum, spectral radiance, default = current color space illuminant
                 static constexpr SText from = "from"sv; // point, 0 0 0
                 static constexpr SText to   = "to"sv;   // point, 0 0 1
-            } // namespace distant
-            namespace goniometric {
+            } // namespace distant_params
+            namespace goniometric_params {
                 static constexpr SText filename = "filename"sv; // string, no default, required
                 static constexpr SText I        = "I"sv;        // current color space's illuminant
-            } // namespace goniometric
-            namespace infinite {
+            } // namespace goniometric_params
+            namespace infinite_params {
                 // either filename or L
                 static constexpr SText filename = "filename"sv;
                 static constexpr SText portal   = "portal"sv; // point3[4], window through which the light is visible
                 static constexpr SText L        = "L"sv;      // radiance intensity = L * scale * power
-            } // namespace infinite
-            namespace point {
+            } // namespace infinite_params
+            namespace point_params {
                 static constexpr SText I = "I"sv; // spectrum, default = current color space illuminant. spectrad dist of light emitted radiant intensity
                 static constexpr SText from = "from"sv; // point, 0 0 0, light location
-            } // namespace point
-            namespace projection {
+            } // namespace point_params
+            namespace projection_params {
                 static constexpr SText I        = "I"sv;        // spectrum
                 static constexpr SText fov      = "fov"sv;      // float, 90
                 static constexpr SText filename = "filename"sv; // string, required
-            } // namespace projection
-            namespace spotlight {
+            } // namespace projection_params
+            namespace spotlight_params {
                 static constexpr SText I              = "I"sv;              // spectrum, spectral intensity
                 static constexpr SText from           = "from"sv;           // point, 0 0 0
                 static constexpr SText to             = "to"sv;             // point, 0 0 1
                 static constexpr SText coneangle      = "coneangle"sv;      // float, 30
                 static constexpr SText conedeltaangle = "conedeltaangle"sv; // float, 5
-            } // namespace spotlight
+            } // namespace spotlight_params
         } // namespace light
 
         // describing the scene: area light
@@ -448,11 +475,11 @@ namespace dmt {
             // arealight types
             static constexpr SText diffuse = "diffuse"sv;
             // diffuse
-            namespace diffuse {
+            namespace diffuse_params {
                 static constexpr SText filename = "filename"sv; // string required no default
                 static constexpr SText L        = "L"sv;        // spectrum, emitted spectral radiance distribution
                 static constexpr SText twosided = "twosided"sv; // bool, false = emit light only in halfspace pointed by normal of shape
-            } // namespace diffuse
+            } // namespace diffuse_params
         } // namespace arealight
 
         // describing the scene: material
@@ -478,22 +505,22 @@ namespace dmt {
             static constexpr SText uroughness     = "uroughness"sv;
             static constexpr SText vroughness     = "vroughness"sv;
             static constexpr SText remaproughness = "remaproughness"sv;
-            namespace coated {                              // coateddiffuse and coatedconductor
+            namespace coated_params { // coateddiffuse and coatedconductor
                 static constexpr SText albedo = "albedo"sv; // spectrum texture, scattering albedo between interface and diffuse layers. in [0, 1]
                 static constexpr SText g         = "g"sv;         // float texture, in [-1, 1]
                 static constexpr SText maxdepth  = "maxdepth"sv;  // integer 10
                 static constexpr SText nsamples  = "nsamples"sv;  // integer 1
                 static constexpr SText thickness = "thickness"sv; // float 0.01f
-                namespace diffuse {
+                namespace diffuse_params {
                     static constexpr SText reflectance = "reflectance"sv; // spectrum texture, default 0.5
                 }
-                namespace conductor {
+                namespace conductor_params {
                     static constexpr SText conductor_eta = "conductor.eta"sv; // spectrum
                     static constexpr SText conductor_k   = "conductor.k"sv;   // spectrum
                     static constexpr SText reflectance   = "reflectance"sv;   // spectrum (NOT texture)
-                } // namespace conductor
-            } // namespace coated
-            namespace conductor {
+                } // namespace conductor_params
+            } // namespace coated_params
+            namespace conductor_params {
                 namespace builtin_spectrum {
                     static constexpr SText glass_BK7    = "glass-BK7"sv;    // Index of refraction for BK7 glass
                     static constexpr SText glass_BAF10  = "glass-BAF10"sv;  // Index of refraction for BAF10 glass
@@ -536,19 +563,19 @@ namespace dmt {
                 static constexpr SText eta = "eta"sv; // spectrum texture (or built ix name), default = metal_Cu_eta
                 static constexpr SText k   = "k"sv;   // spectrum texture (or built in name), default = metal_Cu_k
                 static constexpr SText reflectance = "reflectance"sv; // spectrum texture (computed if absent?)
-            } // namespace conductor
-            namespace dielectric {
+            } // namespace conductor_params
+            namespace dielectric_params {
                 static constexpr SText eta = "eta"sv; // float texture or spectrum texture. default float texture 1.5 constant
             }
-            namespace diffuse {
+            namespace diffuse_params {
                 static constexpr SText reflectance = "reflectance"sv; // spectrum texture, def 0.5
             }
-            namespace diffusetransmission {
+            namespace diffusetransmission_params {
                 static constexpr SText reflectance   = "reflectance"sv;   // spectrum texture, def 0.25
                 static constexpr SText transmittance = "transmittance"sv; // spectrum texture, def 0.25
                 static constexpr SText scale         = "scale"sv;         // float texture, def 1
-            } // namespace diffusetransmission
-            namespace hair {
+            } // namespace diffusetransmission_params
+            namespace hair_params {
                 // Color related: if sigma_a specified, everything else is ignored. if reflectance specified (and sigma_a is not), then ignore everything else. if nothing
                 // is specified, use eumelanin 1.3 and pheomelanin 0
                 static constexpr SText sigma_a = "sigma_a"sv; // spectrum texture, absorption coefficient inside hair, normalized with respect to hair diameter
@@ -559,16 +586,16 @@ namespace dmt {
                 static constexpr SText eta    = "eta"sv;    // float texture, def 1.55
                 static constexpr SText beta_m = "beta_m"sv; // float texture, def 0.3, [0,1]
                 static constexpr SText beta_n = "beta_n"sv; // float texture, def 0.3, [0,1]
-                static constexpr SText alpha  = "alpha";    // float texture, def 2 degrees
-            } // namespace hair
-            namespace measured {
+                static constexpr SText alpha  = "alpha"sv;  // float texture, def 2 degrees
+            } // namespace hair_params
+            namespace measured_params {
                 static constexpr SText filename = "filename"sv; // string filename
             }
-            namespace mix {
+            namespace mix_params {
                 static constexpr SText materials = "materials"sv; // string[2], material names
                 static constexpr SText amount    = "amount"sv;    // texture float, def 0.5,
-            } // namespace mix
-            namespace subsurface {
+            } // namespace mix_params
+            namespace subsurface_params {
                 // specified in one of 3 ways (+ common parameter eta + g)
                 // 1. sigma_a + sigma_s (+ scale)
                 // 2. reflectance + mean free path (mfp)
@@ -581,7 +608,7 @@ namespace dmt {
                 static constexpr SText sigma_a = "sigma_a"sv; // spectrum texture, default = RGB(0.0011, 0.0024, 0.014)
                 static constexpr SText sigma_s = "sigma_s"sv; // spectrum texture, default = RGB(2.55, 3.12, 3.77)
                 static constexpr SText scale   = "scale"sv;
-            } // namespace subsurface
+            } // namespace subsurface_params
         } // namespace material
 
         // describing the scene: texture
@@ -627,34 +654,34 @@ namespace dmt {
                 static constexpr SText gamma  = "gamma"sv; // expects a float following it
             } // namespace encoding_literals
 
-            namespace bilerp {
+            namespace bilerp_params {
                 static constexpr SText v00 = "v00"sv; // spectrum texture or float texture. def = float, 0
                 static constexpr SText v01 = "v01"sv; // spectrum texture or float texture. def = float, 1
                 static constexpr SText v10 = "v10"sv; // spectrum texture or float texture. def = float, 0
                 static constexpr SText v11 = "v11"sv; // spectrum texture or float texture. def = float, 1
-            } // namespace bilerp
-            namespace checkerboard {
+            } // namespace bilerp_params
+            namespace checkerboard_params {
                 static constexpr SText dimension = "dimension"sv; // integer, def = 2 (can be either 2 or 3)
                 static constexpr SText tex1      = "tex1"sv;      // spectrum texture or float texture, def = float 1
                 static constexpr SText tex2      = "tex2"sv;      // spectrum texture or float texture, def = float 0
-            } // namespace checkerboard
-            namespace constant {
+            } // namespace checkerboard_params
+            namespace constant_params {
                 static constexpr SText value = "value"sv; // nbuckets values or rgb if spectrum, 1 value if float
             }
-            namespace directionmix {
+            namespace directionmix_params {
                 static constexpr SText tex1 = "tex1"sv; // spectrum texture or float texture, def = float 0
                 static constexpr SText tex2 = "tex2"sv; // spectrum texture or float texture, def = float 1
                 static constexpr SText dir  = "dir"sv;  // vector, def = 0 1 0
-            } // namespace directionmix
-            namespace dots {
+            } // namespace directionmix_params
+            namespace dots_params {
                 static constexpr SText inside  = "inside"sv;  // spectrum texture or float texture, def = float 1
                 static constexpr SText outside = "outside"sv; // spectrum texture or float texture, def = float 0
-            } // namespace dots
-            namespace perlin {                                    // fbm, wrinkled, windy
+            } // namespace dots_params
+            namespace perlin_params {                             // fbm, wrinkled, windy
                 static constexpr SText octaves   = "octaves"sv;   // integer, def = 8
                 static constexpr SText roughness = "roughness"sv; // float, def = 0.5
-            } // namespace perlin
-            namespace imagemap {
+            } // namespace perlin_params
+            namespace imagemap_params {
                 static constexpr SText filename = "filename"sv; // string, required, no def, has to end with ".tga", ".pfm", ".exr"
                 namespace filename_extensions {
                     static constexpr SText _tga = ".tga"sv;
@@ -678,30 +705,30 @@ namespace dmt {
                 static constexpr SText encoding = "encoding"sv; // enum, def = sRGB, how to convert a 8bit color to float
                 static constexpr SText scale = "scale"sv;       // float, def = 1, scale to apply to the looked up value
                 static constexpr SText invert = "invert"sv; // bool, def = false. If true, each value is converted with f(x) = 1 - x
-            } // namespace imagemap
-            namespace marble {                                    // still perlin
+            } // namespace imagemap_params
+            namespace marble_params {                             // still perlin
                 static constexpr SText octaves   = "octaves"sv;   // integer, def = 8
                 static constexpr SText roughness = "roughness"sv; // float, def = 0.5
                 static constexpr SText scale     = "scale"sv;     // float, def = 1, scaling factor for inpouts
                 static constexpr SText variation = "variation"sv; // float, def = 0.2, scaling factor for output
-            } // namespace marble
-            namespace mix {
+            } // namespace marble_params
+            namespace mix_params {
                 static constexpr SText tex1   = "tex1"sv;   // spectrum texture or float texture, def = float, 0
                 static constexpr SText tex2   = "tex2"sv;   // spectrum texture or float texture, def = float, 1
                 static constexpr SText amount = "amount"sv; // float texture, def = float 0.5
-            } // namespace mix
-            namespace ptex {
+            } // namespace mix_params
+            namespace ptex_params {
                 static constexpr SText encoding = "encoding"sv; // enum, def = gamma 2.2
                 static constexpr SText filename = "filename"sv; // stringfilename, end with ptex, required no def
                 namespace filename_extensions {
                     static constexpr SText _ptex = ".ptex"sv;
                 }
                 static constexpr SText scale = "scale"sv; // float, def = 1
-            } // namespace ptex
-            namespace scale {
+            } // namespace ptex_params
+            namespace scale_params {
                 static constexpr SText tex   = "tex"sv;   // spectrum texture or float texture to be scaled, def float 1
                 static constexpr SText scale = "scale"sv; // float texture, def float 1
-            } // namespace scale
+            } // namespace scale_params
         } // namespace texture
 
         // describing the scene: participating media
@@ -715,7 +742,7 @@ namespace dmt {
                 static constexpr SText rgbgrid     = "rgbgrid"sv;
                 static constexpr SText uniformgrid = "uniformgrid"sv;
             } // namespace type_literals
-            namespace homogeneous {
+            namespace homogeneous_params {
                 static constexpr SText g       = "g"sv;       // Henyey Greenstein asymmetry, float, def 0, [-1,1]
                 static constexpr SText Le      = "Le"sv;      // spectrum, def 0, distribution of emitted radiance
                 static constexpr SText Lescale = "Lescale"sv; // float, def = 1
@@ -723,8 +750,8 @@ namespace dmt {
                 static constexpr SText sigma_a = "sigma_a"sv; // spectrum, absorption cross section, def 1
                 static constexpr SText sigma_s = "sigma_s"sv; // spectrum, scattering cross section, def 1
                 static constexpr SText scale   = "scale"sv;   // float, scale factor of sigma_a and sigma_s, def = 1
-            } // namespace homogeneous
-            namespace uniformgrid { // generalization of homogeneous, so it takes all its parameters plus the following
+            } // namespace homogeneous_params
+            namespace uniformgrid_params { // generalization of homogeneous, so it takes all its parameters plus the following
                 static constexpr SText g       = "g"sv;       // Henyey Greenstein asymmetry, float, def 0, [-1,1]
                 static constexpr SText Le      = "Le"sv;      // spectrum, def 0, distribution of emitted radiance
                 static constexpr SText Lescale = "Lescale"sv; // float, def = 1
@@ -741,8 +768,8 @@ namespace dmt {
                 static constexpr SText temperature = "temperature"sv; // float[], nx*ny*nz kelvin values, row-major order, optional, then converted to blackbody emission spectra
                 static constexpr SText temperatureoffset = "temperatureoffset"sv; // float, def = 0
                 static constexpr SText temperaturescale  = "temperaturescale"sv;  // float, def = 1
-            } // namespace uniformgrid
-            namespace rgbgrid { // alternative to uniformgrid, so takes all parameters of homogeneous EXCEPT preset
+            } // namespace uniformgrid_params
+            namespace rgbgrid_params { // alternative to uniformgrid, so takes all parameters of homogeneous EXCEPT preset
                 static constexpr SText g       = "g"sv;       // Henyey Greenstein asymmetry, float, def 0, [-1,1]
                 static constexpr SText Le      = "Le"sv;      // spectrum, def 0, distribution of emitted radiance
                 static constexpr SText Lescale = "Lescale"sv; // float, def = 1
@@ -751,8 +778,8 @@ namespace dmt {
                 static constexpr SText scale   = "scale"sv;   // float, scale factor of sigma_a and sigma_s, def = 1
                 static constexpr SText p0 = "p0"sv; // point3, def 0 0 0, min bound of the density grid in medium space
                 static constexpr SText p1 = "p1"sv; // point3, def 1 1 1, max bound of the density grid in medium space
-            } // namespace rgbgrid
-            namespace cloud {                       // perlin
+            } // namespace rgbgrid_params
+            namespace cloud_params {                // perlin
                 static constexpr SText p0 = "p0"sv; // point3, def 0 0 0, min bound of the density grid in medium space
                 static constexpr SText p1 = "p1"sv; // point3, def 1 1 1, max bound of the density grid in medium space
                 static constexpr SText density   = "density"sv;   // float, def = 1
@@ -761,8 +788,8 @@ namespace dmt {
                 static constexpr SText sigma_a   = "sigma_a"sv;  // spectrum, absorption cross section, def 1
                 static constexpr SText sigma_s   = "sigma_s"sv;  // spectrum, scattering cross section, def 1
                 static constexpr SText wispness  = "wispness"sv; // float, def 1
-            } // namespace cloud
-            namespace nanovdb {
+            } // namespace cloud_params
+            namespace nanovdb_params {
                 static constexpr SText g       = "g"sv; // Henyey Greenstein asymmetry parameter, float, def 0, [-1,1]
                 static constexpr SText sigma_a = "sigma_a"sv; // spectrum, absorption cross section, def 1
                 static constexpr SText sigma_s = "sigma_s"sv; // spectrum, scattering cross section, def 1
@@ -771,7 +798,7 @@ namespace dmt {
                 static constexpr SText temperatureoffset = "temperatureoffset"sv; // float, def = 0
                 static constexpr SText temperaturescale  = "temperaturescale"sv;  // float, def = 1
                 static constexpr SText filename          = "filename"sv;          // string
-            } // namespace nanovdb
+            } // namespace nanovdb_params
         } // namespace media
     } // namespace dict
 
@@ -779,7 +806,9 @@ namespace dmt {
     { // array needs to follow the order in which the enum values are declared
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<ERenderCoordSys> count = toUnderlying(ERenderCoordSys::eCount);
-        static constexpr std::array<std::string_view, count>     types{"cameraworld"sv, "camera"sv, "world"sv};
+        static constexpr std::array<std::string_view, count> types{dict::opts::rendercoordsys_literals::cameraworld.str,
+                                                                   dict::opts::rendercoordsys_literals::camera.str,
+                                                                   dict::opts::rendercoordsys_literals::world.str};
 
         return ::enumFromStr(str, types, ERenderCoordSys::eCameraWorld);
     }
@@ -788,8 +817,10 @@ namespace dmt {
     { // array needs to follow the order in which the enum values are declared
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<ECameraType> count = toUnderlying(ECameraType::eCount);
-        static constexpr std::array<std::string_view, count>
-            types{"orthographic"sv, "perspective"sv, "realistic"sv, "spherical"sv};
+        static constexpr std::array<std::string_view, count> types{dict::camera::orthographic.str,
+                                                                   dict::camera::perspective.str,
+                                                                   dict::camera::realistic.str,
+                                                                   dict::camera::spherical.str};
 
         return ::enumFromStr(str, types, ECameraType::ePerspective);
     }
@@ -798,7 +829,8 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<ESphericalMapping> count = toUnderlying(ESphericalMapping::eCount);
-        static constexpr std::array<std::string_view, count>       types{"equalarea"sv, "equirectangular"sv};
+        static constexpr std::array<std::string_view, count>       types{dict::camera::mapping_literals::equalarea.str,
+                                                                   dict::camera::mapping_literals::equirectangular.str};
 
         return ::enumFromStr(str, types, ESphericalMapping::eEqualArea);
     }
@@ -808,7 +840,12 @@ namespace dmt {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<ESamplerType> count = toUnderlying(ESamplerType::eCount);
         static constexpr std::array<std::string_view, count>
-            types{"halton"sv, "independent"sv, "paddedsobol"sv, "sobol"sv, "stratified"sv, "zsobol"sv};
+            types{dict::sampler::zsobol.str,
+                  dict::sampler::halton.str,
+                  dict::sampler::independent.str,
+                  dict::sampler::paddedsobol.str,
+                  dict::sampler::sobol.str,
+                  dict::sampler::stratified.str};
 
         return ::enumFromStr(str, types, ESamplerType::eZSobol);
     }
@@ -817,7 +854,10 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<ERandomization> count = toUnderlying(ERandomization::eCount);
-        static constexpr std::array<std::string_view, count> types{"fastowen"sv, "none"sv, "permutedigits"sv, "owen"sv};
+        static constexpr std::array<std::string_view, count> types{dict::sampler::randomization_literals::fastowen.str,
+                                                                   dict::sampler::randomization_literals::none.str,
+                                                                   dict::sampler::randomization_literals::permutedigits.str,
+                                                                   dict::sampler::randomization_literals::owen.str};
 
         return ::enumFromStr(str, types, ERandomization::eFastOwen);
     }
@@ -826,7 +866,10 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<EColorSpaceType> count = toUnderlying(EColorSpaceType::eCount);
-        static constexpr std::array<std::string_view, count> types{"srgb"sv, "rec2020"sv, "aces2065-1"sv, "dci-p3"sv};
+        static constexpr std::array<std::string_view, count>     types{dict::colorspace::srgb.str,
+                                                                   dict::colorspace::rec2020.str,
+                                                                   dict::colorspace::aces2065_1.str,
+                                                                   dict::colorspace::dci_p3.str};
 
         return ::enumFromStr(str, types, EColorSpaceType::eSRGB);
     }
@@ -835,7 +878,9 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<EFilmType>   count = toUnderlying(EFilmType::eCount);
-        static constexpr std::array<std::string_view, count> types{"rgb"sv, "gbuffer"sv, "spectral"sv};
+        static constexpr std::array<std::string_view, count> types{dict::film::rgb.str,
+                                                                   dict::film::gbuffer.str,
+                                                                   dict::film::spectral.str};
 
         return ::enumFromStr(str, types, EFilmType::eRGB);
     }
@@ -843,26 +888,27 @@ namespace dmt {
     ESensor sensorFromStr(char const* str)
     {
         using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ESensor> count = toUnderlying(ESensor::eCount);
-        static constexpr std::array<std::string_view, count>
-            types{"cie1931"sv,
-                  "canon_eos_100d"sv,
-                  "canon_eos_1dx_mkii"sv,
-                  "canon_eos_200d"sv,
-                  "canon_eos_200d_mkii"sv,
-                  "canon_eos_5d"sv,
-                  "canon_eos_5d_mkii"sv,
-                  "canon_eos_5d_mkiii"sv,
-                  "canon_eos_5d_mkiv"sv,
-                  "canon_eos_5ds"sv,
-                  "canon_eos_m"sv,
-                  "hasselblad_l1d_20c"sv,
-                  "nikon_d810"sv,
-                  "nikon_d850"sv,
-                  "sony_ilce_6400"sv,
-                  "sony_ilce_7m3"sv,
-                  "sony_ilce_7rm3"sv,
-                  "sony_ilce_9"sv};
+        static constexpr std::underlying_type_t<ESensor>     count = toUnderlying(ESensor::eCount);
+        static constexpr std::array<std::string_view, count> types{
+            dict::film::sensor_literals::cie1931.str,
+            dict::film::sensor_literals::canon_eos_100d.str,
+            dict::film::sensor_literals::canon_eos_1dx_mkii.str,
+            dict::film::sensor_literals::canon_eos_200d.str,
+            dict::film::sensor_literals::canon_eos_200d_mkii.str,
+            dict::film::sensor_literals::canon_eos_5d.str,
+            dict::film::sensor_literals::canon_eos_5d_mkii.str,
+            dict::film::sensor_literals::canon_eos_5d_mkiii.str,
+            dict::film::sensor_literals::canon_eos_5d_mkiv.str,
+            dict::film::sensor_literals::canon_eos_5ds.str,
+            dict::film::sensor_literals::canon_eos_m.str,
+            dict::film::sensor_literals::hasselblad_l1d_20c.str,
+            dict::film::sensor_literals::nikon_d810.str,
+            dict::film::sensor_literals::nikon_d850.str,
+            dict::film::sensor_literals::sony_ilce_6400.str,
+            dict::film::sensor_literals::sony_ilce_7m3.str,
+            dict::film::sensor_literals::sony_ilce_7rm3.str,
+            dict::film::sensor_literals::sony_ilce_9.str,
+        };
 
         return ::enumFromStr(str, types, ESensor::eCIE1931);
     }
@@ -871,7 +917,8 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
         static constexpr std::underlying_type_t<EGVufferCoordSys> count = toUnderlying(EGVufferCoordSys::eCount);
-        static constexpr std::array<std::string_view, count>      types{"camera"sv, "world"sv};
+        static constexpr std::array<std::string_view, count> types{dict::film::coordinatesystem_literals::camera.str,
+                                                                   dict::film::coordinatesystem_literals::world.str};
 
         return ::enumFromStr(str, types, EGVufferCoordSys::eCamera);
     }
@@ -896,18 +943,12 @@ namespace dmt {
         switch (e)
         {
             using enum EFilterType;
-            case eBox:
-                return 0.5f;
-            case eMitchell:
-                return 2.f;
-            case eSinc:
-                return 4.f;
-            case eTriangle:
-                return 2.f;
-            case eGaussian:
-                [[fallthrough]];
-            default:
-                return 1.5f;
+            case eBox: return 0.5f;
+            case eMitchell: return 2.f;
+            case eSinc: return 4.f;
+            case eTriangle: return 2.f;
+            case eGaussian: [[fallthrough]];
+            default: return 1.5f;
         }
     }
 
@@ -1427,28 +1468,15 @@ namespace dmt {
     {
         switch (c)
         {
-            case EOF:
-                // You shouldn't be here
-                return EOF;
-            case 'b':
-                return '\b';
-            case 'f':
-                return '\f';
-            case 'n':
-                return '\n';
-            case 'r':
-                return '\r';
-            case 't':
-                return '\t';
-            case '\\':
-                return '\\';
-            case '\'':
-                return '\'';
-            case '\"':
-                return '\"';
-            default:
-                assert(false && "invalid escaped character");
-                std::abort();
+            case 'b': return '\b';
+            case 'f': return '\f';
+            case 'n': return '\n';
+            case 'r': return '\r';
+            case 't': return '\t';
+            case '\\': return '\\';
+            case '\'': return '\'';
+            case '\"': return '\"';
+            default: assert(false && "invalid escaped character"); std::abort();
         }
         return 0; // NOTREACHED
     }
@@ -1507,15 +1535,9 @@ namespace dmt {
         return {m_buffer, m_bufferLength};
     }
 
-    bool WordParser::needsContinuation() const
-    {
-        return m_needsContinuation;
-    }
+    bool WordParser::needsContinuation() const { return m_needsContinuation; }
 
-    uint32_t WordParser::numCharReadLast() const
-    {
-        return m_numCharReadLastTime;
-    }
+    uint32_t WordParser::numCharReadLast() const { return m_numCharReadLastTime; }
 
     bool WordParser::endOfStr(std::string_view str, size_t idx) const
     {
@@ -1663,6 +1685,1035 @@ namespace dmt {
         return "";
     }
 
+    HeaderTokenizer::Ret HeaderTokenizer::parseHeader(AppContext& actx, std::string_view filePath)
+    {
+        Ret ret{};
+        // TODO proper memory allocatio with sid and tag
+        char             buf[2] = {pathSeparator(), '/'};
+        std::string_view vBuf   = {buf, 2};
+        size_t           pos    = filePath.find_last_of(vBuf);
+        if (pos == std::string_view::npos)
+        {
+            actx.error("Invalid path {}", {filePath});
+            std::abort();
+        }
+        std::string_view fileName = filePath.substr(pos);
+        std::string_view basePath = filePath.substr(0, pos);
+        parseFile(actx, basePath, fileName);
+
+        return ret;
+    }
+
+    void HeaderTokenizer::parseFile(AppContext& actx, std::string_view basePath, std::string_view includeArgument)
+    {
+        size_t const chunkSize = 512;
+
+        // TODO proper memory allocatio with sid and tag
+        char* filePath = reinterpret_cast<char*>(
+            actx.mctx.stackAllocate(basePath.size() + includeArgument.size() + 1, 1, EMemoryTag::eUnknown, (sid_t)0));
+        if (!filePath)
+        {
+            actx.error("Couldn't allocate memory for file path construction");
+            std::abort();
+        }
+        std::memcpy(filePath, basePath.data(), basePath.size());
+        std::memcpy(filePath + basePath.size(), includeArgument.data(), includeArgument.size());
+        filePath[basePath.size() + includeArgument.size()] = '\0';
+
+        ChunkedFileReader reader{actx.mctx.pctx, filePath, chunkSize};
+        uint32_t          numChunks = reader.numChunks();
+        char* buffer = reinterpret_cast<char*>(actx.mctx.stackAllocate(chunkSize, 8, EMemoryTag::eUnknown, (sid_t)0));
+        WordParser tokenizer;
+
+        // bookkeping
+        size_t   offset       = 0;
+        bool     stop         = false;
+        uint32_t currentIndex = 0;
+
+        for (uint32_t i = 0; i < numChunks; ++i)
+        {
+            bool success = reader.requestChunk(actx.mctx.pctx, buffer, i);
+            assert(success && "Failed to request chunk");
+            bool completed = reader.waitForPendingChunk(actx.mctx.pctx, 1000);
+            assert(completed);
+            std::string_view chunk = {buffer, reader.lastNumBytesRead()};
+
+            bool needAdvance = true;
+            while (needAdvance)
+            { // TODO utf8 token normalization
+                std::string_view token = tokenizer.nextWord(chunk);
+                if (token.empty() && !tokenizer.needsContinuation())
+                { // you found only whitespaces, need to go to next chunk
+                    needAdvance = false;
+                }
+                else if (!tokenizer.needsContinuation())
+                {
+                    chunk = chunk.substr(tokenizer.numCharReadLast());
+                    // ready to consume token
+                    consumeToken(actx, basePath, token);
+                }
+                else
+                {
+                    needAdvance = false;
+                }
+            }
+        }
+    }
+
+    static bool isDirective(sid_t token)
+    {
+        switch (token)
+        {
+            case dict::directive::Option.sid: [[fallthrough]];
+            case dict::directive::Identity.sid: [[fallthrough]];
+            case dict::directive::Camera.sid: [[fallthrough]];
+            case dict::directive::Sampler.sid: [[fallthrough]];
+            case dict::directive::ColorSpace.sid: [[fallthrough]];
+            case dict::directive::Film.sid: [[fallthrough]];
+            case dict::directive::PixelFilter.sid: [[fallthrough]];
+            case dict::directive::Integrator.sid: [[fallthrough]];
+            case dict::directive::Accelerator.sid: [[fallthrough]];
+            case dict::directive::WorldBegin.sid: [[fallthrough]];
+            case dict::directive::AttributeBegin.sid: [[fallthrough]];
+            case dict::directive::AttributeEnd.sid: [[fallthrough]];
+            case dict::directive::Include.sid: [[fallthrough]];
+            case dict::directive::Import.sid: [[fallthrough]];
+            case dict::directive::LookAt.sid: [[fallthrough]];
+            case dict::directive::Translate.sid: [[fallthrough]];
+            case dict::directive::Scale.sid: [[fallthrough]];
+            case dict::directive::Rotate.sid: [[fallthrough]];
+            case dict::directive::CoordinateSystem.sid: [[fallthrough]];
+            case dict::directive::CoordSysTransform.sid: [[fallthrough]];
+            case dict::directive::Transform.sid: [[fallthrough]];
+            case dict::directive::ConcatTransform.sid: [[fallthrough]];
+            case dict::directive::TransformTimes.sid: [[fallthrough]];
+            case dict::directive::ActiveTransform.sid: [[fallthrough]];
+            case dict::directive::ReverseOrientation.sid: [[fallthrough]];
+            case dict::directive::Attribute.sid: [[fallthrough]];
+            case dict::directive::Shape.sid: [[fallthrough]];
+            case dict::directive::ObjectBegin.sid: [[fallthrough]];
+            case dict::directive::ObjectEnd.sid: [[fallthrough]];
+            case dict::directive::ObjectInstance.sid: [[fallthrough]];
+            case dict::directive::LightSource.sid: [[fallthrough]];
+            case dict::directive::AreaLightSource.sid: [[fallthrough]];
+            case dict::directive::Material.sid: [[fallthrough]];
+            case dict::directive::MakeNamedMaterial.sid: [[fallthrough]];
+            case dict::directive::NamedMaterial.sid: [[fallthrough]];
+            case dict::directive::Texture.sid: [[fallthrough]];
+            case dict::directive::MakeNamedMedium.sid: [[fallthrough]];
+            case dict::directive::MediumInterface.sid: return true;
+            default: return false;
+        }
+    }
+
+    struct ParamExractRet
+    {
+        sid_t            type;
+        std::string_view name;
+        sid_t            sid;
+    };
+
+    static ParamExractRet maybeExtractParam(AppContext& actx, std::string_view token)
+    {
+        ParamExractRet ret;
+        ret.type = 0;
+        ret.name = dequoteString(token);
+        ret.sid  = hashCRC64(ret.name);
+        if (token.starts_with('"'))
+        {
+            if (!token.ends_with('"'))
+            {
+                actx.error("syntax error file");
+                std::abort();
+            }
+            size_t whiteSpacePos = findFirstWhitespace(ret.name);
+            if (whiteSpacePos != std::string_view::npos)
+            {
+                std::string_view maybeType    = ret.name.substr(0, whiteSpacePos);
+                sid_t            maybeTypeSid = hashCRC64(maybeType);
+                switch (maybeTypeSid)
+                {
+                    case dict::types::tVector.sid: [[fallthrough]];
+                    case dict::types::tPoint.sid: [[fallthrough]];
+                    case dict::types::tNormal.sid: [[fallthrough]];
+                    case dict::types::tBool.sid: [[fallthrough]];
+                    case dict::types::tFloat.sid: [[fallthrough]];
+                    case dict::types::tInteger.sid: [[fallthrough]];
+                    case dict::types::tString.sid: [[fallthrough]];
+                    case dict::types::tRGB.sid: [[fallthrough]];
+                    case dict::types::tPoint2.sid: [[fallthrough]];
+                    case dict::types::tPoint3.sid: [[fallthrough]];
+                    case dict::types::tNormal3.sid: [[fallthrough]];
+                    case dict::types::tBlackbody.sid: [[fallthrough]];
+                    case dict::types::tSpectrum.sid: [[fallthrough]];
+                    case dict::types::tVector2.sid: [[fallthrough]];
+                    case dict::types::tVector3.sid: [[fallthrough]];
+                    case dict::types::tTexture.sid:
+                        ret.type = maybeTypeSid;
+                        ret.name = trimStartWhitespace(ret.name.substr(whiteSpacePos));
+                        ret.sid  = hashCRC64(ret.name);
+                        break;
+                    default: break;
+                }
+            }
+        }
+
+        return ret;
+    }
+
+    // Parse and set a float value
+    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            float value = defaultValue;
+            if (!parseFloat(values.valueAt(0), value))
+            {
+                return false; // Parsing failed
+            }
+            target = value;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set a std::string_view value
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            target = values.valueAt(0);
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set a boolean value
+    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
+    {
+        using namespace std::string_view_literals;
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            target = (values.valueAt(0) == "true"sv);
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetFloat4(ParamMap const&             params,
+                           sid_t                       paramSid,
+                           std::array<float, 4>&       target,
+                           std::array<float, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
+            {
+                return false; // Invalid type or incorrect number of parameters
+            }
+
+            std::array<float, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseFloat(values.valueAt(i), parsedValues[i]))
+                {
+                    return false; // Parsing failed for an element
+                }
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an int32_t value
+    template <std::integral I>
+    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
+                return false; // Invalid type or number of parameters
+            if (!parseInt(values.valueAt(0), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetInt4(ParamMap const&               params,
+                         sid_t                         paramSid,
+                         std::array<int32_t, 4>&       target,
+                         std::array<int32_t, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
+                return false; // Invalid type or incorrect number of parameters
+
+            std::array<int32_t, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseInt(values.valueAt(i), parsedValues[i]))
+                    return false; // Parsing failed for an element
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an enum value using a conversion function
+    template <typename EnumType, typename Converter>
+    static bool parseAndSetEnum(ParamMap const& params, sid_t paramSid, EnumType& target, EnumType defaultValue, Converter converter)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            target = converter(values.valueAt(0).data());
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    static sid_t setCameraParams(CameraSpec& cameraSpec, ParamMap const& params, Options const& cmdOptions)
+    { // TODO insert cmdOptions as default params
+        // parse common params
+        if (!parseAndSetFloat(params, dict::camera::shutteropen.sid, cameraSpec.shutteropen, 0.f) ||
+            !parseAndSetFloat(params, dict::camera::shutterclose.sid, cameraSpec.shutterclose, 1.f))
+        {
+            return "camera"_side; // Early return on error
+        }
+
+        // parse class specific parameters
+        switch (cameraSpec.type)
+        {
+            case ECameraType::ePerspective:
+            {
+                auto& projectingParams = cameraSpec.params.p;
+                if (!parseAndSetFloat(params, dict::camera::fov.sid, projectingParams.fov, 90.f))
+                { // error
+                    return dict::camera::fov.sid;
+                }
+                [[fallthrough]];
+            }
+            case ECameraType::eOrthographic:
+            {
+                auto& projectingParams = cameraSpec.params.p;
+                if (!parseAndSetFloat(params, dict::camera::frameaspectratio.sid, projectingParams.frameAspectRatio, 90.f) ||
+                    !parseAndSetFloat(params, dict::camera::screenwindow.sid, projectingParams.screenWindow, 1.f) ||
+                    !parseAndSetFloat(params, dict::camera::lensradius.sid, projectingParams.lensRadius, 0.f) ||
+                    !parseAndSetFloat(params, dict::camera::focaldistance.sid, projectingParams.focalDistance, 1e30f))
+                { // error
+                    return "orthographic"_side;
+                }
+                break;
+            }
+            case ECameraType::eRealistic:
+            {
+                using namespace std::string_view_literals;
+                auto& realisticParams = cameraSpec.params.r;
+                if (!parseAndSetFloat(params, dict::camera::aperturediameter.sid, realisticParams.apertureDiameter, 1.f) ||
+                    !parseAndSetFloat(params, dict::camera::focusdistance.sid, realisticParams.focusDistance, 10.f) ||
+                    !parseAndSetString(params, dict::camera::lensfile.sid, realisticParams.lensfile, ""sv) ||
+                    !parseAndSetString(params,
+                                       dict::camera::aperture.sid,
+                                       realisticParams.aperture,
+                                       dict::camera::aperture_builtin::circular.str))
+                { // error
+                    return "realistic"_side;
+                }
+                break;
+            }
+            case ECameraType::eSpherical:
+            {
+                auto& sphericalParams = cameraSpec.params.s;
+                if (!parseAndSetEnum(params,
+                                     dict::camera::mapping.sid,
+                                     sphericalParams.mapping,
+                                     ESphericalMapping::eEqualArea,
+                                     sphericalMappingFromStr))
+                { // error
+                    return dict::camera::mapping.sid;
+                }
+                break;
+            }
+        }
+
+        return 0;
+    }
+
+    static sid_t setSamplerParams(SamplerSpec& samplerSpec, ParamMap const& params, Options const& cmdOptions)
+    {
+        // seed is used by almost all, so consume it anyways
+        if (!parseAndSetInt(params, dict::sampler::seed.sid, samplerSpec.seed, cmdOptions.seed))
+        {
+            return dict::sampler::seed.sid;
+        }
+
+        // all but stratified sampler have num samples not subdivided by axes
+        if (samplerSpec.type == ESamplerType::eStratified)
+        {
+            auto& stratifiedSamples = samplerSpec.samples.stratified;
+            if (!parseAndSetBool(params, dict::sampler::jitter.sid, stratifiedSamples.jitter, true) ||
+                !parseAndSetInt(params, dict::sampler::xsamples.sid, stratifiedSamples.x, 4) ||
+                !parseAndSetInt(params, dict::sampler::ysamples.sid, stratifiedSamples.y, 4))
+            {
+                return "stratified"_side;
+            }
+        }
+        else
+        {
+            if (!parseAndSetInt(params, dict::sampler::pixelsamples.sid, samplerSpec.samples.num, 16))
+                return dict::sampler::pixelsamples.sid;
+
+            if (samplerSpec.type == ESamplerType::eIndependent)
+            {
+                ERandomization def = samplerSpec.type == ESamplerType::eHalton ? ERandomization::ePermuteDigits
+                                                                               : ERandomization::eFastOwen;
+                if (!parseAndSetEnum(params, dict::sampler::randomization.sid, samplerSpec.randomization, def, randomizationFromStr))
+                    return dict::sampler::randomization.sid;
+            }
+        }
+
+        return 0;
+    }
+
+    static sid_t setFilmParams(FilmSpec& filmSpec, ParamMap const& params)
+    {
+        using namespace std::string_view_literals;
+        // common parameters
+        if (!parseAndSetInt(params, dict::film::xresolution.sid, filmSpec.xResolution, 1280) ||
+            !parseAndSetInt(params, dict::film::yresolution.sid, filmSpec.yResolution, 720) ||
+            !parseAndSetFloat(params, dict::film::diagonal.sid, filmSpec.diagonal, 35.f) ||
+            !parseAndSetFloat(params, dict::film::iso.sid, filmSpec.iso, 100.f) ||
+            !parseAndSetFloat(params, dict::film::whitebalance.sid, filmSpec.whiteBalance, 0.f) ||
+            !parseAndSetFloat(params,
+                              dict::film::maxcomponentvalue.sid,
+                              filmSpec.maxComponentValue,
+                              std::numeric_limits<float>::infinity()) ||
+            !parseAndSetEnum(params, dict::film::sensor.sid, filmSpec.sensor, ESensor::eCIE1931, sensorFromStr) ||
+            !parseAndSetBool(params, dict::film::savefp16.sid, filmSpec.savefp16, true) ||
+            !parseAndSetFloat4(params, dict::film::cropwindow.sid, filmSpec.cropWindow, {0.f, 1.f, 0.f, 1.f}) ||
+            !parseAndSetInt4(params,
+                             dict::film::pixelbounds.sid,
+                             filmSpec.pixelBounds,
+                             {0, filmSpec.xResolution, 0, filmSpec.yResolution}) ||
+            !parseAndSetString(params, dict::film::filename.sid, filmSpec.fileName, "pbrt.exr"sv))
+        {
+            return "common"_side;
+        }
+
+        switch (filmSpec.type)
+        {
+            // if RGB,then filename extension can be one of .pfm, .exr, .qoi, .png
+            case EFilmType::eRGB:
+            {
+                if (!endsWithAny(filmSpec.fileName, {".pfm"sv, ".exr"sv, ".qoi"sv, ".png"sv}))
+                    return "rgb::filename"_side;
+                break;
+            }
+            // gbuffer
+            case EFilmType::eGBuffer:
+            {
+                if (!parseAndSetEnum(params,
+                                     dict::film::coordinatesystem.sid,
+                                     filmSpec.coordSys,
+                                     EGVufferCoordSys::eCamera,
+                                     gBufferCoordSysFromStr))
+                    return "gbuffer::coordinatesystem"_side;
+                break;
+            }
+            // spectral film
+            case EFilmType::eSpectral:
+            {
+                if (!parseAndSetInt(params, dict::film::nbuckets.sid, filmSpec.nBuckets, static_cast<int16_t>(16)) ||
+                    !parseAndSetFloat(params, dict::film::lambdamin.sid, filmSpec.lambdaMin, 360.f) ||
+                    !parseAndSetFloat(params, dict::film::lambdamax.sid, filmSpec.lambdaMax, 830.f))
+                {
+                    return "spectral"_side;
+                }
+                break;
+            }
+            default: assert(false); break;
+        }
+
+        return 0;
+    }
+
+    static sid_t setFilterParams(FilterSpec& filterSpec, ParamMap const& params)
+    {
+        static constexpr float oneThird      = 0x1.3333333p-2f;
+        float                  defaultRadius = defaultRadiusFromFilterType(filterSpec.type);
+        // set xRadius and yRadius
+        if (!parseAndSetFloat(params, dict::filter::xradius.sid, filterSpec.xRadius, defaultRadius) ||
+            !parseAndSetFloat(params, dict::filter::yradius.sid, filterSpec.yRadius, defaultRadius))
+        {
+            return "radius"_side;
+        }
+        switch (filterSpec.type)
+        {
+            case EFilterType::eGaussian:
+            {
+                auto& gauss = filterSpec.params.gaussian;
+                if (!parseAndSetFloat(params, dict::filter::sigma.sid, gauss.sigma, 0.5f))
+                    return "gaussian::sigma"_side;
+                break;
+            }
+            case EFilterType::eMitchell:
+            {
+                auto& mitchell = filterSpec.params.mitchell;
+                if (!parseAndSetFloat(params, dict::filter::B.sid, mitchell.b, oneThird) ||
+                    !parseAndSetFloat(params, dict::filter::C.sid, mitchell.c, oneThird))
+                {
+                    return "mitchell"_side;
+                }
+                break;
+            }
+            case EFilterType::eSinc:
+            {
+                auto& sinc = filterSpec.params.sinc;
+                if (!parseAndSetFloat(params, dict::filter::tau.sid, sinc.tau, 3.f))
+                    return "sinc::tau"_side;
+                break;
+            }
+            case EFilterType::eBox: break;
+            case EFilterType::eTriangle: break;
+            default: assert(false); break;
+        }
+
+        return 0;
+    }
+
+    static sid_t setIntegratorParams(IntegratorSpec& integratorSpec, ParamMap const& params, Options const& options)
+    {
+        assert(integratorSpec.type != EIntegratorType::eCount);
+        // maxdepth: all but ambientocclusion
+        if (integratorSpec.type != EIntegratorType::eAmbientOcclusion)
+        {
+            if (!parseAndSetInt(params, dict::integrator::maxdepth.sid, integratorSpec.maxDepth, 5))
+                return dict::integrator::maxdepth.sid;
+        }
+
+        // lightsampler: path volpath wavefront/gpu
+        if (isAnyEnum(integratorSpec.type, {EIntegratorType::eVolPath, EIntegratorType::ePath}) || wavefrontOrGPU(options))
+        {
+            if (!parseAndSetEnum(params,
+                                 dict::integrator::lightsampler.sid,
+                                 integratorSpec.lightSampler,
+                                 ELightSampler::eBVH,
+                                 lightSamplerFromStr))
+                return dict::integrator::lightsampler.sid;
+        }
+
+        // regularize: bdpt mlt path volpath wavefront/gpu
+        if (isAnyEnum(integratorSpec.type,
+                      {EIntegratorType::eBdpt, EIntegratorType::eMLT, EIntegratorType::ePath, EIntegratorType::eVolPath}) ||
+            wavefrontOrGPU(options))
+        {
+            if (!parseAndSetBool(params, dict::integrator::regularize.sid, integratorSpec.regularize, false))
+                return dict::integrator::regularize.sid;
+        }
+
+        // integrator specific parameters
+        switch (integratorSpec.type)
+        {
+            case EIntegratorType::eAmbientOcclusion:
+            {
+                auto& aoParams = integratorSpec.params.ao;
+                if (!parseAndSetBool(params, dict::integrator::cossample.sid, aoParams.cosSample, true) ||
+                    !parseAndSetFloat(params,
+                                      dict::integrator::maxdistance.sid,
+                                      aoParams.maxDistance,
+                                      std::numeric_limits<float>::infinity()))
+                {
+                    return "ambientocclusion"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eBdpt:
+            {
+                auto& bdptParams = integratorSpec.params.bdpt;
+                if (!parseAndSetBool(params, dict::integrator::visualizestrategies.sid, bdptParams.visualizeStrategies, false) ||
+                    !parseAndSetBool(params, dict::integrator::visualizeweights.sid, bdptParams.visualizeWeights, false))
+                {
+                    return "bdpt"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eMLT:
+            {
+                auto& mltParams = integratorSpec.params.mlt;
+                if (!parseAndSetInt(params, dict::integrator::bootstrapsamples.sid, mltParams.bootstraqpSamples, 100000) ||
+                    !parseAndSetInt(params, dict::integrator::chains.sid, mltParams.chains, 1000) ||
+                    !parseAndSetInt(params, dict::integrator::mutationsperpixel.sid, mltParams.mutationsPerPixel, 100) ||
+                    !parseAndSetFloat(params, dict::integrator::largestepprobability.sid, mltParams.largestStepProbability, 0.3f) ||
+                    !parseAndSetFloat(params, dict::integrator::sigma.sid, mltParams.sigma, 0.01f))
+                {
+                    return "mlt"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eSimplePath:
+            {
+                auto& simplePathParams = integratorSpec.params.simplePath;
+                if (!parseAndSetBool(params, dict::integrator::samplebsdf.sid, simplePathParams.sampleBSDF, true) ||
+                    !parseAndSetBool(params, dict::integrator::samplelights.sid, simplePathParams.sampleLights, true))
+                {
+                    return "simplepath"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eSPPM:
+            {
+                auto& sppmParams = integratorSpec.params.sppm;
+                if (!parseAndSetInt(params, dict::integrator::photonsperiteration.sid, sppmParams.photonsPerIteration, -1) ||
+                    !parseAndSetFloat(params, dict::integrator::radius.sid, sppmParams.radius, 1.f) ||
+                    !parseAndSetInt(params, dict::integrator::seed.sid, sppmParams.seed, 0))
+                {
+                    return "sppm"_side;
+                }
+                break;
+            }
+            default: break;
+        }
+
+        return 0;
+    }
+
+    static sid_t setAcceleratorParams(AcceleratorSpec& acceleratorSpec, ParamMap const& params)
+    {
+        switch (acceleratorSpec.type)
+        {
+            case EAcceletatorType::eBVH:
+            {
+                auto& bvhParams = acceleratorSpec.params.bvh;
+                if (!parseAndSetInt(params, dict::accelerator::maxnodeprims.sid, bvhParams.maxNodePrims, 4) ||
+                    !parseAndSetEnum(params,
+                                     dict::accelerator::splitmethod.sid,
+                                     bvhParams.splitMethod,
+                                     EBVHSplitMethod::eSAH,
+                                     bvhSplitMethodFromStr))
+                {
+                    return "bvh"_side;
+                }
+                break;
+            }
+            case EAcceletatorType::eKdTree:
+            {
+                auto& kdtreeParams = acceleratorSpec.params.kdtree;
+                if (!parseAndSetInt(params, dict::accelerator::intersectcost.sid, kdtreeParams.intersectCost, 5) ||
+                    !parseAndSetInt(params, dict::accelerator::traversalcost.sid, kdtreeParams.traversalCost, 1) ||
+                    !parseAndSetFloat(params, dict::accelerator::emptybonus.sid, kdtreeParams.emptyBonus, 0.5f) ||
+                    !parseAndSetInt(params, dict::accelerator::maxprims.sid, kdtreeParams.maxPrims, 1) ||
+                    !parseAndSetInt(params, dict::accelerator::maxdepth.sid, kdtreeParams.maxDepth, -1))
+                {
+                    return "kdtree"_side;
+                }
+                break;
+            }
+            default: break;
+        }
+        return 0;
+    }
+
+
+    void HeaderTokenizer::setCurrentParam(sid_t type, sid_t name)
+    {
+        m_currentParamType = type;
+        m_currentParamName = name;
+        m_state            = EHeaderBlockState::eParamsReading;
+    }
+
+    void HeaderTokenizer::handleDirective(AppContext& actx, sid_t directive)
+    {
+        switch (directive)
+        {
+            // empty directives
+            case dict::directive::WorldBegin.sid:
+            {
+                if (m_inWorldBlock)
+                {
+                    actx.error("WorldBegin directive encontered more than once");
+                    std::abort();
+                }
+                m_inWorldBlock = true;
+                break;
+            }
+            case dict::directive::AttributeBegin.sid:
+            {
+                if (!m_inWorldBlock)
+                {
+                    actx.error("AttributeBegin directive can appear after WorldBegin");
+                    std::abort();
+                }
+                m_blockStack.push(EScope::eAttribute);
+                break;
+            }
+            case dict::directive::AttributeEnd.sid:
+            {
+                if (m_blockStack.empty() || m_blockStack.top() != EScope::eAttribute || !m_inWorldBlock)
+                {
+                    actx.error("Invalid state for an AttributeEnd directive. (check presence of AttributeBegin)");
+                    std::abort();
+                }
+                m_blockStack.pop();
+                // TODO restore previous graphics state
+                break;
+            }
+            case dict::directive::ObjectEnd.sid:
+            {
+                if (m_blockStack.empty() || m_blockStack.top() != EScope::eObject || !m_inWorldBlock)
+                {
+                    actx.error("Invalid state for an ObjectEnd directive.");
+                    std::abort();
+                }
+                m_blockStack.pop();
+                // TODO finalize object declaration
+                break;
+            }
+
+            case dict::directive::ReverseOrientation.sid: [[fallthrough]];
+
+            // directives which take an argument and possibly a param list, and belong before the world block
+            // -- names stuff declaration (which is also parsed in import mode)
+            case dict::directive::MakeNamedMedium.sid: [[fallthrough]];
+            case dict::directive::MakeNamedMaterial.sid: [[fallthrough]];
+            case dict::directive::Texture.sid: [[fallthrough]];
+
+            // -- transformation on the CTM
+            case dict::directive::LookAt.sid: [[fallthrough]];
+            case dict::directive::Translate.sid: [[fallthrough]];
+            case dict::directive::Scale.sid: [[fallthrough]];
+            case dict::directive::Rotate.sid: [[fallthrough]];
+            case dict::directive::CoordinateSystem.sid: [[fallthrough]];
+            case dict::directive::CoordSysTransform.sid: [[fallthrough]];
+            case dict::directive::Transform.sid: [[fallthrough]];
+            case dict::directive::ConcatTransform.sid: [[fallthrough]];
+
+            // -- Animated Transform stuff
+            case dict::directive::TransformTimes.sid: [[fallthrough]];
+            case dict::directive::ActiveTransform.sid: [[fallthrough]];
+
+            // -- header stuff
+            case dict::directive::Option.sid: [[fallthrough]];
+            case dict::directive::Camera.sid: [[fallthrough]];
+            case dict::directive::Sampler.sid: [[fallthrough]];
+            case dict::directive::ColorSpace.sid: [[fallthrough]];
+            case dict::directive::Film.sid: [[fallthrough]];
+            case dict::directive::PixelFilter.sid: [[fallthrough]];
+            case dict::directive::Integrator.sid: [[fallthrough]];
+            case dict::directive::Accelerator.sid:
+                if (m_inWorldBlock)
+                {
+                    actx.error("Encountered unexpected directive in world block");
+                    std::abort();
+                }
+                m_state           = EHeaderBlockState::eDirectiveRead;
+                m_insideDirective = directive;
+                break;
+
+            case dict::directive::Attribute.sid: [[fallthrough]];
+
+            case dict::directive::Shape.sid: [[fallthrough]];
+
+            case dict::directive::ObjectBegin.sid: [[fallthrough]];
+            case dict::directive::ObjectInstance.sid: [[fallthrough]];
+
+            case dict::directive::LightSource.sid: [[fallthrough]];
+            case dict::directive::AreaLightSource.sid: [[fallthrough]];
+            case dict::directive::Material.sid: [[fallthrough]];
+            case dict::directive::NamedMaterial.sid: [[fallthrough]];
+            case dict::directive::MediumInterface.sid: return true;
+
+            case dict::directive::Include.sid:
+            case dict::directive::Import.sid:
+                [[fallthrough]];
+                { // TODO recursion on parseFile
+                    std::abort();
+                }
+                break;
+            default:
+                actx.error("Unrecognized header token");
+                std::abort();
+                break;
+        }
+    }
+
+    void HeaderTokenizer::handleArgument(AppContext& actx, std::string_view token) {}
+
+    void HeaderTokenizer::setClassArg(std::string_view token, sid_t arg)
+    {
+        m_dequotedArg = token;
+        m_classArg    = arg;
+        m_argsRead    = 1;
+        m_state       = EHeaderBlockState::eArgsRead;
+    }
+
+    static sid_t classDirectives[] = {dict::directive::Camera.sid,
+                                      dict::directive::Sampler.sid,
+                                      dict::directive::ColorSpace.sid,
+                                      dict::directive::Film.sid,
+                                      dict::directive::PixelFilter.sid,
+                                      dict::directive::Integrator.sid,
+                                      dict::directive::Accelerator.sid};
+
+    void HeaderTokenizer::handleFirstTokenAfterDirective(AppContext& actx, std::string_view token)
+    {
+        // is it an arg or a param? it is a param only if it is quoted, contains at least 2 words, and the first word is a valid type
+        // if it is neither an arg or a param, error
+        // TODO add if not valid token function which takes token and state
+        ParamExractRet maybeParam = maybeExtractParam(actx, token);
+        if (m_insideDirective == dict::directive::Option.sid)
+        { // expects a single parameter, hence this should be it
+            if (maybeParam.type == 0)
+            {
+                actx.error("Option directive expects a single valid parameter");
+                std::abort();
+            }
+            else
+            {
+                setCurrentParam(maybeParam.type, maybeParam.sid);
+            }
+        }
+
+        if (oneOf(m_insideDirective, std::begin(classDirectives), std::end(classDirectives)))
+        { // expects the class argument and param list
+            if (maybeParam.type == 0 && startsWithEndsWith(token, '"', '"'))
+            {
+                setClassArg(maybeParam.name, maybeParam.sid);
+            }
+            else
+            {
+                actx.error("Camera directive expects 1 string (quoted) argument");
+                std::abort();
+            }
+        }
+
+        switch (m_insideDirective)
+        {
+            case dict::directive::Camera.sid:
+            {
+                cameraSpec.type = cameraTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::Sampler.sid:
+            {
+                samplerSpec.type = samplerTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::ColorSpace.sid:
+            {
+                colorSpaceSpec.type = colorSpaceTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::Film.sid:
+            {
+                filmSpec.type = filmTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::PixelFilter.sid:
+            {
+                filterSpec.type = filterTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::Integrator.sid:
+            {
+                integratorSpec.type = integratorTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::Accelerator.sid:
+            {
+                acceleratorSpec.type = acceleratorTypeFromStr(maybeParam.name.data());
+                break;
+            }
+            case dict::directive::MakeNamedMedium.sid:
+            { // TODO: handle named stuff declaration
+                std::abort();
+            }
+        }
+    }
+
+    void HeaderTokenizer::insertParameterValue(AppContext& actx, sid_t name, std::string_view token)
+    {
+        auto it = m_params.find(name);
+        if (it == m_params.end())
+        {
+            actx.error("Internal Error: Couldn't find previously added param");
+            std::abort();
+        }
+        it->second.addParamValue(token);
+    }
+
+    void HeaderTokenizer::consumeToken(AppContext& actx, std::string_view basePath, std::string_view token)
+    {
+        // ignore comments
+        if (token.starts_with('#'))
+            return;
+
+        sid_t tokenSid = hashCRC64(token);
+        switch (m_state)
+        {
+            case EHeaderBlockState::eNone:
+            {
+                handleDirective(actx, tokenSid);
+                break;
+            }
+            case EHeaderBlockState::eDirectiveRead:
+            {
+                handleFirstTokenAfterDirective(actx, token);
+                break;
+            }
+            case EHeaderBlockState::eArgsRead: // == you read a directive and all its argument, and you are reading its params
+            {                                  // try to read either next directive or parameter
+                ParamExractRet maybeParam = maybeExtractParam(actx, token);
+                if (!isDirective(tokenSid))
+                {
+                    switch (m_insideDirective)
+                    {
+                        case dict::directive::Sampler.sid: [[fallthrough]];
+                        case dict::directive::ColorSpace.sid: [[fallthrough]];
+                        case dict::directive::Film.sid: [[fallthrough]];
+                        case dict::directive::PixelFilter.sid: [[fallthrough]];
+                        case dict::directive::Integrator.sid: [[fallthrough]];
+                        case dict::directive::Accelerator.sid: [[fallthrough]];
+                        case dict::directive::Camera.sid:
+                        {
+                            if (maybeParam.type == 0 && startsWithEndsWith(token, '"', '"'))
+                            {
+                                actx.error("Expected parameter for camera");
+                                std::abort();
+                            }
+                            else
+                            {
+                                setCurrentParam(maybeParam.type, maybeParam.sid); // eParamsReading
+                                m_params.try_emplace(maybeParam.sid, maybeParam.type);
+                            }
+                            break;
+                        }
+                        case dict::directive::MakeNamedMedium.sid:
+                        { // TODO: handle named stuff declaration
+                            std::abort();
+                        }
+                    }
+                }
+                else
+                {
+                    switch (m_insideDirective)
+                    {
+                        case dict::directive::Sampler.sid: setSamplerParams(samplerSpec, m_params, fileOptions); break;
+                        case dict::directive::Film.sid: setFilmParams(filmSpec, m_params); break;
+                        case dict::directive::PixelFilter.sid: setFilterParams(filterSpec, m_params); break;
+                        case dict::directive::Integrator.sid:
+                            setIntegratorParams(integratorSpec, m_params, fileOptions);
+                            break;
+                        case dict::directive::Accelerator.sid: setAcceleratorParams(acceleratorSpec, m_params); break;
+                        case dict::directive::Camera.sid: setCameraParams(cameraSpec, m_params, fileOptions); break;
+                        case dict::directive::ColorSpace.sid:
+                            actx.error("ColorSpace directive doesn't take any parameters");
+                            std::abort();
+                            break;
+                        case dict::directive::MakeNamedMedium.sid:
+                        { // TODO: handle named stuff declaration
+                            std::abort();
+                        }
+                    }
+                    reestState();
+                    handleDirective(actx, tokenSid);
+                    m_params.clear();
+                    m_state = EHeaderBlockState::eDirectiveRead;
+                }
+                break;
+            }
+            case EHeaderBlockState::eParamsReading:
+            { // expect either the beginning of an array, or a value
+                if (token.starts_with('[') && token.size() == 1)
+                {
+                    m_state = EHeaderBlockState::eInsideArray;
+                }
+                else
+                {
+                    insertParameterValue(actx, m_currentParamName, token);
+                    m_state = EHeaderBlockState::eArgsRead;
+                }
+                break;
+            }
+            case EHeaderBlockState::eInsideArray:
+            {
+                if (token.ends_with(']') && token.size() == 1)
+                {
+                    m_state = EHeaderBlockState::eArgsRead;
+                }
+                else
+                {
+                    insertParameterValue(actx, m_currentParamName, token);
+                    m_state = EHeaderBlockState::eInsideArray;
+                }
+                break;
+            }
+        }
+
+        if (m_state == EHeaderBlockState::eArgsRead)
+        {
+        }
+    }
+
+    void HeaderTokenizer::reestState()
+    { // TODO memory free
+        m_params.clear();
+        m_state            = EHeaderBlockState::eNone;
+        m_insideDirective  = 0;
+        m_currentParamType = 0;
+        m_currentParamName = 0;
+        m_classArg         = 0;
+        m_argsRead         = 0;
+        m_paramsRead       = 0;
+    }
 } // namespace dmt
 
 namespace dmt::model {

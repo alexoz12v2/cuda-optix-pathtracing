@@ -80,10 +80,7 @@ namespace dmt {
 
     // StringTable --------------------------------------------------------------------------------------------------------
 
-    sid_t StringTable::intern(std::string_view str)
-    {
-        return intern(str.data(), str.size());
-    }
+    sid_t StringTable::intern(std::string_view str) { return intern(str.data(), str.size()); }
 
     sid_t StringTable::intern(char const* str, uint64_t sz)
     {
@@ -120,9 +117,7 @@ namespace dmt {
     class HooksJanitor
     {
     public:
-        HooksJanitor(LoggingContext& ctx, bool alloc) : m_ctx(ctx), m_alloc(alloc)
-        {
-        }
+        HooksJanitor(LoggingContext& ctx, bool alloc) : m_ctx(ctx), m_alloc(alloc) {}
         HooksJanitor(HooksJanitor const&)                = delete;
         HooksJanitor(HooksJanitor&&) noexcept            = delete;
         HooksJanitor& operator=(HooksJanitor const&)     = delete;
@@ -506,9 +501,7 @@ namespace dmt {
         m_hooks.allocHook(m_hooks.data, ctx, ret);
         return true;
     }
-    PageAllocator::~PageAllocator()
-    {
-    }
+    PageAllocator::~PageAllocator() {}
 
 #elif defined(DMT_OS_WINDOWS)
     class Janitor
@@ -1223,9 +1216,7 @@ namespace dmt {
         }
     }
 
-    PageAllocator::~PageAllocator()
-    {
-    }
+    PageAllocator::~PageAllocator() {}
 
 #endif // DMT_OS_LINUX, DMT_OS_WINDOWS
 
@@ -2153,10 +2144,7 @@ namespace dmt {
         return stackAllocator.allocate(pctx, pageAllocator, size, alignment, tag, sid);
     }
 
-    void MemoryContext::stackReset()
-    {
-        stackAllocator.reset(pctx, pageAllocator);
-    }
+    void MemoryContext::stackReset() { stackAllocator.reset(pctx, pageAllocator); }
 
     // pool methods
     TaggedPointer MemoryContext::poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid)

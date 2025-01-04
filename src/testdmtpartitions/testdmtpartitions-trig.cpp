@@ -10,8 +10,5 @@ module;
 module testdmtpartitions; // implementation units for partitions do not redeclare the partition
 
 namespace dmt {
-    float myCos(float x)
-    {
-        return std::cosf(x);
-    }
+    float myCos(float x) { return std::cosf(x); }
 } // namespace dmt

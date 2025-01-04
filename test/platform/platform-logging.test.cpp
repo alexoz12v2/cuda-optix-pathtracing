@@ -129,10 +129,7 @@ public:
         return m_.buffers->operator[](idx).data();
     }
 
-    char* get(uint32_t idx)
-    {
-        return m_.buffers->operator[](idx).data();
-    }
+    char* get(uint32_t idx) { return m_.buffers->operator[](idx).data(); }
 
     bool enqueue(uint32_t idx, size_t sz)
     {
@@ -142,10 +139,7 @@ public:
         return m_.enqueueReturn;
     }
 
-    void setDestructorCalled(bool* p)
-    {
-        m_.destructorCalled = p;
-    }
+    void setDestructorCalled(bool* p) { m_.destructorCalled = p; }
 
     ~MockAsyncIOManager()
     {
@@ -156,10 +150,7 @@ public:
         delete m_.buffers;
     }
 
-    void setUseStdOut(bool b)
-    {
-        m_.useStdout = b;
-    }
+    void setUseStdOut(bool b) { m_.useStdout = b; }
 
     struct T
     {

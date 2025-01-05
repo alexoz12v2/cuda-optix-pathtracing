@@ -6,7 +6,9 @@ module;
 #include <atomic>
 #include <bit>
 #include <map>
+#include <memory>
 #include <memory_resource>
+#include <numeric>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -22,20 +24,6 @@ module middleware;
 // Option "bool wavefront" true
 // TODO if this asppears after the sampler has been alread, you need to modify it somehow
 // Option "integer seed" 15
-
-template <typename Enum, size_t N>
-    requires(std::is_enum_v<Enum>)
-static constexpr Enum enumFromStr(char const* str, std::array<std::string_view, N> const& types, Enum defaultEnum)
-{
-    for (uint8_t i = 0; i < types.size(); ++i)
-    {
-        if (std::strncmp(str, types[i].data(), types[i].size()) == 0)
-        {
-            return ::dmt::fromUnderlying<Enum>(i);
-        }
-    }
-    return defaultEnum;
-}
 
 namespace dmt {
     // values can also be closed into arrays even if something expects a scalar. parameters are unordered
@@ -69,7 +57,7 @@ namespace dmt {
             static constexpr SText Import = "Import"sv; // supports another pbrt file, literal, imports only named entities. only in world block
 
             // transformations on the CTM (Current Transformation Matrix) (reset to Identity at world begin)
-            static constexpr SText Identity = "Identity"sv
+            static constexpr SText Identity  = "Identity"sv;
             static constexpr SText LookAt    = "LookAt"sv;    // expects a 9 element array
             static constexpr SText Translate = "Translate"sv; // expects x y z
             static constexpr SText Scale     = "Scale"sv;
@@ -99,6 +87,11 @@ namespace dmt {
             static constexpr SText MakeNamedMedium = "MakeNamedMedium"sv; // declares a medium, expects name type param list
             static constexpr SText MediumInterface = "MediumInterface"sv;
         } // namespace directive
+        namespace activetransform_literals {
+            static constexpr SText StartTime = "StartTime"sv;
+            static constexpr SText EndTime   = "EndTime"sv;
+            static constexpr SText All       = "All"sv;
+        } // namespace activetransform_literals
 
         // data types
         namespace types {
@@ -802,140 +795,274 @@ namespace dmt {
         } // namespace media
     } // namespace dict
 
-    ERenderCoordSys renderCoordSysFromStr(char const* str)
-    { // array needs to follow the order in which the enum values are declared
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ERenderCoordSys> count = toUnderlying(ERenderCoordSys::eCount);
-        static constexpr std::array<std::string_view, count> types{dict::opts::rendercoordsys_literals::cameraworld.str,
-                                                                   dict::opts::rendercoordsys_literals::camera.str,
-                                                                   dict::opts::rendercoordsys_literals::world.str};
-
-        return ::enumFromStr(str, types, ERenderCoordSys::eCameraWorld);
-    }
-
-    ECameraType cameraTypeFromStr(char const* str)
-    { // array needs to follow the order in which the enum values are declared
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ECameraType> count = toUnderlying(ECameraType::eCount);
-        static constexpr std::array<std::string_view, count> types{dict::camera::orthographic.str,
-                                                                   dict::camera::perspective.str,
-                                                                   dict::camera::realistic.str,
-                                                                   dict::camera::spherical.str};
-
-        return ::enumFromStr(str, types, ECameraType::ePerspective);
-    }
-
-    ESphericalMapping sphericalMappingFromStr(char const* str)
+    static constexpr bool activeTransformFromSid(sid_t type, EActiveTransform& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ESphericalMapping> count = toUnderlying(ESphericalMapping::eCount);
-        static constexpr std::array<std::string_view, count>       types{dict::camera::mapping_literals::equalarea.str,
-                                                                   dict::camera::mapping_literals::equirectangular.str};
-
-        return ::enumFromStr(str, types, ESphericalMapping::eEqualArea);
+        switch (type)
+        {
+            case dict::activetransform_literals::StartTime.sid: out = EActiveTransform::eStartTime; break;
+            case dict::activetransform_literals::EndTime.sid: out = EActiveTransform::eEndTime; break;
+            case dict::activetransform_literals::All.sid: out = EActiveTransform::eAll; break;
+            default: return false;
+        }
+        return true;
     }
 
-    ESamplerType samplerTypeFromStr(char const* str)
+    static constexpr bool materialTypeFromSid(sid_t type, EMaterialType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ESamplerType> count = toUnderlying(ESamplerType::eCount);
-        static constexpr std::array<std::string_view, count>
-            types{dict::sampler::zsobol.str,
-                  dict::sampler::halton.str,
-                  dict::sampler::independent.str,
-                  dict::sampler::paddedsobol.str,
-                  dict::sampler::sobol.str,
-                  dict::sampler::stratified.str};
+        switch (type)
+        {
+            case dict::material::coateddiffuse.sid: out = EMaterialType::eCoateddiffuse; break;
+            case dict::material::coatedconductor.sid: out = EMaterialType::eCoatedconductor; break;
+            case dict::material::conductor.sid: out = EMaterialType::eConductor; break;
+            case dict::material::dielectric.sid: out = EMaterialType::eDielectric; break;
+            case dict::material::diffuse.sid: out = EMaterialType::eDiffuse; break;
+            case dict::material::diffusetransmission.sid: out = EMaterialType::eDiffusetransmission; break;
+            case dict::material::hair.sid: out = EMaterialType::eHair; break;
+            case dict::material::interface.sid: out = EMaterialType::eInterface; break;
+            case dict::material::measured.sid: out = EMaterialType::eMeasured; break;
+            case dict::material::mix.sid: out = EMaterialType::eMix; break;
+            case dict::material::subsurface.sid: out = EMaterialType::eSubsurface; break;
+            case dict::material::thindielectric.sid: out = EMaterialType::eThindielectric; break;
+            default: return false;
+        }
 
-        return ::enumFromStr(str, types, ESamplerType::eZSobol);
+        return true;
     }
 
-    ERandomization randomizationFromStr(char const* str)
+    static constexpr bool textureTypeFromSid(sid_t type, ETextureType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ERandomization> count = toUnderlying(ERandomization::eCount);
-        static constexpr std::array<std::string_view, count> types{dict::sampler::randomization_literals::fastowen.str,
-                                                                   dict::sampler::randomization_literals::none.str,
-                                                                   dict::sampler::randomization_literals::permutedigits.str,
-                                                                   dict::sampler::randomization_literals::owen.str};
+        switch (type)
+        {
+            case dict::types::tSpectrum.sid: out = ETextureType::eSpectrum; break;
+            case dict::types::tFloat.sid: out = ETextureType::eFloat; break;
+            default: return false;
+        }
 
-        return ::enumFromStr(str, types, ERandomization::eFastOwen);
+        return true;
     }
 
-    EColorSpaceType colorSpaceTypeFromStr(char const* str)
+    static constexpr bool lightTypeFromSid(sid_t type, ELightType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EColorSpaceType> count = toUnderlying(EColorSpaceType::eCount);
-        static constexpr std::array<std::string_view, count>     types{dict::colorspace::srgb.str,
-                                                                   dict::colorspace::rec2020.str,
-                                                                   dict::colorspace::aces2065_1.str,
-                                                                   dict::colorspace::dci_p3.str};
+        switch (type)
+        {
+            case dict::light::distant.sid: out = ELightType::eDistant; break;
+            case dict::light::goniometric.sid: out = ELightType::eGoniometric; break;
+            case dict::light::infinite.sid: out = ELightType::eInfinite; break;
+            case dict::light::point.sid: out = ELightType::ePoint; break;
+            case dict::light::projection.sid: out = ELightType::eProjection; break;
+            case dict::light::spot.sid: out = ELightType::eSpot; break;
+            default: return false;
+        }
 
-        return ::enumFromStr(str, types, EColorSpaceType::eSRGB);
+        return true;
     }
 
-    EFilmType filmTypeFromStr(char const* str)
+    static constexpr bool areaLightTypeFromSid(sid_t type, EAreaLightType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EFilmType>   count = toUnderlying(EFilmType::eCount);
-        static constexpr std::array<std::string_view, count> types{dict::film::rgb.str,
-                                                                   dict::film::gbuffer.str,
-                                                                   dict::film::spectral.str};
+        switch (type)
+        {
+            case dict::arealight::diffuse.sid: out = EAreaLightType::eDiffuse; break;
+            default: return false;
+        }
 
-        return ::enumFromStr(str, types, EFilmType::eRGB);
+        return true;
     }
 
-    ESensor sensorFromStr(char const* str)
+    static constexpr bool shapeTypeFromSid(sid_t type, EShapeType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ESensor>     count = toUnderlying(ESensor::eCount);
-        static constexpr std::array<std::string_view, count> types{
-            dict::film::sensor_literals::cie1931.str,
-            dict::film::sensor_literals::canon_eos_100d.str,
-            dict::film::sensor_literals::canon_eos_1dx_mkii.str,
-            dict::film::sensor_literals::canon_eos_200d.str,
-            dict::film::sensor_literals::canon_eos_200d_mkii.str,
-            dict::film::sensor_literals::canon_eos_5d.str,
-            dict::film::sensor_literals::canon_eos_5d_mkii.str,
-            dict::film::sensor_literals::canon_eos_5d_mkiii.str,
-            dict::film::sensor_literals::canon_eos_5d_mkiv.str,
-            dict::film::sensor_literals::canon_eos_5ds.str,
-            dict::film::sensor_literals::canon_eos_m.str,
-            dict::film::sensor_literals::hasselblad_l1d_20c.str,
-            dict::film::sensor_literals::nikon_d810.str,
-            dict::film::sensor_literals::nikon_d850.str,
-            dict::film::sensor_literals::sony_ilce_6400.str,
-            dict::film::sensor_literals::sony_ilce_7m3.str,
-            dict::film::sensor_literals::sony_ilce_7rm3.str,
-            dict::film::sensor_literals::sony_ilce_9.str,
-        };
+        switch (type)
+        {
+            case dict::shape::bilinearmesh.sid: out = EShapeType::eBilinearmesh; break;
+            case dict::shape::curve.sid: out = EShapeType::eCurve; break;
+            case dict::shape::cylinder.sid: out = EShapeType::eCylinder; break;
+            case dict::shape::disk.sid: out = EShapeType::eDisk; break;
+            case dict::shape::sphere.sid: out = EShapeType::eSphere; break;
+            case dict::shape::trianglemesh.sid: out = EShapeType::eTrianglemesh; break;
+            case dict::shape::loopsubdiv.sid: out = EShapeType::eLoopsubdiv; break;
+            case dict::shape::plymesh.sid: out = EShapeType::ePlymesh; break;
+            default: return false;
+        }
 
-        return ::enumFromStr(str, types, ESensor::eCIE1931);
+        return true;
     }
 
-    EGVufferCoordSys gBufferCoordSysFromStr(char const* str)
+    static constexpr bool textureClassFromSid(sid_t type, ETextureClass& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EGVufferCoordSys> count = toUnderlying(EGVufferCoordSys::eCount);
-        static constexpr std::array<std::string_view, count> types{dict::film::coordinatesystem_literals::camera.str,
-                                                                   dict::film::coordinatesystem_literals::world.str};
+        switch (type)
+        {
+            case dict::texture::bilerp.sid: out = ETextureClass::eBilerp; break;
+            case dict::texture::checkerboard.sid: out = ETextureClass::eCheckerboard; break;
+            case dict::texture::constant.sid: out = ETextureClass::eConstant; break;
+            case dict::texture::directionmix.sid: out = ETextureClass::eDirectionmix; break;
+            case dict::texture::dots.sid: out = ETextureClass::eDots; break;
+            case dict::texture::fbm.sid: out = ETextureClass::eFbm; break;
+            case dict::texture::imagemap.sid: out = ETextureClass::eImagemap; break;
+            case dict::texture::marble.sid: out = ETextureClass::eMarble; break;
+            case dict::texture::mix.sid: out = ETextureClass::eMix; break;
+            case dict::texture::ptex.sid: out = ETextureClass::ePtex; break;
+            case dict::texture::scale.sid: out = ETextureClass::eScale; break;
+            case dict::texture::windy.sid: out = ETextureClass::eWindy; break;
+            case dict::texture::wrinkled.sid: out = ETextureClass::eWrinkled; break;
+            default: return false;
+        }
 
-        return ::enumFromStr(str, types, EGVufferCoordSys::eCamera);
+        return true;
     }
 
-    EFilterType filterTypeFromStr(char const* str)
+    static constexpr bool renderCoordSysFromSid(sid_t type, ERenderCoordSys& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EFilterType> count = toUnderlying(EFilterType::eCount);
-        static constexpr std::array<std::string_view, count> types{
-            "box"sv,
-            "gaussian"sv,
-            "mitchell"sv,
-            "sinc"sv,
-            "triangle"sv,
-        };
+        switch (type)
+        {
+            case dict::opts::rendercoordsys_literals::cameraworld.sid: out = ERenderCoordSys::eCameraWorld; break;
+            case dict::opts::rendercoordsys_literals::camera.sid: out = ERenderCoordSys::eCamera; break;
+            case dict::opts::rendercoordsys_literals::world.sid: out = ERenderCoordSys::eWorld; break;
+            default: return false;
+        }
+        return true;
+    }
 
-        return ::enumFromStr(str, types, EFilterType::eGaussian);
+    static constexpr bool cameraTypeFromSid(sid_t type, ECameraType& out)
+    {
+        switch (type)
+        {
+            case dict::camera::orthographic.sid: out = ECameraType::eOrthographic; break;
+            case dict::camera::perspective.sid: out = ECameraType::ePerspective; break;
+            case dict::camera::realistic.sid: out = ECameraType::eRealistic; break;
+            case dict::camera::spherical.sid: out = ECameraType::eSpherical; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool sphericalMappingFromSid(sid_t type, ESphericalMapping& out)
+    {
+        switch (type)
+        {
+            case dict::camera::mapping_literals::equalarea.sid: out = ESphericalMapping::eEqualArea; break;
+            case dict::camera::mapping_literals::equirectangular.sid: out = ESphericalMapping::eEquirectangular; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool samplerTypeFromSid(sid_t type, ESamplerType& out)
+    {
+        switch (type)
+        {
+            case dict::sampler::zsobol.sid: out = ESamplerType::eZSobol; break;
+            case dict::sampler::halton.sid: out = ESamplerType::eHalton; break;
+            case dict::sampler::independent.sid: out = ESamplerType::eIndependent; break;
+            case dict::sampler::paddedsobol.sid: out = ESamplerType::ePaddedSobol; break;
+            case dict::sampler::sobol.sid: out = ESamplerType::eSobol; break;
+            case dict::sampler::stratified.sid: out = ESamplerType::eStratified; break;
+            default: return false;
+        }
+
+        return true;
+    }
+
+    static constexpr bool randomizationFromSid(sid_t type, ERandomization& out)
+    {
+        switch (type)
+        {
+            case dict::sampler::randomization_literals::fastowen.sid: out = ERandomization::eFastOwen; break;
+            case dict::sampler::randomization_literals::none.sid: out = ERandomization::eNone; break;
+            case dict::sampler::randomization_literals::permutedigits.sid: out = ERandomization::ePermuteDigits; break;
+            case dict::sampler::randomization_literals::owen.sid: out = ERandomization::eOwen; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool colorSpaceTypeFromSid(sid_t type, EColorSpaceType& out)
+    {
+        switch (type)
+        {
+            case dict::colorspace::srgb.sid: out = EColorSpaceType::eSRGB; break;
+            case dict::colorspace::rec2020.sid: out = EColorSpaceType::eRec2020; break;
+            case dict::colorspace::aces2065_1.sid: out = EColorSpaceType::eAces2065_1; break;
+            case dict::colorspace::dci_p3.sid: out = EColorSpaceType::eDci_p3; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool filmTypeFromSid(sid_t type, EFilmType& out)
+    {
+        switch (type)
+        {
+            case dict::film::rgb.sid: out = EFilmType::eRGB; break;
+            case dict::film::gbuffer.sid: out = EFilmType::eGBuffer; break;
+            case dict::film::spectral.sid: out = EFilmType::eSpectral; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool sensorFromSid(sid_t type, ESensor& out)
+    {
+        switch (type)
+        {
+            case dict::film::sensor_literals::cie1931.sid: out = ESensor::eCIE1931; break;
+            case dict::film::sensor_literals::canon_eos_100d.sid: out = ESensor::eCanon_eos_100d; break;
+            case dict::film::sensor_literals::canon_eos_1dx_mkii.sid: out = ESensor::eCanon_eos_1dx_mkii; break;
+            case dict::film::sensor_literals::canon_eos_200d.sid: out = ESensor::eCanon_eos_200d; break;
+            case dict::film::sensor_literals::canon_eos_200d_mkii.sid: out = ESensor::eCanon_eos_200d_mkii; break;
+            case dict::film::sensor_literals::canon_eos_5d.sid: out = ESensor::eCanon_eos_5d; break;
+            case dict::film::sensor_literals::canon_eos_5d_mkii.sid: out = ESensor::eCanon_eos_5d_mkii; break;
+            case dict::film::sensor_literals::canon_eos_5d_mkiii.sid: out = ESensor::eCanon_eos_5d_mkiii; break;
+            case dict::film::sensor_literals::canon_eos_5d_mkiv.sid: out = ESensor::eCanon_eos_5d_mkiv; break;
+            case dict::film::sensor_literals::canon_eos_5ds.sid: out = ESensor::eCanon_eos_5ds; break;
+            case dict::film::sensor_literals::canon_eos_m.sid: out = ESensor::eCanon_eos_m; break;
+            case dict::film::sensor_literals::hasselblad_l1d_20c.sid: out = ESensor::eHasselblad_l1d_20c; break;
+            case dict::film::sensor_literals::nikon_d810.sid: out = ESensor::eNikon_d810; break;
+            case dict::film::sensor_literals::nikon_d850.sid: out = ESensor::eNikon_d850; break;
+            case dict::film::sensor_literals::sony_ilce_6400.sid: out = ESensor::eSony_ilce_6400; break;
+            case dict::film::sensor_literals::sony_ilce_7m3.sid: out = ESensor::eSony_ilce_7m3; break;
+            case dict::film::sensor_literals::sony_ilce_7rm3.sid: out = ESensor::eSony_ilce_7rm3; break;
+            case dict::film::sensor_literals::sony_ilce_9.sid: out = ESensor::eSony_ilce_9; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool targetFromSid(sid_t type, ETarget& out)
+    {
+        switch (type)
+        {
+            case dict::target::shape.sid: out = ETarget::eShape; break;
+            case dict::target::light.sid: out = ETarget::eLight; break;
+            case dict::target::material.sid: out = ETarget::eMaterial; break;
+            case dict::target::medium.sid: out = ETarget::eMedium; break;
+            case dict::target::texture.sid: out = ETarget::eTexture; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool gBufferCoordSysFromSid(sid_t type, EGVufferCoordSys& out)
+    {
+        switch (type)
+        {
+            case dict::film::coordinatesystem_literals::camera.sid: out = EGVufferCoordSys::eCamera; break;
+            case dict::film::coordinatesystem_literals::world.sid: out = EGVufferCoordSys::eWorld; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    static constexpr bool filterTypeFromSid(sid_t type, EFilterType& out)
+    {
+        switch (type)
+        {
+            case dict::filter::box.sid: out = EFilterType::eBox; break;
+            case dict::filter::gaussian.sid: out = EFilterType::eGaussian; break;
+            case dict::filter::mitchell.sid: out = EFilterType::eMitchell; break;
+            case dict::filter::sinc.sid: out = EFilterType::eSinc; break;
+            case dict::filter::triangle.sid: out = EFilterType::eTriangle; break;
+            default: return false;
+        }
+        return true;
     }
 
     float defaultRadiusFromFilterType(EFilterType e)
@@ -952,50 +1079,774 @@ namespace dmt {
         }
     }
 
-    EIntegratorType integratorTypeFromStr(char const* str)
+    static constexpr bool integratorTypeFromSid(sid_t type, EIntegratorType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EIntegratorType> count = toUnderlying(EIntegratorType::eCount);
-        static constexpr std::array<std::string_view, count>
-            types{"volpath"sv,
-                  "ambientocclusion"sv,
-                  "bdpt"sv,
-                  "lightpath"sv,
-                  "mlt"sv,
-                  "path"sv,
-                  "randomwalk"sv,
-                  "simplepath"sv,
-                  "simplevolpath"sv,
-                  "sppm"sv};
-
-        return ::enumFromStr(str, types, EIntegratorType::eVolPath);
+        switch (type)
+        {
+            case dict::integrator::volpath.sid: out = EIntegratorType::eVolPath; break;
+            case dict::integrator::ambientocclusion.sid: out = EIntegratorType::eAmbientOcclusion; break;
+            case dict::integrator::bdpt.sid: out = EIntegratorType::eBdpt; break;
+            case dict::integrator::lightpath.sid: out = EIntegratorType::eLightPath; break;
+            case dict::integrator::mlt.sid: out = EIntegratorType::eMLT; break;
+            case dict::integrator::path.sid: out = EIntegratorType::ePath; break;
+            case dict::integrator::randomwalk.sid: out = EIntegratorType::eRandomWalk; break;
+            case dict::integrator::simplepath.sid: out = EIntegratorType::eSimplePath; break;
+            case dict::integrator::simplevolpath.sid: out = EIntegratorType::eSimpleVolPath; break;
+            case dict::integrator::sppm.sid: out = EIntegratorType::eSPPM; break;
+            default: return false;
+        }
+        return true;
     }
 
-    ELightSampler lightSamplerFromStr(char const* str)
+    static constexpr bool lightSamplerFromSid(sid_t type, ELightSampler& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<ELightSampler> count = toUnderlying(ELightSampler::eCount);
-        static constexpr std::array<std::string_view, count>   types{"bvh"sv, "uniform"sv, "power"sv};
-
-        return ::enumFromStr(str, types, ELightSampler::eBVH);
+        switch (type)
+        {
+            case dict::integrator::lightsampler_literals::bvh.sid: out = ELightSampler::eBVH; break;
+            case dict::integrator::lightsampler_literals::uniform.sid: out = ELightSampler::eUniform; break;
+            case dict::integrator::lightsampler_literals::power.sid: out = ELightSampler::ePower; break;
+            default: return false;
+        }
+        return true;
     }
 
-    EAcceletatorType acceleratorTypeFromStr(char const* str)
+    static constexpr bool acceleratorTypeFromSid(sid_t type, EAcceletatorType& out)
     {
-        using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EAcceletatorType> count = toUnderlying(EAcceletatorType::eCount);
-        static constexpr std::array<std::string_view, count>      types{"bvh"sv, "kdtree"sv};
-
-        return ::enumFromStr(str, types, EAcceletatorType::eBVH);
+        switch (type)
+        {
+            case dict::accelerator::bvh.sid: out = EAcceletatorType::eBVH; break;
+            case dict::accelerator::kdtree.sid: out = EAcceletatorType::eKdTree; break;
+            default: return false;
+        }
+        return true;
     }
 
-    EBVHSplitMethod bvhSplitMethodFromStr(char const* str)
+    static constexpr bool bvhSplitMethodFromSid(sid_t type, EBVHSplitMethod& out)
+    {
+        switch (type)
+        {
+            case dict::accelerator::splitmethod_literals::sah.sid: out = EBVHSplitMethod::eSAH; break;
+            case dict::accelerator::splitmethod_literals::middle.sid: out = EBVHSplitMethod::eMiddle; break;
+            case dict::accelerator::splitmethod_literals::equal.sid: out = EBVHSplitMethod::eEqual; break;
+            case dict::accelerator::splitmethod_literals::hlbvh.sid: out = EBVHSplitMethod::eHLBVH; break;
+            default: return false;
+        }
+        return true;
+    }
+
+    // Parsing Helpers ------------------------------------------------------------------------------------------------
+    static bool isDirective(sid_t token)
+    {
+        switch (token)
+        {
+            case dict::directive::Option.sid: [[fallthrough]];
+            case dict::directive::Identity.sid: [[fallthrough]];
+            case dict::directive::Camera.sid: [[fallthrough]];
+            case dict::directive::Sampler.sid: [[fallthrough]];
+            case dict::directive::ColorSpace.sid: [[fallthrough]];
+            case dict::directive::Film.sid: [[fallthrough]];
+            case dict::directive::PixelFilter.sid: [[fallthrough]];
+            case dict::directive::Integrator.sid: [[fallthrough]];
+            case dict::directive::Accelerator.sid: [[fallthrough]];
+            case dict::directive::WorldBegin.sid: [[fallthrough]];
+            case dict::directive::AttributeBegin.sid: [[fallthrough]];
+            case dict::directive::AttributeEnd.sid: [[fallthrough]];
+            case dict::directive::Include.sid: [[fallthrough]];
+            case dict::directive::Import.sid: [[fallthrough]];
+            case dict::directive::LookAt.sid: [[fallthrough]];
+            case dict::directive::Translate.sid: [[fallthrough]];
+            case dict::directive::Scale.sid: [[fallthrough]];
+            case dict::directive::Rotate.sid: [[fallthrough]];
+            case dict::directive::CoordinateSystem.sid: [[fallthrough]];
+            case dict::directive::CoordSysTransform.sid: [[fallthrough]];
+            case dict::directive::Transform.sid: [[fallthrough]];
+            case dict::directive::ConcatTransform.sid: [[fallthrough]];
+            case dict::directive::TransformTimes.sid: [[fallthrough]];
+            case dict::directive::ActiveTransform.sid: [[fallthrough]];
+            case dict::directive::ReverseOrientation.sid: [[fallthrough]];
+            case dict::directive::Attribute.sid: [[fallthrough]];
+            case dict::directive::Shape.sid: [[fallthrough]];
+            case dict::directive::ObjectBegin.sid: [[fallthrough]];
+            case dict::directive::ObjectEnd.sid: [[fallthrough]];
+            case dict::directive::ObjectInstance.sid: [[fallthrough]];
+            case dict::directive::LightSource.sid: [[fallthrough]];
+            case dict::directive::AreaLightSource.sid: [[fallthrough]];
+            case dict::directive::Material.sid: [[fallthrough]];
+            case dict::directive::MakeNamedMaterial.sid: [[fallthrough]];
+            case dict::directive::NamedMaterial.sid: [[fallthrough]];
+            case dict::directive::Texture.sid: [[fallthrough]];
+            case dict::directive::MakeNamedMedium.sid: [[fallthrough]];
+            case dict::directive::MediumInterface.sid: return true;
+            default: return false;
+        }
+    }
+
+    static bool isZeroArgsDirective(sid_t token)
+    {
+        switch (token)
+        {
+            case dict::directive::Identity.sid: [[fallthrough]];
+            case dict::directive::WorldBegin.sid: [[fallthrough]];
+            case dict::directive::AttributeBegin.sid: [[fallthrough]];
+            case dict::directive::AttributeEnd.sid: [[fallthrough]];
+            case dict::directive::ReverseOrientation.sid: [[fallthrough]];
+            case dict::directive::ObjectEnd.sid: return true;
+            default: return false;
+        }
+    }
+
+    struct ParamExractRet
+    {
+        sid_t            type;
+        std::string_view name;
+        sid_t            sid;
+    };
+
+    static ParamExractRet maybeExtractParam(AppContext& actx, std::string_view token)
+    {
+        ParamExractRet ret;
+        ret.type = 0;
+        ret.name = dequoteString(token);
+        ret.sid  = hashCRC64(ret.name);
+        if (token.starts_with('"'))
+        {
+            if (!token.ends_with('"'))
+            {
+                actx.error("syntax error file");
+                std::abort();
+            }
+            size_t whiteSpacePos = findFirstWhitespace(ret.name);
+            if (whiteSpacePos != std::string_view::npos)
+            {
+                std::string_view maybeType    = ret.name.substr(0, whiteSpacePos);
+                sid_t            maybeTypeSid = hashCRC64(maybeType);
+                switch (maybeTypeSid)
+                {
+                    case dict::types::tVector.sid: [[fallthrough]];
+                    case dict::types::tPoint.sid: [[fallthrough]];
+                    case dict::types::tNormal.sid: [[fallthrough]];
+                    case dict::types::tBool.sid: [[fallthrough]];
+                    case dict::types::tFloat.sid: [[fallthrough]];
+                    case dict::types::tInteger.sid: [[fallthrough]];
+                    case dict::types::tString.sid: [[fallthrough]];
+                    case dict::types::tRGB.sid: [[fallthrough]];
+                    case dict::types::tPoint2.sid: [[fallthrough]];
+                    case dict::types::tPoint3.sid: [[fallthrough]];
+                    case dict::types::tNormal3.sid: [[fallthrough]];
+                    case dict::types::tBlackbody.sid: [[fallthrough]];
+                    case dict::types::tSpectrum.sid: [[fallthrough]];
+                    case dict::types::tVector2.sid: [[fallthrough]];
+                    case dict::types::tVector3.sid: [[fallthrough]];
+                    case dict::types::tTexture.sid:
+                        ret.type = maybeTypeSid;
+                        ret.name = trimStartWhitespace(ret.name.substr(whiteSpacePos));
+                        ret.sid  = hashCRC64(ret.name);
+                        break;
+                    default: break;
+                }
+            }
+        }
+
+        return ret;
+    }
+
+    static bool isParameter(AppContext& actx, std::string_view token)
+    {
+        if (token.starts_with('"'))
+        {
+            if (!token.ends_with('"'))
+            {
+                actx.error("syntax error file");
+                std::abort();
+            }
+
+            std::string_view name          = dequoteString(token);
+            size_t           whiteSpacePos = findFirstWhitespace(name);
+            if (whiteSpacePos != std::string_view::npos)
+            {
+                std::string_view maybeType    = name.substr(0, whiteSpacePos);
+                sid_t            maybeTypeSid = hashCRC64(maybeType);
+                switch (maybeTypeSid)
+                {
+                    case dict::types::tVector.sid: [[fallthrough]];
+                    case dict::types::tPoint.sid: [[fallthrough]];
+                    case dict::types::tNormal.sid: [[fallthrough]];
+                    case dict::types::tBool.sid: [[fallthrough]];
+                    case dict::types::tFloat.sid: [[fallthrough]];
+                    case dict::types::tInteger.sid: [[fallthrough]];
+                    case dict::types::tString.sid: [[fallthrough]];
+                    case dict::types::tRGB.sid: [[fallthrough]];
+                    case dict::types::tPoint2.sid: [[fallthrough]];
+                    case dict::types::tPoint3.sid: [[fallthrough]];
+                    case dict::types::tNormal3.sid: [[fallthrough]];
+                    case dict::types::tBlackbody.sid: [[fallthrough]];
+                    case dict::types::tSpectrum.sid: [[fallthrough]];
+                    case dict::types::tVector2.sid: [[fallthrough]];
+                    case dict::types::tVector3.sid: [[fallthrough]];
+                    case dict::types::tTexture.sid: return true;
+                    default: break;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    // Parse and set a float value
+    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            float value = defaultValue;
+            if (!parseFloat(values.valueAt(0), value))
+            {
+                return false; // Parsing failed
+            }
+            target = value;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set a std::string_view value
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            target = values.valueAt(0);
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, char* target, uint32_t& outLength, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            std::memcpy(target, values.valueAt(0).data(), values.valueAt(0).size());
+            outLength = static_cast<uint32_t>(values.valueAt(0).size());
+        }
+        else
+        {
+            std::memcpy(target, defaultValue.data(), defaultValue.size()); // Use default value if parameter is not found
+            outLength = static_cast<uint32_t>(defaultValue.size());
+        }
+        return true;
+    }
+
+    // Parse and set a boolean value
+    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
     {
         using namespace std::string_view_literals;
-        static constexpr std::underlying_type_t<EBVHSplitMethod> count = toUnderlying(EBVHSplitMethod::eCount);
-        static constexpr std::array<std::string_view, count>     types{"sah"sv, "middle"sv, "equal"sv, "hlbvh"sv};
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            if (values.valueAt(0) == "true"sv)
+                target = true;
+            else if (values.valueAt(0) == "false"sv)
+                target = false;
+            else
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
 
-        return ::enumFromStr(str, types, EBVHSplitMethod::eSAH);
+    bool parseAndSetFloat4(ParamMap const&             params,
+                           sid_t                       paramSid,
+                           std::array<float, 4>&       target,
+                           std::array<float, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
+            {
+                return false; // Invalid type or incorrect number of parameters
+            }
+
+            std::array<float, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseFloat(values.valueAt(i), parsedValues[i]))
+                {
+                    return false; // Parsing failed for an element
+                }
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an int32_t value
+    template <std::integral I>
+    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
+                return false; // Invalid type or number of parameters
+            if (!parseInt(values.valueAt(0), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetInt4(ParamMap const&               params,
+                         sid_t                         paramSid,
+                         std::array<int32_t, 4>&       target,
+                         std::array<int32_t, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
+                return false; // Invalid type or incorrect number of parameters
+
+            std::array<int32_t, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseInt(values.valueAt(i), parsedValues[i]))
+                    return false; // Parsing failed for an element
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an enum value using a conversion function
+    template <typename EnumType>
+    static bool parseAndSetEnum(ParamMap const& params,
+                                sid_t           paramSid,
+                                EnumType&       target,
+                                EnumType        defaultValue,
+                                bool (*converter)(sid_t, EnumType&))
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            if (!converter(hashCRC64(values.valueAt(0)), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    template <std::size_t NTTPSize>
+    static std::size_t parseFloatArray(ArgsDArray const& args, std::array<float, NTTPSize>& outArray)
+    {
+        // Check if the size of the input vector matches the expected size
+        if (args.size() != NTTPSize)
+        {
+            return 0; // Mismatch in expected and actual size
+        }
+
+        std::size_t parsedCount = 0;
+
+        for (std::size_t i = 0; i < NTTPSize; ++i)
+        {
+            // Parse each string into a float
+            float value = 0.0f;
+            if (!parseFloat(std::string_view(args[i]), value))
+            {
+                return parsedCount; // Stop and return the count parsed so far if there's an error
+            }
+            outArray[i] = value;
+            ++parsedCount;
+        }
+
+        return parsedCount; // Should be NTTPSize upon success
+    }
+
+    static sid_t setCameraParams(CameraSpec& cameraSpec, ParamMap const& params, Options const& cmdOptions)
+    { // TODO insert cmdOptions as default params
+        // parse common params
+        if (!parseAndSetFloat(params, dict::camera::shutteropen.sid, cameraSpec.shutteropen, 0.f) ||
+            !parseAndSetFloat(params, dict::camera::shutterclose.sid, cameraSpec.shutterclose, 1.f))
+        {
+            return "camera"_side; // Early return on error
+        }
+
+        // parse class specific parameters
+        switch (cameraSpec.type)
+        {
+            case ECameraType::ePerspective:
+            {
+                auto& projectingParams = cameraSpec.params.p;
+                if (!parseAndSetFloat(params, dict::camera::fov.sid, projectingParams.fov, 90.f))
+                { // error
+                    return dict::camera::fov.sid;
+                }
+                [[fallthrough]];
+            }
+            case ECameraType::eOrthographic:
+            {
+                auto& projectingParams = cameraSpec.params.p;
+                if (!parseAndSetFloat(params, dict::camera::frameaspectratio.sid, projectingParams.frameAspectRatio, 90.f) ||
+                    !parseAndSetFloat(params, dict::camera::screenwindow.sid, projectingParams.screenWindow, 1.f) ||
+                    !parseAndSetFloat(params, dict::camera::lensradius.sid, projectingParams.lensRadius, 0.f) ||
+                    !parseAndSetFloat(params, dict::camera::focaldistance.sid, projectingParams.focalDistance, 1e30f))
+                { // error
+                    return "orthographic"_side;
+                }
+                break;
+            }
+            case ECameraType::eRealistic:
+            {
+                using namespace std::string_view_literals;
+                auto& realisticParams = cameraSpec.params.r;
+                if (!parseAndSetFloat(params, dict::camera::aperturediameter.sid, realisticParams.apertureDiameter, 1.f) ||
+                    !parseAndSetFloat(params, dict::camera::focusdistance.sid, realisticParams.focusDistance, 10.f) ||
+                    !parseAndSetString(params, dict::camera::lensfile.sid, realisticParams.lensfile, ""sv) ||
+                    !parseAndSetString(params,
+                                       dict::camera::aperture.sid,
+                                       realisticParams.aperture,
+                                       dict::camera::aperture_builtin::circular.str))
+                { // error
+                    return "realistic"_side;
+                }
+                break;
+            }
+            case ECameraType::eSpherical:
+            {
+                auto& sphericalParams = cameraSpec.params.s;
+                if (!parseAndSetEnum(params,
+                                     dict::camera::mapping.sid,
+                                     sphericalParams.mapping,
+                                     ESphericalMapping::eEqualArea,
+                                     sphericalMappingFromSid))
+                { // error
+                    return dict::camera::mapping.sid;
+                }
+                break;
+            }
+        }
+
+        return 0;
+    }
+
+    static sid_t setSamplerParams(SamplerSpec& samplerSpec, ParamMap const& params, Options const& cmdOptions)
+    {
+        // seed is used by almost all, so consume it anyways
+        if (!parseAndSetInt(params, dict::sampler::seed.sid, samplerSpec.seed, cmdOptions.seed))
+        {
+            return dict::sampler::seed.sid;
+        }
+
+        // all but stratified sampler have num samples not subdivided by axes
+        if (samplerSpec.type == ESamplerType::eStratified)
+        {
+            auto& stratifiedSamples = samplerSpec.samples.stratified;
+            if (!parseAndSetBool(params, dict::sampler::jitter.sid, stratifiedSamples.jitter, true) ||
+                !parseAndSetInt(params, dict::sampler::xsamples.sid, stratifiedSamples.x, 4) ||
+                !parseAndSetInt(params, dict::sampler::ysamples.sid, stratifiedSamples.y, 4))
+            {
+                return "stratified"_side;
+            }
+        }
+        else
+        {
+            if (!parseAndSetInt(params, dict::sampler::pixelsamples.sid, samplerSpec.samples.num, 16))
+                return dict::sampler::pixelsamples.sid;
+
+            if (samplerSpec.type == ESamplerType::eIndependent)
+            {
+                ERandomization def = samplerSpec.type == ESamplerType::eHalton ? ERandomization::ePermuteDigits
+                                                                               : ERandomization::eFastOwen;
+                if (!parseAndSetEnum(params, dict::sampler::randomization.sid, samplerSpec.randomization, def, randomizationFromSid))
+                    return dict::sampler::randomization.sid;
+            }
+        }
+
+        return 0;
+    }
+
+    static sid_t setFilmParams(FilmSpec& filmSpec, ParamMap const& params, Options const& unused)
+    {
+        using namespace std::string_view_literals;
+        // common parameters
+        if (!parseAndSetInt(params, dict::film::xresolution.sid, filmSpec.xResolution, 1280) ||
+            !parseAndSetInt(params, dict::film::yresolution.sid, filmSpec.yResolution, 720) ||
+            !parseAndSetFloat(params, dict::film::diagonal.sid, filmSpec.diagonal, 35.f) ||
+            !parseAndSetFloat(params, dict::film::iso.sid, filmSpec.iso, 100.f) ||
+            !parseAndSetFloat(params, dict::film::whitebalance.sid, filmSpec.whiteBalance, 0.f) ||
+            !parseAndSetFloat(params,
+                              dict::film::maxcomponentvalue.sid,
+                              filmSpec.maxComponentValue,
+                              std::numeric_limits<float>::infinity()) ||
+            !parseAndSetEnum(params, dict::film::sensor.sid, filmSpec.sensor, ESensor::eCIE1931, sensorFromSid) ||
+            !parseAndSetBool(params, dict::film::savefp16.sid, filmSpec.savefp16, true) ||
+            !parseAndSetFloat4(params, dict::film::cropwindow.sid, filmSpec.cropWindow, {0.f, 1.f, 0.f, 1.f}) ||
+            !parseAndSetInt4(params,
+                             dict::film::pixelbounds.sid,
+                             filmSpec.pixelBounds,
+                             {0, filmSpec.xResolution, 0, filmSpec.yResolution}) ||
+            !parseAndSetString(params, dict::film::filename.sid, filmSpec.fileName, "pbrt.exr"sv))
+        {
+            return "common"_side;
+        }
+
+        switch (filmSpec.type)
+        {
+            // if RGB,then filename extension can be one of .pfm, .exr, .qoi, .png
+            case EFilmType::eRGB:
+            {
+                if (!endsWithAny(filmSpec.fileName, {".pfm"sv, ".exr"sv, ".qoi"sv, ".png"sv}))
+                    return "rgb::filename"_side;
+                break;
+            }
+            // gbuffer
+            case EFilmType::eGBuffer:
+            {
+                if (!parseAndSetEnum(params,
+                                     dict::film::coordinatesystem.sid,
+                                     filmSpec.coordSys,
+                                     EGVufferCoordSys::eCamera,
+                                     gBufferCoordSysFromSid))
+                    return "gbuffer::coordinatesystem"_side;
+                break;
+            }
+            // spectral film
+            case EFilmType::eSpectral:
+            {
+                if (!parseAndSetInt(params, dict::film::nbuckets.sid, filmSpec.nBuckets, static_cast<int16_t>(16)) ||
+                    !parseAndSetFloat(params, dict::film::lambdamin.sid, filmSpec.lambdaMin, 360.f) ||
+                    !parseAndSetFloat(params, dict::film::lambdamax.sid, filmSpec.lambdaMax, 830.f))
+                {
+                    return "spectral"_side;
+                }
+                break;
+            }
+            default: assert(false); break;
+        }
+
+        return 0;
+    }
+
+    static sid_t setFilterParams(FilterSpec& filterSpec, ParamMap const& params, Options const& unused)
+    {
+        static constexpr float oneThird      = 0x1.3333333p-2f;
+        float                  defaultRadius = defaultRadiusFromFilterType(filterSpec.type);
+        // set xRadius and yRadius
+        if (!parseAndSetFloat(params, dict::filter::xradius.sid, filterSpec.xRadius, defaultRadius) ||
+            !parseAndSetFloat(params, dict::filter::yradius.sid, filterSpec.yRadius, defaultRadius))
+        {
+            return "radius"_side;
+        }
+        switch (filterSpec.type)
+        {
+            case EFilterType::eGaussian:
+            {
+                auto& gauss = filterSpec.params.gaussian;
+                if (!parseAndSetFloat(params, dict::filter::sigma.sid, gauss.sigma, 0.5f))
+                    return "gaussian::sigma"_side;
+                break;
+            }
+            case EFilterType::eMitchell:
+            {
+                auto& mitchell = filterSpec.params.mitchell;
+                if (!parseAndSetFloat(params, dict::filter::B.sid, mitchell.b, oneThird) ||
+                    !parseAndSetFloat(params, dict::filter::C.sid, mitchell.c, oneThird))
+                {
+                    return "mitchell"_side;
+                }
+                break;
+            }
+            case EFilterType::eSinc:
+            {
+                auto& sinc = filterSpec.params.sinc;
+                if (!parseAndSetFloat(params, dict::filter::tau.sid, sinc.tau, 3.f))
+                    return "sinc::tau"_side;
+                break;
+            }
+            case EFilterType::eBox: break;
+            case EFilterType::eTriangle: break;
+            default: assert(false); break;
+        }
+
+        return 0;
+    }
+
+    static sid_t setIntegratorParams(IntegratorSpec& integratorSpec, ParamMap const& params, Options const& options)
+    {
+        assert(integratorSpec.type != EIntegratorType::eCount);
+        // maxdepth: all but ambientocclusion
+        if (integratorSpec.type != EIntegratorType::eAmbientOcclusion)
+        {
+            if (!parseAndSetInt(params, dict::integrator::maxdepth.sid, integratorSpec.maxDepth, 5))
+                return dict::integrator::maxdepth.sid;
+        }
+
+        // lightsampler: path volpath wavefront/gpu
+        if (isAnyEnum(integratorSpec.type, {EIntegratorType::eVolPath, EIntegratorType::ePath}) || wavefrontOrGPU(options))
+        {
+            if (!parseAndSetEnum(params,
+                                 dict::integrator::lightsampler.sid,
+                                 integratorSpec.lightSampler,
+                                 ELightSampler::eBVH,
+                                 lightSamplerFromSid))
+                return dict::integrator::lightsampler.sid;
+        }
+
+        // regularize: bdpt mlt path volpath wavefront/gpu
+        if (isAnyEnum(integratorSpec.type,
+                      {EIntegratorType::eBdpt, EIntegratorType::eMLT, EIntegratorType::ePath, EIntegratorType::eVolPath}) ||
+            wavefrontOrGPU(options))
+        {
+            if (!parseAndSetBool(params, dict::integrator::regularize.sid, integratorSpec.regularize, false))
+                return dict::integrator::regularize.sid;
+        }
+
+        // integrator specific parameters
+        switch (integratorSpec.type)
+        {
+            case EIntegratorType::eAmbientOcclusion:
+            {
+                auto& aoParams = integratorSpec.params.ao;
+                if (!parseAndSetBool(params, dict::integrator::cossample.sid, aoParams.cosSample, true) ||
+                    !parseAndSetFloat(params,
+                                      dict::integrator::maxdistance.sid,
+                                      aoParams.maxDistance,
+                                      std::numeric_limits<float>::infinity()))
+                {
+                    return "ambientocclusion"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eBdpt:
+            {
+                auto& bdptParams = integratorSpec.params.bdpt;
+                if (!parseAndSetBool(params, dict::integrator::visualizestrategies.sid, bdptParams.visualizeStrategies, false) ||
+                    !parseAndSetBool(params, dict::integrator::visualizeweights.sid, bdptParams.visualizeWeights, false))
+                {
+                    return "bdpt"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eMLT:
+            {
+                auto& mltParams = integratorSpec.params.mlt;
+                if (!parseAndSetInt(params, dict::integrator::bootstrapsamples.sid, mltParams.bootstraqpSamples, 100000) ||
+                    !parseAndSetInt(params, dict::integrator::chains.sid, mltParams.chains, 1000) ||
+                    !parseAndSetInt(params, dict::integrator::mutationsperpixel.sid, mltParams.mutationsPerPixel, 100) ||
+                    !parseAndSetFloat(params, dict::integrator::largestepprobability.sid, mltParams.largestStepProbability, 0.3f) ||
+                    !parseAndSetFloat(params, dict::integrator::sigma.sid, mltParams.sigma, 0.01f))
+                {
+                    return "mlt"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eSimplePath:
+            {
+                auto& simplePathParams = integratorSpec.params.simplePath;
+                if (!parseAndSetBool(params, dict::integrator::samplebsdf.sid, simplePathParams.sampleBSDF, true) ||
+                    !parseAndSetBool(params, dict::integrator::samplelights.sid, simplePathParams.sampleLights, true))
+                {
+                    return "simplepath"_side;
+                }
+                break;
+            }
+            case EIntegratorType::eSPPM:
+            {
+                auto& sppmParams = integratorSpec.params.sppm;
+                if (!parseAndSetInt(params, dict::integrator::photonsperiteration.sid, sppmParams.photonsPerIteration, -1) ||
+                    !parseAndSetFloat(params, dict::integrator::radius.sid, sppmParams.radius, 1.f) ||
+                    !parseAndSetInt(params, dict::integrator::seed.sid, sppmParams.seed, 0))
+                {
+                    return "sppm"_side;
+                }
+                break;
+            }
+            default: break;
+        }
+
+        return 0;
+    }
+
+    static sid_t setAcceleratorParams(AcceleratorSpec& acceleratorSpec, ParamMap const& params, Options const& unused)
+    {
+        switch (acceleratorSpec.type)
+        {
+            case EAcceletatorType::eBVH:
+            {
+                auto& bvhParams = acceleratorSpec.params.bvh;
+                if (!parseAndSetInt(params, dict::accelerator::maxnodeprims.sid, bvhParams.maxNodePrims, 4) ||
+                    !parseAndSetEnum(params,
+                                     dict::accelerator::splitmethod.sid,
+                                     bvhParams.splitMethod,
+                                     EBVHSplitMethod::eSAH,
+                                     bvhSplitMethodFromSid))
+                {
+                    return "bvh"_side;
+                }
+                break;
+            }
+            case EAcceletatorType::eKdTree:
+            {
+                auto& kdtreeParams = acceleratorSpec.params.kdtree;
+                if (!parseAndSetInt(params, dict::accelerator::intersectcost.sid, kdtreeParams.intersectCost, 5) ||
+                    !parseAndSetInt(params, dict::accelerator::traversalcost.sid, kdtreeParams.traversalCost, 1) ||
+                    !parseAndSetFloat(params, dict::accelerator::emptybonus.sid, kdtreeParams.emptyBonus, 0.5f) ||
+                    !parseAndSetInt(params, dict::accelerator::maxprims.sid, kdtreeParams.maxPrims, 1) ||
+                    !parseAndSetInt(params, dict::accelerator::maxdepth.sid, kdtreeParams.maxDepth, -1))
+                {
+                    return "kdtree"_side;
+                }
+                break;
+            }
+            default: break;
+        }
+        return 0;
     }
 
     // CTrie ----------------------------------------------------------------------------------------------------------
@@ -1685,1035 +2536,868 @@ namespace dmt {
         return "";
     }
 
-    HeaderTokenizer::Ret HeaderTokenizer::parseHeader(AppContext& actx, std::string_view filePath)
+    // TokenStream ----------------------------------------------------------------------------------------------------
+    TokenStream::TokenStream(AppContext& actx, std::string_view filePath)
+    { // TODO proper memory allocation with tag and all
+        std::construct_at(&m_delayedCtor.reader, actx.mctx.pctx, filePath.data(), chunkSize);
+        if (!m_delayedCtor.reader)
+        {
+            actx.error("Couldn't open file {}", {filePath});
+            std::abort();
+        }
+
+        m_buffer = reinterpret_cast<char*>(actx.mctx.stackAllocate(chunkSize, 8, EMemoryTag::eUnknown, (sid_t)0));
+        if (!m_buffer)
+        {
+            actx.error("Couldn't allocate 512 B for token buffer");
+            std::abort();
+        }
+        using Tokenizer = std::remove_pointer_t<decltype(m_tokenizer)>;
+        m_tokenizer     = reinterpret_cast<decltype(m_tokenizer)>(
+            actx.mctx.stackAllocate(sizeof(Tokenizer), alignof(Tokenizer), EMemoryTag::eUnknown, (sid_t)0));
+        if (!m_tokenizer)
+        {
+            actx.error("Couldn't allocate word tokenizer");
+            std::abort();
+        }
+        std::construct_at(m_tokenizer);
+
+        // request first chunk
+        bool success = m_delayedCtor.reader.requestChunk(actx.mctx.pctx, m_buffer, 0);
+        assert(success);
+    }
+
+    TokenStream::~TokenStream() noexcept
     {
-        Ret ret{};
-        // TODO proper memory allocatio with sid and tag
-        char             buf[2] = {pathSeparator(), '/'};
-        std::string_view vBuf   = {buf, 2};
-        size_t           pos    = filePath.find_last_of(vBuf);
+        assert(m_chunkNum == m_delayedCtor.reader.numChunks());
+        std::destroy_at(&m_delayedCtor.reader);
+        std::destroy_at(m_tokenizer);
+    }
+
+    std::string TokenStream::next(AppContext& actx)
+    { // TODO stack allocated
+        advance(actx);
+        return peek();
+    }
+
+    void TokenStream::advance(AppContext& actx)
+    {
+        while (true)
+        {
+            if (m_newChunk)
+            {
+                bool completed = false;
+                while (!completed)
+                {
+                    completed = m_delayedCtor.reader.waitForPendingChunk(actx.mctx.pctx, 1000);
+                }
+                m_chunk    = {m_buffer, m_delayedCtor.reader.lastNumBytesRead()};
+                m_newChunk = false;
+            }
+
+            m_needAdvance = true;
+            while (m_needAdvance)
+            { // TODO utf8 token normalization
+                std::string_view token = m_tokenizer->nextWord(m_chunk);
+                if (!token.empty() && !m_tokenizer->needsContinuation())
+                {
+                    m_chunk = m_chunk.substr(m_tokenizer->numCharReadLast());
+                    m_token = token;
+                    return;
+                }
+                else
+                {
+                    m_needAdvance = false;
+                    m_newChunk    = true;
+                    if (++m_chunkNum == m_delayedCtor.reader.numChunks())
+                    {
+                        m_token.clear();
+                        return;
+                    }
+                    bool success = m_delayedCtor.reader.requestChunk(actx.mctx.pctx, m_buffer, m_chunkNum);
+                    assert(success);
+                }
+            }
+        }
+    }
+
+    std::string TokenStream::peek() { return m_token; }
+
+    // SceneParser ----------------------------------------------------------------------------------------------------
+    SceneParser::SceneParser(AppContext& actx, IParserTarget* pTarget, std::string_view filePath) : m_pTarget(pTarget)
+    {
+        if (!m_pTarget)
+        {
+            actx.error("Valid parser target needed");
+            std::abort();
+        }
+
+        pushFile(actx, filePath, true);
+        char             separators[2] = {pathSeparator(), '/'};
+        std::string_view sepView       = {separators, 2};
+        size_t           pos           = filePath.find_last_of(sepView);
         if (pos == std::string_view::npos)
         {
             actx.error("Invalid path {}", {filePath});
-            std::abort();
         }
-        std::string_view fileName = filePath.substr(pos);
-        std::string_view basePath = filePath.substr(0, pos);
-        parseFile(actx, basePath, fileName);
 
-        return ret;
+        m_basePath = filePath.substr(0, pos);
+        assert(m_basePath.back() == separators[0] || m_basePath.back() == separators[1]);
     }
 
-    void HeaderTokenizer::parseFile(AppContext& actx, std::string_view basePath, std::string_view includeArgument)
-    {
-        size_t const chunkSize = 512;
-
-        // TODO proper memory allocatio with sid and tag
-        char* filePath = reinterpret_cast<char*>(
-            actx.mctx.stackAllocate(basePath.size() + includeArgument.size() + 1, 1, EMemoryTag::eUnknown, (sid_t)0));
-        if (!filePath)
-        {
-            actx.error("Couldn't allocate memory for file path construction");
-            std::abort();
-        }
-        std::memcpy(filePath, basePath.data(), basePath.size());
-        std::memcpy(filePath + basePath.size(), includeArgument.data(), includeArgument.size());
-        filePath[basePath.size() + includeArgument.size()] = '\0';
-
-        ChunkedFileReader reader{actx.mctx.pctx, filePath, chunkSize};
-        uint32_t          numChunks = reader.numChunks();
-        char* buffer = reinterpret_cast<char*>(actx.mctx.stackAllocate(chunkSize, 8, EMemoryTag::eUnknown, (sid_t)0));
-        WordParser tokenizer;
-
-        // bookkeping
-        size_t   offset       = 0;
-        bool     stop         = false;
-        uint32_t currentIndex = 0;
-
-        for (uint32_t i = 0; i < numChunks; ++i)
-        {
-            bool success = reader.requestChunk(actx.mctx.pctx, buffer, i);
-            assert(success && "Failed to request chunk");
-            bool completed = reader.waitForPendingChunk(actx.mctx.pctx, 1000);
-            assert(completed);
-            std::string_view chunk = {buffer, reader.lastNumBytesRead()};
-
-            bool needAdvance = true;
-            while (needAdvance)
-            { // TODO utf8 token normalization
-                std::string_view token = tokenizer.nextWord(chunk);
-                if (token.empty() && !tokenizer.needsContinuation())
-                { // you found only whitespaces, need to go to next chunk
-                    needAdvance = false;
-                }
-                else if (!tokenizer.needsContinuation())
-                {
-                    chunk = chunk.substr(tokenizer.numCharReadLast());
-                    // ready to consume token
-                    consumeToken(actx, basePath, token);
-                }
-                else
-                {
-                    needAdvance = false;
-                }
-            }
-        }
-    }
-
-    static bool isDirective(sid_t token)
-    {
-        switch (token)
-        {
-            case dict::directive::Option.sid: [[fallthrough]];
-            case dict::directive::Identity.sid: [[fallthrough]];
-            case dict::directive::Camera.sid: [[fallthrough]];
-            case dict::directive::Sampler.sid: [[fallthrough]];
-            case dict::directive::ColorSpace.sid: [[fallthrough]];
-            case dict::directive::Film.sid: [[fallthrough]];
-            case dict::directive::PixelFilter.sid: [[fallthrough]];
-            case dict::directive::Integrator.sid: [[fallthrough]];
-            case dict::directive::Accelerator.sid: [[fallthrough]];
-            case dict::directive::WorldBegin.sid: [[fallthrough]];
-            case dict::directive::AttributeBegin.sid: [[fallthrough]];
-            case dict::directive::AttributeEnd.sid: [[fallthrough]];
-            case dict::directive::Include.sid: [[fallthrough]];
-            case dict::directive::Import.sid: [[fallthrough]];
-            case dict::directive::LookAt.sid: [[fallthrough]];
-            case dict::directive::Translate.sid: [[fallthrough]];
-            case dict::directive::Scale.sid: [[fallthrough]];
-            case dict::directive::Rotate.sid: [[fallthrough]];
-            case dict::directive::CoordinateSystem.sid: [[fallthrough]];
-            case dict::directive::CoordSysTransform.sid: [[fallthrough]];
-            case dict::directive::Transform.sid: [[fallthrough]];
-            case dict::directive::ConcatTransform.sid: [[fallthrough]];
-            case dict::directive::TransformTimes.sid: [[fallthrough]];
-            case dict::directive::ActiveTransform.sid: [[fallthrough]];
-            case dict::directive::ReverseOrientation.sid: [[fallthrough]];
-            case dict::directive::Attribute.sid: [[fallthrough]];
-            case dict::directive::Shape.sid: [[fallthrough]];
-            case dict::directive::ObjectBegin.sid: [[fallthrough]];
-            case dict::directive::ObjectEnd.sid: [[fallthrough]];
-            case dict::directive::ObjectInstance.sid: [[fallthrough]];
-            case dict::directive::LightSource.sid: [[fallthrough]];
-            case dict::directive::AreaLightSource.sid: [[fallthrough]];
-            case dict::directive::Material.sid: [[fallthrough]];
-            case dict::directive::MakeNamedMaterial.sid: [[fallthrough]];
-            case dict::directive::NamedMaterial.sid: [[fallthrough]];
-            case dict::directive::Texture.sid: [[fallthrough]];
-            case dict::directive::MakeNamedMedium.sid: [[fallthrough]];
-            case dict::directive::MediumInterface.sid: return true;
-            default: return false;
-        }
-    }
-
-    struct ParamExractRet
-    {
-        sid_t            type;
-        std::string_view name;
-        sid_t            sid;
-    };
-
-    static ParamExractRet maybeExtractParam(AppContext& actx, std::string_view token)
-    {
-        ParamExractRet ret;
-        ret.type = 0;
-        ret.name = dequoteString(token);
-        ret.sid  = hashCRC64(ret.name);
-        if (token.starts_with('"'))
-        {
-            if (!token.ends_with('"'))
-            {
-                actx.error("syntax error file");
-                std::abort();
-            }
-            size_t whiteSpacePos = findFirstWhitespace(ret.name);
-            if (whiteSpacePos != std::string_view::npos)
-            {
-                std::string_view maybeType    = ret.name.substr(0, whiteSpacePos);
-                sid_t            maybeTypeSid = hashCRC64(maybeType);
-                switch (maybeTypeSid)
-                {
-                    case dict::types::tVector.sid: [[fallthrough]];
-                    case dict::types::tPoint.sid: [[fallthrough]];
-                    case dict::types::tNormal.sid: [[fallthrough]];
-                    case dict::types::tBool.sid: [[fallthrough]];
-                    case dict::types::tFloat.sid: [[fallthrough]];
-                    case dict::types::tInteger.sid: [[fallthrough]];
-                    case dict::types::tString.sid: [[fallthrough]];
-                    case dict::types::tRGB.sid: [[fallthrough]];
-                    case dict::types::tPoint2.sid: [[fallthrough]];
-                    case dict::types::tPoint3.sid: [[fallthrough]];
-                    case dict::types::tNormal3.sid: [[fallthrough]];
-                    case dict::types::tBlackbody.sid: [[fallthrough]];
-                    case dict::types::tSpectrum.sid: [[fallthrough]];
-                    case dict::types::tVector2.sid: [[fallthrough]];
-                    case dict::types::tVector3.sid: [[fallthrough]];
-                    case dict::types::tTexture.sid:
-                        ret.type = maybeTypeSid;
-                        ret.name = trimStartWhitespace(ret.name.substr(whiteSpacePos));
-                        ret.sid  = hashCRC64(ret.name);
-                        break;
-                    default: break;
-                }
-            }
-        }
-
-        return ret;
-    }
-
-    // Parse and set a float value
-    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            float value = defaultValue;
-            if (!parseFloat(values.valueAt(0), value))
-            {
-                return false; // Parsing failed
-            }
-            target = value;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set a std::string_view value
-    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            target = values.valueAt(0);
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set a boolean value
-    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
+    void SceneParser::parse(AppContext& actx, Options& inOutOptions)
     {
         using namespace std::string_view_literals;
-        if (auto it = params.find(paramSid); it != params.end())
+
+        auto typeHeaderDirectiveParsing =
+            [this]<typename Spec, typename EnumType>
+            requires requires(Spec spec) {
+                spec.type;
+                requires std::is_same_v<decltype(spec.type), EnumType> && std::is_default_constructible_v<Spec>;
+            }(AppContext & actx,
+              SText const&   directive,
+              Options const& options,
+              TokenStream&   currentStream,
+              ArgsDArray&    outArgs,
+              ParamMap&      outParams,
+              bool (*fromSidFunc)(sid_t, EnumType&),
+              sid_t (*setParams)(Spec&, ParamMap const&, Options const&),
+              void (IParserTarget::*apiFunc)(Spec const&),
+              EEncounteredHeaderDirective eDirective)
         {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            target = (values.valueAt(0) == "true"sv);
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    bool parseAndSetFloat4(ParamMap const&             params,
-                           sid_t                       paramSid,
-                           std::array<float, 4>&       target,
-                           std::array<float, 4> const& defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
-            {
-                return false; // Invalid type or incorrect number of parameters
-            }
-
-            std::array<float, 4> parsedValues = defaultValue;
-            for (size_t i = 0; i < 4; ++i)
-            {
-                if (!parseFloat(values.valueAt(i), parsedValues[i]))
-                {
-                    return false; // Parsing failed for an element
-                }
-            }
-
-            target = parsedValues;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set an int32_t value
-    template <std::integral I>
-    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
-                return false; // Invalid type or number of parameters
-            if (!parseInt(values.valueAt(0), target))
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    bool parseAndSetInt4(ParamMap const&               params,
-                         sid_t                         paramSid,
-                         std::array<int32_t, 4>&       target,
-                         std::array<int32_t, 4> const& defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
-                return false; // Invalid type or incorrect number of parameters
-
-            std::array<int32_t, 4> parsedValues = defaultValue;
-            for (size_t i = 0; i < 4; ++i)
-            {
-                if (!parseInt(values.valueAt(i), parsedValues[i]))
-                    return false; // Parsing failed for an element
-            }
-
-            target = parsedValues;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set an enum value using a conversion function
-    template <typename EnumType, typename Converter>
-    static bool parseAndSetEnum(ParamMap const& params, sid_t paramSid, EnumType& target, EnumType defaultValue, Converter converter)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            target = converter(values.valueAt(0).data());
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    static sid_t setCameraParams(CameraSpec& cameraSpec, ParamMap const& params, Options const& cmdOptions)
-    { // TODO insert cmdOptions as default params
-        // parse common params
-        if (!parseAndSetFloat(params, dict::camera::shutteropen.sid, cameraSpec.shutteropen, 0.f) ||
-            !parseAndSetFloat(params, dict::camera::shutterclose.sid, cameraSpec.shutterclose, 1.f))
-        {
-            return "camera"_side; // Early return on error
-        }
-
-        // parse class specific parameters
-        switch (cameraSpec.type)
-        {
-            case ECameraType::ePerspective:
-            {
-                auto& projectingParams = cameraSpec.params.p;
-                if (!parseAndSetFloat(params, dict::camera::fov.sid, projectingParams.fov, 90.f))
-                { // error
-                    return dict::camera::fov.sid;
-                }
-                [[fallthrough]];
-            }
-            case ECameraType::eOrthographic:
-            {
-                auto& projectingParams = cameraSpec.params.p;
-                if (!parseAndSetFloat(params, dict::camera::frameaspectratio.sid, projectingParams.frameAspectRatio, 90.f) ||
-                    !parseAndSetFloat(params, dict::camera::screenwindow.sid, projectingParams.screenWindow, 1.f) ||
-                    !parseAndSetFloat(params, dict::camera::lensradius.sid, projectingParams.lensRadius, 0.f) ||
-                    !parseAndSetFloat(params, dict::camera::focaldistance.sid, projectingParams.focalDistance, 1e30f))
-                { // error
-                    return "orthographic"_side;
-                }
-                break;
-            }
-            case ECameraType::eRealistic:
-            {
-                using namespace std::string_view_literals;
-                auto& realisticParams = cameraSpec.params.r;
-                if (!parseAndSetFloat(params, dict::camera::aperturediameter.sid, realisticParams.apertureDiameter, 1.f) ||
-                    !parseAndSetFloat(params, dict::camera::focusdistance.sid, realisticParams.focusDistance, 10.f) ||
-                    !parseAndSetString(params, dict::camera::lensfile.sid, realisticParams.lensfile, ""sv) ||
-                    !parseAndSetString(params,
-                                       dict::camera::aperture.sid,
-                                       realisticParams.aperture,
-                                       dict::camera::aperture_builtin::circular.str))
-                { // error
-                    return "realistic"_side;
-                }
-                break;
-            }
-            case ECameraType::eSpherical:
-            {
-                auto& sphericalParams = cameraSpec.params.s;
-                if (!parseAndSetEnum(params,
-                                     dict::camera::mapping.sid,
-                                     sphericalParams.mapping,
-                                     ESphericalMapping::eEqualArea,
-                                     sphericalMappingFromStr))
-                { // error
-                    return dict::camera::mapping.sid;
-                }
-                break;
-            }
-        }
-
-        return 0;
-    }
-
-    static sid_t setSamplerParams(SamplerSpec& samplerSpec, ParamMap const& params, Options const& cmdOptions)
-    {
-        // seed is used by almost all, so consume it anyways
-        if (!parseAndSetInt(params, dict::sampler::seed.sid, samplerSpec.seed, cmdOptions.seed))
-        {
-            return dict::sampler::seed.sid;
-        }
-
-        // all but stratified sampler have num samples not subdivided by axes
-        if (samplerSpec.type == ESamplerType::eStratified)
-        {
-            auto& stratifiedSamples = samplerSpec.samples.stratified;
-            if (!parseAndSetBool(params, dict::sampler::jitter.sid, stratifiedSamples.jitter, true) ||
-                !parseAndSetInt(params, dict::sampler::xsamples.sid, stratifiedSamples.x, 4) ||
-                !parseAndSetInt(params, dict::sampler::ysamples.sid, stratifiedSamples.y, 4))
-            {
-                return "stratified"_side;
-            }
-        }
-        else
-        {
-            if (!parseAndSetInt(params, dict::sampler::pixelsamples.sid, samplerSpec.samples.num, 16))
-                return dict::sampler::pixelsamples.sid;
-
-            if (samplerSpec.type == ESamplerType::eIndependent)
-            {
-                ERandomization def = samplerSpec.type == ESamplerType::eHalton ? ERandomization::ePermuteDigits
-                                                                               : ERandomization::eFastOwen;
-                if (!parseAndSetEnum(params, dict::sampler::randomization.sid, samplerSpec.randomization, def, randomizationFromStr))
-                    return dict::sampler::randomization.sid;
-            }
-        }
-
-        return 0;
-    }
-
-    static sid_t setFilmParams(FilmSpec& filmSpec, ParamMap const& params)
-    {
-        using namespace std::string_view_literals;
-        // common parameters
-        if (!parseAndSetInt(params, dict::film::xresolution.sid, filmSpec.xResolution, 1280) ||
-            !parseAndSetInt(params, dict::film::yresolution.sid, filmSpec.yResolution, 720) ||
-            !parseAndSetFloat(params, dict::film::diagonal.sid, filmSpec.diagonal, 35.f) ||
-            !parseAndSetFloat(params, dict::film::iso.sid, filmSpec.iso, 100.f) ||
-            !parseAndSetFloat(params, dict::film::whitebalance.sid, filmSpec.whiteBalance, 0.f) ||
-            !parseAndSetFloat(params,
-                              dict::film::maxcomponentvalue.sid,
-                              filmSpec.maxComponentValue,
-                              std::numeric_limits<float>::infinity()) ||
-            !parseAndSetEnum(params, dict::film::sensor.sid, filmSpec.sensor, ESensor::eCIE1931, sensorFromStr) ||
-            !parseAndSetBool(params, dict::film::savefp16.sid, filmSpec.savefp16, true) ||
-            !parseAndSetFloat4(params, dict::film::cropwindow.sid, filmSpec.cropWindow, {0.f, 1.f, 0.f, 1.f}) ||
-            !parseAndSetInt4(params,
-                             dict::film::pixelbounds.sid,
-                             filmSpec.pixelBounds,
-                             {0, filmSpec.xResolution, 0, filmSpec.yResolution}) ||
-            !parseAndSetString(params, dict::film::filename.sid, filmSpec.fileName, "pbrt.exr"sv))
-        {
-            return "common"_side;
-        }
-
-        switch (filmSpec.type)
-        {
-            // if RGB,then filename extension can be one of .pfm, .exr, .qoi, .png
-            case EFilmType::eRGB:
-            {
-                if (!endsWithAny(filmSpec.fileName, {".pfm"sv, ".exr"sv, ".qoi"sv, ".png"sv}))
-                    return "rgb::filename"_side;
-                break;
-            }
-            // gbuffer
-            case EFilmType::eGBuffer:
-            {
-                if (!parseAndSetEnum(params,
-                                     dict::film::coordinatesystem.sid,
-                                     filmSpec.coordSys,
-                                     EGVufferCoordSys::eCamera,
-                                     gBufferCoordSysFromStr))
-                    return "gbuffer::coordinatesystem"_side;
-                break;
-            }
-            // spectral film
-            case EFilmType::eSpectral:
-            {
-                if (!parseAndSetInt(params, dict::film::nbuckets.sid, filmSpec.nBuckets, static_cast<int16_t>(16)) ||
-                    !parseAndSetFloat(params, dict::film::lambdamin.sid, filmSpec.lambdaMin, 360.f) ||
-                    !parseAndSetFloat(params, dict::film::lambdamax.sid, filmSpec.lambdaMax, 830.f))
-                {
-                    return "spectral"_side;
-                }
-                break;
-            }
-            default: assert(false); break;
-        }
-
-        return 0;
-    }
-
-    static sid_t setFilterParams(FilterSpec& filterSpec, ParamMap const& params)
-    {
-        static constexpr float oneThird      = 0x1.3333333p-2f;
-        float                  defaultRadius = defaultRadiusFromFilterType(filterSpec.type);
-        // set xRadius and yRadius
-        if (!parseAndSetFloat(params, dict::filter::xradius.sid, filterSpec.xRadius, defaultRadius) ||
-            !parseAndSetFloat(params, dict::filter::yradius.sid, filterSpec.yRadius, defaultRadius))
-        {
-            return "radius"_side;
-        }
-        switch (filterSpec.type)
-        {
-            case EFilterType::eGaussian:
-            {
-                auto& gauss = filterSpec.params.gaussian;
-                if (!parseAndSetFloat(params, dict::filter::sigma.sid, gauss.sigma, 0.5f))
-                    return "gaussian::sigma"_side;
-                break;
-            }
-            case EFilterType::eMitchell:
-            {
-                auto& mitchell = filterSpec.params.mitchell;
-                if (!parseAndSetFloat(params, dict::filter::B.sid, mitchell.b, oneThird) ||
-                    !parseAndSetFloat(params, dict::filter::C.sid, mitchell.c, oneThird))
-                {
-                    return "mitchell"_side;
-                }
-                break;
-            }
-            case EFilterType::eSinc:
-            {
-                auto& sinc = filterSpec.params.sinc;
-                if (!parseAndSetFloat(params, dict::filter::tau.sid, sinc.tau, 3.f))
-                    return "sinc::tau"_side;
-                break;
-            }
-            case EFilterType::eBox: break;
-            case EFilterType::eTriangle: break;
-            default: assert(false); break;
-        }
-
-        return 0;
-    }
-
-    static sid_t setIntegratorParams(IntegratorSpec& integratorSpec, ParamMap const& params, Options const& options)
-    {
-        assert(integratorSpec.type != EIntegratorType::eCount);
-        // maxdepth: all but ambientocclusion
-        if (integratorSpec.type != EIntegratorType::eAmbientOcclusion)
-        {
-            if (!parseAndSetInt(params, dict::integrator::maxdepth.sid, integratorSpec.maxDepth, 5))
-                return dict::integrator::maxdepth.sid;
-        }
-
-        // lightsampler: path volpath wavefront/gpu
-        if (isAnyEnum(integratorSpec.type, {EIntegratorType::eVolPath, EIntegratorType::ePath}) || wavefrontOrGPU(options))
-        {
-            if (!parseAndSetEnum(params,
-                                 dict::integrator::lightsampler.sid,
-                                 integratorSpec.lightSampler,
-                                 ELightSampler::eBVH,
-                                 lightSamplerFromStr))
-                return dict::integrator::lightsampler.sid;
-        }
-
-        // regularize: bdpt mlt path volpath wavefront/gpu
-        if (isAnyEnum(integratorSpec.type,
-                      {EIntegratorType::eBdpt, EIntegratorType::eMLT, EIntegratorType::ePath, EIntegratorType::eVolPath}) ||
-            wavefrontOrGPU(options))
-        {
-            if (!parseAndSetBool(params, dict::integrator::regularize.sid, integratorSpec.regularize, false))
-                return dict::integrator::regularize.sid;
-        }
-
-        // integrator specific parameters
-        switch (integratorSpec.type)
-        {
-            case EIntegratorType::eAmbientOcclusion:
-            {
-                auto& aoParams = integratorSpec.params.ao;
-                if (!parseAndSetBool(params, dict::integrator::cossample.sid, aoParams.cosSample, true) ||
-                    !parseAndSetFloat(params,
-                                      dict::integrator::maxdistance.sid,
-                                      aoParams.maxDistance,
-                                      std::numeric_limits<float>::infinity()))
-                {
-                    return "ambientocclusion"_side;
-                }
-                break;
-            }
-            case EIntegratorType::eBdpt:
-            {
-                auto& bdptParams = integratorSpec.params.bdpt;
-                if (!parseAndSetBool(params, dict::integrator::visualizestrategies.sid, bdptParams.visualizeStrategies, false) ||
-                    !parseAndSetBool(params, dict::integrator::visualizeweights.sid, bdptParams.visualizeWeights, false))
-                {
-                    return "bdpt"_side;
-                }
-                break;
-            }
-            case EIntegratorType::eMLT:
-            {
-                auto& mltParams = integratorSpec.params.mlt;
-                if (!parseAndSetInt(params, dict::integrator::bootstrapsamples.sid, mltParams.bootstraqpSamples, 100000) ||
-                    !parseAndSetInt(params, dict::integrator::chains.sid, mltParams.chains, 1000) ||
-                    !parseAndSetInt(params, dict::integrator::mutationsperpixel.sid, mltParams.mutationsPerPixel, 100) ||
-                    !parseAndSetFloat(params, dict::integrator::largestepprobability.sid, mltParams.largestStepProbability, 0.3f) ||
-                    !parseAndSetFloat(params, dict::integrator::sigma.sid, mltParams.sigma, 0.01f))
-                {
-                    return "mlt"_side;
-                }
-                break;
-            }
-            case EIntegratorType::eSimplePath:
-            {
-                auto& simplePathParams = integratorSpec.params.simplePath;
-                if (!parseAndSetBool(params, dict::integrator::samplebsdf.sid, simplePathParams.sampleBSDF, true) ||
-                    !parseAndSetBool(params, dict::integrator::samplelights.sid, simplePathParams.sampleLights, true))
-                {
-                    return "simplepath"_side;
-                }
-                break;
-            }
-            case EIntegratorType::eSPPM:
-            {
-                auto& sppmParams = integratorSpec.params.sppm;
-                if (!parseAndSetInt(params, dict::integrator::photonsperiteration.sid, sppmParams.photonsPerIteration, -1) ||
-                    !parseAndSetFloat(params, dict::integrator::radius.sid, sppmParams.radius, 1.f) ||
-                    !parseAndSetInt(params, dict::integrator::seed.sid, sppmParams.seed, 0))
-                {
-                    return "sppm"_side;
-                }
-                break;
-            }
-            default: break;
-        }
-
-        return 0;
-    }
-
-    static sid_t setAcceleratorParams(AcceleratorSpec& acceleratorSpec, ParamMap const& params)
-    {
-        switch (acceleratorSpec.type)
-        {
-            case EAcceletatorType::eBVH:
-            {
-                auto& bvhParams = acceleratorSpec.params.bvh;
-                if (!parseAndSetInt(params, dict::accelerator::maxnodeprims.sid, bvhParams.maxNodePrims, 4) ||
-                    !parseAndSetEnum(params,
-                                     dict::accelerator::splitmethod.sid,
-                                     bvhParams.splitMethod,
-                                     EBVHSplitMethod::eSAH,
-                                     bvhSplitMethodFromStr))
-                {
-                    return "bvh"_side;
-                }
-                break;
-            }
-            case EAcceletatorType::eKdTree:
-            {
-                auto& kdtreeParams = acceleratorSpec.params.kdtree;
-                if (!parseAndSetInt(params, dict::accelerator::intersectcost.sid, kdtreeParams.intersectCost, 5) ||
-                    !parseAndSetInt(params, dict::accelerator::traversalcost.sid, kdtreeParams.traversalCost, 1) ||
-                    !parseAndSetFloat(params, dict::accelerator::emptybonus.sid, kdtreeParams.emptyBonus, 0.5f) ||
-                    !parseAndSetInt(params, dict::accelerator::maxprims.sid, kdtreeParams.maxPrims, 1) ||
-                    !parseAndSetInt(params, dict::accelerator::maxdepth.sid, kdtreeParams.maxDepth, -1))
-                {
-                    return "kdtree"_side;
-                }
-                break;
-            }
-            default: break;
-        }
-        return 0;
-    }
-
-
-    void HeaderTokenizer::setCurrentParam(sid_t type, sid_t name)
-    {
-        m_currentParamType = type;
-        m_currentParamName = name;
-        m_state            = EHeaderBlockState::eParamsReading;
-    }
-
-    void HeaderTokenizer::handleDirective(AppContext& actx, sid_t directive)
-    {
-        switch (directive)
-        {
-            // empty directives
-            case dict::directive::WorldBegin.sid:
-            {
-                if (m_inWorldBlock)
-                {
-                    actx.error("WorldBegin directive encontered more than once");
-                    std::abort();
-                }
-                m_inWorldBlock = true;
-                break;
-            }
-            case dict::directive::AttributeBegin.sid:
-            {
-                if (!m_inWorldBlock)
-                {
-                    actx.error("AttributeBegin directive can appear after WorldBegin");
-                    std::abort();
-                }
-                m_blockStack.push(EScope::eAttribute);
-                break;
-            }
-            case dict::directive::AttributeEnd.sid:
-            {
-                if (m_blockStack.empty() || m_blockStack.top() != EScope::eAttribute || !m_inWorldBlock)
-                {
-                    actx.error("Invalid state for an AttributeEnd directive. (check presence of AttributeBegin)");
-                    std::abort();
-                }
-                m_blockStack.pop();
-                // TODO restore previous graphics state
-                break;
-            }
-            case dict::directive::ObjectEnd.sid:
-            {
-                if (m_blockStack.empty() || m_blockStack.top() != EScope::eObject || !m_inWorldBlock)
-                {
-                    actx.error("Invalid state for an ObjectEnd directive.");
-                    std::abort();
-                }
-                m_blockStack.pop();
-                // TODO finalize object declaration
-                break;
-            }
-
-            case dict::directive::ReverseOrientation.sid: [[fallthrough]];
-
-            // directives which take an argument and possibly a param list, and belong before the world block
-            // -- names stuff declaration (which is also parsed in import mode)
-            case dict::directive::MakeNamedMedium.sid: [[fallthrough]];
-            case dict::directive::MakeNamedMaterial.sid: [[fallthrough]];
-            case dict::directive::Texture.sid: [[fallthrough]];
-
-            // -- transformation on the CTM
-            case dict::directive::LookAt.sid: [[fallthrough]];
-            case dict::directive::Translate.sid: [[fallthrough]];
-            case dict::directive::Scale.sid: [[fallthrough]];
-            case dict::directive::Rotate.sid: [[fallthrough]];
-            case dict::directive::CoordinateSystem.sid: [[fallthrough]];
-            case dict::directive::CoordSysTransform.sid: [[fallthrough]];
-            case dict::directive::Transform.sid: [[fallthrough]];
-            case dict::directive::ConcatTransform.sid: [[fallthrough]];
-
-            // -- Animated Transform stuff
-            case dict::directive::TransformTimes.sid: [[fallthrough]];
-            case dict::directive::ActiveTransform.sid: [[fallthrough]];
-
-            // -- header stuff
-            case dict::directive::Option.sid: [[fallthrough]];
-            case dict::directive::Camera.sid: [[fallthrough]];
-            case dict::directive::Sampler.sid: [[fallthrough]];
-            case dict::directive::ColorSpace.sid: [[fallthrough]];
-            case dict::directive::Film.sid: [[fallthrough]];
-            case dict::directive::PixelFilter.sid: [[fallthrough]];
-            case dict::directive::Integrator.sid: [[fallthrough]];
-            case dict::directive::Accelerator.sid:
-                if (m_inWorldBlock)
-                {
-                    actx.error("Encountered unexpected directive in world block");
-                    std::abort();
-                }
-                m_state           = EHeaderBlockState::eDirectiveRead;
-                m_insideDirective = directive;
-                break;
-
-            case dict::directive::Attribute.sid: [[fallthrough]];
-
-            case dict::directive::Shape.sid: [[fallthrough]];
-
-            case dict::directive::ObjectBegin.sid: [[fallthrough]];
-            case dict::directive::ObjectInstance.sid: [[fallthrough]];
-
-            case dict::directive::LightSource.sid: [[fallthrough]];
-            case dict::directive::AreaLightSource.sid: [[fallthrough]];
-            case dict::directive::Material.sid: [[fallthrough]];
-            case dict::directive::NamedMaterial.sid: [[fallthrough]];
-            case dict::directive::MediumInterface.sid: return true;
-
-            case dict::directive::Include.sid:
-            case dict::directive::Import.sid:
-                [[fallthrough]];
-                { // TODO recursion on parseFile
-                    std::abort();
-                }
-                break;
-            default:
-                actx.error("Unrecognized header token");
+            Spec spec;
+            if (!transitionToHeaderIfFirstHeaderDirective(actx, options, eDirective))
                 std::abort();
-                break;
-        }
-    }
-
-    void HeaderTokenizer::handleArgument(AppContext& actx, std::string_view token) {}
-
-    void HeaderTokenizer::setClassArg(std::string_view token, sid_t arg)
-    {
-        m_dequotedArg = token;
-        m_classArg    = arg;
-        m_argsRead    = 1;
-        m_state       = EHeaderBlockState::eArgsRead;
-    }
-
-    static sid_t classDirectives[] = {dict::directive::Camera.sid,
-                                      dict::directive::Sampler.sid,
-                                      dict::directive::ColorSpace.sid,
-                                      dict::directive::Film.sid,
-                                      dict::directive::PixelFilter.sid,
-                                      dict::directive::Integrator.sid,
-                                      dict::directive::Accelerator.sid};
-
-    void HeaderTokenizer::handleFirstTokenAfterDirective(AppContext& actx, std::string_view token)
-    {
-        // is it an arg or a param? it is a param only if it is quoted, contains at least 2 words, and the first word is a valid type
-        // if it is neither an arg or a param, error
-        // TODO add if not valid token function which takes token and state
-        ParamExractRet maybeParam = maybeExtractParam(actx, token);
-        if (m_insideDirective == dict::directive::Option.sid)
-        { // expects a single parameter, hence this should be it
-            if (maybeParam.type == 0)
+            if (uint32_t num = parseArgs(actx, currentStream, outArgs); num != 1)
             {
-                actx.error("Option directive expects a single valid parameter");
+                actx.error("Unexpected number of arguments for {} directive. Should be 1, got {}", {directive.str, num});
                 std::abort();
             }
-            else
+            if (!fromSidFunc(hashCRC64(outArgs[0]), spec.type))
             {
-                setCurrentParam(maybeParam.type, maybeParam.sid);
-            }
-        }
-
-        if (oneOf(m_insideDirective, std::begin(classDirectives), std::end(classDirectives)))
-        { // expects the class argument and param list
-            if (maybeParam.type == 0 && startsWithEndsWith(token, '"', '"'))
-            {
-                setClassArg(maybeParam.name, maybeParam.sid);
-            }
-            else
-            {
-                actx.error("Camera directive expects 1 string (quoted) argument");
+                actx.error("Unexpected type argument for {} directive. got {}. Consult docs to see possible values.",
+                           {directive.str, outArgs[0]});
                 std::abort();
             }
-        }
-
-        switch (m_insideDirective)
-        {
-            case dict::directive::Camera.sid:
+            parseParams(actx, currentStream, outParams);
+            if (setParams(spec, outParams, options) != 0)
             {
-                cameraSpec.type = cameraTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::Sampler.sid:
-            {
-                samplerSpec.type = samplerTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::ColorSpace.sid:
-            {
-                colorSpaceSpec.type = colorSpaceTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::Film.sid:
-            {
-                filmSpec.type = filmTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::PixelFilter.sid:
-            {
-                filterSpec.type = filterTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::Integrator.sid:
-            {
-                integratorSpec.type = integratorTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::Accelerator.sid:
-            {
-                acceleratorSpec.type = acceleratorTypeFromStr(maybeParam.name.data());
-                break;
-            }
-            case dict::directive::MakeNamedMedium.sid:
-            { // TODO: handle named stuff declaration
+                actx.error("Encountered error while parsing {} parameters", {directive.str});
                 std::abort();
             }
-        }
-    }
-
-    void HeaderTokenizer::insertParameterValue(AppContext& actx, sid_t name, std::string_view token)
-    {
-        auto it = m_params.find(name);
-        if (it == m_params.end())
-        {
-            actx.error("Internal Error: Couldn't find previously added param");
-            std::abort();
-        }
-        it->second.addParamValue(token);
-    }
-
-    void HeaderTokenizer::consumeToken(AppContext& actx, std::string_view basePath, std::string_view token)
-    {
-        // ignore comments
-        if (token.starts_with('#'))
-            return;
-
-        sid_t tokenSid = hashCRC64(token);
-        switch (m_state)
-        {
-            case EHeaderBlockState::eNone:
+            (m_pTarget->*apiFunc)(spec);
+        };
+        auto parseArgumentFloats = [this]<size_t size> // TODO rework without template
+            requires(size == 3 || size == 16 || size == 9 || size == 4 || size == 2)
+        (AppContext & actx,
+         SText const&             directive,
+         TokenStream&             currentStream,
+         ArgsDArray&              outArgs,
+         std::array<float, size>& outArray) {
+            if (parseArgs(actx, currentStream, outArgs) != size)
             {
-                handleDirective(actx, tokenSid);
-                break;
+                actx.error("Unexpected number of parameters for {} directive", {directive.str});
+                std::abort();
             }
-            case EHeaderBlockState::eDirectiveRead:
+            if (parseFloatArray(outArgs, outArray) != 9)
             {
-                handleFirstTokenAfterDirective(actx, token);
-                break;
+                actx.error("Error while parsing float arguments for the LookAt directive");
+                std::abort();
             }
-            case EHeaderBlockState::eArgsRead: // == you read a directive and all its argument, and you are reading its params
-            {                                  // try to read either next directive or parameter
-                ParamExractRet maybeParam = maybeExtractParam(actx, token);
+        };
+        auto parseArgumentNames =
+            [this](AppContext&  actx,
+                   SText const& directive,
+                   TokenStream& currentStream,
+                   ArgsDArray&  outArgs,
+                   sid_t*       pSids,
+                   uint32_t     num) {
+            if (parseArgs(actx, currentStream, outArgs) != num ||
+                std::reduce(outArgs.begin(), outArgs.begin() + num, false, [](bool curr, std::string const& elem) {
+                return curr || !startsWithEndsWith(elem, '"', '"');
+            }))
+            {
+                actx.error("Directive {} expects {} quoted string argument(s)", {directive.str, num});
+                std::abort();
+            }
+            for (uint32_t i = 0; i < num; ++i)
+                pSids[i] = hashCRC64(outArgs[i]);
+        };
+
+        while (!m_fileStack.empty())
+        {
+            TokenStream& currentStream = topFile();
+            currentStream.advance(actx);
+            for (std::string token = currentStream.peek(); !token.empty(); token = currentStream.peek())
+            { // token advancement handled by either parseArgs, parseParams, or by a switch case
+                ArgsDArray args;
+                ParamMap   params;
+                sid_t      tokenSid = hashCRC64(token);
                 if (!isDirective(tokenSid))
                 {
-                    switch (m_insideDirective)
-                    {
-                        case dict::directive::Sampler.sid: [[fallthrough]];
-                        case dict::directive::ColorSpace.sid: [[fallthrough]];
-                        case dict::directive::Film.sid: [[fallthrough]];
-                        case dict::directive::PixelFilter.sid: [[fallthrough]];
-                        case dict::directive::Integrator.sid: [[fallthrough]];
-                        case dict::directive::Accelerator.sid: [[fallthrough]];
-                        case dict::directive::Camera.sid:
+                    actx.error("Invalid directive {}", {token});
+                    std::abort();
+                }
+
+                switch (tokenSid)
+                { // TODO args parsing type with error handling
+                    case dict::directive::Option.sid:
+                    { // 1 parameter, allowed only in step Options
+                        if (m_parsingStep != EParsingStep::eOptions)
                         {
-                            if (maybeParam.type == 0 && startsWithEndsWith(token, '"', '"'))
-                            {
-                                actx.error("Expected parameter for camera");
-                                std::abort();
-                            }
-                            else
-                            {
-                                setCurrentParam(maybeParam.type, maybeParam.sid); // eParamsReading
-                                m_params.try_emplace(maybeParam.sid, maybeParam.type);
-                            }
-                            break;
-                        }
-                        case dict::directive::MakeNamedMedium.sid:
-                        { // TODO: handle named stuff declaration
+                            actx.error("Option directive allowed only before any other Directives in the Header");
                             std::abort();
                         }
+                        parseParams(actx, currentStream, params);
+                        if (!setOptionParam(actx, params, inOutOptions))
+                            std::abort();
+                        m_pTarget->Option(params.begin()->first, params.begin()->second);
+                        break;
                     }
-                }
-                else
-                {
-                    switch (m_insideDirective)
+                    case dict::directive::Identity.sid:
                     {
-                        case dict::directive::Sampler.sid: setSamplerParams(samplerSpec, m_params, fileOptions); break;
-                        case dict::directive::Film.sid: setFilmParams(filmSpec, m_params); break;
-                        case dict::directive::PixelFilter.sid: setFilterParams(filterSpec, m_params); break;
-                        case dict::directive::Integrator.sid:
-                            setIntegratorParams(integratorSpec, m_params, fileOptions);
-                            break;
-                        case dict::directive::Accelerator.sid: setAcceleratorParams(acceleratorSpec, m_params); break;
-                        case dict::directive::Camera.sid: setCameraParams(cameraSpec, m_params, fileOptions); break;
-                        case dict::directive::ColorSpace.sid:
-                            actx.error("ColorSpace directive doesn't take any parameters");
+                        m_pTarget->Identity();
+                        break;
+                    }
+                    case dict::directive::Camera.sid:
+                    {
+                        typeHeaderDirectiveParsing(actx,
+                                                   dict::directive::Camera,
+                                                   inOutOptions,
+                                                   currentStream,
+                                                   args,
+                                                   params,
+                                                   cameraTypeFromSid,
+                                                   setCameraParams,
+                                                   &IParserTarget::Camera,
+                                                   EEncounteredHeaderDirective::eCamera);
+                        break;
+                    }
+                    case dict::directive::Sampler.sid:
+                    {
+                        typeHeaderDirectiveParsing(actx,
+                                                   dict::directive::Sampler,
+                                                   inOutOptions,
+                                                   currentStream,
+                                                   args,
+                                                   params,
+                                                   samplerTypeFromSid,
+                                                   setSamplerParams,
+                                                   &IParserTarget::Sampler,
+                                                   EEncounteredHeaderDirective::eSampler);
+                        break;
+                    }
+                    case dict::directive::ColorSpace.sid:
+                    {
+                        if (!transitionToHeaderIfFirstHeaderDirective(actx, inOutOptions, EEncounteredHeaderDirective::eColorSpace))
                             std::abort();
-                            break;
-                        case dict::directive::MakeNamedMedium.sid:
-                        { // TODO: handle named stuff declaration
+                        if (parseArgs(actx, currentStream, args) != 1)
+                        {
+                            actx.error("Unexpected number of arguments for ColorSpace directive");
                             std::abort();
                         }
+                        EColorSpaceType type;
+                        if (!colorSpaceTypeFromSid(hashCRC64(args[0]), type))
+                        {
+                            actx.error("Unknown color space inserted {} in directive {}",
+                                       {args[0], dict::directive::ColorSpace.str});
+                            std::abort();
+                        }
+                        m_pTarget->ColorSpace(type);
+                        break;
                     }
-                    reestState();
-                    handleDirective(actx, tokenSid);
-                    m_params.clear();
-                    m_state = EHeaderBlockState::eDirectiveRead;
+                    case dict::directive::Film.sid:
+                    {
+                        typeHeaderDirectiveParsing(actx,
+                                                   dict::directive::Film,
+                                                   inOutOptions,
+                                                   currentStream,
+                                                   args,
+                                                   params,
+                                                   filmTypeFromSid,
+                                                   setFilmParams,
+                                                   &IParserTarget::Film,
+                                                   EEncounteredHeaderDirective::eFilm);
+                        break;
+                    }
+                    case dict::directive::PixelFilter.sid:
+                    {
+                        typeHeaderDirectiveParsing(actx,
+                                                   dict::directive::PixelFilter,
+                                                   inOutOptions,
+                                                   currentStream,
+                                                   args,
+                                                   params,
+                                                   filterTypeFromSid,
+                                                   setFilterParams,
+                                                   &IParserTarget::PixelFilter,
+                                                   EEncounteredHeaderDirective::ePixelFilter);
+                        break;
+                    }
+                    case dict::directive::Integrator.sid:
+                    {
+                        typeHeaderDirectiveParsing(actx,
+                                                   dict::directive::Integrator,
+                                                   inOutOptions,
+                                                   currentStream,
+                                                   args,
+                                                   params,
+                                                   integratorTypeFromSid,
+                                                   setIntegratorParams,
+                                                   &IParserTarget::Integrator,
+                                                   EEncounteredHeaderDirective::eIntegrator);
+                        break;
+                    }
+                    case dict::directive::Accelerator.sid:
+                    {
+                        typeHeaderDirectiveParsing(actx,
+                                                   dict::directive::Accelerator,
+                                                   inOutOptions,
+                                                   currentStream,
+                                                   args,
+                                                   params,
+                                                   acceleratorTypeFromSid,
+                                                   setAcceleratorParams,
+                                                   &IParserTarget::Accelerator,
+                                                   EEncounteredHeaderDirective::eAccelerator);
+                        break;
+                    }
+                    case dict::directive::WorldBegin.sid:
+                    {
+                        if (m_parsingStep == EParsingStep::eWorld)
+                        {
+                            actx.error("Encountered WorldBegin more than once");
+                            std::abort();
+                        }
+                        m_parsingStep = EParsingStep::eWorld;
+                        m_pTarget->WorldBegin();
+                        break;
+                    }
+                    case dict::directive::AttributeBegin.sid:
+                    {
+                        pushScope(EScope::eAttribute);
+                        m_pTarget->AttributeBegin();
+                        break;
+                    }
+                    case dict::directive::AttributeEnd.sid:
+                    {
+                        if (!hasScope() || currentScope() != EScope::eAttribute)
+                        {
+                            actx.error("Unbalanced AttributeBegin and AttributeEnd");
+                            std::abort();
+                        }
+                        popScope();
+                        m_pTarget->AttributeEnd();
+                        break;
+                    }
+                    case dict::directive::Include.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::Import.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::LookAt.sid:
+                    {
+                        std::array<float, 9> look{};
+                        parseArgumentFloats(actx, dict::directive::LookAt, currentStream, args, look);
+                        m_pTarget->LookAt(look[0], look[1], look[2], look[3], look[4], look[5], look[6], look[7], look[8]);
+                        break;
+                    }
+                    case dict::directive::Translate.sid:
+                    {
+                        std::array<float, 3> translate{};
+                        parseArgumentFloats(actx, dict::directive::Translate, currentStream, args, translate);
+                        m_pTarget->Translate(translate[0], translate[1], translate[2]);
+                        break;
+                    }
+                    case dict::directive::Scale.sid:
+                    {
+                        std::array<float, 3> scale{};
+                        parseArgumentFloats(actx, dict::directive::Scale, currentStream, args, scale);
+                        m_pTarget->Scale(scale[0], scale[1], scale[2]);
+                        break;
+                    }
+                    case dict::directive::Rotate.sid:
+                    {
+                        std::array<float, 4> rotate{};
+                        parseArgumentFloats(actx, dict::directive::Rotate, currentStream, args, rotate);
+                        m_pTarget->Rotate(rotate[0], rotate[1], rotate[2], rotate[3]);
+                        break;
+                    }
+                    case dict::directive::CoordinateSystem.sid:
+                    {
+                        sid_t coordSys = 0;
+                        parseArgumentNames(actx, dict::directive::CoordinateSystem, currentStream, args, &coordSys, 1);
+                        m_pTarget->CoordinateSystem(coordSys);
+                        break;
+                    }
+                    case dict::directive::CoordSysTransform.sid:
+                    {
+                        sid_t coordSys = 0;
+                        parseArgumentNames(actx, dict::directive::CoordSysTransform, currentStream, args, &coordSys, 1);
+                        m_pTarget->CoordSysTransform(coordSys);
+                        break;
+                    }
+                    case dict::directive::Transform.sid:
+                    {
+                        std::array<float, 16> transform{1, 0, 0, 0, /**/ 0, 1, 0, 0, /**/ 0, 0, 1, 0, /**/ 0, 0, 0, 1};
+                        parseArgumentFloats(actx, dict::directive::Transform, currentStream, args, transform);
+                        m_pTarget->Transform(transform);
+                        break;
+                    }
+                    case dict::directive::ConcatTransform.sid:
+                    {
+                        std::array<float, 16> transform{1, 0, 0, 0, /**/ 0, 1, 0, 0, /**/ 0, 0, 1, 0, /**/ 0, 0, 0, 1};
+                        parseArgumentFloats(actx, dict::directive::ConcatTransform, currentStream, args, transform);
+                        m_pTarget->ConcatTransform(transform);
+                        break;
+                    }
+                    case dict::directive::TransformTimes.sid:
+                    {
+                        std::array<float, 2> startEnd{0, 1};
+                        parseArgumentFloats(actx, dict::directive::TransformTimes, currentStream, args, startEnd);
+                        m_pTarget->TransformTimes(startEnd[0], startEnd[1]);
+                        break;
+                    }
+                    case dict::directive::ActiveTransform.sid:
+                    {
+                        EActiveTransform transform = EActiveTransform::eStartTime;
+                        if (parseArgs(actx, currentStream, args) != 1 ||
+                            !activeTransformFromSid(hashCRC64(args[0]), transform))
+                        {
+                            actx.error("illegal or absent argument for directive {}",
+                                       {dict::directive::ActiveTransform.str});
+                            std::abort();
+                        }
+                        switch (transform)
+                        {
+                            case EActiveTransform::eStartTime: m_pTarget->ActiveTransformStartTime(); break;
+                            case EActiveTransform::eEndTime: m_pTarget->ActiveTransformEndTime(); break;
+                            case EActiveTransform::eAll: m_pTarget->ActiveTransformAll(); break;
+                        }
+                        break;
+                    }
+                    case dict::directive::ReverseOrientation.sid:
+                    {
+                        m_pTarget->ReverseOrientation();
+                        break;
+                    }
+                    case dict::directive::Attribute.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::Shape.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::ObjectBegin.sid:
+                    {
+                        if (!parseArgs(actx, currentStream, args) != 1)
+                        {
+                            actx.error("Unexpected number of arguments for {} directive",
+                                       {dict::directive::ObjectBegin.str});
+                            std::abort(); // TODO change all aborts in a return faslse
+                        }
+                        if (!args[0].starts_with('"') || !args[0].ends_with('"'))
+                        {
+                            actx.error("Syntax error: invalid string at argument of {} directive",
+                                       {dict::directive::ObjectBegin.str});
+                            std::abort(); // TODO change all aborts in a return faslse
+                        }
+                        std::string_view name    = dequoteString(args[0]);
+                        sid_t            nameSid = hashCRC64(name);
+                        pushScope(EScope::eObject);
+                        m_pTarget->ObjectBegin(nameSid);
+                        break;
+                    }
+                    case dict::directive::ObjectEnd.sid:
+                    {
+                        if (!hasScope() || currentScope() != EScope::eObject)
+                        {
+                            actx.error("Unbalanced ObjectBegin and ObjectEnd");
+                            std::abort();
+                        }
+                        popScope();
+                        m_pTarget->ObjectEnd();
+                        break;
+                    }
+                    case dict::directive::ObjectInstance.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::LightSource.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::AreaLightSource.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::Material.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::MakeNamedMaterial.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::NamedMaterial.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::Texture.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::MakeNamedMedium.sid:
+                    {
+                        break;
+                    }
+                    case dict::directive::MediumInterface.sid:
+                    {
+                        break;
+                    }
+                    default:
+                        actx.error("Unrecognized directive {}.", { token });
+                        std::abort();
+                        break;
                 }
-                break;
-            }
-            case EHeaderBlockState::eParamsReading:
-            { // expect either the beginning of an array, or a value
-                if (token.starts_with('[') && token.size() == 1)
-                {
-                    m_state = EHeaderBlockState::eInsideArray;
-                }
-                else
-                {
-                    insertParameterValue(actx, m_currentParamName, token);
-                    m_state = EHeaderBlockState::eArgsRead;
-                }
-                break;
-            }
-            case EHeaderBlockState::eInsideArray:
-            {
-                if (token.ends_with(']') && token.size() == 1)
-                {
-                    m_state = EHeaderBlockState::eArgsRead;
-                }
-                else
-                {
-                    insertParameterValue(actx, m_currentParamName, token);
-                    m_state = EHeaderBlockState::eInsideArray;
-                }
-                break;
+
+                if (isZeroArgsDirective(tokenSid))
+                    currentStream.advance(actx);
             }
         }
+    }
 
-        if (m_state == EHeaderBlockState::eArgsRead)
+    bool SceneParser::setOptionParam(AppContext& actx, ParamMap const& params, Options& outOptions)
+    {
+        using namespace std::string_view_literals;
+        if (params.size() != 1)
         {
+            actx.error("Option directive: expected a single parameter");
+            return false;
         }
+        sid_t            name  = params.begin()->first;
+        ParamPair const& param = params.begin()->second;
+        bool             b     = false;
+        switch (name)
+        {
+            case dict::opts::disablepixeljitter.sid:
+                if (!parseAndSetBool(params, name, b, false))
+                {
+                    actx.error("Error while parsing disablepixeljitter");
+                    return false;
+                }
+                if (b)
+                    outOptions.flags |= EBoolOptions::efDisablepixeljitter;
+                break;
+            case dict::opts::disabletexturefiltering.sid:
+                if (!parseAndSetBool(params, name, b, false))
+                {
+                    actx.error("Error while parsing disabletexturefiltering");
+                    return false;
+                }
+                if (b)
+                    outOptions.flags |= EBoolOptions::efDisabletexturefiltering;
+                break;
+            case dict::opts::disablewavelengthjitter.sid:
+                if (!parseAndSetBool(params, name, b, false))
+                {
+                    actx.error("Error while parsing disablewavelengthjitter");
+                    return false;
+                }
+                if (b)
+                    outOptions.flags |= EBoolOptions::efDisablewavelengthjitter;
+                break;
+            case dict::opts::displacementedgescale.sid:
+                if (!parseAndSetFloat(params, name, outOptions.diespacementEdgeScale, 1.f))
+                {
+                    actx.error("Error while parsing displacementedgescale");
+                    return false;
+                }
+                break;
+            case dict::opts::msereferenceimage.sid:
+                outOptions.mseReferenceOutput = reinterpret_cast<char*>(
+                    actx.mctx.stackAllocate(256, 8, EMemoryTag::eUnknown, (sid_t)0));
+                if (!outOptions.mseReferenceOutput ||
+                    !parseAndSetString(params,
+                                       name,
+                                       outOptions.mseReferenceImage,
+                                       outOptions.mseReferenceImageLength,
+                                       ""sv))
+                {
+                    actx.error("Error while parsing msereferenceimage");
+                    return false;
+                }
+                break;
+            case dict::opts::msereferenceout.sid: // TODO
+                outOptions.mseReferenceOutput = reinterpret_cast<char*>(
+                    actx.mctx.stackAllocate(256, 8, EMemoryTag::eUnknown, (sid_t)0));
+                if (!outOptions.mseReferenceOutput ||
+                    !parseAndSetString(params,
+                                       name,
+                                       outOptions.mseReferenceOutput,
+                                       outOptions.mseReferenceOutputLength,
+                                       ""sv))
+                {
+                    actx.error("Error while parsing msereferenceout");
+                    return false;
+                }
+                break;
+            case dict::opts::rendercoordsys.sid:
+                if (!parseAndSetEnum(params, name, outOptions.renderCoord, ERenderCoordSys::eCameraWorld, renderCoordSysFromSid))
+                {
+                    actx.error("Error while parsing rendercoordsys");
+                    return false;
+                }
+                break;
+            case dict::opts::seed.sid:
+                if (!parseAndSetInt(params, name, outOptions.seed, 0))
+                {
+                    actx.error("Error while parsing seed");
+                    return false;
+                }
+                break;
+            case dict::opts::forcediffuse.sid:
+                if (!parseAndSetBool(params, name, b, false))
+                {
+                    actx.error("Error while parsing forcediffuse");
+                    return false;
+                }
+                if (b)
+                    outOptions.flags |= EBoolOptions::efForcediffuse;
+                break;
+            case dict::opts::pixelstats.sid:
+                if (!parseAndSetBool(params, name, b, false))
+                {
+                    actx.error("Error while parsing pixelstats");
+                    return false;
+                }
+                if (b)
+                    outOptions.flags |= EBoolOptions::efPixelstats;
+                break;
+            case dict::opts::wavefront.sid:
+                if (!parseAndSetBool(params, name, b, false))
+                {
+                    actx.error("Error while parsing wavefront");
+                    return false;
+                }
+                if (b)
+                    outOptions.flags |= EBoolOptions::efWavefront;
+                break;
+            default: actx.error("Option directive: unexpected parameter"); return false;
+        }
+
+        return true;
     }
 
-    void HeaderTokenizer::reestState()
-    { // TODO memory free
-        m_params.clear();
-        m_state            = EHeaderBlockState::eNone;
-        m_insideDirective  = 0;
-        m_currentParamType = 0;
-        m_currentParamName = 0;
-        m_classArg         = 0;
-        m_argsRead         = 0;
-        m_paramsRead       = 0;
+    uint32_t SceneParser::parseArgs(AppContext& actx, TokenStream& stream, ArgsDArray& outArr)
+    {
+        uint32_t i = 0;
+        for (std::string token = stream.peek(); !token.empty(); ++i, stream.advance(actx))
+        {
+            if (token.starts_with('#'))
+                continue;
+
+            sid_t tokenSid = hashCRC64(token);
+            if (isDirective(tokenSid) || isParameter(actx, token))
+                break;
+
+            outArr.emplace_back(std::move(token));
+        }
+
+        if (i == 0)
+        {
+            actx.error("Expected at least 1 argument for the current directive, got none");
+            // abort done by caller, which checks the number of args and their type
+        }
+
+        return i;
     }
+
+    uint32_t SceneParser::parseParams(AppContext& actx, TokenStream& stream, ParamMap& outParams)
+    {
+        uint32_t i = 0;
+        for (std::string token = stream.peek(); !token.empty(); ++i, stream.advance(actx))
+        {
+            if (token.starts_with('#')) // TODO isComment function
+                continue;
+
+            sid_t tokenSid = hashCRC64(token);
+            if (isDirective(tokenSid))
+                break;
+
+            ParamExractRet param   = maybeExtractParam(actx, token);
+            auto [it, wasInserted] = outParams.try_emplace(param.sid, param.type);
+            if (!wasInserted)
+            {
+                actx.error("Unexpected error, couldn't insert parameter into map, token: ", {token});
+                std::abort();
+            }
+
+            for (token = stream.peek(); !token.empty() && !isParameter(actx, token) && !isDirective(tokenSid);
+                 stream.advance(actx))
+            {
+                it->second.addParamValue(token);
+            }
+
+            if (token.empty() || isDirective(tokenSid))
+                break;
+        }
+
+        if (i == 0)
+        {
+            actx.error("Expected at least 1 parameter for the current directive, got none");
+            // abort done by caller, which checks the number of args and their type
+        }
+
+        return i;
+    }
+
+    bool SceneParser::transitionToHeaderIfFirstHeaderDirective(AppContext&                 actx,
+                                                               Options const&              outOptions,
+                                                               EEncounteredHeaderDirective val)
+    {
+        if (m_parsingStep == EParsingStep::eWorld)
+        {
+            actx.error("Unexpected directive found in World block");
+            return false;
+        }
+        if (m_parsingStep == EParsingStep::eOptions)
+        {
+            m_parsingStep = EParsingStep::eHeader;
+            m_pTarget->EndOfOptions(outOptions);
+        }
+        if (hasFlag(m_encounteredHeaders, val))
+        {
+            actx.error("Already encountered directive {}", {toStr(val)});
+            return false;
+        }
+        putFlag(m_encounteredHeaders, val);
+        return true;
+    }
+
+    void SceneParser::pushFile(AppContext& actx, std::string_view filePath, bool isImport)
+    {
+        m_fileStack.emplace_front(actx, filePath);
+        if (isImport)
+            m_scopeStacks.emplace_back();
+    }
+
+    void SceneParser::popFile(bool isImport)
+    {
+        m_fileStack.pop_front();
+        if (isImport)
+            m_scopeStacks.pop_back();
+    }
+
+    TokenStream& SceneParser::topFile() { return m_fileStack.front(); }
+
+    bool SceneParser::hasScope() const { return !m_scopeStacks.empty(); }
+
+    EScope SceneParser::currentScope() const
+    {
+        assert(hasScope() && !m_scopeStacks.back().empty());
+        return m_scopeStacks.back().back();
+    }
+
+    void SceneParser::popScope()
+    {
+        assert(hasScope() && !m_scopeStacks.back().empty());
+        m_scopeStacks.back().pop_back();
+    }
+
+    void SceneParser::pushScope(EScope scope)
+    {
+        assert(hasScope());
+        m_scopeStacks.back().push_back(scope);
+    }
+
+    // SceneDescription -----------------------------------------------------------------------------------------------
+    void SceneDescription::Scale(float sx, float sy, float sz) {}
+
+    void SceneDescription::Shape(EShapeType type, ParamMap const& params) {}
+
+    void SceneDescription::Option(sid_t name, ParamPair const&) {}
+
+    void SceneDescription::Identity() {}
+
+    void SceneDescription::Translate(float dx, float dy, float dz) {}
+
+    void SceneDescription::Rotate(float angle, float ax, float ay, float az) {}
+
+    void SceneDescription::LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz)
+    {
+    }
+
+    void SceneDescription::ConcatTransform(std::array<float, 16> const& transform) {}
+
+    void SceneDescription::Transform(std::array<float, 16> transform) {}
+
+    void SceneDescription::CoordinateSystem(sid_t name) {}
+
+    void SceneDescription::CoordSysTransform(sid_t name) {}
+
+    void SceneDescription::ActiveTransformAll() {}
+
+    void SceneDescription::ActiveTransformEndTime() {}
+
+    void SceneDescription::ActiveTransformStartTime() {}
+
+    void SceneDescription::TransformTimes(float start, float end) {}
+
+    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) {}
+
+    void SceneDescription::PixelFilter(FilterSpec const& spec) {}
+
+    void SceneDescription::Film(FilmSpec const& spec) {}
+
+    void SceneDescription::Accelerator(AcceleratorSpec const& spec) {}
+
+    void SceneDescription::Integrator(IntegratorSpec const& spec) {}
+
+    void SceneDescription::Camera(CameraSpec const& params) {}
+
+    void SceneDescription::MakeNamedMedium(sid_t name, ParamMap const& params) {}
+
+    void SceneDescription::MediumInterface(sid_t insideName, sid_t outsideName) {}
+
+    void SceneDescription::Sampler(SamplerSpec const& spec) {}
+
+    void SceneDescription::WorldBegin() {}
+
+    void SceneDescription::AttributeBegin() {}
+
+    void SceneDescription::AttributeEnd() {}
+
+    void SceneDescription::Attribute(ETarget target, ParamMap const& params) {}
+
+    void SceneDescription::Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) {}
+
+    void SceneDescription::Material(EMaterialType type, ParamMap const& params) {}
+
+    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params) {}
+
+    void SceneDescription::NamedMaterial(sid_t name) {}
+
+    void SceneDescription::LightSource(ELightType type, ParamMap const& params) {}
+
+    void SceneDescription::AreaLightSource(EAreaLightType type, ParamMap const& params) {}
+
+    void SceneDescription::ReverseOrientation() {}
+
+    void SceneDescription::ObjectBegin(sid_t name) {}
+
+    void SceneDescription::ObjectEnd() {}
+
+    void SceneDescription::ObjectInstance(sid_t name) {}
+
+    void SceneDescription::EndOfOptions(Options const& options) {}
+
+    void SceneDescription::EndOfFiles() {}
+
 } // namespace dmt
 
 namespace dmt::model {

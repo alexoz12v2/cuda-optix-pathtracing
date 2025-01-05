@@ -2,8 +2,16 @@
 
 #include "dmtmacros.h"
 
+#include <glm/ext/matrix_clip_space.hpp> // glm::perspective
+#include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
+#include <glm/ext/scalar_constants.hpp>  // glm::pi
+#include <glm/mat4x4.hpp>                // glm::mat4
+#include <glm/vec3.hpp>                  // glm::vec3
+#include <glm/vec4.hpp>                  // glm::vec4
+
 #include <array>
 #include <atomic>
+#include <forward_list>
 #include <limits>
 #include <map>
 #include <memory_resource>
@@ -17,13 +25,6 @@
 #include <compare>
 #include <cstdint>
 
-#include <glm/vec3.hpp> // glm::vec3
-#include <glm/vec4.hpp> // glm::vec4
-#include <glm/mat4x4.hpp> // glm::mat4
-#include <glm/ext/matrix_transform.hpp> // glm::translate, glm::rotate, glm::scale
-#include <glm/ext/matrix_clip_space.hpp> // glm::perspective
-#include <glm/ext/scalar_constants.hpp> // glm::pi
-
 #if defined(DMT_INTERFACE_AS_HEADER)
 #include <platform/platform.h>
 #else
@@ -35,6 +36,87 @@ import platform;
 
 // stuff related to .pbrt file parsing + data structures
 DMT_MODULE_EXPORT dmt {
+    // TODO move somewhere else
+    class Transform
+    {
+    public:
+        glm::mat4 m;    // Transformation matrix
+        glm::mat4 mInv; // Inverse transformation matrix
+
+        // Default constructor
+        Transform() : m(glm::mat4(1.0f)), mInv(glm::mat4(1.0f)) {}
+
+        // Constructor with an initial matrix
+        explicit Transform(glm::mat4 const& matrix) : m(matrix), mInv(glm::inverse(matrix)) {}
+
+        // Apply translation
+        void translate_(glm::vec3 const& translation)
+        {
+            m    = glm::translate(m, translation);
+            mInv = glm::translate(mInv, -translation);
+        }
+
+        // Apply scaling
+        void scale_(glm::vec3 const& scaling)
+        {
+            m    = glm::scale(m, scaling);
+            mInv = glm::scale(mInv, 1.0f / scaling);
+        }
+
+        // Apply rotation (angle in degrees)
+        void rotate_(float angle, glm::vec3 const& axis)
+        {
+            m    = glm::rotate(m, glm::radians(angle), axis);
+            mInv = glm::rotate(mInv, -glm::radians(angle), axis);
+        }
+
+        // Combine with another transform
+        Transform combine(Transform const& other) const
+        {
+            Transform result;
+            result.m    = m * other.m;
+            result.mInv = other.mInv * mInv;
+            return result;
+        }
+
+        // Combine with another transform
+        void combine_(Transform const& other)
+        {
+            m    = m * other.m;
+            mInv = other.mInv * mInv;
+        }
+
+        // Reset to identity matrix
+        void reset()
+        {
+            m    = glm::mat4(1.0f);
+            mInv = glm::mat4(1.0f);
+        }
+
+        // Swap m and mInv
+        void inverse() { std::swap(m, mInv); }
+
+        // Apply the transform to a point
+        glm::vec3 applyToPoint(glm::vec3 const& point) const
+        {
+            glm::vec4 result = m * glm::vec4(point, 1.0f);
+            return glm::vec3(result);
+        }
+
+        // Apply the inverse transform to a point
+        glm::vec3 applyInverseToPoint(glm::vec3 const& point) const
+        {
+            glm::vec4 result = mInv * glm::vec4(point, 1.0f);
+            return glm::vec3(result);
+        }
+
+        // Equality comparison
+        bool operator==(Transform const& other) const { return m == other.m && mInv == other.mInv; }
+
+        // Inequality comparison
+        bool operator!=(Transform const& other) const { return !(*this == other); }
+    };
+
     inline size_t alignedSize(size_t elementSize, size_t alignment)
     {
         assert(alignment > 0 && "Alignment must be greater than 0");
@@ -313,8 +395,6 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    ERenderCoordSys renderCoordSysFromStr(char const* str);
-
     // f = .pbrt file option, c = command line option, o = refers to the presence or absence of some other option
     // some file options are also present from command line and override what's in the file
     // the files ones are to OR with what we got from the command line, hence the job will yield bool options too
@@ -395,11 +475,11 @@ DMT_MODULE_EXPORT dmt {
     struct Options
     {
         // 8 byte aligned (not using string view as it uses a size_t as length, too much)
-        char const* imageFile;
-        char const* mseReferenceImage;
-        char const* mseReferenceOutput;
-        char const* debugStart;
-        char const* displayServer;
+        char* imageFile;
+        char* mseReferenceImage;
+        char* mseReferenceOutput;
+        char* debugStart;
+        char* displayServer;
 
         // 4 byte aligned
         uint32_t imageFileLength          = 0;
@@ -444,16 +524,12 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    ECameraType cameraTypeFromStr(char const* str);
-
     enum class ESphericalMapping : uint8_t
     {
         eEqualArea = 0,
         eEquirectangular,
         eCount
     };
-
-    ESphericalMapping sphericalMappingFromStr(char const* str);
 
     namespace apertures {
         using namespace std::string_view_literals;
@@ -532,8 +608,6 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    ESamplerType samplerTypeFromStr(char const* str);
-
     enum class ERandomization : uint8_t
     {
         eFastOwen = 0,
@@ -542,8 +616,6 @@ DMT_MODULE_EXPORT dmt {
         eOwen,
         eCount
     };
-
-    ERandomization randomizationFromStr(char const* str);
 
     struct SamplerSpec
     {
@@ -585,8 +657,6 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    EColorSpaceType colorSpaceTypeFromStr(char const* str);
-
     struct ColorSpaceSpec
     {
         EColorSpaceType type = EColorSpaceType::eSRGB;
@@ -600,8 +670,6 @@ DMT_MODULE_EXPORT dmt {
         eSpectral,
         eCount
     };
-
-    EFilmType filmTypeFromStr(char const* str);
 
     enum class ESensor : uint8_t
     {
@@ -626,16 +694,12 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    ESensor sensorFromStr(char const* str);
-
     enum class EGVufferCoordSys : uint8_t
     {
         eCamera = 0,
         eWorld,
         eCount
     };
-
-    EGVufferCoordSys gBufferCoordSysFromStr(char const* str);
 
     struct FilmSpec
     {
@@ -677,9 +741,7 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    EFilterType filterTypeFromStr(char const* str);
-    float       defaultRadiusFromFilterType(EFilterType e);
-
+    float defaultRadiusFromFilterType(EFilterType e);
     struct FilterSpec
     {
         struct Gaussian
@@ -730,8 +792,6 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    EIntegratorType integratorTypeFromStr(char const* str);
-
     enum class ELightSampler : uint8_t
     {
         eBVH = 0,
@@ -739,8 +799,6 @@ DMT_MODULE_EXPORT dmt {
         ePower,
         eCount
     };
-
-    ELightSampler lightSamplerFromStr(char const* str);
 
     struct IntegratorSpec
     {
@@ -799,8 +857,6 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
-    EAcceletatorType acceleratorTypeFromStr(char const* str);
-
     enum class EBVHSplitMethod : uint8_t
     {
         eSAH = 0,
@@ -809,8 +865,6 @@ DMT_MODULE_EXPORT dmt {
         eHLBVH,
         eCount
     };
-
-    EBVHSplitMethod bvhSplitMethodFromStr(char const* str);
 
     struct AcceleratorSpec
     {
@@ -877,161 +931,7 @@ DMT_MODULE_EXPORT dmt {
         bool     m_haveEscaped       = false;
     };
 
-    struct ArrayData
-    {
-        static constexpr uint32_t countPenNode = 248u / sizeof(int32_t);
-        union U
-        {
-            std::array<int32_t, countPenNode> is;
-            std::array<float, countPenNode>   fs;
-        };
-        U arr;
-    };
-    template struct PoolNode<ArrayData, EBlockSize::e256B>;
-    using ArrayNode256B = PoolNode<ArrayData, EBlockSize::e256B>;
-
     // ----------------------------------------------------------------------------------------------------------------
-    enum class ETypeModifier : uint8_t
-    {
-        eEmpty          = 0,
-        eScalar         = 1u << 0u,
-        eArray          = 1u << 1u,
-        eUnboundedArray = 0u << 2u,
-        e1Elem          = 1u << 2u,
-        e2Elem          = 2u << 2u,
-        e3Elem          = 3u << 2u,
-        eTexture        = 1u << 4u,
-        eEnum           = 1u << 5u,
-    };
-    constexpr ETypeModifier operator|(ETypeModifier lhs, ETypeModifier rhs) noexcept
-    {
-        return static_cast<ETypeModifier>(toUnderlying(lhs) | toUnderlying(rhs));
-    }
-    constexpr ETypeModifier operator&(ETypeModifier lhs, ETypeModifier rhs) noexcept
-    {
-        return static_cast<ETypeModifier>(toUnderlying(lhs) & toUnderlying(rhs));
-    }
-    constexpr ETypeModifier operator~(ETypeModifier value) noexcept
-    {
-        return static_cast<ETypeModifier>(~toUnderlying(value));
-    }
-    constexpr ETypeModifier operator^(ETypeModifier lhs, ETypeModifier rhs) noexcept
-    {
-        return static_cast<ETypeModifier>(toUnderlying(lhs) ^ toUnderlying(rhs));
-    }
-    constexpr ETypeModifier& operator|=(ETypeModifier& lhs, ETypeModifier rhs) noexcept
-    {
-        lhs = lhs | rhs;
-        return lhs;
-    }
-    constexpr ETypeModifier& operator&=(ETypeModifier& lhs, ETypeModifier rhs) noexcept
-    {
-        lhs = lhs & rhs;
-        return lhs;
-    }
-    constexpr ETypeModifier& operator^=(ETypeModifier& lhs, ETypeModifier rhs) noexcept
-    {
-        lhs = lhs ^ rhs;
-        return lhs;
-    }
-
-    struct TypeTuple
-    {
-        static constexpr uint32_t              maxNumTypes = 3;
-        std::array<sid_t, maxNumTypes>         sids;
-        uint64_t                               count;
-        std::array<ETypeModifier, maxNumTypes> mods;
-        unsigned char                          padding[5];
-    };
-    static_assert(sizeof(TypeTuple) == 40 && alignof(TypeTuple) == 8);
-
-    struct Parameter
-    {
-        Parameter(TypeTuple tup) : allowedTypes(tup) {}
-        TypeTuple allowedTypes;
-        // sid_t     sid; implicitly stored as map key
-    };
-
-    struct Argument
-    {
-        sid_t type;
-    };
-
-    enum class EDirectivePos : uint8_t
-    {
-        eNothing        = 0,
-        eHeaderBlock    = 1u << 0u,
-        eWorldBlock     = 1u << 1u,
-        eAttributeBlock = 1u << 2u, // note: attributes can be nested
-        eObjectBlock    = 1u << 3u,
-        eAll            = std::numeric_limits<uint8_t>::max()
-    };
-    constexpr EDirectivePos operator|(EDirectivePos lhs, EDirectivePos rhs) noexcept
-    {
-        return static_cast<EDirectivePos>(toUnderlying(lhs) | toUnderlying(rhs));
-    }
-    constexpr EDirectivePos operator&(EDirectivePos lhs, EDirectivePos rhs) noexcept
-    {
-        return static_cast<EDirectivePos>(toUnderlying(lhs) & toUnderlying(rhs));
-    }
-    constexpr EDirectivePos operator~(EDirectivePos value) noexcept
-    {
-        return static_cast<EDirectivePos>(~toUnderlying(value));
-    }
-    constexpr EDirectivePos operator^(EDirectivePos lhs, EDirectivePos rhs) noexcept
-    {
-        return static_cast<EDirectivePos>(toUnderlying(lhs) ^ toUnderlying(rhs));
-    }
-    constexpr EDirectivePos& operator|=(EDirectivePos& lhs, EDirectivePos rhs) noexcept
-    {
-        lhs = lhs | rhs;
-        return lhs;
-    }
-    constexpr EDirectivePos& operator&=(EDirectivePos& lhs, EDirectivePos rhs) noexcept
-    {
-        lhs = lhs & rhs;
-        return lhs;
-    }
-    constexpr EDirectivePos& operator^=(EDirectivePos& lhs, EDirectivePos rhs) noexcept
-    {
-        lhs = lhs ^ rhs;
-        return lhs;
-    }
-    constexpr bool canBeInHeaderBlock(EDirectivePos pos) noexcept
-    {
-        return (pos & EDirectivePos::eHeaderBlock) == EDirectivePos::eHeaderBlock;
-    }
-    constexpr bool canBeInWorldBlock(EDirectivePos pos) noexcept
-    {
-        return (pos & EDirectivePos::eWorldBlock) == EDirectivePos::eWorldBlock;
-    }
-
-    struct Directive
-    {
-        using ParamsMap = std::pmr::map<sid_t, Parameter>;
-        Directive(std::pmr::memory_resource* mem) :
-        args(mem),
-        allowedParams(mem),
-        maxParams(0),
-        allowedPos(EDirectivePos::eNothing)
-        {
-        }
-        std::pmr::vector<Argument> args;
-        ParamsMap                  allowedParams;
-        uint32_t                   maxParams; // 0 means unlimited, and if there are duplicates consider the last one
-        EDirectivePos              allowedPos;
-    };
-
-    enum class EHeaderBlockState : uint32_t
-    {
-        eNone = 0,
-        eDirectiveRead,
-        eArgsReading,
-        eArgsRead,
-        eParamsReading,
-        eInsideArray,
-    };
-
     struct ParamPair
     {
         using ValueList = std::vector<std::string>;
@@ -1049,29 +949,304 @@ DMT_MODULE_EXPORT dmt {
         sid_t type;
     };
 
-    using ParamMap = std::map<sid_t, ParamPair>;
-    enum class EScope
+    using ParamMap   = std::map<sid_t, ParamPair>;
+    using ArgsDArray = std::vector<std::string>;
+
+    enum class ETarget : uint8_t
     {
-        eAttribute,
-        eObject,
+        eShape = 0,
+        eLight,
+        eMaterial,
+        eMedium,
+        eTexture,
+        eCount
     };
 
-    /**
-     * surely pool allocated
-     */
-    class HeaderTokenizer
+    enum class ETextureType : uint8_t
+    {
+        eSpectrum = 0,
+        eFloat
+    };
+
+    enum class ETextureClass : uint8_t
+    {
+        eBilerp = 0,
+        eCheckerboard,
+        eConstant,
+        eDirectionmix,
+        eDots,
+        eFbm,
+        eImagemap,
+        eMarble,
+        eMix,
+        ePtex,
+        eScale,
+        eWindy,
+        eWrinkled,
+        eCount
+    };
+
+    enum class EMaterialType : uint8_t
+    {
+        eCoateddiffuse = 0,
+        eCoatedconductor,
+        eConductor,
+        eDielectric,
+        eDiffuse,
+        eDiffusetransmission,
+        eHair,
+        eInterface,
+        eMeasured,
+        eMix,
+        eSubsurface,
+        eThindielectric,
+        eCount
+    };
+
+    enum class ELightType : uint8_t
+    {
+        eDistant = 0,
+        eGoniometric,
+        eInfinite,
+        ePoint,
+        eProjection,
+        eSpot,
+        eCount
+    };
+
+    enum class EAreaLightType : uint8_t
+    {
+        eDiffuse = 0,
+        eCount
+    };
+
+    enum class EShapeType : uint8_t
+    {
+        eBilinearmesh = 0,
+        eCurve,
+        eCylinder,
+        eDisk,
+        eSphere,
+        eTrianglemesh,
+        eLoopsubdiv,
+        ePlymesh,
+        eCount
+    };
+
+    enum class EActiveTransform : uint8_t
+    {
+        eStartTime = 0,
+        eEndTime,
+        eAll,
+        eCount
+    };
+
+    class TokenStream
     {
     public:
-        HeaderTokenizer(Options const& cmdOptions) : fileOptions(cmdOptions) {}
+        static constexpr uint32_t chunkSize = 512;
 
-        struct Ret
+        TokenStream(AppContext& actx, std::string_view filePath);
+        TokenStream(TokenStream const&)                = delete;
+        TokenStream(TokenStream&&) noexcept            = delete;
+        TokenStream& operator=(TokenStream const&)     = delete;
+        TokenStream& operator=(TokenStream&&) noexcept = delete;
+        ~TokenStream() noexcept;
+
+        std::string next(AppContext& actx);
+        void        advance(AppContext& actx);
+        std::string peek();
+
+    private:
+        union U
         {
-            size_t   worldBlockOffset;
-            uint32_t numWorldBlockChunk;
-        };
-        Ret parseHeader(AppContext& actx, std::string_view filePath);
+            U() {}
+            ~U() {}
 
-        Options         fileOptions;
+            ChunkedFileReader reader;
+        };
+        U                m_delayedCtor;
+        WordParser*      m_tokenizer = nullptr;
+        std::string      m_token;
+        std::string_view m_chunk       = "";
+        char*            m_buffer      = nullptr;
+        uint32_t         m_chunkNum    = 0;
+        bool             m_newChunk    = true;
+        bool             m_needAdvance = true;
+    };
+
+    class IParserTarget
+    {
+    public:
+        virtual void Scale(float sx, float sy, float sz) = 0;
+
+        virtual void Shape(EShapeType type, ParamMap const& params) = 0;
+
+        virtual ~IParserTarget() {};
+
+        virtual void Option(sid_t name, ParamPair const& value) = 0;
+
+        virtual void Identity()                                        = 0;
+        virtual void Translate(float dx, float dy, float dz)           = 0;
+        virtual void Rotate(float angle, float ax, float ay, float az) = 0;
+        virtual void LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz) = 0;
+        virtual void ConcatTransform(std::array<float, 16> const& transform) = 0;
+        virtual void Transform(std::array<float, 16> transform)              = 0;
+        virtual void CoordinateSystem(sid_t name)                            = 0;
+        virtual void CoordSysTransform(sid_t name)                           = 0;
+        virtual void ActiveTransformAll()                                    = 0;
+        virtual void ActiveTransformEndTime()                                = 0;
+        virtual void ActiveTransformStartTime()                              = 0;
+        virtual void TransformTimes(float start, float end)                  = 0;
+
+        virtual void ColorSpace(EColorSpaceType colorSpace)   = 0;
+        virtual void PixelFilter(FilterSpec const& spec)      = 0;
+        virtual void Film(FilmSpec const& spec)               = 0;
+        virtual void Accelerator(AcceleratorSpec const& spec) = 0;
+        virtual void Integrator(IntegratorSpec const& spec)   = 0;
+        virtual void Camera(CameraSpec const& params)         = 0;
+        virtual void Sampler(SamplerSpec const& spec)         = 0;
+
+        virtual void MakeNamedMedium(sid_t name, ParamMap const& params)  = 0;
+        virtual void MediumInterface(sid_t insideName, sid_t outsideName) = 0;
+
+        virtual void WorldBegin()                                                                          = 0;
+        virtual void AttributeBegin()                                                                      = 0;
+        virtual void AttributeEnd()                                                                        = 0;
+        virtual void Attribute(ETarget target, ParamMap const& params)                                     = 0;
+        virtual void Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) = 0;
+        virtual void Material(EMaterialType type, ParamMap const& params)                                  = 0;
+        virtual void MakeNamedMaterial(sid_t name, ParamMap const& params)                                 = 0;
+        virtual void NamedMaterial(sid_t name)                                                             = 0;
+        virtual void LightSource(ELightType type, ParamMap const& params)                                  = 0;
+        virtual void AreaLightSource(EAreaLightType type, ParamMap const& params)                          = 0;
+        virtual void ReverseOrientation()                                                                  = 0;
+        virtual void ObjectBegin(sid_t name)                                                               = 0;
+        virtual void ObjectEnd()                                                                           = 0;
+        virtual void ObjectInstance(sid_t name)                                                            = 0;
+
+        virtual void EndOfOptions(Options const& options) = 0;
+        virtual void EndOfFiles()                         = 0;
+    };
+
+    // TODO move
+    struct TransformSet
+    {
+        static constexpr uint32_t maxTransforms = 2;
+        // TransformSet Public Methods
+        Transform& operator[](int i)
+        {
+            assert(i >= 0);
+            assert(i < maxTransforms);
+            return t[i];
+        }
+        Transform const& operator[](int i) const
+        {
+            assert(i >= 0);
+            assert(i < maxTransforms);
+            return t[i];
+        }
+
+        friend TransformSet Inverse(TransformSet const& ts)
+        {
+            TransformSet tInv = ts;
+            for (int i = 0; i < maxTransforms; ++i)
+                tInv.t[i].inverse();
+            return tInv;
+        }
+
+        bool IsAnimated() const
+        {
+            for (int i = 0; i < maxTransforms - 1; ++i)
+                if (t[i] != t[i + 1])
+                    return true;
+            return false;
+        }
+
+    private:
+        Transform t[maxTransforms];
+    };
+
+    struct GraphicsState
+    {
+    public:
+        template <typename F>
+        void forActiveTransforms(F func)
+        {
+            for (int i = 0; i < TransformSet::maxTransforms; ++i)
+                if (activeTransformBits & (1 << i))
+                    ctm[i] = func(ctm[i]);
+        }
+
+    public:
+        sid_t currentInsideMedium  = 0;
+        sid_t currentOutsideMedium = 0;
+
+        sid_t   currentMaterialName  = 0;
+        int32_t currentMaterialIndex = 0;
+
+        sid_t    areaLightName = 0;
+        ParamMap areaLightParams;
+
+        ParamMap shapeAttributes;
+        ParamMap lightAttributes;
+        ParamMap materialAttributes;
+        ParamMap textureAttributes;
+
+        TransformSet ctm;
+        uint32_t     activeTransformBits = std::numeric_limits<uint32_t>::max();
+        bool         reverseOrientation  = false;
+        float        transfromStartTime  = 0.f;
+        float        transformEndTime    = 1.f;
+
+        EColorSpaceType colorSpace = EColorSpaceType::eSRGB;
+    };
+
+    class SceneDescription : public IParserTarget
+    {
+    public:
+        void Scale(float sx, float sy, float sz) override;
+        void Shape(EShapeType type, ParamMap const& params) override;
+        void Option(sid_t name, ParamPair const& value) override;
+        void Identity() override;
+        void Translate(float dx, float dy, float dz) override;
+        void Rotate(float angle, float ax, float ay, float az) override;
+        void LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz) override;
+        void ConcatTransform(std::array<float, 16> const& transform) override;
+        void Transform(std::array<float, 16> transform) override;
+        void CoordinateSystem(sid_t name) override;
+        void CoordSysTransform(sid_t name) override;
+        void ActiveTransformAll() override;
+        void ActiveTransformEndTime() override;
+        void ActiveTransformStartTime() override;
+        void TransformTimes(float start, float end) override;
+        void ColorSpace(EColorSpaceType colorSpace) override;
+        void PixelFilter(FilterSpec const& spec) override;
+        void Film(FilmSpec const& spec) override;
+        void Accelerator(AcceleratorSpec const& spec) override;
+        void Integrator(IntegratorSpec const& spec) override;
+        void Camera(CameraSpec const& params) override;
+        void MakeNamedMedium(sid_t name, ParamMap const& params) override;
+        void MediumInterface(sid_t insideName, sid_t outsideName) override;
+        void Sampler(SamplerSpec const& spec) override;
+        void WorldBegin() override;
+        void AttributeBegin() override;
+        void AttributeEnd() override;
+        void Attribute(ETarget target, ParamMap const& params) override;
+        void Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) override;
+        void Material(EMaterialType type, ParamMap const& params) override;
+        void MakeNamedMaterial(sid_t name, ParamMap const& params) override;
+        void NamedMaterial(sid_t name) override;
+        void LightSource(ELightType type, ParamMap const& params) override;
+        void AreaLightSource(EAreaLightType type, ParamMap const& params) override;
+        void ReverseOrientation() override;
+        void ObjectBegin(sid_t name) override;
+        void ObjectEnd() override;
+        void ObjectInstance(sid_t name) override;
+        void EndOfOptions(Options const& options) override;
+        void EndOfFiles() override;
+
+    public:
         CameraSpec      cameraSpec;
         SamplerSpec     samplerSpec;
         ColorSpaceSpec  colorSpaceSpec;
@@ -1079,32 +1254,91 @@ DMT_MODULE_EXPORT dmt {
         FilterSpec      filterSpec;
         IntegratorSpec  integratorSpec;
         AcceleratorSpec acceleratorSpec;
-        // TODO list of media/materials/any declaration the header can have
+    };
+
+    enum class EParsingStep : uint8_t
+    {
+        eOptions = 0,
+        eHeader,
+        eWorld
+    };
+
+    enum class EScope : uint8_t
+    {
+        eAttribute = 0,
+        eObject
+    };
+
+    enum class EEncounteredHeaderDirective : uint32_t
+    {
+        eNone        = 0u,
+        eCamera      = 1u,
+        eSampler     = 1u << 1u,
+        eColorSpace  = 1u << 2u,
+        eFilm        = 1u << 3u,
+        eIntegrator  = 1u << 4u,
+        ePixelFilter = 1u << 5u,
+        eAccelerator = 1u << 6u,
+    };
+    inline constexpr bool hasFlag(EEncounteredHeaderDirective e, EEncounteredHeaderDirective val)
+    {
+        return toUnderlying(e) & toUnderlying(val) != 0;
+    }
+    inline EEncounteredHeaderDirective putFlag(EEncounteredHeaderDirective e, EEncounteredHeaderDirective val)
+    {
+        return static_cast<EEncounteredHeaderDirective>(toUnderlying(e) | toUnderlying(val));
+    }
+    // TODO move to cpp with dict constants
+    inline std::string_view toStr(EEncounteredHeaderDirective e)
+    {
+        using namespace std::string_view_literals;
+        switch (e)
+        {
+            using enum EEncounteredHeaderDirective;
+            case eCamera: return "Camera"sv;
+            case eSampler: return "Sampler"sv;
+            case eColorSpace: return "ColorSpace"sv;
+            case eFilm: return "Film"sv;
+            case eIntegrator: return "Integrator"sv;
+            case ePixelFilter: return "PixelFilter"sv;
+            case eAccelerator: return "Accelerator"sv;
+        }
+        return ""sv;
+    }
+
+    // TOSO Option directives must precede anything else
+    // TODO AreaLight is applied to a shape AFTERWARDS
+    class SceneParser
+    {
+    public:
+        SceneParser(AppContext& actx, IParserTarget* pTarget, std::string_view filePath);
+        void parse(AppContext& actx, Options& inOutOptions);
 
     private:
-        void parseFile(AppContext& actx, std::string_view basePath, std::string_view includeArgument);
-        void consumeToken(AppContext& actx, std::string_view basePath, std::string_view token);
-        void reestState();
+        static bool setOptionParam(AppContext& actx, ParamMap const& params, Options& outOptions);
 
-        void setCurrentParam(sid_t type, sid_t name);
-        void setClassArg(std::string_view token, sid_t arg);
-        void handleDirective(AppContext& actx, sid_t directive);
-        void handleArgument(AppContext& actx, std::string_view token);
-        void handleFirstTokenAfterDirective(AppContext& actx, std::string_view token);
-        void insertParameterValue(AppContext& actx, sid_t name, std::string_view token);
+    private:
+        uint32_t     parseArgs(AppContext& actx, TokenStream& stream, ArgsDArray& outArr);
+        uint32_t     parseParams(AppContext& actx, TokenStream& stream, ParamMap& outParams);
+        bool         transitionToHeaderIfFirstHeaderDirective(AppContext&                 actx,
+                                                              Options const&              outOptions,
+                                                              EEncounteredHeaderDirective val);
+        void         pushFile(AppContext& actx, std::string_view filePath, bool isImportOrMainFile);
+        void         popFile(bool isImportOrMainFile);
+        TokenStream& topFile();
+        bool         hasScope() const;
+        EScope       currentScope() const;
+        void         popScope();
+        void         pushScope(EScope scope);
 
-        // TODO maybe
-        std::map<sid_t, ParamPair>              m_params;
-        std::stack<EScope, std::vector<EScope>> m_blockStack;
-        EHeaderBlockState                       m_state = EHeaderBlockState::eNone;
-        std::string_view                        m_dequotedArg;
-        sid_t                                   m_insideDirective  = 0;
-        sid_t                                   m_currentParamType = 0;
-        sid_t                                   m_currentParamName = 0;
-        sid_t                                   m_classArg         = 0;
-        uint32_t                                m_argsRead         = 0;
-        uint32_t                                m_paramsRead       = 0;
-        bool                                    m_inWorldBlock     = false;
+    private:
+        // TODO better
+        std::forward_list<TokenStream>   m_fileStack;
+        std::vector<std::vector<EScope>> m_scopeStacks;
+        std::string                      m_basePath;
+        IParserTarget*                   m_pTarget;
+        EParsingStep                     m_parsingStep        = EParsingStep::eOptions;
+        EEncounteredHeaderDirective      m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
     };
 }
 

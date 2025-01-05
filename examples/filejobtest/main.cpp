@@ -165,11 +165,17 @@ AttributeEnd
     void textParsing(dmt::AppContext& actx)
     {
         using namespace std::string_view_literals;
-        dmt::Options         opt;
-        dmt::HeaderTokenizer parser{opt};
-        auto                 filePath = "../res/scenes/disney-cloud/disney-cloud.pbrt"sv;
+        dmt::Options opt;
+        //dmt::HeaderTokenizer parser{opt};
+        auto filePath = "../res/scenes/disney-cloud/disney-cloud.pbrt"sv;
 
-        parser.parseHeader(actx, filePath);
+        //parser.parseHeader(actx, filePath);
+        dmt::TokenStream tokenStream{actx, filePath};
+        for (std::string token = tokenStream.next(actx); !token.empty(); token = tokenStream.next(actx))
+        {
+            actx.log("sdfdsa {}", {token});
+        }
+        actx.log("sdfdsa");
     }
 } // namespace
 

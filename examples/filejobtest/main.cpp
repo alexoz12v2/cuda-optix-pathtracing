@@ -189,5 +189,23 @@ int32_t main()
     //testJob(actx);
     //textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
+
+    dmt::EMemoryResourceType mem = dmt::makeMemResId(dmt::EMemoryResourceType::eDevice, dmt::EMemoryResourceType::eCudaMalloc);
+    size_t memSz                     = dmt::sizeForMemoryResouce(mem);
+    size_t align                     = dmt::alignForMemoryResource(mem);
+    void*  storage                   = alloca(memSz + align - 1);
+    storage                          = dmt::alignTo(storage, align);
+    dmt::BesaMemoryResource* pMemRes = dmt::constructMemoryResourceAt(storage, mem);
+    if (void* p = pMemRes->allocateBytes(sizeof(float) * 16, alignof(float)); p)
+    {
+        actx.log("Allocated Device memory!");
+        pMemRes->freeBytes(p, sizeof(float) * 16, alignof(float));
+    }
+    else
+    {
+        actx.error("Couldn't allocate device memory");
+    }
+
+    dmt::destroyMemoryResouceAt(pMemRes, mem);
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

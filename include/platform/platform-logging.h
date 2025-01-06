@@ -140,6 +140,19 @@ DMT_MODULE_EXPORT dmt {
         Count,
     };
 
+    template <std::integral I>
+    inline constexpr char const* defaultFormatter()
+    {
+        if constexpr (std::is_signed_v<I> && sizeof(I) <= 4)
+            return "%d";
+        if constexpr (std::is_signed_v<I>)
+            return "%lld";
+        if constexpr (std::is_unsigned_v<I> && sizeof(I) <= 4)
+            return "%u";
+        else
+            return "%zu";
+    }
+
     /**
      * Class whose purpose is to convert to a string representation whichever types are to be supported by default in the
      * `CircularOStringStream` formatting facilities`. Uses ASCII
@@ -211,7 +224,7 @@ DMT_MODULE_EXPORT dmt {
          * @param fstr
          */
         template <std::integral I>
-        constexpr StrBuf(I i, char const* fstr = "%d")
+        constexpr StrBuf(I i, char const* fstr = defaultFormatter<I>())
         {
             initialize(i, fstr);
         }

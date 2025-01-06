@@ -44,6 +44,15 @@ DMT_MODULE_EXPORT dmt {
         const ImGuiViewport* mainViewport;
     } DMTwindowImGui;
 
+    typedef struct DMTwindowOpenGL
+    {
+        GLuint                bufferID;
+        GLuint                tex;
+        GLuint vao;
+        GLuint vbo;
+        GLuint shaderProgram;
+    } DMTwindowOpenGL;
+
     class Display
     {
     public:
@@ -61,10 +70,12 @@ DMT_MODULE_EXPORT dmt {
         void ShowWindow();
         void SetFullScreen(bool value);
         bool IsFullScreen();
+        
         //void CreatePBO(GLuint& bufferID, size_t size );
         //void DeletePBO(GLuint& bufferID );
 
     private:
+        
         static void HelpMarker(const char* desc)
         {
             ImGui::TextDisabled("(?)");
@@ -119,20 +130,10 @@ DMT_MODULE_EXPORT dmt {
         void ShowMenuFile();
         void InitPropertyWindow();
         void PropertyWindowRenderer();
+        void InitOpenGL();
 
         static DMTwindowGLFW  m_winGLFW;
         static DMTwindowImGui m_winImGui;
-        GLuint                bufferID;
-        GLuint                tex;
-        GLuint vao;
-        GLuint vbo;
-        GLuint shaderProgram;
-        float quadVertices[16] = {
-        // Positions  // TexCoords
-        -1.0f, -1.0f, 0.0f, 0.0f, // Bottom-left
-         1.0f, -1.0f, 1.0f, 0.0f, // Bottom-right
-        -1.0f,  1.0f, 0.0f, 1.0f, // Top-left
-         1.0f,  1.0f, 1.0f, 1.0f  // Top-right
-        };
+        static DMTwindowOpenGL m_winOpenGL;
     };
 }

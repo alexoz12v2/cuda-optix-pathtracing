@@ -14,6 +14,7 @@ namespace dmt
 //glfw staff
 DMTwindowGLFW  Display::m_winGLFW;
 DMTwindowImGui Display::m_winImGui;
+DMTwindowOpenGL Display::m_winOpenGL;
 
 Display::Display()
 {
@@ -74,13 +75,13 @@ void Display::PropertyWindowRenderer()
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        dmt::RegImgSurf(tex, vbo, 640, 480);
-        glUseProgram(shaderProgram);
-        glBindVertexArray(vao);
+        dmt::RegImgSurf(m_winOpenGL.tex, m_winOpenGL.vbo, 0.2f * m_winGLFW.displayW, 0.8 * m_winGLFW.displayW);
+        glUseProgram(m_winOpenGL.shaderProgram);
+        glBindVertexArray(m_winOpenGL.vao);
 
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glUniform1i(glGetUniformLocation(shaderProgram, "screenTexture"), 0);
+        glBindTexture(GL_TEXTURE_2D, m_winOpenGL.tex);
+        //glUniform1i(glGetUniformLocation(shaderProgram, "screenTexture"), 0);
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
@@ -146,73 +147,7 @@ void Display::InitPropertyWindow()
     ImGui_ImplGlfw_InitForOpenGL(m_winGLFW.window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
-    tex = dmt::createOpenGLTexture(640, 480);
-    if (glGetError() != GL_NO_ERROR)
-    {
-        std::cerr << "Could not allocate texture" << std::endl;
-        return;
-    }
-
-     // Create VAO and VBO
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-
-    glBindVertexArray(0);
-
-    // Vertex shader
-    char const* vertexShaderSource = R"(
-        #version 460 core
-        layout(location = 0) in vec2 aPos;
-        layout(location = 1) in vec2 aTexCoord;
-
-        out vec2 TexCoord;
-
-        void main()
-        {
-            TexCoord = aTexCoord;
-            gl_Position = vec4(aPos, 0.0, 1.0);
-        }
-    )";
-
-    // Fragment shader
-    char const* fragmentShaderSource = R"(
-        #version 460 core
-        out vec4 FragColor;
-
-        in vec2 TexCoord;
-        uniform sampler2D screenTexture;
-
-        void main()
-        {
-            FragColor = texture(screenTexture, TexCoord);
-        }
-    )";
-
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
-    glCompileShader(vertexShader);
-
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
-    glCompileShader(fragmentShader);
-
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
+    Display::InitOpenGL();
 
 }
 
@@ -321,5 +256,112 @@ void Display::SetFullScreen(bool value)
 bool Display::IsFullScreen()
 {
     return m_winGLFW.fullScreenState;
+}
+
+void Display::InitOpenGL()
+{
+    float quadVertices[16] = {
+    // Positions  // TexCoords
+    -1.0f, -1.0f, 0.0f, 0.0f, // Bottom-left
+    1.0f, -1.0f, 1.0f, 0.0f, // Bottom-right
+    -1.0f,  1.0f, 0.0f, 1.0f, // Top-left
+    1.0f,  1.0f, 1.0f, 1.0f  // Top-right
+    };
+
+    glfwGetFramebufferSize(m_winGLFW.window, &m_winGLFW.displayW, &m_winGLFW.displayH);
+    m_winOpenGL.tex = dmt::createOpenGLTexture(0.2f * m_winGLFW.displayW,  0.8f * m_winGLFW.displayH);
+    if (glGetError() != GL_NO_ERROR)
+    {
+        std::cerr << "Could not allocate texture" << std::endl;
+        return;
+    }
+
+     // Create VAO and VBO
+    glGenVertexArrays(1, &(m_winOpenGL.vao));
+    glGenBuffers(1, &(m_winOpenGL.vbo));
+    glBindVertexArray(m_winOpenGL.vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_winOpenGL.vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindVertexArray(0);
+
+    // Vertex shader
+    char const* vertexShaderSource = R"(
+        #version 460 core
+        layout(location = 0) in vec2 aPos;
+        layout(location = 1) in vec2 aTexCoord;
+
+        out vec2 TexCoord;
+
+        void main()
+        {
+            TexCoord = aTexCoord;
+            gl_Position = vec4(aPos, 0.0, 1.0);
+        }
+    )";
+
+    // Fragment shader
+    char const* fragmentShaderSource = R"(
+        #version 460 core
+        out vec4 FragColor;
+
+        in vec2 TexCoord;
+        uniform sampler2D screenTexture;
+
+        void main()
+        {
+            FragColor = texture(screenTexture, TexCoord);
+        }
+    )";
+
+    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
+    glCompileShader(vertexShader);
+
+    int success;
+    char infoLog[512];
+
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    
+    if(!success)
+    {
+        glGetShaderInfoLog(vertexShader, 512, nullptr, infoLog);
+        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILES\n" << infoLog << std::endl;
+    }
+
+    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
+    glCompileShader(fragmentShader);
+
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    
+    if(!success)
+    {
+        glGetShaderInfoLog(fragmentShader, 512, nullptr, infoLog);
+        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILES\n" << infoLog << std::endl;
+    }
+
+    m_winOpenGL.shaderProgram = glCreateProgram();
+    glAttachShader(m_winOpenGL.shaderProgram, vertexShader);
+    glAttachShader(m_winOpenGL.shaderProgram, fragmentShader);
+    glLinkProgram(m_winOpenGL.shaderProgram);
+
+    glGetProgramiv(m_winOpenGL.shaderProgram, GL_LINK_STATUS, &success);
+
+    if(!success)
+    {
+        glGetShaderInfoLog(m_winOpenGL.shaderProgram, 512, nullptr, infoLog);
+        std::cout << "ERROR::SHADER::SHADERPROGRAM::LINKING_FAILES\n" << infoLog << std::endl;
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
 }
 } // namespace dmt

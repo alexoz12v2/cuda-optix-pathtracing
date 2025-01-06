@@ -33,7 +33,6 @@ __global__ void fillAndWriteTextureKernelSurfObj(cudaSurfaceObject_t surfObj, in
 
     if (x < width && y < height)
     {
-        int    index = y * width + x;
         uchar4 value = make_uchar4(x % 256, y % 256, 128, 255); // RGBA gradient
         surf2Dwrite(value, surfObj, x * sizeof(float), y);
     }
@@ -196,7 +195,6 @@ bool RegImgSurf(uint32_t tex, uint32_t buf, uint32_t width, uint32_t height)
     // Launch the CUDA kernel
     dim3 blockDim(16, 16);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
-    //fillTextureKernel<<<gridDim, blockDim>>>(width, height);
     fillAndWriteTextureKernelSurfObj<<<gridDim, blockDim>>>(surfObj, width, height);
     // Cleanup
     //cudaUnbindSurface(surfRef);

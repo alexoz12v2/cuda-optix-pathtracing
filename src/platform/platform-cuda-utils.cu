@@ -51,7 +51,7 @@ namespace dmt {
             mctx->pctx.error("Couldn't get device {} properties", {device});
             return ret;
         }
-        mctx->pctx.log("Chosed Device: {}", {actualProps.name});
+        mctx->pctx.log("Chosed Device: {} ({})", { std::string_view{actualProps.name}, device });
         mctx->pctx.log("Compute Capability: {}.{}", {actualProps.major, actualProps.minor});
         assert(actualProps.managedMemory && actualProps.canMapHostMemory);
 

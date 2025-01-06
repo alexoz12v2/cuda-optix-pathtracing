@@ -273,7 +273,7 @@ DMT_MODULE_EXPORT dmt {
     concept TemplateInstantiationOf = is_template_instantiation_v<Template, T>;
 
     // TODO move to cpp all not inline
-    char pathSeparator()
+    inline constexpr char pathSeparator()
     {
 #if defined(DMT_OS_WINDOWS)
         return '\\';
@@ -282,7 +282,7 @@ DMT_MODULE_EXPORT dmt {
 #endif
     }
 
-    void* alignTo(void* address, size_t alignment)
+    inline void* alignTo(void* address, size_t alignment)
     {
         // Ensure alignment is a power of two (required for bitwise operations).
         size_t const mask = alignment - 1;
@@ -294,7 +294,7 @@ DMT_MODULE_EXPORT dmt {
         return reinterpret_cast<void*>(alignedAddr);
     }
 
-    uintptr_t alignToAddr(uintptr_t address, size_t alignment)
+    inline constexpr uintptr_t alignToAddr(uintptr_t address, size_t alignment)
     {
         // Ensure alignment is a power of two (required for bitwise operations).
         size_t const mask = alignment - 1;
@@ -305,7 +305,7 @@ DMT_MODULE_EXPORT dmt {
         return alignedAddr;
     }
 
-    void* alignToBackward(void* address, size_t alignment)
+    inline void* alignToBackward(void* address, size_t alignment)
     {
         // Ensure alignment is a power of two (required for bitwise operations).
         size_t const mask = alignment - 1;
@@ -433,7 +433,7 @@ DMT_MODULE_EXPORT dmt {
     inline constexpr TaggedPointer taggedNullptr;
 
     template <std::integral I>
-    constexpr I ceilDiv(I num, I den)
+    inline constexpr I ceilDiv(I num, I den)
     {
         return (num + den - 1) / den;
     }

@@ -39,4 +39,6 @@ macro(dmt_setup_dependencies)
     FetchContent_MakeAvailable(glm)
     add_compile_definitions(GLM_CONFIG_XYZW_ONLY=1)
   endif()
+
+  find_package(CUDAToolkit REQUIRED)
 endmacro()

@@ -10,6 +10,7 @@
 
 #if defined(DMT_INTERFACE_AS_HEADER)
 // Keep in sync with .cppm
+#include <platform/platform-cuda-utils.h>
 #include <platform/platform-logging.h>
 #include <platform/platform-memory.h>
 #include <platform/platform-threadPool.h>
@@ -19,6 +20,7 @@ import <platform/platform-logging.h>;
 import <platform/platform-memory.h>;
 import <platform/platform-utils.h>;
 import <platform/platform-threadPool.h>;
+import <platform/platform-cuda-utils.h>;
 #endif
 
 DMT_MODULE_EXPORT dmt {

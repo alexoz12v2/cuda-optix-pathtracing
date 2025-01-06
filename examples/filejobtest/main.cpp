@@ -185,7 +185,9 @@ int32_t main()
     auto&         actx = platform.ctx();
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
     //testCTrie(actx);
-    testWordTokenization(actx);
+    //testWordTokenization(actx);
     //testJob(actx);
-    textParsing(actx);
+    //textParsing(actx);
+    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
+    actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

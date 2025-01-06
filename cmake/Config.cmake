@@ -318,6 +318,16 @@ macro(dmt_set_target_warnings target)
       $<$<COMPILE_LANGUAGE:CXX>: -Wno-unknown-warning-option> # do not warn on GCC-specific warning diagnostic pragmas 
     )
   endif()
+
+  # TODO move to another function
+  set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+  set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
+  target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                       -lineinfo
+                       -use_fast_math
+                       -rdc=true
+                       >)
 endmacro()
 
 
@@ -413,7 +423,11 @@ function(dmt_add_compile_definitions target)
   else()
     set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
   endif()
-  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
+  target_compile_definitions(${target} 
+    PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER}
+      $<$<COMPILE_LANGUAGE:CXX>:DMT_LANGUAGE_CPP "DMT_CPU_GPU=" "DMT_CPU=" "DMT_GPU=">
+      $<$<COMPILE_LANGUAGE:CUDA>:DMT_LANGUAGE_CUDA "DMT_CPU_GPU=__host__ __device__" "DMT_CPU=__host__" "DMT_GPU=__device__">
+  )
 endfunction()
 
 

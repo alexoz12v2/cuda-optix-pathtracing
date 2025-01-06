@@ -2649,11 +2649,33 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
 
+        auto typeAndParamListParsing = [this]<typename Enum>
+            requires(std::is_enum_v<Enum>)
+        (AppContext & actx,
+         SText const& directive,
+         TokenStream& currentStream,
+         ArgsDArray&  outArgs,
+         ParamMap&    outParams,
+         bool (*fromSidFunc)(sid_t, Enum&),
+         Enum& out) {
+            if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(outArgs[0]), out))
+            {
+                actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
+                std::abort();
+            }
+            if (parseParams(actx, currentStream, outParams) == 0)
+            {
+                actx.error("Expected at least a parameter for directive {}", {directive.str});
+                std::abort();
+            }
+        };
+
         auto typeHeaderDirectiveParsing =
             [this]<typename Spec, typename EnumType>
             requires requires(Spec spec) {
                 spec.type;
-                requires std::is_same_v<decltype(spec.type), EnumType> && std::is_default_constructible_v<Spec>;
+                requires std::is_same_v<decltype(spec.type), EnumType> && std::is_enum_v<EnumType> &&
+                             std::is_default_constructible_v<Spec>;
             }(AppContext & actx,
               SText const&   directive,
               Options const& options,
@@ -2687,6 +2709,7 @@ namespace dmt {
             }
             (m_pTarget->*apiFunc)(spec);
         };
+
         auto parseArgumentFloats = [this]<size_t size> // TODO rework without template
             requires(size == 3 || size == 16 || size == 9 || size == 4 || size == 2)
         (AppContext & actx,
@@ -2705,6 +2728,7 @@ namespace dmt {
                 std::abort();
             }
         };
+
         auto parseArgumentNames =
             [this](AppContext&  actx,
                    SText const& directive,
@@ -2721,7 +2745,7 @@ namespace dmt {
                 std::abort();
             }
             for (uint32_t i = 0; i < num; ++i)
-                pSids[i] = hashCRC64(outArgs[i]);
+                pSids[i] = hashCRC64(dequoteString(outArgs[i]));
         };
 
         while (!m_fileStack.empty())
@@ -2986,30 +3010,21 @@ namespace dmt {
                     }
                     case dict::directive::Attribute.sid:
                     {
+                        ETarget target = ETarget::eShape;
+                        typeAndParamListParsing(actx, dict::directive::Attribute, currentStream, args, params, targetFromSid, target);
+                        m_pTarget->Attribute(target, params);
                         break;
                     }
                     case dict::directive::Shape.sid:
-                    {
+                    { // TODO create file
                         break;
                     }
                     case dict::directive::ObjectBegin.sid:
                     {
-                        if (!parseArgs(actx, currentStream, args) != 1)
-                        {
-                            actx.error("Unexpected number of arguments for {} directive",
-                                       {dict::directive::ObjectBegin.str});
-                            std::abort(); // TODO change all aborts in a return faslse
-                        }
-                        if (!args[0].starts_with('"') || !args[0].ends_with('"'))
-                        {
-                            actx.error("Syntax error: invalid string at argument of {} directive",
-                                       {dict::directive::ObjectBegin.str});
-                            std::abort(); // TODO change all aborts in a return faslse
-                        }
-                        std::string_view name    = dequoteString(args[0]);
-                        sid_t            nameSid = hashCRC64(name);
+                        sid_t name = 0;
+                        parseArgumentNames(actx, dict::directive::ObjectBegin, currentStream, args, &name, 1);
                         pushScope(EScope::eObject);
-                        m_pTarget->ObjectBegin(nameSid);
+                        m_pTarget->ObjectBegin(name);
                         break;
                     }
                     case dict::directive::ObjectEnd.sid:
@@ -3025,6 +3040,15 @@ namespace dmt {
                     }
                     case dict::directive::ObjectInstance.sid:
                     {
+                        if (m_parsingStep != EParsingStep::eWorld)
+                        {
+                            actx.error("Encontered directive {} outside of the World Block",
+                                       {dict::directive::ObjectInstance.str});
+                            std::abort();
+                        }
+                        sid_t name = 0;
+                        parseArgumentNames(actx, dict::directive::ObjectBegin, currentStream, args, &name, 1);
+                        m_pTarget->ObjectInstance(name);
                         break;
                     }
                     case dict::directive::LightSource.sid:
@@ -3060,7 +3084,7 @@ namespace dmt {
                         break;
                     }
                     default:
-                        actx.error("Unrecognized directive {}.", { token });
+                        actx.error("Unrecognized directive {}.", {token});
                         std::abort();
                         break;
                 }

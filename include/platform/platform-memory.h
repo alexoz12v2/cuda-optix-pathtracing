@@ -253,7 +253,7 @@ DMT_MODULE_EXPORT dmt {
      * Utility function used to scale to the next page size whenever a large/huge page allocation fails
      * (Example: (Win32) lack of SeLockMemoryPrivilege, or (Linux) nr_hugepages == 0)
      */
-    EPageSize scaleDownPageSize(EPageSize pageSize)
+    inline constexpr EPageSize scaleDownPageSize(EPageSize pageSize)
     {
         switch (pageSize)
         {

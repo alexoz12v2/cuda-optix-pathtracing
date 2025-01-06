@@ -34,6 +34,16 @@ import platform;
 // TODO switch all structures with stack allocator
 // TODO remove default values from clases and leave them only in parsing functions
 
+DMT_MODULE_EXPORT dmt::model {
+    class Spectrum
+    {
+    public:
+        enum class Type
+        {
+        };
+    };
+}
+
 // stuff related to .pbrt file parsing + data structures
 DMT_MODULE_EXPORT dmt {
     // TODO move somewhere else
@@ -1041,6 +1051,24 @@ DMT_MODULE_EXPORT dmt {
         eCount
     };
 
+    // LightSource ----------------------------------------------------------------------------------------------------
+    struct LightSourceSpec
+    {
+        // 4 byte aligned, coommon
+        union PowerOrIlluminance
+        { // there is no default, one of these must be present
+            // all except distant and infinite
+            float power;
+            // distant, infinite
+            float illuminance;
+        };
+        PowerOrIlluminance po;
+        float              scale = 1.f;
+        // 1 byte aligned
+        ELightType type;
+    };
+
+    // Parsing --------------------------------------------------------------------------------------------------------
     class TokenStream
     {
     public:
@@ -1341,8 +1369,6 @@ DMT_MODULE_EXPORT dmt {
         EEncounteredHeaderDirective      m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
     };
 }
-
-DMT_MODULE_EXPORT dmt::model {}
 
 DMT_MODULE_EXPORT dmt::job {
     struct ParseSceneHeaderData

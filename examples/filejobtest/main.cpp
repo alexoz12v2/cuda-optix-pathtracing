@@ -206,6 +206,27 @@ int32_t main()
         actx.error("Couldn't allocate device memory");
     }
 
+    float*         ptr = ::new float[10];
+    dmt::DynaArray arr{sizeof(float), pMemRes, dmt::noStream};
+    arr.reserve(10);
+    for (uint32_t i = 0; i < 10; ++i)
+    {
+        float f = i;
+        arr.push_back(&f, true);
+    }
+    arr.copyToHostSync(ptr);
+
+    std::string buf = "{ ";
+    for (uint32_t i = 0; i < arr.size(); ++i)
+    {
+        buf += std::to_string(ptr[i]);
+        buf += ", ";
+    }
+    buf += " }";
+    actx.log("Float array: {}", {buf});
+
+    ::delete[] ptr;
+
     dmt::destroyMemoryResouceAt(pMemRes, mem);
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

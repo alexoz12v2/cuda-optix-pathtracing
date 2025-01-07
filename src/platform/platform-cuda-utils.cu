@@ -252,7 +252,7 @@ namespace dmt {
     bool CudaMallocAsyncResource::do_is_equal(memory_resource const& _That) const noexcept { return true; }
 
     // Memory Resouce Boilerplate -------------------------------------------------------------------------------------
-    void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource* p, size_t* sz, bool destroy)
+    DMT_CPU_GPU void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource* p, size_t* sz, bool destroy)
     {
         EMemoryResourceType category = extractCategory(eAlloc);
         EMemoryResourceType type     = extractType(eAlloc);
@@ -316,26 +316,26 @@ namespace dmt {
         }
     }
 
-    size_t sizeForMemoryResouce(EMemoryResourceType eAlloc)
+    DMT_CPU_GPU size_t sizeForMemoryResouce(EMemoryResourceType eAlloc)
     {
         size_t ret = 0;
         switchOnMemoryResoure(eAlloc, nullptr, &ret, true);
         return ret;
     }
 
-    BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc)
+    DMT_CPU_GPU BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc)
     {
         BaseMemoryResource* p = std::bit_cast<BaseMemoryResource*>(ptr);
         switchOnMemoryResoure(eAlloc, p, nullptr, false);
         return p;
     }
 
-    void destroyMemoryResouceAt(BaseMemoryResource* p, EMemoryResourceType eAlloc)
+    DMT_CPU_GPU void destroyMemoryResouceAt(BaseMemoryResource* p, EMemoryResourceType eAlloc)
     {
         switchOnMemoryResoure(eAlloc, p, nullptr, true);
     }
 
-    EMemoryResourceType categoryOf(BaseMemoryResource* allocator)
+    DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource* allocator)
     {
         if (dynamic_cast<CudaAsyncMemoryReosurce*>(allocator))
             return EMemoryResourceType::eAsync;
@@ -349,7 +349,35 @@ namespace dmt {
         return EMemoryResourceType::eHost;
     }
 
-    void* allocateFromCategory(BaseMemoryResource* allocator, size_t sz, size_t align, CudaStreamHandle stream)
+    DMT_CPU_GPU bool isDeviceAllocator(BaseMemoryResource* allocator)
+    {
+        if (dynamic_cast<CudaAsyncMemoryReosurce*>(allocator))
+            return true;
+        else if (dynamic_cast<DeviceMemoryReosurce*>(allocator))
+            return true;
+        else if (dynamic_cast<UnifiedMemoryResource*>(allocator))
+            return true;
+        else if (dynamic_cast<std::pmr::memory_resource*>(allocator))
+            return false;
+
+        return false;
+    }
+
+    DMT_CPU_GPU bool isHostAllocator(BaseMemoryResource* allocator)
+    {
+        if (dynamic_cast<CudaAsyncMemoryReosurce*>(allocator))
+            return false;
+        else if (dynamic_cast<DeviceMemoryReosurce*>(allocator))
+            return false;
+        else if (dynamic_cast<UnifiedMemoryResource*>(allocator))
+            return true;
+        else if (dynamic_cast<std::pmr::memory_resource*>(allocator))
+            return true;
+
+        return false;
+    }
+
+    DMT_CPU_GPU void* allocateFromCategory(BaseMemoryResource* allocator, size_t sz, size_t align, CudaStreamHandle stream)
     {
         if (auto* a = dynamic_cast<CudaAsyncMemoryReosurce*>(allocator); a)
         {
@@ -372,7 +400,7 @@ namespace dmt {
         return nullptr;
     }
 
-    void freeFromCategory(BaseMemoryResource* allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
+    DMT_CPU_GPU void freeFromCategory(BaseMemoryResource* allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
     {
         if (auto* a = dynamic_cast<CudaAsyncMemoryReosurce*>(allocator); a)
         {
@@ -392,80 +420,295 @@ namespace dmt {
             a->deallocate(ptr, sz, align);
     }
 
-    // BlockyForwardList ----------------------------------------------------------------------------------------------
-    DMT_CPU_GPU void* BlockyForwardList::allocateNode()
-    {
-        return allocateFromCategory(m_resource, nodeSize, alignof(NodeHeader), stream);
-    }
-
-    DMT_CPU_GPU void BlockyForwardList::freeNode(void* node)
-    {
-        freeFromCategory(m_resource, node, nodeSize, alignof(NodeHeader), stream);
-    }
-
-    DMT_CPU_GPU void BlockyForwardList::lockForRead()
+    // BaseDeviceContainer --------------------------------------------------------------------------------------------
+    DMT_CPU_GPU void BaseDeviceContainer::lockForRead() const
     {
 #if defined(__CUDA_ARCH__)
-    // Wait until no writer is active
-    while (atomicAdd(&m_writeCount, 0) > 0) {
-        // Spin-wait
-    }
-    // Increment reader count
-    atomicAdd(&m_readCount, 1);
+        // Wait until no writer is active
+        while (atomicAdd(&m_writeCount, 0) > 0)
+        {
+            // Spin-wait
+        }
+        // Increment reader count
+        atomicAdd(&m_readCount, 1);
 #else
-    std::atomic_ref<int> writeRef(m_writeCount);
-    std::atomic_ref<int> readRef(m_readCount);
-    // Wait until no writer is active
-    while (writeRef.load(std::memory_order_acquire) > 0) {
-        // Spin-wait
-    }
-    // Increment reader count
-    readRef.fetch_add(1, std::memory_order_acquire);
-#endif    
-    }
-
-    DMT_CPU_GPU void BlockyForwardList::unlockForRead()
-    {
-#if defined(__CUDA_ARCH__)
-    // Decrement reader count
-    atomicSub(&m_readCount, 1);
-#else
-    std::atomic_ref<int> readRef(m_readCount);
-    // Decrement reader count
-    readRef.fetch_sub(1, std::memory_order_release);
-#endif    
-    }
-
-    DMT_CPU_GPU void BlockyForwardList::lockForWrite()
-    {
-#if defined(__CUDA_ARCH__)
-    // Wait until no reader or writer is active
-    while (atomicAdd(&m_readCount, 0) > 0 || atomicAdd(&m_writeCount, 0) > 0) {
-        // Spin-wait
-    }
-    // Increment writer count
-    atomicAdd(&m_writeCount, 1);
-#else
-    std::atomic_ref<int> writeRef(m_writeCount);
-    std::atomic_ref<int> readRef(m_readCount);
-    // Wait until no reader or writer is active
-    while (readRef.load(std::memory_order_acquire) > 0 || writeRef.load(std::memory_order_acquire) > 0) {
-        // Spin-wait
-    }
-    // Increment writer count
-    writeRef.fetch_add(1, std::memory_order_acquire);
+        std::atomic_ref<int> writeRef(m_writeCount);
+        std::atomic_ref<int> readRef(m_readCount);
+        // Wait until no writer is active
+        while (writeRef.load(std::memory_order_acquire) > 0)
+        {
+            // Spin-wait
+        }
+        // Increment reader count
+        readRef.fetch_add(1, std::memory_order_acquire);
 #endif
     }
 
-    DMT_CPU_GPU void BlockyForwardList::unlockForWrite()
+    DMT_CPU_GPU void BaseDeviceContainer::unlockForRead() const
     {
 #if defined(__CUDA_ARCH__)
-    // Decrement writer count
-    atomicSub(&m_writeCount, 1);
+        // Decrement reader count
+        atomicSub(&m_readCount, 1);
 #else
-    std::atomic_ref<int> writeRef(m_writeCount);
-    // Decrement writer count
-    writeRef.fetch_sub(1, std::memory_order_release);
+        std::atomic_ref<int> readRef(m_readCount);
+        // Decrement reader count
+        readRef.fetch_sub(1, std::memory_order_release);
 #endif
+    }
+
+    DMT_CPU_GPU void BaseDeviceContainer::lockForWrite() const
+    {
+#if defined(__CUDA_ARCH__)
+        // Wait until no reader or writer is active
+        while (atomicAdd(&m_readCount, 0) > 0 || atomicAdd(&m_writeCount, 0) > 0)
+        {
+            // Spin-wait
+        }
+        // Increment writer count
+        atomicAdd(&m_writeCount, 1);
+#else
+        std::atomic_ref<int> writeRef(m_writeCount);
+        std::atomic_ref<int> readRef(m_readCount);
+        // Wait until no reader or writer is active
+        while (readRef.load(std::memory_order_acquire) > 0 || writeRef.load(std::memory_order_acquire) > 0)
+        {
+            // Spin-wait
+        }
+        // Increment writer count
+        writeRef.fetch_add(1, std::memory_order_acquire);
+#endif
+    }
+
+    DMT_CPU_GPU void BaseDeviceContainer::unlockForWrite() const
+    {
+#if defined(__CUDA_ARCH__)
+        // Decrement writer count
+        atomicSub(&m_writeCount, 1);
+#else
+        std::atomic_ref<int> writeRef(m_writeCount);
+        // Decrement writer count
+        writeRef.fetch_sub(1, std::memory_order_release);
+#endif
+    }
+
+    DMT_CPU_GPU void BaseDeviceContainer::waitWriter() const
+    {
+#if defined(__CUDA_ARCH__)
+        // Spin-wait until no writer is active
+        while (atomicAdd(&m_writeCount, 0) > 0)
+        {
+            // Spin-wait
+        }
+#else
+        std::atomic_ref<int> writeRef(m_writeCount);
+        // Spin-wait until no writer is active
+        while (writeRef.load(std::memory_order_acquire) > 0)
+        {
+            // Spin-wait
+        }
+#endif
+    }
+
+    // DynaArray ------------------------------------------------------------------------------------------------------
+    DMT_CPU_GPU DynaArray::DynaArray(DynaArray const& other) :
+    BaseDeviceContainer(other.m_resource, other.stream),
+    m_elemSize(other.m_elemSize)
+    {
+        other.lockForRead();
+        m_resource = other.m_resource;
+        stream     = other.stream;
+        m_elemSize = other.m_elemSize;
+        reserve(other.m_size);
+        lockForWrite();
+        copyFrom(other);
+        unlockForWrite();
+        other.unlockForRead();
+    }
+
+    DMT_CPU_GPU DynaArray::DynaArray(DynaArray&& other) noexcept : BaseDeviceContainer(other.m_resource, other.stream)
+    {
+        other.lockForWrite();
+        m_resource = std::exchange(other.m_resource, nullptr);
+        stream     = other.stream;
+        m_head     = std::exchange(other.m_head, nullptr);
+        m_size     = std::exchange(other.m_size, 0);
+        m_capacity = std::exchange(other.m_capacity, 0);
+        m_elemSize = other.m_elemSize;
+        other.unlockForWrite();
+    }
+
+    DMT_CPU_GPU void DynaArray::reserve(size_t newCapacity, bool lock)
+    {
+        if (lock)
+            lockForWrite();
+        if (newCapacity <= m_capacity)
+            return;
+
+        void* newHead = allocateFromCategory(m_resource, newCapacity * m_elemSize, alignof(std::max_align_t), stream);
+        if (m_head)
+        {
+            std::memcpy(newHead, m_head, m_size * m_elemSize);
+            freeFromCategory(m_resource, m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
+        }
+        m_head     = newHead;
+        m_capacity = newCapacity;
+        if (lock)
+            unlockForWrite();
+    }
+
+    DMT_CPU_GPU void DynaArray::clear(bool lock) noexcept
+    {
+        if (lock)
+            lockForWrite();
+        if (m_head)
+        {
+            freeFromCategory(m_resource, m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
+            m_head = nullptr;
+        }
+        if (lock)
+            unlockForWrite();
+    }
+
+    DMT_CPU_GPU bool DynaArray::push_back(void const* pValue, bool srcHost, bool lock)
+    {
+        bool ret = true;
+        if (lock)
+            lockForWrite();
+
+        if (m_size >= m_capacity)
+            reserve(m_capacity > 0 ? m_capacity >> 1 : 1, false);
+
+        void* dest = std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + m_size * m_elemSize);
+
+#if defined(__CUDA_ARCH__)
+        if (srcHost) // error!
+            ret = false;
+        else
+            std::memcpy(dest, pValue, m_elemSize);
+#else
+        cudaMemcpyKind kind = isDeviceAllocator(m_resource)
+                                  ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
+                                  : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
+        cudaError_t    res  = cudaMemcpy(dest, pValue, m_elemSize, kind);
+        if (res != ::cudaSuccess)
+            ret = false;
+#endif
+        if (ret)
+            ++m_size;
+
+        if (lock)
+            unlockForWrite();
+        return ret;
+    }
+
+    DMT_CPU_GPU void DynaArray::pop_back(bool lock)
+    {
+        if (lock)
+            lockForWrite();
+
+        if (m_size != 0)
+            --m_size;
+
+        if (lock)
+            unlockForWrite();
+    }
+
+    // assumes you already locked for read
+
+    DMT_CPU_GPU void const* DynaArray::at(size_t index) const
+    {
+        assert(index < m_size);
+#if defined(__CUDA_ARCH__)
+        if (isDeviceAllocator(m_resource))
+            return std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + index * m_elemSize);
+        else
+            return nullptr;
+#else
+        if (isHostAllocator(m_resource))
+            return std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + index * m_elemSize);
+        else
+        {
+            assert(false);
+            return nullptr;
+        }
+#endif
+    }
+
+    DMT_CPU_GPU void DynaArray::copyFrom(DynaArray const& other)
+    {
+        if (other.m_size > 0)
+        {
+            std::memcpy(m_head, other.m_head, other.m_size * other.m_elemSize);
+            m_size = other.m_size;
+        }
+    }
+
+    DMT_CPU_GPU DynaArray& DynaArray::operator=(DynaArray const& other)
+    {
+        if (this != &other)
+        {
+            lockForWrite();
+            other.lockForWrite();
+            assert(m_elemSize == other.m_elemSize);
+
+            clear();
+            reserve(other.m_size, false);
+            copyFrom(other);
+
+            other.unlockForWrite();
+            unlockForWrite();
+        }
+        return *this;
+    }
+
+    DMT_CPU_GPU DynaArray& DynaArray::operator=(DynaArray&& other) noexcept
+    {
+        if (this != &other)
+        {
+            lockForWrite();
+            other.lockForWrite();
+            assert(m_elemSize == other.m_elemSize);
+
+            m_size     = std::exchange(other.m_size, 0);
+            m_capacity = std::exchange(other.m_capacity, 0);
+            m_head     = std::exchange(other.m_head, nullptr);
+
+            other.unlockForWrite();
+            unlockForWrite();
+        }
+        return *this;
+    }
+
+    DMT_CPU_GPU DynaArray::~DynaArray() noexcept { clear(); }
+
+    DMT_CPU bool DynaArray::copyToHostSync(void* /*DMT_RESTRICT*/ dest, bool lock) const
+    {
+        if (!isDeviceAllocator(m_resource))
+        {
+            assert(false);
+            return false;
+        }
+
+        bool ret = true;
+        if (lock)
+            lockForRead();
+
+        ret = ::cudaSuccess == cudaMemcpy(dest, m_head, m_size * m_elemSize, ::cudaMemcpyDeviceToHost);
+
+        if (lock)
+            unlockForRead();
+
+        return ret;
+    }
+
+    DMT_CPU_GPU size_t DynaArray::size(bool lock) const
+    {
+        size_t ret = 0;
+        if (lock)
+            lockForRead();
+        ret = m_size;
+        if (lock)
+            unlockForRead();
+        return ret;
     }
 } // namespace dmt

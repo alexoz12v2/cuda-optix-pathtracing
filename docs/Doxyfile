@@ -1014,6 +1014,7 @@ FILE_PATTERNS          = *.c \
                          *.ccm \
                          *.c++ \
                          *.c++m \
+                         *.cu \
                          *.java \
                          *.ii \
                          *.ixx \
@@ -1027,6 +1028,7 @@ FILE_PATTERNS          = *.c \
                          *.hh \
                          *.hxx \
                          *.hpp \
+                         *.cuh \
                          *.h++ \
                          *.ixx \
                          *.l \

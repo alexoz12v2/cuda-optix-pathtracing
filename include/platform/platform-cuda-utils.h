@@ -160,61 +160,79 @@ DMT_MODULE_EXPORT dmt {
         void  freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
     };
 
-    void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource * p, size_t * sz, bool destroy);
-    EMemoryResourceType categoryOf(BaseMemoryResource * allocator);
+    DMT_CPU_GPU void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource * p, size_t * sz, bool destroy);
+    DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource * allocator);
+    DMT_CPU_GPU bool                isDeviceAllocator(BaseMemoryResource * allocator);
+    DMT_CPU_GPU bool                isHostAllocator(BaseMemoryResource * allocator);
 
-    /**
-     * Singly linked list whose nodes are blocks of 256 Bytes each, where the last 8 bytes are used for the next pointer
-     * and the remaining 248 Bytes to store as many elements as possible, of which we store explicitly copy control functions, destructor
-     * insertion should only prepare the memory area and not construct the object. It is the caller responsibility to call construct at if
-     * necessary
-     * Such list will store a pointer to the BaseMemoryResource and a cuda stream handle at construction. If the handle is valid and the
-     * allocator is async, then stream aware allocation is prefered
-     */
-    class BlockyForwardList
+    DMT_CPU_GPU void* allocateFromCategory(BaseMemoryResource * allocator, size_t sz, size_t align, CudaStreamHandle stream);
+    DMT_CPU_GPU void freeFromCategory(BaseMemoryResource * allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+
+    class BaseDeviceContainer
     {
     public:
-        static constexpr uint32_t nodeSize  = 256;
-        static constexpr uint32_t blockSize = nodeSize - (sizeof(uintptr_t) + sizeof(size_t));
-        template <typename T>
-        DMT_CPU_GPU explicit BlockyForwardList(BaseMemoryResource* ptr, CudaStreamHandle stream = noStream) :
+        DMT_CPU_GPU explicit BaseDeviceContainer(BaseMemoryResource* ptr, CudaStreamHandle stream = noStream) :
         stream(stream),
-        m_resource(ptr),
-        m_elemSize(sizeof(T))
+        m_resource(ptr)
         {
-            if (!ptr || m_elemSize > blockSize)
-                std::abort();
         }
 
-        // TODO copy control
-
-        DMT_CPU_GPU void lockForRead();
-        DMT_CPU_GPU void unlockForRead();
-        DMT_CPU_GPU void lockForWrite();
-        DMT_CPU_GPU void unlockForWrite();
+        DMT_CPU_GPU void lockForRead() const;
+        DMT_CPU_GPU void unlockForRead() const;
+        DMT_CPU_GPU void lockForWrite() const;
+        DMT_CPU_GPU void unlockForWrite() const;
+        DMT_CPU_GPU void waitWriter() const;
 
         CudaStreamHandle stream;
 
-    private:
-        struct alignas(std::max_align_t) NodeHeader
-        {
-            size_t                  occupied;
-            void*                   next;
-            DMT_CPU_GPU NodeHeader* nextFooter() const
-            {
-                return std::bit_cast<NodeHeader*>(std::bit_cast<uintptr_t>(next) + blockSize);
-            }
-        };
-
-    private:
-        DMT_CPU_GPU void* allocateNode();
-        DMT_CPU_GPU void  freeNode(void* node);
-
+    protected:
         BaseMemoryResource* m_resource;
-        size_t              m_elemSize;
-        size_t              m_size = 0;
-        NodeHeader*         m_head = nullptr;
-        int32_t             m_readCount = 0;
-        int32_t             m_writeCount = 0;
+        mutable int32_t     m_readCount  = 0;
+        mutable int32_t     m_writeCount = 0;
+    };
+
+    // now works only for std::is_trivial_v<T> types
+    class DynaArray : public BaseDeviceContainer
+    {
+    public:
+        DMT_CPU_GPU explicit DynaArray(size_t elemSz, BaseMemoryResource* ptr, CudaStreamHandle stream = noStream) :
+        BaseDeviceContainer(ptr, stream),
+        m_elemSize(elemSz)
+        {
+        }
+
+        DMT_CPU_GPU DynaArray(DynaArray const& other);
+
+        DMT_CPU_GPU DynaArray(DynaArray&& other) noexcept;
+
+        DMT_CPU_GPU ~DynaArray() noexcept;
+
+        DMT_CPU_GPU DynaArray& operator=(DynaArray const& other);
+
+        DMT_CPU_GPU DynaArray& operator=(DynaArray&& other) noexcept;
+
+        DMT_CPU_GPU void reserve(size_t newCapacity, bool lock = true);
+
+        DMT_CPU_GPU void clear(bool lock = true) noexcept;
+
+        DMT_CPU_GPU bool push_back(void const* pValue, bool srcHost, bool lock = true);
+
+        DMT_CPU_GPU void pop_back(bool lock = true);
+
+        // assumes you already locked for read
+        DMT_CPU_GPU void const* at(size_t index) const;
+
+        DMT_CPU bool copyToHostSync(void* dest, bool lock = true) const;
+
+        DMT_CPU_GPU size_t size(bool lock = true) const;
+
+    private:
+        // requires read locked other
+        DMT_CPU_GPU void copyFrom(DynaArray const& other);
+
+        size_t m_elemSize;
+        size_t m_capacity = 0;
+        size_t m_size     = 0;
+        void*  m_head     = nullptr;
     };
 } // namespace dmt

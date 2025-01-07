@@ -110,7 +110,4 @@ namespace dmt {
                                           cuda::stream_ref        stream) override;
         bool          do_is_equal(memory_resource const& _That) const noexcept override;
     };
-
-    void* allocateFromCategory(BaseMemoryResource* allocator, size_t sz, size_t align, CudaStreamHandle stream);
-    void  freeFromCategory(BaseMemoryResource* allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
 } // namespace dmt

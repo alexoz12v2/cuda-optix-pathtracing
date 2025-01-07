@@ -93,17 +93,9 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
   - [ ] Formazione
 - [ ] GUI imgui implot
 
-
-Submodule 'src/ext/filesystem' (https://github.com/wjakob/filesystem.git) registered for path 'src/ext/filesystem'
-Submodule 'src/ext/glfw' (https://github.com/glfw/glfw.git) registered for path 'src/ext/glfw'
-Submodule 'src/ext/libdeflate' (https://github.com/mmp/libdeflate.git) registered for path 'src/ext/libdeflate'
-Submodule 'src/ext/lodepng' (https://github.com/lvandeve/lodepng.git) registered for path 'src/ext/lodepng'
-Submodule 'src/ext/openexr' (https://github.com/mmp/openexr.git) registered for path 'src/ext/openexr'
-Submodule 'src/ext/openvdb' (https://github.com/AcademySoftwareFoundation/openvdb.git) registered for path 'src/ext/openvdb'
-Submodule 'src/ext/ptex' (https://github.com/wdas/ptex.git) registered for path 'src/ext/ptex'
-Submodule 'src/ext/qoi' (https://github.com/phoboslab/qoi.git) registered for path 'src/ext/qoi'
-Submodule 'src/ext/stb' (https://github.com/nothings/stb.git) registered for path 'src/ext/stb'
-Submodule 'src/ext/utf8proc' (https://github.com/JuliaStrings/utf8proc.git) registered for path 'src/ext/utf8proc'
-Submodule 'src/ext/zlib' (https://github.com/mitsuba-renderer/zlib.git) registered for path 'src/ext/zlib'
-
-cmake .. -DCMAKE_BUILD_TYPE=Debug -G "Visual Studio 17 2022" -DPBRT_OPTIX7_PATH="C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.7.0"
+### Appunti e links su CUDA memory allocation
+- introduzione sull'argomento: https://stackoverflow.com/questions/73155788/efficient-reallocation-of-cuda-memory
+- Stream ordered allocations: https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
+- link esempi github 1: https://github.com/NVIDIA-developer-blog/code-samples/blob/master/posts/cuda-vmm/cuvector.cpp
+- link esempi github 2: https://github.com/eyalroz/cuda-api-wrappers/blob/master/src/cuda/api/context.hpp#L131o
+- link esempi github 3: https://github.com/NVIDIA/cuda-samples/blob/9c688d7ff78455ed42e345124d1495aad6bf66de/Samples/2_Concepts_and_Techniques/streamOrderedAllocation/streamOrderedAllocation.cu#L126

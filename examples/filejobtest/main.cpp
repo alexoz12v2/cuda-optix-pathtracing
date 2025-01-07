@@ -195,7 +195,7 @@ int32_t main()
     size_t align                     = dmt::alignForMemoryResource(mem);
     void*  storage                   = alloca(memSz + align - 1);
     storage                          = dmt::alignTo(storage, align);
-    dmt::BesaMemoryResource* pMemRes = dmt::constructMemoryResourceAt(storage, mem);
+    dmt::BaseMemoryResource* pMemRes = dmt::constructMemoryResourceAt(storage, mem);
     if (void* p = pMemRes->allocateBytes(sizeof(float) * 16, alignof(float)); p)
     {
         actx.log("Allocated Device memory!");

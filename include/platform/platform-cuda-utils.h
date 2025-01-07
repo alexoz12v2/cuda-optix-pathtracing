@@ -2,6 +2,7 @@
 
 #include "dmtmacros.h"
 
+#include <bit>
 #include <limits>
 #include <memory_resource>
 #include <type_traits>
@@ -121,10 +122,10 @@ DMT_MODULE_EXPORT dmt {
         return static_cast<EMemoryResourceType>(static_cast<T>(category) | static_cast<T>(type));
     }
 
-    class DMT_INTERFACE BesaMemoryResource
+    class DMT_INTERFACE BaseMemoryResource
     {
     public:
-        virtual ~BesaMemoryResource() = default;
+        virtual ~BaseMemoryResource() = default;
 
         // structures defined inside this CUDA translation unit should dynamic cast to the derived type instead
         virtual void* allocateBytes(size_t sz, size_t align)                                      = 0;
@@ -141,21 +142,79 @@ DMT_MODULE_EXPORT dmt {
 
     size_t sizeForMemoryResouce(EMemoryResourceType type);
 
-    BesaMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc);
+    BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc);
 
-    void destroyMemoryResouceAt(BesaMemoryResource * p, EMemoryResourceType eAlloc);
+    void destroyMemoryResouceAt(BaseMemoryResource * p, EMemoryResourceType eAlloc);
 
-    class UnifiedMemoryResource : public BesaMemoryResource, public std::pmr::memory_resource
+    class UnifiedMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     private:
         DMT_CPU void* do_allocate(size_t _Bytes, size_t _Align) override;
         DMT_CPU void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
         DMT_CPU bool  do_is_equal(memory_resource const& _That) const noexcept override;
 
-        // Inherited via BesaMemoryResource
+        // Inherited via BaseMemoryResource
         void* allocateBytes(size_t sz, size_t align) override;
         void  freeBytes(void* ptr, size_t sz, size_t align) override;
         void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override;
         void  freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
+    };
+
+    void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource * p, size_t * sz, bool destroy);
+    EMemoryResourceType categoryOf(BaseMemoryResource * allocator);
+
+    /**
+     * Singly linked list whose nodes are blocks of 256 Bytes each, where the last 8 bytes are used for the next pointer
+     * and the remaining 248 Bytes to store as many elements as possible, of which we store explicitly copy control functions, destructor
+     * insertion should only prepare the memory area and not construct the object. It is the caller responsibility to call construct at if
+     * necessary
+     * Such list will store a pointer to the BaseMemoryResource and a cuda stream handle at construction. If the handle is valid and the
+     * allocator is async, then stream aware allocation is prefered
+     */
+    class BlockyForwardList
+    {
+    public:
+        static constexpr uint32_t nodeSize  = 256;
+        static constexpr uint32_t blockSize = nodeSize - (sizeof(uintptr_t) + sizeof(size_t));
+        template <typename T>
+        DMT_CPU_GPU explicit BlockyForwardList(BaseMemoryResource* ptr, CudaStreamHandle stream = noStream) :
+        stream(stream),
+        m_resource(ptr),
+        m_elemSize(sizeof(T))
+        {
+            if (!ptr || m_elemSize > blockSize)
+                std::abort();
+        }
+
+        // TODO copy control
+
+        DMT_CPU_GPU void lockForRead();
+        DMT_CPU_GPU void unlockForRead();
+        DMT_CPU_GPU void lockForWrite();
+        DMT_CPU_GPU void unlockForWrite();
+
+        CudaStreamHandle stream;
+
+    private:
+        struct alignas(std::max_align_t) NodeHeader
+        {
+            size_t                  occupied;
+            void*                   next;
+            DMT_CPU_GPU NodeHeader* nextFooter() const
+            {
+                return std::bit_cast<NodeHeader*>(std::bit_cast<uintptr_t>(next) + blockSize);
+            }
+        };
+
+    private:
+        DMT_CPU_GPU void* allocateNode();
+        DMT_CPU_GPU void  freeNode(void* node);
+
+        BaseMemoryResource* m_resource;
+        size_t              m_elemSize;
+        size_t              m_size = 0;
+        NodeHeader*         m_head = nullptr;
+        int32_t             m_readCount = 0;
+        int32_t             m_writeCount = 0;
     };
 } // namespace dmt

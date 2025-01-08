@@ -47,6 +47,81 @@ DMT_MODULE_EXPORT dmt {
         return static_cast<E>(0);
     }
 
+    template <std::integral I, std::integral I2>
+        requires(sizeof(I) <= 8 && std::is_unsigned_v<I> && std::is_unsigned_v<I2> && sizeof(I) == sizeof(I2))
+    inline constexpr I roundUpToNextMultipleOf(I value, I2 divisor)
+    {
+        if (divisor == 0)
+        {
+            return 0; // Avoid division by zero
+        }
+        return ((value + divisor - 1) / divisor) * divisor;
+    }
+
+    template <std::integral I>
+        requires(sizeof(I) <= 8 && std::is_unsigned_v<I>)
+    inline constexpr I nextPOT(I value)
+    {
+        if constexpr (sizeof(I) == 8)
+        {
+            // Handle 64-bit integers
+            if (value == 0)
+            {
+                return 1;
+            }
+            --value;
+            value |= value >> 1;
+            value |= value >> 2;
+            value |= value >> 4;
+            value |= value >> 8;
+            value |= value >> 16;
+            value |= value >> 32;
+            return ++value;
+        }
+        else if constexpr (sizeof(I) == 4)
+        {
+            // Handle 32-bit integers
+            if (value == 0)
+            {
+                return 1;
+            }
+            --value;
+            value |= value >> 1;
+            value |= value >> 2;
+            value |= value >> 4;
+            value |= value >> 8;
+            value |= value >> 16;
+            return ++value;
+        }
+        else if constexpr (sizeof(I) == 2)
+        {
+            // Handle 16-bit integers
+            if (value == 0)
+            {
+                return 1;
+            }
+            --value;
+            value |= value >> 1;
+            value |= value >> 2;
+            value |= value >> 4;
+            value |= value >> 8;
+            return ++value;
+        }
+        else if constexpr (sizeof(I) == 1)
+        {
+            // Handle 8-bit integers
+            if (value == 0)
+            {
+                return 1;
+            }
+            --value;
+            value |= value >> 1;
+            value |= value >> 2;
+            value |= value >> 4;
+            return ++value;
+        }
+    }
+
     inline constexpr uint32_t smallestPOTMask(uint32_t value)
     {
         // If value is 0, smallest POT is 1 (mask = 0x0000'0001)

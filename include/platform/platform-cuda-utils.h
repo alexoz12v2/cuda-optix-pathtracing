@@ -22,10 +22,33 @@ DMT_MODULE_EXPORT dmt {
 
     struct CUDAHelloInfo
     {
-        size_t  totalMemInBytes;
-        int32_t device;
-        int32_t warpSize;
-        bool    cudaCapable;
+        struct ScopedLimits
+        {
+            int32_t maxBlocks;
+            int32_t maxRegisters;
+            int32_t maxSharedMemory;
+        };
+        struct Extent3D
+        {
+            int32_t x;
+            int32_t y;
+            int32_t z;
+        };
+
+        size_t       totalMemInBytes;
+        int32_t      device;
+        int32_t      warpSize;
+        ScopedLimits perMultiprocessor;
+        ScopedLimits perBlock;
+        int32_t      perBlockMaxThreads;
+        int32_t      multiprocessorCount;
+        int32_t      L2CacheBytes;
+        int32_t      constantMemoryBytes;
+        Extent3D     maxBlockDim;
+        Extent3D     maxGridDim;
+        uint32_t     cudaCapable           : 1;
+        uint32_t     supportsMemoryPools   : 1;
+        uint32_t     supportsVirtualMemory : 1;
     };
 
     bool logCUDAStatus(MemoryContext * mctx);
@@ -146,6 +169,8 @@ DMT_MODULE_EXPORT dmt {
 
     void destroyMemoryResouceAt(BaseMemoryResource * p, EMemoryResourceType eAlloc);
 
+    // Memory Resource Inputs and Types -------------------------------------------------------------------------------
+
     class UnifiedMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     private:
@@ -160,6 +185,17 @@ DMT_MODULE_EXPORT dmt {
         void  freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
     };
 
+    struct BuddyAsyncResourceSpec
+    {
+        MemoryContext* pmctx;
+        size_t         maxPoolSize;  // multiple of 2MB (cc 7.0) (ceil)
+        uint32_t       minBlockSize; // power of two (ceil). `minBlockSize * minBlocks` should be multiple of 2MB
+        uint32_t       minBlocks;    // number of device memory blocks to be committed immediately
+        int32_t        deviceId;
+    };
+
+    // Allocation Utilities for Containers ----------------------------------------------------------------------------
+
     DMT_CPU_GPU void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource * p, size_t * sz, bool destroy);
     DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource * allocator);
     DMT_CPU_GPU bool                isDeviceAllocator(BaseMemoryResource * allocator);
@@ -167,6 +203,9 @@ DMT_MODULE_EXPORT dmt {
 
     DMT_CPU_GPU void* allocateFromCategory(BaseMemoryResource * allocator, size_t sz, size_t align, CudaStreamHandle stream);
     DMT_CPU_GPU void freeFromCategory(BaseMemoryResource * allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+
+
+    // Containers -----------------------------------------------------------------------------------------------------
 
     class BaseDeviceContainer
     {

@@ -580,6 +580,11 @@ namespace dmt {
         m_IOClassInterface = std::exchange(other.m_IOClassInterface, Table{});
     }
 
+    size_t ConsoleLogger::maxLogArgBytes() const
+    {
+        return std::min(static_cast<size_t>(BaseAsyncIOManager::lineSize) >> 1, m_oss.maxLogArgBytes());
+    }
+
     static_assert(LogDisplay<ConsoleLogger>);
 
     // LoggingContext -------------------------------------------------------------------------------------------------
@@ -611,5 +616,6 @@ namespace dmt {
 #endif
     }
 
+    size_t LoggingContext::maxLogArgBytes() const { return logger.maxLogArgBytes(); }
 
 } // namespace dmt

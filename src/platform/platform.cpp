@@ -29,6 +29,8 @@ namespace dmt {
         mctx.pctx.write(level, str, list, loc);
     }
 
+    size_t AppContext::maxLogArgBytes() const { return mctx.pctx.maxLogArgBytes(); }
+
     void AppContext::addJob(Job const& job, EJobLayer layer) { threadPool.addJob(mctx, job, layer); }
 
     AppContext::~AppContext()

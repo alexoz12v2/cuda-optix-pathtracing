@@ -69,4 +69,62 @@ void testBuddyDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes)
         assert(ptr != nullptr && "Reallocation after exhaustion failed");
         pBuddy->deallocate(ptr, blockSize, alignof(std::max_align_t));
     }
+
+    // === Test 4: Basic CUDA Kernel Test ===
+    {
+        constexpr size_t  bufferSize = 1024; // Buffer size in bytes
+        constexpr uint8_t fillValue  = 42;   // Value to fill the buffer with
+
+        // Allocate device memory using the BuddyMemoryResource
+        void* deviceBuffer = pBuddy->allocate(bufferSize, alignof(std::max_align_t));
+        assert(deviceBuffer != nullptr && "Failed to allocate device buffer");
+
+        // Launch the kernel to fill the buffer
+        int threadsPerBlock = 256;
+        int blocksPerGrid   = (bufferSize + threadsPerBlock - 1) / threadsPerBlock;
+        fillBufferKernel<<<blocksPerGrid, threadsPerBlock>>>(static_cast<uint8_t*>(deviceBuffer), bufferSize, fillValue);
+
+        // Check for kernel launch errors
+        cudaError_t err = cudaGetLastError();
+        assert(err == ::cudaSuccess && "Kernel launch failed");
+
+        // Synchronize to ensure kernel execution is complete
+        err = cudaDeviceSynchronize();
+        assert(err == ::cudaSuccess && "Device synchronization failed");
+
+        // Allocate host memory for verification
+        std::vector<uint8_t> hostBuffer(bufferSize);
+
+        // Copy the device buffer back to the host
+        err = cudaMemcpy(hostBuffer.data(), deviceBuffer, bufferSize, ::cudaMemcpyDeviceToHost);
+        assert(err == ::cudaSuccess && "Failed to copy device buffer to host");
+
+        // Verify the buffer contents
+        std::string content;
+        for (size_t i = 0; i < bufferSize; ++i)
+        {
+            content += std::to_string(hostBuffer[i]) + ", ";
+            assert(hostBuffer[i] == fillValue && "Buffer verification failed");
+        }
+        content.resize(content.size() - 2);
+
+        actx.log("Buffer content: \{");
+        std::string_view str       = content;
+        size_t           remaining = str.size();
+        size_t const     maxPrint  = actx.maxLogArgBytes() >> 1;
+        size_t           offset    = 0;
+        while (offset < str.size())
+        {
+            size_t           toPrint = std::min(remaining, actx.maxLogArgBytes());
+            std::string_view s       = str.substr(offset, toPrint);
+            actx.log(" {}", {s});
+            offset += toPrint;
+            remaining -= toPrint;
+        }
+        actx.log("\} End Buffer content");
+
+        // Clean up
+        pBuddy->deallocate(deviceBuffer, bufferSize, alignof(std::max_align_t));
+        actx.log("CUDA Kernel Test Passed {}", {"success"sv});
+    }
 }

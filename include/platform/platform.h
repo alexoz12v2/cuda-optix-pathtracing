@@ -35,12 +35,13 @@ DMT_MODULE_EXPORT dmt {
         AppContext& operator=(AppContext&&) noexcept = delete;
         ~AppContext();
 
-        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
-        void write(ELogLevel                            level,
-                   std::string_view const&              str,
-                   std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc);
-        void addJob(Job const& job, EJobLayer layer);
+        size_t maxLogArgBytes() const;
+        void   write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+        void   write(ELogLevel                            level,
+                     std::string_view const&              str,
+                     std::initializer_list<StrBuf> const& list,
+                     std::source_location const&          loc);
+        void   addJob(Job const& job, EJobLayer layer);
 
         MemoryContext mctx;
         ThreadPoolV2  threadPool;

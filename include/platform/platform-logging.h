@@ -432,6 +432,8 @@ DMT_MODULE_EXPORT dmt {
          */
         std::string_view str();
 
+        size_t maxLogArgBytes() const { return bufferSize; }
+
     private:
         /**
          * character buffer
@@ -763,7 +765,7 @@ concept AsyncIOManager = requires(T t) {
                 uint32_t freeIdx = clazz.findFirstFreeBlocking();
                 int32_t  sz      = std::snprintf(clazz[freeIdx],
                                            T::lineSize,
-                                           "%s[%s %s:%s:%u] %s <> %s\n%s",
+                                           "%s[%s %s:%s:%u] %s <> %s%s\n\0",
                                            logcolor::colorFromLevel(levell).data(),
                                            date.data(),
                                            fileName.data(),
@@ -830,6 +832,8 @@ concept AsyncIOManager = requires(T t) {
         {
             return *reinterpret_cast<std::remove_cvref_t<T>*>(&m_asyncIOClass);
         }
+
+        size_t maxLogArgBytes() const;
 
     private:
         // -- Constructors --
@@ -1010,6 +1014,8 @@ concept AsyncIOManager = requires(T t) {
         void dbgTraceStackTrace();
 
         void dbgErrorStackTrace();
+
+        size_t maxLogArgBytes() const;
 
         uint64_t millisFromStart() const
         {

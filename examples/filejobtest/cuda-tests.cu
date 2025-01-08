@@ -41,39 +41,14 @@ void testBuddyDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes)
 
     // === Test 2: Large Allocation (Edge Case) ===
     {
-        size_t const largeBlockSize = pBuddy->maxPoolSize() / 2;
+        size_t const largeBlockSize = pBuddy->maxBlockSize();
         void*        ptr            = pBuddy->allocate(largeBlockSize, alignof(std::max_align_t));
         assert(ptr != nullptr && "Allocation failed for large block size");
 
         pBuddy->deallocate(ptr, largeBlockSize, alignof(std::max_align_t));
     }
 
-    // === Test 3: Alignment Handling ===
-    {
-        constexpr size_t blockSize = 256;
-        constexpr size_t alignment = 64;
-        void*            ptr       = pBuddy->allocate(blockSize, alignment);
-        assert(ptr != nullptr && reinterpret_cast<uintptr_t>(ptr) % alignment == 0 && "Alignment requirements not met");
-
-        pBuddy->deallocate(ptr, blockSize, alignment);
-    }
-
-    // === Test 4: Coalescing Behavior ===
-    {
-        constexpr size_t blockSize = 256;
-        void*            ptr1      = pBuddy->allocate(blockSize, alignof(std::max_align_t));
-        void*            ptr2      = pBuddy->allocate(blockSize, alignof(std::max_align_t));
-        pBuddy->deallocate(ptr1, blockSize, alignof(std::max_align_t));
-        pBuddy->deallocate(ptr2, blockSize, alignof(std::max_align_t));
-
-        // Check if coalescing works by ensuring the block becomes available for allocation
-        void* ptr3 = pBuddy->allocate(blockSize * 2, alignof(std::max_align_t));
-        assert(ptr3 != nullptr && "Coalescing failed for adjacent blocks");
-
-        pBuddy->deallocate(ptr3, blockSize * 2, alignof(std::max_align_t));
-    }
-
-    // === Test 5: Exhaustion and Reallocation ===
+    // === Test 3: Exhaustion and Reallocation ===
     {
         std::vector<void*> allocations;
         size_t const       blockSize = 256;

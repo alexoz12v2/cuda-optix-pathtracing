@@ -586,6 +586,8 @@ namespace dmt {
     DMT_CPU bool BuddyMemoryResource::grow()
     { // assume you already own the spinlock
         assert(m_ctrlBlock);
+        if (m_ctrlBlock->size * m_chunkSize >= m_maxPoolSize)
+            return false; // pool exhausted
 
         // check if capacity is enough
         if (m_ctrlBlock->capacity <= m_ctrlBlock->size)
@@ -606,7 +608,7 @@ namespace dmt {
         if (!allocateDevicePhysicalMemory(m_deviceId, m_chunkSize, arr[m_ctrlBlock->size]))
             return false;
 
-        assert(cuMemMap(m_ctrlBlock->ptr + offset, m_chunkSize, 0, arr[m_ctrlBlock->size], 0));
+        assert(cuMemMap(m_ctrlBlock->ptr + offset, m_chunkSize, 0, arr[m_ctrlBlock->size], 0) == ::CUDA_SUCCESS);
         setReadWriteDeviceVirtMemory(m_deviceId, m_ctrlBlock->ptr + offset, m_chunkSize);
         ++m_ctrlBlock->size;
 
@@ -629,10 +631,10 @@ namespace dmt {
         assert((size & (size - 1)) == 0); // Check if size is a power of two
 
         // Calculate the minimum order
-        size_t const minOrder = std::countl_zero(m_chunkSize) - std::countl_zero(static_cast<size_t>(m_minBlockSize));
+        size_t const minOrd = minOrder();
 
         // Calculate the order for the given size
-        size_t const order = minOrder + (std::countl_zero(m_chunkSize) - std::countl_zero(size));
+        size_t const order = minOrd + (std::countl_zero(size) - std::countl_zero(m_chunkSize));
 
         return order;
     }
@@ -662,6 +664,8 @@ namespace dmt {
         // Calculate the indices of the two children
         size_t const leftChildIndex  = 2 * index + 1;
         size_t const rightChildIndex = 2 * index + 2;
+        assert(m_ctrlBlock->allocationBitmap[leftChildIndex] == eInvalid &&
+               m_ctrlBlock->allocationBitmap[rightChildIndex] == eInvalid);
 
         // Ensure indices are within bounds
         assert(leftChildIndex < m_ctrlBlock->allocationBitmap.size());
@@ -672,8 +676,9 @@ namespace dmt {
         m_ctrlBlock->allocationBitmap[rightChildIndex] = eFree;
     }
 
-    DMT_CPU bool BuddyMemoryResource::coalesce(size_t parentIndex)
-    { // shared_lock on m_ctx, lock_guard on transactionInFlight acquired by caller
+    DMT_CPU bool BuddyMemoryResource::coalesce(size_t parentIndex, size_t parentLevel)
+    { // shared_lock on m_ctx, lock_guard on transactionInFlight acquired by caller.
+        // parent level > min Order checked by caller
         // Ensure the parent is valid and has children
         assert(parentIndex < m_ctrlBlock->allocationBitmap.size());
         assert(m_ctrlBlock->allocationBitmap[parentIndex] == eHasChildren);
@@ -686,21 +691,13 @@ namespace dmt {
         assert(leftChildIndex < m_ctrlBlock->allocationBitmap.size());
         assert(rightChildIndex < m_ctrlBlock->allocationBitmap.size());
 
-        // Check if this parent level is valid for coalescing
-        size_t const parentLevel = minOrder() - (std::countl_zero(parentIndex + 1) -
-                                                 std::countl_zero(m_ctrlBlock->allocationBitmap.size()));
-        if (parentLevel < minOrder())
-        {
-            return false; // Stop coalescing if parent level is below minOrder
-        }
-
         // Check if both children are free
         if (m_ctrlBlock->allocationBitmap[leftChildIndex] == eFree && m_ctrlBlock->allocationBitmap[rightChildIndex] == eFree)
         {
             // Mark the parent as free
             m_ctrlBlock->allocationBitmap[parentIndex] = eFree;
 
-            // Clear the children (optional, for debugging/clarity)
+            // Clear the children
             m_ctrlBlock->allocationBitmap[leftChildIndex]  = eInvalid;
             m_ctrlBlock->allocationBitmap[rightChildIndex] = eInvalid;
 
@@ -736,41 +733,47 @@ namespace dmt {
         while (true)
         {
             bool needsGrowth = false;
-            for (size_t currentLevel = level; !needsGrowth && currentLevel <= minOrder(); ++currentLevel)
+            for (size_t currentLevel = level; !needsGrowth && currentLevel >= minOrder(); --currentLevel)
             {
                 size_t const numNodesAtLevel = 1ULL << currentLevel;
 
                 // Loop through nodes at the current level
                 for (size_t nodeIdx = 0; !needsGrowth && nodeIdx < numNodesAtLevel; ++nodeIdx)
                 {
-                    size_t const index = ((1ULL << currentLevel) - 1) + nodeIdx;
+                    size_t index = ((1ULL << currentLevel) - 1) + nodeIdx;
 
                     // Check if the node is free
                     if (m_ctrlBlock->allocationBitmap[index] == eFree)
                     {
                         // Split the block as needed to reach the desired level
-                        while (currentLevel > level)
+                        while (currentLevel < level)
                         {
-                            --currentLevel;
-                            split(currentLevel, nodeIdx / 2); // Split the parent
-                            nodeIdx *= 2;                     // Move to the left child
+                            split(currentLevel, nodeIdx); // Split the parent
+                            ++currentLevel;
+                            nodeIdx *= 2; // Move to the left child
                         }
 
-                        // Mark the node as allocated
-                        m_ctrlBlock->allocationBitmap[index] = eAllocated;
+                        index = ((1ULL << currentLevel) - 1) + nodeIdx;
+                        assert(m_ctrlBlock->allocationBitmap[index] == eFree);
 
                         // Compute the pointer to the allocated memory
-                        size_t const offset = nodeIdx * (m_chunkSize >> currentLevel);
+                        size_t const offset = nodeIdx * (m_chunkSize >> (currentLevel - minOrder()));
                         CUdeviceptr  ptr    = m_ctrlBlock->ptr + offset;
                         CUdeviceptr  limit  = m_ctrlBlock->ptr + m_ctrlBlock->size * m_chunkSize;
                         if (ptr < limit)
+                        {
+                            // Mark the node as allocated
+                            m_ctrlBlock->allocationBitmap[index] = eAllocated;
                             return std::bit_cast<void*>(ptr);
+                        }
                         else
                         {
                             needsGrowth = true;
                             break;
                         }
                     }
+                    else if (m_ctrlBlock->allocationBitmap[index] == eInvalid)
+                        break;
                 }
             }
 
@@ -797,7 +800,7 @@ namespace dmt {
         size_t const offset = std::bit_cast<uintptr_t>(_Ptr) - m_ctrlBlock->ptr;
 
         // Calculate the index of the block in the allocation bitmap
-        size_t const nodeIdx = offset / (m_chunkSize >> level);
+        size_t const nodeIdx = offset / (m_chunkSize >> (level - minOrder()));
         size_t const index   = ((1ULL << level) - 1) + nodeIdx;
 
         // Acquire a lock for thread safety
@@ -809,9 +812,11 @@ namespace dmt {
 
         // Attempt to coalesce blocks up the tree
         size_t parentIndex = (index - 1) / 2;
-        while (parentIndex >= ((1ULL << (minOrder() - 1)) - 1) && coalesce(parentIndex))
+        size_t parentLevel = level - 1;
+        while (parentLevel >= minOrder() && coalesce(parentIndex, parentLevel))
         {
             parentIndex = (parentIndex - 1) / 2; // Move up to the parent
+            --parentLevel;
         }
 #endif
     }

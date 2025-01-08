@@ -238,7 +238,7 @@ int32_t main()
     dmt::BuddyResourceSpec buddySpec{
         .pmctx        = &actx.mctx,
         .pHostMemRes  = std::pmr::get_default_resource(),
-        .maxPoolSize  = 1ULL << 30,
+        .maxPoolSize  = 4ULL << 20, // 1ULL << 30,
         .minBlockSize = 256,
         .minBlocks    = (2ULL << 20) / 256,
         .deviceId     = info.device,

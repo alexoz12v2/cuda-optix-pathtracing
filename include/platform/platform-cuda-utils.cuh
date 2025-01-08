@@ -176,6 +176,7 @@ namespace dmt {
         ~BuddyMemoryResource() override;
 
         size_t maxPoolSize() const noexcept { return m_maxPoolSize; }
+        size_t maxBlockSize() const noexcept { return m_chunkSize; }
 
     private:
         enum EBitTree : uint8_t
@@ -208,7 +209,7 @@ namespace dmt {
         DMT_CPU size_t                blockToOrder(size_t size) const;
         DMT_CPU size_t                alignUpToBlock(size_t size) const;
         DMT_CPU void                  split(size_t order, size_t nodeIndex);
-        DMT_CPU bool                  coalesce(size_t parentIndex);
+        DMT_CPU bool                  coalesce(size_t parentIndex, size_t parentLevel);
 
         // Inherited via std::pmr::memory_resource
         void* do_allocate(size_t _Bytes, size_t _Align) override;

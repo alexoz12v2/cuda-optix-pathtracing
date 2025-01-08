@@ -1,4 +1,6 @@
 
+#include "cuda-tests.h"
+
 #include <array>
 #include <atomic>
 #include <bit>
@@ -177,6 +179,11 @@ AttributeEnd
         }
         actx.log("sdfdsa");
     }
+
+    void testBuddy(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemResBuddy)
+    {
+        testBuddyDirectly(actx, pMemResBuddy);
+    }
 } // namespace
 
 int32_t main()
@@ -190,12 +197,13 @@ int32_t main()
     //textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
 
-    dmt::EMemoryResourceType mem = dmt::makeMemResId(dmt::EMemoryResourceType::eDevice, dmt::EMemoryResourceType::eCudaMalloc);
-    size_t memSz                     = dmt::sizeForMemoryResouce(mem);
-    size_t align                     = dmt::alignForMemoryResource(mem);
-    void*  storage                   = alloca(memSz + align - 1);
-    storage                          = dmt::alignTo(storage, align);
-    dmt::BaseMemoryResource* pMemRes = dmt::constructMemoryResourceAt(storage, mem);
+    dmt::EMemoryResourceType const mem     = dmt::makeMemResId(dmt::EMemoryResourceType::eDevice,
+                                                           dmt::EMemoryResourceType::eCudaMalloc);
+    size_t const                   memSz   = dmt::sizeForMemoryResouce(mem);
+    size_t const                   align   = dmt::alignForMemoryResource(mem);
+    void*                          storage = alloca(memSz + align - 1);
+    storage                                = dmt::alignTo(storage, align);
+    dmt::BaseMemoryResource* pMemRes       = dmt::constructMemoryResourceAt(storage, mem, nullptr);
     if (void* p = pMemRes->allocateBytes(sizeof(float) * 16, alignof(float)); p)
     {
         actx.log("Allocated Device memory!");
@@ -227,6 +235,25 @@ int32_t main()
 
     ::delete[] ptr;
 
+    dmt::BuddyResourceSpec buddySpec{
+        .pmctx        = &actx.mctx,
+        .pHostMemRes  = std::pmr::get_default_resource(),
+        .maxPoolSize  = 1ULL << 30,
+        .minBlockSize = 256,
+        .minBlocks    = (2ULL << 20) / 256,
+        .deviceId     = info.device,
+    };
+    auto const memBuddy = dmt::makeMemResId(dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap);
+    size_t const             memSzBuddy       = dmt::sizeForMemoryResouce(memBuddy);
+    size_t const             alignBuddy       = dmt::alignForMemoryResource(memBuddy);
+    void*                    pMemBytes        = std::malloc(memSzBuddy + alignBuddy - 1);
+    void*                    pMemBytesAligned = dmt::alignTo(pMemBytes, alignBuddy);
+    dmt::BaseMemoryResource* pMemResBuddy     = dmt::constructMemoryResourceAt(pMemBytesAligned, memBuddy, &buddySpec);
+
+    testBuddy(actx, pMemResBuddy);
+
+    dmt::destroyMemoryResouceAt(pMemResBuddy, memBuddy);
     dmt::destroyMemoryResouceAt(pMemRes, mem);
+    std::free(pMemBytes);
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

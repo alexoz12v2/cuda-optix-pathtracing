@@ -131,7 +131,7 @@ namespace dmt {
         // various inofration
         assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCKS_PER_MULTIPROCESSOR, deviceHandle) ==
                ::CUDA_SUCCESS);
-        ret.perMultiprocessor.maxBlocks = support;
+        ret.perMultiprocessorMaxBlocks = support;
         assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR, deviceHandle) ==
                ::CUDA_SUCCESS);
         ret.perMultiprocessor.maxRegisters = support;
@@ -310,22 +310,12 @@ namespace dmt {
     }
 
     // Memory Resouce Implementations ---------------------------------------------------------------------------------
-    void* HostPoolReousce::allocateBytes(size_t sz, size_t align) { return m_res.allocate(sz, align); }
-    void  HostPoolReousce::freeBytes(void* ptr, size_t sz, size_t align) { return m_res.deallocate(ptr, sz, align); }
-    void* HostPoolReousce::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
-    {
-        assert(false);
-        return nullptr;
-    }
-
-    void HostPoolReousce::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) { assert(false); }
-
-    void* HostPoolReousce::do_allocate(size_t _Bytes, size_t _Align) { return m_res.allocate(_Bytes, _Align); }
-    void  HostPoolReousce::do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align)
+    void* HostPoolResource::do_allocate(size_t _Bytes, size_t _Align) { return m_res.allocate(_Bytes, _Align); }
+    void  HostPoolResource::do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align)
     {
         m_res.deallocate(_Ptr, _Bytes, _Align);
     }
-    bool HostPoolReousce::do_is_equal(memory_resource const& _That) const noexcept { return m_res == _That; }
+    bool HostPoolResource::do_is_equal(memory_resource const& _That) const noexcept { return m_res == _That; }
 
     DMT_CPU_GPU void* CudaMallocResource::do_allocate(size_t sz, [[maybe_unused]] size_t align)
     {
@@ -369,14 +359,15 @@ namespace dmt {
     bool CudaMallocAsyncResource::do_is_equal(memory_resource const& _That) const noexcept { return true; }
 
 
-    BuddyAsyncResource::BuddyAsyncResource(BuddyAsyncResourceSpec const& input) :
+    BuddyMemoryResource::BuddyMemoryResource(BuddyResourceSpec const& input) :
     m_deviceId(input.deviceId),
-    m_minBlockSize(nextPOT(input.minBlockSize))
+    m_minBlockSize(static_cast<uint32_t>(nextPOT(input.minBlockSize)))
     { // TODO better? allocation functions without class? global context map {pid, idx -> ctx}
 #if defined(__CUDA_ARCH__)
         // you shouldn't be here
         m_ctrlBlock = nullptr;
 #else
+        assert(input.pHostMemRes);
         assert(cuDeviceGet(&m_device, m_deviceId) == ::CUDA_SUCCESS);
         int32_t support = 0;
         assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, m_device) == ::CUDA_SUCCESS);
@@ -416,7 +407,7 @@ namespace dmt {
         assert(initialCapacity % sizeof(CUmemGenericAllocationHandle) == 0);
         initialCapacity /= sizeof(CUmemGenericAllocationHandle);
 
-        m_ctrlBlock = std::construct_at(std::bit_cast<UnifiedControlBlock*>(reservedHostSpace));
+        m_ctrlBlock = std::construct_at(std::bit_cast<UnifiedControlBlock*>(reservedHostSpace), input.pHostMemRes);
         m_ctrlBlock->refCount.store(1, std::memory_order_seq_cst);
         m_ctrlBlock->capacity = initialCapacity;
 
@@ -438,10 +429,34 @@ namespace dmt {
         // map the first device memory chunk
         assert(cuMemMap(m_ctrlBlock->ptr, m_chunkSize, 0, arr[0], 0) == ::CUDA_SUCCESS);
         setReadWriteDeviceVirtMemory(m_deviceId, m_ctrlBlock->ptr, m_chunkSize);
+
+        // allocate the metadata all in one shot, and memset it to
+        assert(m_maxPoolSize % m_minBlockSize == 0);
+        size_t const completeBinaryTreeNodes = (m_maxPoolSize / m_minBlockSize) << 1;
+        m_ctrlBlock->allocationBitmap.resize(completeBinaryTreeNodes);
+        std::ranges::fill(m_ctrlBlock->allocationBitmap, eInvalid);
+
+        // this isn't a "pure" buddy system. The allocation actually has a maximum size, hence subdivide the
+        // tree until you get nodes representing blocks of `m_chunkSize`
+        size_t const minOrderChunk = minOrder();
+        for (size_t level = 0; level < minOrderChunk; ++level)
+        {
+            size_t numNodes = 1ULL << level;
+            for (size_t nodeIdx = 0; nodeIdx < numNodes; ++nodeIdx)
+            {
+                size_t const index                   = ((1ULL << level) - 1) + nodeIdx; // Calculate index
+                m_ctrlBlock->allocationBitmap[index] = eHasChildren;
+            }
+        }
+        for (size_t nodeIdx = 0; nodeIdx < (1ULL << minOrderChunk); ++nodeIdx)
+        {
+            size_t const index                   = ((1ULL << minOrderChunk) - 1) + nodeIdx; // Calculate index
+            m_ctrlBlock->allocationBitmap[index] = eFree;
+        }
 #endif
     }
 
-    BuddyAsyncResource::BuddyAsyncResource(BuddyAsyncResource const& other)
+    BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource const& other)
     {
         // shouldn't be necessary to lock `transactionInFlight`, cause no device allocation is needed here
         std::shared_lock slk{other.m_mtx};
@@ -457,7 +472,7 @@ namespace dmt {
         m_ctrlBlock->refCount.fetch_add(1, std::memory_order_seq_cst);
     }
 
-    BuddyAsyncResource::BuddyAsyncResource(BuddyAsyncResource&& other) noexcept
+    BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource&& other) noexcept
     {
         // shouldn't be necessary to lock `transactionInFlight`, cause no device allocation is needed here
         std::lock_guard lk{other.m_mtx};
@@ -470,7 +485,7 @@ namespace dmt {
         m_minBlockSize               = other.m_minBlockSize;
     }
 
-    BuddyAsyncResource& BuddyAsyncResource::operator=(BuddyAsyncResource const& other)
+    BuddyMemoryResource& BuddyMemoryResource::operator=(BuddyMemoryResource const& other)
     {
         if (this != &other)
         {
@@ -491,7 +506,7 @@ namespace dmt {
         return *this;
     }
 
-    BuddyAsyncResource& BuddyAsyncResource::operator=(BuddyAsyncResource&& other) noexcept
+    BuddyMemoryResource& BuddyMemoryResource::operator=(BuddyMemoryResource&& other) noexcept
     {
         if (this != &other)
         {
@@ -511,7 +526,7 @@ namespace dmt {
         return *this;
     }
 
-    DMT_CPU void BuddyAsyncResource::cleanup() noexcept
+    DMT_CPU void BuddyMemoryResource::cleanup() noexcept
     {
         if (!m_ctrlBlock)
             return;
@@ -542,6 +557,8 @@ namespace dmt {
         // free device virtual address reservation
         assert(cuMemAddressFree(m_ctrlBlock->ptr, m_maxPoolSize) == ::CUDA_SUCCESS);
 
+        std::destroy_at(m_ctrlBlock);
+
         // compute number of host committed pages, decommit them
         size_t pageCount = m_ctrlBlock->capacity * sizeof(CUmemGenericAllocationHandle) + sizeof(UnifiedControlBlock);
         size_t const pageSz = toUnderlying(EPageSize::e4KB);
@@ -559,13 +576,14 @@ namespace dmt {
         m_ctrlBlock = nullptr;
     }
 
-    CUmemGenericAllocationHandle* BuddyAsyncResource::vlaStart() const
+    CUmemGenericAllocationHandle* BuddyMemoryResource::vlaStart() const
     {
         assert(m_ctrlBlock);
-        return std::bit_cast<CUmemGenericAllocationHandle*>(std::bit_cast<uintptr_t>(m_ctrlBlock) + sizeof(UnifiedControlBlock)));
+        return std::bit_cast<CUmemGenericAllocationHandle*>(
+            std::bit_cast<uintptr_t>(m_ctrlBlock) + sizeof(UnifiedControlBlock));
     }
 
-    DMT_CPU bool BuddyAsyncResource::grow()
+    DMT_CPU bool BuddyMemoryResource::grow()
     { // assume you already own the spinlock
         assert(m_ctrlBlock);
 
@@ -595,7 +613,104 @@ namespace dmt {
         return true;
     }
 
-    BuddyAsyncResource::~BuddyAsyncResource()
+    DMT_CPU size_t BuddyMemoryResource::minOrder() const
+    {
+        size_t const lzcntMinSize = std::countl_zero(m_chunkSize);
+        size_t const lzcntMaxSize = std::countl_zero(m_maxPoolSize);
+        return lzcntMinSize - lzcntMaxSize;
+    }
+
+    DMT_CPU size_t BuddyMemoryResource::blockToOrder(size_t size) const
+    { // assumptions: size is already a POT between m_minBlockSize and m_chunkSize
+        // should return: minOrder()     for size == m_chunkSize
+        // should return: minOrder() + n for size == m_chunkSize >> n
+        // Ensure the size is a power of two and within valid bounds
+        assert(size >= m_minBlockSize && size <= m_chunkSize);
+        assert((size & (size - 1)) == 0); // Check if size is a power of two
+
+        // Calculate the minimum order
+        size_t const minOrder = std::countl_zero(m_chunkSize) - std::countl_zero(static_cast<size_t>(m_minBlockSize));
+
+        // Calculate the order for the given size
+        size_t const order = minOrder + (std::countl_zero(m_chunkSize) - std::countl_zero(size));
+
+        return order;
+    }
+
+    DMT_CPU size_t BuddyMemoryResource::alignUpToBlock(size_t size) const
+    {
+        size_t alignedSize = m_minBlockSize;
+        while (alignedSize < size)
+        {
+            alignedSize <<= 1; // Double the size until it can accommodate 'size'.
+        }
+        return alignedSize;
+    }
+
+    DMT_CPU void BuddyMemoryResource::split(size_t order, size_t nodeIndex)
+    { // shared_lock on m_ctx, lock_guard on transactionInFlight acquired by caller
+        // Calculate raw array index of the node
+        size_t const index = ((1ULL << order) - 1) + nodeIndex;
+
+        // Ensure the node is valid
+        assert(index < m_ctrlBlock->allocationBitmap.size());
+        assert(m_ctrlBlock->allocationBitmap[index] == eFree || m_ctrlBlock->allocationBitmap[index] == eHasChildren);
+
+        // Mark the current node as having children
+        m_ctrlBlock->allocationBitmap[index] = eHasChildren;
+
+        // Calculate the indices of the two children
+        size_t const leftChildIndex  = 2 * index + 1;
+        size_t const rightChildIndex = 2 * index + 2;
+
+        // Ensure indices are within bounds
+        assert(leftChildIndex < m_ctrlBlock->allocationBitmap.size());
+        assert(rightChildIndex < m_ctrlBlock->allocationBitmap.size());
+
+        // Mark both children as free
+        m_ctrlBlock->allocationBitmap[leftChildIndex]  = eFree;
+        m_ctrlBlock->allocationBitmap[rightChildIndex] = eFree;
+    }
+
+    DMT_CPU bool BuddyMemoryResource::coalesce(size_t parentIndex)
+    { // shared_lock on m_ctx, lock_guard on transactionInFlight acquired by caller
+        // Ensure the parent is valid and has children
+        assert(parentIndex < m_ctrlBlock->allocationBitmap.size());
+        assert(m_ctrlBlock->allocationBitmap[parentIndex] == eHasChildren);
+
+        // Calculate indices of the children
+        size_t const leftChildIndex  = 2 * parentIndex + 1;
+        size_t const rightChildIndex = 2 * parentIndex + 2;
+
+        // Ensure children indices are within bounds
+        assert(leftChildIndex < m_ctrlBlock->allocationBitmap.size());
+        assert(rightChildIndex < m_ctrlBlock->allocationBitmap.size());
+
+        // Check if this parent level is valid for coalescing
+        size_t const parentLevel = minOrder() - (std::countl_zero(parentIndex + 1) -
+                                                 std::countl_zero(m_ctrlBlock->allocationBitmap.size()));
+        if (parentLevel < minOrder())
+        {
+            return false; // Stop coalescing if parent level is below minOrder
+        }
+
+        // Check if both children are free
+        if (m_ctrlBlock->allocationBitmap[leftChildIndex] == eFree && m_ctrlBlock->allocationBitmap[rightChildIndex] == eFree)
+        {
+            // Mark the parent as free
+            m_ctrlBlock->allocationBitmap[parentIndex] = eFree;
+
+            // Clear the children (optional, for debugging/clarity)
+            m_ctrlBlock->allocationBitmap[leftChildIndex]  = eInvalid;
+            m_ctrlBlock->allocationBitmap[rightChildIndex] = eInvalid;
+
+            return true; // Coalescing succeeded
+        }
+
+        return false; // Coalescing not possible
+    }
+
+    BuddyMemoryResource::~BuddyMemoryResource()
     {
 #if defined(__CUDA_ARCH__)
         // you shouldn't be here
@@ -604,28 +719,106 @@ namespace dmt {
 #endif
     }
 
-    inline void* BuddyAsyncResource::do_allocate(size_t _Bytes, size_t _Align)
+    void* BuddyMemoryResource::do_allocate(size_t _Bytes, size_t _Align)
     {
 #if defined(__CUDA_ARCH__)
         return nullptr;
 #else
-        // ...
-        return nullptr;
+        if (_Bytes > m_chunkSize)
+            return nullptr;
+
+        std::shared_lock slk{m_mtx};
+        size_t           alignedSize = alignUpToBlock(_Bytes);
+        size_t           level       = blockToOrder(alignedSize);
+
+        std::lock_guard spinGuard{m_ctrlBlock->transactionInFlight};
+        // Traverse the allocation bitmap to find a suitable free block
+        while (true)
+        {
+            bool needsGrowth = false;
+            for (size_t currentLevel = level; !needsGrowth && currentLevel <= minOrder(); ++currentLevel)
+            {
+                size_t const numNodesAtLevel = 1ULL << currentLevel;
+
+                // Loop through nodes at the current level
+                for (size_t nodeIdx = 0; !needsGrowth && nodeIdx < numNodesAtLevel; ++nodeIdx)
+                {
+                    size_t const index = ((1ULL << currentLevel) - 1) + nodeIdx;
+
+                    // Check if the node is free
+                    if (m_ctrlBlock->allocationBitmap[index] == eFree)
+                    {
+                        // Split the block as needed to reach the desired level
+                        while (currentLevel > level)
+                        {
+                            --currentLevel;
+                            split(currentLevel, nodeIdx / 2); // Split the parent
+                            nodeIdx *= 2;                     // Move to the left child
+                        }
+
+                        // Mark the node as allocated
+                        m_ctrlBlock->allocationBitmap[index] = eAllocated;
+
+                        // Compute the pointer to the allocated memory
+                        size_t const offset = nodeIdx * (m_chunkSize >> currentLevel);
+                        CUdeviceptr  ptr    = m_ctrlBlock->ptr + offset;
+                        CUdeviceptr  limit  = m_ctrlBlock->ptr + m_ctrlBlock->size * m_chunkSize;
+                        if (ptr < limit)
+                            return std::bit_cast<void*>(ptr);
+                        else
+                        {
+                            needsGrowth = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // If no suitable block was found, grow the pool if possible
+            if (!grow())
+                return nullptr;
+        }
 #endif
     }
 
-    inline void BuddyAsyncResource::do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align)
+    void BuddyMemoryResource::do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align)
     {
 #if defined(__CUDA_ARCH__)
         // do nothing
 #else
-        // ...
+        std::shared_lock slk{m_mtx};
+        // Align the size to the nearest power-of-two block
+        _Bytes = alignUpToBlock(_Bytes);
+
+        // Determine the level corresponding to the block size
+        size_t const level = blockToOrder(_Bytes);
+
+        // Compute the offset of the block relative to the start of the memory pool
+        size_t const offset = std::bit_cast<uintptr_t>(_Ptr) - m_ctrlBlock->ptr;
+
+        // Calculate the index of the block in the allocation bitmap
+        size_t const nodeIdx = offset / (m_chunkSize >> level);
+        size_t const index   = ((1ULL << level) - 1) + nodeIdx;
+
+        // Acquire a lock for thread safety
+        std::lock_guard lk{m_ctrlBlock->transactionInFlight};
+
+        // Mark the block as free
+        assert(m_ctrlBlock->allocationBitmap[index] == eAllocated);
+        m_ctrlBlock->allocationBitmap[index] = eFree;
+
+        // Attempt to coalesce blocks up the tree
+        size_t parentIndex = (index - 1) / 2;
+        while (parentIndex >= ((1ULL << (minOrder() - 1)) - 1) && coalesce(parentIndex))
+        {
+            parentIndex = (parentIndex - 1) / 2; // Move up to the parent
+        }
 #endif
     }
 
-    inline bool BuddyAsyncResource::do_is_equal(memory_resource const& that) const noexcept
+    inline bool BuddyMemoryResource::do_is_equal(memory_resource const& that) const noexcept
     { // TODO better
-        BuddyAsyncResource const* other = dynamic_cast<BuddyAsyncResource const*>(&that);
+        BuddyMemoryResource const* other = dynamic_cast<BuddyMemoryResource const*>(&that);
         if (!other)
             return false;
         // if control block is the same, then they should be on the same device
@@ -633,12 +826,8 @@ namespace dmt {
         return m_device == other->m_device && m_ctrlBlock == other->m_ctrlBlock;
     }
 
-    inline DMT_CPU void* BuddyAsyncResource::do_allocate_async(size_t, size_t, cuda::stream_ref) { return nullptr; }
-
-    inline DMT_CPU void BuddyAsyncResource::do_deallocate_async(void*, size_t, size_t, cuda::stream_ref) {}
-
     // Memory Resouce Boilerplate -------------------------------------------------------------------------------------
-    DMT_CPU_GPU void switchOnMemoryResoure(EMemoryResourceType eAlloc, BaseMemoryResource* p, size_t* sz, bool destroy)
+    DMT_CPU_GPU void switchOnMemoryResource(EMemoryResourceType eAlloc, BaseMemoryResource* p, size_t* sz, bool destroy, void* ctorParam)
     {
         EMemoryResourceType category = extractCategory(eAlloc);
         EMemoryResourceType type     = extractType(eAlloc);
@@ -651,11 +840,21 @@ namespace dmt {
                     case ePool:
                         if (p)
                             if (destroy)
-                                std::destroy_at(std::bit_cast<HostPoolReousce*>(p));
+                                std::destroy_at(std::bit_cast<HostPoolResource*>(p));
                             else
-                                std::construct_at(std::bit_cast<HostPoolReousce*>(p));
+                                std::construct_at(std::bit_cast<HostPoolResource*>(p));
                         else if (sz)
-                            *sz = sizeof(HostPoolReousce);
+                            *sz = sizeof(HostPoolResource);
+                        break;
+                    case eHostToDevMemMap:
+                        if (p)
+                            if (destroy)
+                                std::destroy_at(std::bit_cast<BuddyMemoryResource*>(p));
+                            else
+                                std::construct_at(std::bit_cast<BuddyMemoryResource*>(p),
+                                                  *std::bit_cast<BuddyResourceSpec*>(ctorParam));
+                        else if (sz)
+                            *sz = sizeof(BuddyMemoryResource);
                         break;
                 }
                 break;
@@ -705,20 +904,20 @@ namespace dmt {
     DMT_CPU_GPU size_t sizeForMemoryResouce(EMemoryResourceType eAlloc)
     {
         size_t ret = 0;
-        switchOnMemoryResoure(eAlloc, nullptr, &ret, true);
+        switchOnMemoryResource(eAlloc, nullptr, &ret, true, nullptr);
         return ret;
     }
 
-    DMT_CPU_GPU BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc)
+    DMT_CPU_GPU BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam)
     {
         BaseMemoryResource* p = std::bit_cast<BaseMemoryResource*>(ptr);
-        switchOnMemoryResoure(eAlloc, p, nullptr, false);
+        switchOnMemoryResource(eAlloc, p, nullptr, false, ctorParam);
         return p;
     }
 
     DMT_CPU_GPU void destroyMemoryResouceAt(BaseMemoryResource* p, EMemoryResourceType eAlloc)
     {
-        switchOnMemoryResoure(eAlloc, p, nullptr, true);
+        switchOnMemoryResource(eAlloc, p, nullptr, true, nullptr);
     }
 
     DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource* allocator)

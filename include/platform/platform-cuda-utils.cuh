@@ -98,15 +98,34 @@ namespace dmt {
                   cuda::has_property<CudaAsyncMemoryReosurce, cuda::mr::device_accessible>);
 
     // Memory Resouce Implementations ---------------------------------------------------------------------------------
-    class HostPoolReousce : public DeviceMemoryReosurce, public std::pmr::memory_resource
+    template <typename T>
+    class BaseHostResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     private:
-        void* allocateBytes(size_t sz, size_t align) override;
-        void  freeBytes(void* ptr, size_t sz, size_t align) override;
-        void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override;
+        void* allocateBytes(size_t sz, size_t align) override
+        {
+            return std::bit_cast<T*>(this)->m_res.allocate(sz, align);
+        }
 
-        void freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
+        void freeBytes(void* ptr, size_t sz, size_t align) override
+        {
+            std::bit_cast<T*>(this)->m_res.deallocate(ptr, sz, align);
+        }
 
+        void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override
+        {
+            assert(false);
+            return nullptr;
+        }
+
+        void freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override { assert(false); }
+    };
+
+    class HostPoolResource : public BaseHostResource<HostPoolResource>
+    {
+        friend class BaseHostResource<HostPoolResource>;
+
+    private:
         void* do_allocate(size_t _Bytes, size_t _Align) override;
         void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
         bool  do_is_equal(memory_resource const& _That) const noexcept override;
@@ -146,27 +165,37 @@ namespace dmt {
         bool          do_is_equal(memory_resource const& _That) const noexcept override;
     };
 
-    class BuddyAsyncResource :
-    public CudaAsyncMemoryReosurce,
-        public cuda::forward_property<BuddyAsyncResource, CudaAsyncMemoryReosurce>
+    class BuddyMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     public:
-        BuddyAsyncResource(BuddyAsyncResourceSpec const& input);
-        BuddyAsyncResource(BuddyAsyncResource const& other);
-        BuddyAsyncResource(BuddyAsyncResource&& other) noexcept;
-        BuddyAsyncResource& operator=(BuddyAsyncResource const& other);
-        BuddyAsyncResource& operator=(BuddyAsyncResource&& other) noexcept;
-        ~BuddyAsyncResource() override;
+        BuddyMemoryResource(BuddyResourceSpec const& input);
+        BuddyMemoryResource(BuddyMemoryResource const& other);
+        BuddyMemoryResource(BuddyMemoryResource&& other) noexcept;
+        BuddyMemoryResource& operator=(BuddyMemoryResource const& other);
+        BuddyMemoryResource& operator=(BuddyMemoryResource&& other) noexcept;
+        ~BuddyMemoryResource() override;
+
+        size_t maxPoolSize() const noexcept { return m_maxPoolSize; }
 
     private:
+        enum EBitTree : uint8_t
+        {
+            eFree = 0,
+            eAllocated,
+            eHasChildren,
+            eInvalid
+        };
+        using BitTree = std::pmr::vector<EBitTree>;
         struct UnifiedControlBlock
         {
-            CUdeviceptr ptr;
-            size_t      size = 0; // number of chunks physically allocated and mapped, equal to number of handles
-            size_t      capacity; // number of handles we can hold in the VLA
-            //std::pmr::vector<uint32_t> allocationBitmap;
-            std::atomic<int32_t> refCount;
-            SpinLock             transactionInFlight;
+            UnifiedControlBlock(std::pmr::memory_resource* res) : allocationBitmap(res) {}
+
+            CUdeviceptr ptr      = 0;
+            size_t      size     = 0; // number of chunks physically allocated and mapped, equal to number of handles
+            size_t      capacity = 0; // number of handles we can hold in the VLA
+            std::pmr::vector<EBitTree>   allocationBitmap;
+            mutable std::atomic<int32_t> refCount;
+            mutable SpinLock             transactionInFlight;
             // VLA of `CUmemGenericAllocationHandle` here
         };
         static_assert(alignof(UnifiedControlBlock) >= alignof(CUmemGenericAllocationHandle));
@@ -175,13 +204,26 @@ namespace dmt {
         DMT_CPU void                  cleanup() noexcept;
         CUmemGenericAllocationHandle* vlaStart() const;
         DMT_CPU bool                  grow();
+        DMT_CPU size_t                minOrder() const;
+        DMT_CPU size_t                blockToOrder(size_t size) const;
+        DMT_CPU size_t                alignUpToBlock(size_t size) const;
+        DMT_CPU void                  split(size_t order, size_t nodeIndex);
+        DMT_CPU bool                  coalesce(size_t parentIndex);
 
-        // Inherited via CudaAsyncMemoryReosurce
-        void*         do_allocate(size_t _Bytes, size_t _Align) override;
-        void          do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
-        bool          do_is_equal(memory_resource const& that) const noexcept override;
-        DMT_CPU void* do_allocate_async(size_t, size_t, cuda::stream_ref) override;
-        DMT_CPU void  do_deallocate_async(void*, size_t, size_t, cuda::stream_ref) override;
+        // Inherited via std::pmr::memory_resource
+        void* do_allocate(size_t _Bytes, size_t _Align) override;
+        void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
+        bool  do_is_equal(memory_resource const& that) const noexcept override;
+
+        // Inherited via BaseMemoryResource (Boilerplate basically)
+        void* allocateBytes(size_t sz, size_t align) override { return do_allocate(sz, align); }
+        void  freeBytes(void* ptr, size_t sz, size_t align) override { do_deallocate(ptr, sz, align); }
+        void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override
+        {
+            assert(false);
+            return nullptr;
+        }
+        void freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override { assert(false); }
 
     private:
         UnifiedControlBlock* m_ctrlBlock; // when moved from, this is nullptr, and if it is, allocation functions return always nullptr
@@ -190,7 +232,7 @@ namespace dmt {
         size_t m_maxPoolSize;
         size_t m_ctrlBlockReservedVMemBytes;
         size_t m_chunkSize;
-        std::shared_mutex m_mtx; // allocation functions use a std::shared_lock on this, while std::lock_guard used by copy control and cleanup
+        mutable std::shared_mutex m_mtx; // allocation functions use a std::shared_lock on this, while std::lock_guard used by copy control and cleanup
         CUdevice m_device;
         int32_t  m_deviceId;
         uint32_t m_minBlockSize;

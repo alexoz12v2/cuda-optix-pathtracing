@@ -3227,12 +3227,12 @@ namespace dmt {
     uint32_t SceneParser::parseArgs(AppContext& actx, TokenStream& stream, ArgsDArray& outArr)
     {
         uint32_t i = 0;
-        for (std::string token = stream.peek(); !token.empty(); ++i, stream.advance(actx))
+        for (std::string token = stream.peek(); !token.empty(); ++i, stream.advance(actx), token = stream.peek())
         {
             if (token.starts_with('#'))
                 continue;
 
-            sid_t tokenSid = hashCRC64(token);
+            sid_t tokenSid = hashCRC64(dequoteString(token));
             if (isDirective(tokenSid) || isParameter(actx, token))
                 break;
 
@@ -3251,12 +3251,12 @@ namespace dmt {
     uint32_t SceneParser::parseParams(AppContext& actx, TokenStream& stream, ParamMap& outParams)
     {
         uint32_t i = 0;
-        for (std::string token = stream.peek(); !token.empty(); ++i, stream.advance(actx))
+        for (std::string token = stream.peek(); !token.empty(); stream.advance(actx))
         {
             if (token.starts_with('#')) // TODO isComment function
                 continue;
 
-            sid_t tokenSid = hashCRC64(token);
+            sid_t tokenSid = hashCRC64(dequoteString(token));
             if (isDirective(tokenSid))
                 break;
 
@@ -3270,13 +3270,19 @@ namespace dmt {
 
             stream.advance(actx);
             for (token = stream.peek(); !token.empty() && !isParameter(actx, token) && !isDirective(tokenSid);
-                 stream.advance(actx))
+                 stream.advance(actx), token = stream.peek(), tokenSid = hashCRC64(dequoteString(token)))
             {
                 if (token.size() == 1 && (token[0] == '[' || token[0] == ']'))
                     continue;
                 it->second.addParamValue(token);
             }
+            if (it->second.values.size() < 1)
+            {
+                actx.error("Found a parameter without values, aborting...");
+                std::abort();
+            }
 
+            ++i;
             if (token.empty() || isDirective(tokenSid))
                 break;
         }

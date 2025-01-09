@@ -2659,6 +2659,7 @@ namespace dmt {
          ParamMap&    outParams,
          bool (*fromSidFunc)(sid_t, Enum&),
          Enum& out) {
+            currentStream.advance(actx);
             if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(outArgs[0]), out))
             {
                 actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
@@ -2691,12 +2692,13 @@ namespace dmt {
             Spec spec;
             if (!transitionToHeaderIfFirstHeaderDirective(actx, options, eDirective))
                 std::abort();
+            currentStream.advance(actx);
             if (uint32_t num = parseArgs(actx, currentStream, outArgs); num != 1)
             {
                 actx.error("Unexpected number of arguments for {} directive. Should be 1, got {}", {directive.str, num});
                 std::abort();
             }
-            if (!fromSidFunc(hashCRC64(outArgs[0]), spec.type))
+            if (!fromSidFunc(hashCRC64(dequoteString(outArgs[0])), spec.type))
             {
                 actx.error("Unexpected type argument for {} directive. got {}. Consult docs to see possible values.",
                            {directive.str, outArgs[0]});
@@ -2718,6 +2720,7 @@ namespace dmt {
          TokenStream&             currentStream,
          ArgsDArray&              outArgs,
          std::array<float, size>& outArray) {
+            currentStream.advance(actx);
             if (parseArgs(actx, currentStream, outArgs) != size)
             {
                 actx.error("Unexpected number of parameters for {} directive", {directive.str});
@@ -2737,6 +2740,7 @@ namespace dmt {
                    ArgsDArray&  outArgs,
                    sid_t*       pSids,
                    uint32_t     num) {
+            currentStream.advance(actx);
             if (parseArgs(actx, currentStream, outArgs) != num ||
                 std::reduce(outArgs.begin(), outArgs.begin() + num, false, [](bool curr, std::string const& elem) {
                 return curr || !startsWithEndsWith(elem, '"', '"');
@@ -2816,6 +2820,7 @@ namespace dmt {
                     {
                         if (!transitionToHeaderIfFirstHeaderDirective(actx, inOutOptions, EEncounteredHeaderDirective::eColorSpace))
                             std::abort();
+                        currentStream.advance(actx);
                         if (parseArgs(actx, currentStream, args) != 1)
                         {
                             actx.error("Unexpected number of arguments for ColorSpace directive");
@@ -2989,6 +2994,7 @@ namespace dmt {
                     case dict::directive::ActiveTransform.sid:
                     {
                         EActiveTransform transform = EActiveTransform::eStartTime;
+                        currentStream.advance(actx);
                         if (parseArgs(actx, currentStream, args) != 1 ||
                             !activeTransformFromSid(hashCRC64(args[0]), transform))
                         {
@@ -3262,9 +3268,12 @@ namespace dmt {
                 std::abort();
             }
 
+            stream.advance(actx);
             for (token = stream.peek(); !token.empty() && !isParameter(actx, token) && !isDirective(tokenSid);
                  stream.advance(actx))
             {
+                if (token.size() == 1 && (token[0] == '[' || token[0] == ']'))
+                    continue;
                 it->second.addParamValue(token);
             }
 

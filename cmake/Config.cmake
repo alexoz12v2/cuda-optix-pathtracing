@@ -322,7 +322,7 @@ macro(dmt_set_target_warnings target)
   # TODO move to another function
   set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON) # default = on for shared, off for static
-  set_property(TARGET ${target} PROPERTY CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+  set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Shared)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
   target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
     -dlink
@@ -338,7 +338,23 @@ endmacro()
 
 
 function(dmt_set_target_optimization target)
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  # https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/linker-tools-warning-lnk4098?view=msvc-170
+  if(DEFINED DMT_OS_WINDOWS AND DEFINED DMT_COMPILER_MSVC)
+    if((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+      # Debug Multithreaded DLL (/MDd)
+      message(STATUS "(${target}) debug compilation detected on Windows MSVC. Linking to /MDd")
+      target_link_options(${target} PRIVATE /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrt.lib)
+      target_link_libraries(${target} PRIVATE msvcrtd.lib)  # Explicitly link to msvcrtd.lib
+    else()
+      # Release Multithreaded DLL (/MD)
+      message(STATUS "(${target}) release compilation detected on Windows MSVC. Linking to /MD")
+      target_link_options(${target} PRIVATE /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib)
+      target_link_libraries(${target} PRIVATE msvcrt.lib)   # Explicitly link to msvcrt.lib
+    endif()
+  endif()
+
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug") # you can also use the CONFIG generator expression
     target_compile_options(${target} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:
         $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi>

@@ -125,3 +125,11 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
 - Accendi il programma "NVIDIA NSight Monitor"
 - Documentazione [Qui](https://docs.nvidia.com/nsight-visual-studio-edition/cuda-debugger/)
 - Dopo la build, su Visual Studio, "Extensions" -> "NSight" -> "Start CUDA Debuggging (Next Gen)"
+
+### Promemoria vari
+- vedere il C runtime linkato/richiesto da MSVC in un `.obj`
+```
+dumpbin /ALL middleware-model.cu.obj | findstr "Runtime"
+# esempio di output
+   /FAILIFMISMATCH:RuntimeLibrary=MDd_DynamicDebug
+```

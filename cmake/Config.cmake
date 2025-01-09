@@ -325,6 +325,7 @@ macro(dmt_set_target_warnings target)
   set_property(TARGET ${target} PROPERTY CMAKE_CUDA_RUNTIME_LIBRARY Shared)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
   target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+    -dlink
     --cudart shared
     --cudadevrt static
     --expt-relaxed-constexpr # constexpr functions inside device code

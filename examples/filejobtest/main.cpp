@@ -201,17 +201,12 @@ AttributeEnd
     void textParsing(dmt::AppContext& actx)
     {
         using namespace std::string_view_literals;
-        dmt::Options opt;
-        //dmt::HeaderTokenizer parser{opt};
-        auto filePath = "../res/scenes/disney-cloud/disney-cloud.pbrt"sv;
+        dmt::Options          opt;
+        dmt::SceneDescription desc;
+        auto                  filePath = "../res/scenes/disney-cloud/disney-cloud.pbrt"sv;
+        dmt::SceneParser      parser{actx, &desc, filePath};
 
-        //parser.parseHeader(actx, filePath);
-        dmt::TokenStream tokenStream{actx, filePath};
-        for (std::string token = tokenStream.next(actx); !token.empty(); token = tokenStream.next(actx))
-        {
-            actx.log("sdfdsa {}", {token});
-        }
-        actx.log("sdfdsa");
+        parser.parse(actx, opt);
     }
 
     void testBuddy(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemResBuddy)
@@ -235,41 +230,41 @@ int32_t main()
     //testCTrie(actx);
     //testWordTokenization(actx);
     //testJob(actx);
-    //textParsing(actx);
-    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
+    textParsing(actx);
+    //dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
 
-    dmt::UnifiedMemoryResource unified;
+    //dmt::UnifiedMemoryResource unified;
 
-    dmt::BuddyResourceSpec buddySpec{
-        .pmctx        = &actx.mctx,
-        .pHostMemRes  = std::pmr::get_default_resource(),
-        .maxPoolSize  = 4ULL << 20, // 1ULL << 30,
-        .minBlockSize = 256,
-        .minBlocks    = (2ULL << 20) / 256,
-        .deviceId     = info.device,
-    };
-    AllocBundle buddy{&unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
+    //dmt::BuddyResourceSpec buddySpec{
+    //    .pmctx        = &actx.mctx,
+    //    .pHostMemRes  = std::pmr::get_default_resource(),
+    //    .maxPoolSize  = 4ULL << 20, // 1ULL << 30,
+    //    .minBlockSize = 256,
+    //    .minBlocks    = (2ULL << 20) / 256,
+    //    .deviceId     = info.device,
+    //};
+    //AllocBundle buddy{&unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
 
-    testBuddy(actx, buddy.pMemRes);
+    //testBuddy(actx, buddy.pMemRes);
 
-    dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
-        .pmctx            = &actx.mctx,
-        .poolSize         = 2ULL << 20, // 2MB is the minimum allocation granularity for most devices (cc 7.0)
-        .releaseThreshold = std::numeric_limits<size_t>::max(),
-        .pHostMemRes      = std::pmr::get_default_resource(),
-        .deviceId         = info.device,
-    };
-    AllocBundle pool{&unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
+    //dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
+    //    .pmctx            = &actx.mctx,
+    //    .poolSize         = 2ULL << 20, // 2MB is the minimum allocation granularity for most devices (cc 7.0)
+    //    .releaseThreshold = std::numeric_limits<size_t>::max(),
+    //    .pHostMemRes      = std::pmr::get_default_resource(),
+    //    .deviceId         = info.device,
+    //};
+    //AllocBundle pool{&unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
 
-    testPool(actx, pool.pMemRes);
+    //testPool(actx, pool.pMemRes);
 
-    auto* dynaArrayUnified = std::bit_cast<dmt::DynaArray*>(
-        unified.allocate(sizeof(dmt::DynaArray), alignof(dmt::DynaArray)));
-    std::construct_at(dynaArrayUnified, sizeof(float), pool.pMemRes);
+    //auto* dynaArrayUnified = std::bit_cast<dmt::DynaArray*>(
+    //    unified.allocate(sizeof(dmt::DynaArray), alignof(dmt::DynaArray)));
+    //std::construct_at(dynaArrayUnified, sizeof(float), pool.pMemRes);
 
-    testDynaArrayDirectly(actx, *dynaArrayUnified);
+    //testDynaArrayDirectly(actx, *dynaArrayUnified);
 
-    std::destroy_at(dynaArrayUnified);
-    unified.deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
-    actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
+    //std::destroy_at(dynaArrayUnified);
+    //unified.deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
+    //actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

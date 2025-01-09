@@ -63,14 +63,14 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
 ```
 
 ## Tasks
-- [ ] Completamento classe `Platform`
-  - [ ] Alessio: Logging
+- [x] Completamento classe `Platform`
+  - [x] Alessio: Logging
   - [ ] Alessio: Memory Allocation
-  - [ ] Anto: ThreadPool = 1 Thread IO + N Workers, Workers ascolta una lock-free queue
+  - [x] Anto: ThreadPool = 1 Thread IO + N Workers, Workers ascolta una lock-free queue
         [Job Scheduling Talk](https://www.youtube.com/watch?v=HIVBhKj7gQU), 
         [Job Scheduling Slides](https://www.createursdemondes.fr/wp-content/uploads/2015/03/parallelizing_the_naughty_dog_engine_using_fibers.pdf)
         [Atomics (Queue)](https://www.youtube.com/watch?v=ZQFzMfHIxng)
-  - [ ] Anto: Display = funzione OpenGL per mostrare una texture a schermo
+  - [x] Anto: Display = funzione OpenGL per mostrare una texture a schermo
         [BufferDisplay](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/src/pbrt/gpu/cudagl.h#L64)
   - [ ] Anto(*): integrare parsing della struttura `pbrt`, [Link al Parser](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/src/pbrt/parser.h#L109)
 - [ ] Modulo delle classi di modello (sia SoA che AoS)
@@ -79,20 +79,41 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
   - [ ] classi base Ray, AABB, Vector, Matrix
   - [ ] Funzioni Shading: BRDF, Texture Mapping, Mapping Spettro -> RGB
 - [ ] Alessio: Migliorie agli script di building (vedi [Link](https://cmake.org/cmake/help/latest/module/FindCUDA.html))
-  - [x] Link Time Optimization
-  - [ ] `add_custom_target` per copiare cartella `assets/`
+  - [x] `add_custom_target` per copiare cartella `assets/`
   - [x] supporto CUDA `add_cuda_library` (deprecato da cmake 3.27, ora CUDA first class citizen)
   - [ ] di default cmake setta il CUDA compiler per compute capability 5.2. Settare la 6.1
   - [ ] integrazione CUDA check compatibility with cmake, [link](https://github.com/mmp/pbrt-v4/blob/88645ffd6a451bd030d062a55a70a701c58a55d0/cmake/checkcuda.cu#L4)
   - [ ] supporto per librerie dinamiche `add_library(${target} SHARED)`
   - [ ] far funzionare gli script su Windows su un altro build tool diverso da VS
-- [ ] Implementazione CPU con [Embree](https://www.embree.org/api.html)
-  - [ ] costruzione della `RTCScene` a partire dalla rappresentazione `pbrt`
-  - [ ] ...
 - [ ] Implementazione con OptiX
   - [ ] Formazione
 - [ ] GUI imgui implot
+- [ ] MiddleWare e Memoria ([Riferimento File Format PBRT](https://pbrt.org/fileformat-v4))
+  - [ ] (Anto) Inserimento nella classe `SceneDescription` dei metodi necessari per la gestione del GraphicsState (`scene.h` in PBRT)
+  - [ ] (Alessio) Algoritmo di pseudo random number generation sia per `__host__` che `__device__` (xorshift)
+  - [ ] Completamento delle classi di modello, versione standard e versione SOA, (dove entrambe devono 
+      usare allocatori di memoria Device `BaseMemoryResource` (MemPool, Buddy), mentre l'allocatore stesso
+      e la struttura dati stessa stanno in Managed Memory, `UnifiedMemoryResource`)
+      La prima classe di modello e' `Spectrum` (servono anche per completare il parse del world block)
+      - [ ] (Alessio) `Spectrum` -> direttiva `LightSource`
+      - [ ] (Anto) `Light`
+      - [ ] (Alessio) `Texture`
+      - [ ] `Shape` (...)
+      - [ ] (Anto) `SurfaceInteraction`
+      - [ ] (Anto) `Sampler` (RNG)
+      - [ ] (Anto) `Filter`
+      - [ ] (Anto) `Film`
+      - [ ] (Alessio) `Camera` -> (perspective)
+      - [ ] (Alessio) `BSDF`
+ - [ ] (Alessio) Testing delle strutture dati preesistenti (`DynaArray`) con piu' allocatori
+ - [ ] (Anto) Gestione della direttiva `Shape` (Parte 1: Memorizzazione della mesh in un file binario intermedio)
+ - [ ] (Anto) Gestione in `SceneParser` delle direttive `Import` e `Include`, dove
+     - `Import`: Aggiunge nella `SceneDescription` tutte le "Named Entities" (Textures, Materials, Medium), Compare solo nel World Block (`m_parsingStep == EParsingStep::eWorld`)
+     - `Include`: Semanticamente equivalente a fare copy-paste del file indicato nel file corrente. Specifica una path relativa alla `m_basePath`, e aggiunge un file al `m_fileStack`.
+ - [ ] (Alessio) Scrittura di una classe `BVH`, costruita in un file binario a partire dai vari pezzi della scena,
+      caricata livello per livello con la `cuFile API` in una cache in device memory ([paper](https://dcgi.fel.cvut.cz/home/bittner/publications/cag2014.pdf))
 
+ 
 ### Appunti e links su CUDA memory allocation
 - introduzione sull'argomento: https://stackoverflow.com/questions/73155788/efficient-reallocation-of-cuda-memory
 - Stream ordered allocations: https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/

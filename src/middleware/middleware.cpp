@@ -2642,6 +2642,7 @@ namespace dmt {
         }
 
         m_basePath = filePath.substr(0, pos);
+        m_basePath += '/';
         assert(m_basePath.back() == separators[0] || m_basePath.back() == separators[1]);
     }
 
@@ -2724,7 +2725,7 @@ namespace dmt {
             }
             if (parseFloatArray(outArgs, outArray) != 9)
             {
-                actx.error("Error while parsing float arguments for the LookAt directive");
+                actx.error("Error while parsing float arguments for the {} directive", {directive.str});
                 std::abort();
             }
         };

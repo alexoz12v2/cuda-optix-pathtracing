@@ -6,7 +6,7 @@
 #define DMT_MODULE_EXPORT namespace
 #endif
 
-#if defined(__CUDACC__) // Test
+#if defined(__NVCC__) // Test
 #define DMT_INTERFACE
 #elif defined(DMT_COMPILER_MSVC)
 #define DMT_INTERFACE __declspec(novtable)
@@ -14,7 +14,7 @@
 #define DMT_INTERFACE
 #endif
 
-#if defined(__CUDACC__)
+#if defined(__NVCC__)
 #define DMT_RESTRICT __restrict__
 #elif defined(DMT_COMPILER_MSVC)
 #define DMT_RESTRICT __restrict
@@ -24,3 +24,13 @@
 #define DMT_RESTRICT
 #endif
 // TODO reg, interface dll
+
+#if defined(__NVCC__)
+#define DMT_CPU     __host__
+#define DMT_CPU_GPU __host__ __device__
+#define DMT_GPU     __device__
+#else
+#define DMT_CPU
+#define DMT_CPU_GPU
+#define DMT_GPU
+#endif

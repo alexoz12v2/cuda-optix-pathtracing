@@ -16,6 +16,40 @@
 import platform;
 import middleware;
 
+struct AllocBundle
+{
+    AllocBundle(dmt::UnifiedMemoryResource* unified,
+                dmt::EMemoryResourceType    category,
+                dmt::EMemoryResourceType    type,
+                void*                       ctorParam)
+    {
+        pUnified         = unified;
+        memEnum          = dmt::makeMemResId(category, type);
+        memSz            = dmt::sizeForMemoryResource(memEnum);
+        memAlign         = dmt::alignForMemoryResource(memEnum);
+        pMemBytes        = unified->allocate(memSz, memAlign);
+        pMemBytesAligned = dmt::alignTo(pMemBytes, memAlign);
+        pMemRes          = dmt::constructMemoryResourceAt(pMemBytesAligned, memEnum, ctorParam);
+    }
+    AllocBundle(AllocBundle const&)                = delete;
+    AllocBundle(AllocBundle&&) noexcept            = delete;
+    AllocBundle& operator=(AllocBundle const&)     = delete;
+    AllocBundle& operator=(AllocBundle&&) noexcept = delete;
+    ~AllocBundle()
+    {
+        dmt::destroyMemoryResourceAt(pMemRes, memEnum);
+        pUnified->deallocate(pMemBytes, memSz, memAlign);
+    }
+
+    dmt::UnifiedMemoryResource* pUnified;
+    dmt::EMemoryResourceType    memEnum;
+    size_t                      memSz;
+    size_t                      memAlign;
+    void*                       pMemBytes;
+    void*                       pMemBytesAligned;
+    dmt::BaseMemoryResource*    pMemRes;
+};
+
 namespace {
     std::string_view input = R"=(
 Integrator "volpath" "integer maxdepth" [100]
@@ -189,6 +223,8 @@ AttributeEnd
     {
         testMemPoolAsyncDirectly(actx, pMemResPool);
     }
+
+
 } // namespace
 
 int32_t main()
@@ -202,43 +238,7 @@ int32_t main()
     //textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
 
-    dmt::EMemoryResourceType const mem     = dmt::makeMemResId(dmt::EMemoryResourceType::eDevice,
-                                                           dmt::EMemoryResourceType::eCudaMalloc);
-    size_t const                   memSz   = dmt::sizeForMemoryResource(mem);
-    size_t const                   align   = dmt::alignForMemoryResource(mem);
-    void*                          storage = alloca(memSz + align - 1);
-    storage                                = dmt::alignTo(storage, align);
-    dmt::BaseMemoryResource* pMemRes       = dmt::constructMemoryResourceAt(storage, mem, nullptr);
-    if (void* p = pMemRes->allocateBytes(sizeof(float) * 16, alignof(float)); p)
-    {
-        actx.log("Allocated Device memory!");
-        pMemRes->freeBytes(p, sizeof(float) * 16, alignof(float));
-    }
-    else
-    {
-        actx.error("Couldn't allocate device memory");
-    }
-
-    float*         ptr = ::new float[10];
-    dmt::DynaArray arr{sizeof(float), pMemRes, dmt::noStream};
-    arr.reserve(10);
-    for (uint32_t i = 0; i < 10; ++i)
-    {
-        float f = i;
-        arr.push_back(&f, true);
-    }
-    arr.copyToHostSync(ptr);
-
-    std::string buf = "{ ";
-    for (uint32_t i = 0; i < arr.size(); ++i)
-    {
-        buf += std::to_string(ptr[i]);
-        buf += ", ";
-    }
-    buf += " }";
-    actx.log("Float array: {}", {buf});
-
-    ::delete[] ptr;
+    dmt::UnifiedMemoryResource unified;
 
     dmt::BuddyResourceSpec buddySpec{
         .pmctx        = &actx.mctx,
@@ -248,14 +248,9 @@ int32_t main()
         .minBlocks    = (2ULL << 20) / 256,
         .deviceId     = info.device,
     };
-    auto const memBuddy = dmt::makeMemResId(dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap);
-    size_t const             memSzBuddy       = dmt::sizeForMemoryResource(memBuddy);
-    size_t const             alignBuddy       = dmt::alignForMemoryResource(memBuddy);
-    void*                    pMemBytes        = std::malloc(memSzBuddy + alignBuddy - 1);
-    void*                    pMemBytesAligned = dmt::alignTo(pMemBytes, alignBuddy);
-    dmt::BaseMemoryResource* pMemResBuddy     = dmt::constructMemoryResourceAt(pMemBytesAligned, memBuddy, &buddySpec);
+    AllocBundle buddy{&unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
 
-    testBuddy(actx, pMemResBuddy);
+    testBuddy(actx, buddy.pMemRes);
 
     dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
         .pmctx            = &actx.mctx,
@@ -264,19 +259,17 @@ int32_t main()
         .pHostMemRes      = std::pmr::get_default_resource(),
         .deviceId         = info.device,
     };
-    auto const   memPoolEnum  = dmt::makeMemResId(dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool);
-    size_t const memSzPool    = dmt::sizeForMemoryResource(memPoolEnum);
-    size_t const memAlignPool = dmt::alignForMemoryResource(memPoolEnum);
-    void*        pMemPoolBytes           = std::malloc(memSzPool + memAlignPool - 1);
-    void*        pMemPoolBytesAligned    = dmt::alignTo(pMemPoolBytes, memAlignPool);
-    dmt::BaseMemoryResource* pMemResPool = dmt::constructMemoryResourceAt(pMemPoolBytesAligned, memPoolEnum, &poolSpec);
+    AllocBundle pool{&unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
 
-    testPool(actx, pMemResPool);
+    testPool(actx, pool.pMemRes);
 
-    dmt::destroyMemoryResouceAt(pMemResPool, memPoolEnum);
-    dmt::destroyMemoryResouceAt(pMemResBuddy, memBuddy);
-    dmt::destroyMemoryResouceAt(pMemRes, mem);
-    std::free(pMemBytes);
-    std::free(pMemPoolBytes);
+    auto* dynaArrayUnified = std::bit_cast<dmt::DynaArray*>(
+        unified.allocate(sizeof(dmt::DynaArray), alignof(dmt::DynaArray)));
+    std::construct_at(dynaArrayUnified, sizeof(float), pool.pMemRes);
+
+    testDynaArrayDirectly(actx, *dynaArrayUnified);
+
+    std::destroy_at(dynaArrayUnified);
+    unified.deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

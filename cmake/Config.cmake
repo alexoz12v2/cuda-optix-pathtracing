@@ -321,14 +321,18 @@ macro(dmt_set_target_warnings target)
 
   # TODO move to another function
   set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-  set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON) # default = on for shared, off for static
+  set_property(TARGET ${target} PROPERTY CMAKE_CUDA_RUNTIME_LIBRARY Shared)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
   target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                       --extended-lambda
-                       -lineinfo
-                       -use_fast_math
-                       -rdc=true
-                       >)
+    --cudart shared
+    --cudadevrt static
+    --expt-relaxed-constexpr # constexpr functions inside device code
+    --extended-lambda # full C++20 lambda syntax inside device code
+    -dc
+    -use_fast_math
+    # --relocatable-device-code true set by cuda separable compilation
+  >)
 endmacro()
 
 
@@ -339,9 +343,7 @@ function(dmt_set_target_optimization target)
         $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi>
         $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O0 -g -fprofile-arcs -ftest-coverage>
       >
-      $<$<COMPILE_LANGUAGE:CUDA>:
-        -G
-      >
+      $<$<COMPILE_LANGUAGE:CUDA>: -G -g -O0>
     )
     target_link_options(${target} PUBLIC $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
   elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -357,9 +359,7 @@ function(dmt_set_target_optimization target)
         $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2 /Zi>
         $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O2 -g>
       >
-      $<$<COMPILE_LANGUAGE:CUDA>:
-        -G
-      >
+      $<$<COMPILE_LANGUAGE:CUDA>: -G -g>
     )
   elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     target_compile_options(${target} PRIVATE
@@ -426,8 +426,8 @@ function(dmt_add_compile_definitions target)
   endif()
   target_compile_definitions(${target} 
     PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER}
-      $<$<COMPILE_LANGUAGE:CXX>:DMT_LANGUAGE_CPP "DMT_CPU_GPU=" "DMT_CPU=" "DMT_GPU=">
-      $<$<COMPILE_LANGUAGE:CUDA>:DMT_LANGUAGE_CUDA "DMT_CPU_GPU=__host__ __device__" "DMT_CPU=__host__" "DMT_GPU=__device__">
+      #$<$<COMPILE_LANGUAGE:CXX>:DMT_LANGUAGE_CPP "DMT_CPU_GPU=" "DMT_CPU=" "DMT_GPU=">
+      #$<$<COMPILE_LANGUAGE:CUDA>:DMT_LANGUAGE_CUDA "DMT_CPU_GPU=__host__ __device__" "DMT_CPU=__host__" "DMT_GPU=__device__">
   )
 endfunction()
 

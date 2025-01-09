@@ -1,10 +1,10 @@
-#include "cuda-tests.h"
-
 #define DMT_INTERFACE_AS_HEADER
+#include "cuda-tests.h"
 #include "dmtmacros.h"
 #include "platform/platform-cuda-utils.cuh"
 #include "platform/platform.h"
 
+#include <cuda_device_runtime_api.h>
 #include <cuda_runtime.h>
 
 __global__ void fillBufferKernel(uint8_t* buffer, size_t size, uint8_t value)
@@ -414,4 +414,42 @@ void testMemPoolAsyncDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pM
     }
 
     actx.log("Completed all tests for MemPoolAsyncMemoryResource.");
+}
+
+__global__ void dynaArraytestKernel(dmt::DynaArray& dynaArray)
+{ // the only error we are not covering is a device mismatch, ie ``
+    int32_t device;
+    if (cudaGetDevice(&device) != ::cudaSuccess)
+    { // what?
+        return;
+    }
+
+    if (dmt::categoryOf(dynaArray.resource()) == dmt::EMemoryResourceType::eDevice)
+    { // __device__ code is allowed to make the array grow
+    }
+    else if (!isDeviceAllocator(dynaArray.resource(), device))
+    { // __device__ code cannot access the array elements, as they are in a __host__ only region of memory
+    }
+    else
+    { // __device__ code cannot grow the DynaArray past its current capacity
+    }
+}
+
+void testDynaArrayDirectly(dmt::AppContext& actx, dmt::DynaArray& dynaArray)
+{
+    actx.log("----------------- Beginning Tests For DynaArray ------------------------------");
+    if (dynaArray.size() != 0)
+    {
+        actx.error("Container should start in a clean state");
+        assert(false);
+        return;
+    }
+    if (cudaGetLastError() != ::cudaSuccess)
+    {
+        actx.error("CUDA runtime should start in a clean error state");
+        assert(false);
+        return;
+    }
+
+    actx.log("----------------- Completed Tests For DynaArray ------------------------------");
 }

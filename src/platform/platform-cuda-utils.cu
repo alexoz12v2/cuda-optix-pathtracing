@@ -22,7 +22,7 @@ namespace dmt {
         return true;
     }
 
-    DMT_CPU CudaStreamHandle newStream()
+    __host__ CudaStreamHandle newStream()
     {
         cudaStream_t stream;
         if (cudaStreamCreate(&stream) == ::cudaSuccess)
@@ -31,25 +31,28 @@ namespace dmt {
             return noStream;
     }
 
-    DMT_CPU CUdevice currentDeviceHandle()
+    __host__ CUdevice currentDeviceHandle()
     {
-        CUdevice ret;
-        int32_t  deviceId = 0;
-        assert(cudaGetDevice(&deviceId) == ::cudaSuccess);
-        assert(cuDeviceGet(&ret, deviceId) == ::CUDA_SUCCESS);
+        CUdevice    ret;
+        int32_t     deviceId = 0;
+        cudaError_t err      = cudaGetDevice(&deviceId);
+        assert(err == ::cudaSuccess);
+        CUresult err1 = cuDeviceGet(&ret, deviceId);
+        assert(err1 == ::CUDA_SUCCESS);
         return ret;
     }
 
-    DMT_CPU void deleteStream(CudaStreamHandle stream)
+    __host__ void deleteStream(CudaStreamHandle stream)
     {
         if (stream != noStream && stream != 0)
         {
             cudaStream_t cStream = std::bit_cast<cudaStream_t>(stream);
-            assert(cudaStreamDestroy(cStream) == ::cudaSuccess);
+            cudaError_t  err     = cudaStreamDestroy(cStream);
+            assert(err == ::cudaSuccess);
         }
     }
 
-    DMT_CPU CUDAHelloInfo cudaHello(MemoryContext* mctx)
+    __host__ CUDAHelloInfo cudaHello(MemoryContext* mctx)
     {
         CUDAHelloInfo ret;
         ret.cudaCapable = false;
@@ -116,52 +119,80 @@ namespace dmt {
 
         // check current device support for for CU_DEVICE_ATTRIBUTE_MEMORY_POOLS and CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY
         CUdevice deviceHandle;
-        assert(cuDeviceGet(&deviceHandle, device) == ::CUDA_SUCCESS);
+        CUresult res;
+        res = cuDeviceGet(&deviceHandle, device);
+        assert(res == ::CUDA_SUCCESS);
         int32_t support = 0;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, deviceHandle) == ::CUDA_SUCCESS);
+        res             = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         assert(support <= 1);
         ret.supportsMemoryPools = support;
 
         // support for `cuMemAddressReserve`, `cuMemCreate`, `cuMemMap` and related
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, deviceHandle) ==
-               ::CUDA_SUCCESS);
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         assert(support <= 1);
         ret.supportsVirtualMemory = support;
 
         // various inofration
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCKS_PER_MULTIPROCESSOR, deviceHandle) ==
-               ::CUDA_SUCCESS);
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCKS_PER_MULTIPROCESSOR, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.perMultiprocessorMaxBlocks = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR, deviceHandle) ==
-               ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.perMultiprocessor.maxRegisters = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR, deviceHandle) ==
-               ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.perMultiprocessor.maxSharedMemory = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.L2CacheBytes = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.multiprocessorCount = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.perBlock.maxRegisters = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, deviceHandle) ==
-               ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.perBlock.maxSharedMemory = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.constantMemoryBytes = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.perBlockMaxThreads = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.maxBlockDim.x = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.maxBlockDim.y = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.maxBlockDim.z = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.maxGridDim.x = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.maxGridDim.y = support;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z, deviceHandle) == ::CUDA_SUCCESS);
+
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z, deviceHandle);
+        assert(res == ::CUDA_SUCCESS);
         ret.maxGridDim.z = support;
 
         // More details about interop between driver and runtime: https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DRIVER.html
@@ -178,7 +209,7 @@ namespace dmt {
         return ret;
     }
 
-    DMT_CPU void* cudaAllocate(size_t sz)
+    __host__ void* cudaAllocate(size_t sz)
     {
         void*       tmp = nullptr;
         cudaError_t err = cudaMallocManaged(&tmp, sz);
@@ -187,78 +218,126 @@ namespace dmt {
         return tmp;
     }
 
-    DMT_CPU_GPU void cudaDeallocate(void* ptr, size_t sz)
+    __host__ __device__ void cudaDeallocate(void* ptr, size_t sz)
     {
         if (ptr)
             cudaFree(ptr);
     }
 
-    DMT_CPU void* UnifiedMemoryResource::do_allocate(size_t _Bytes, size_t _Align) { return cudaAllocate(_Bytes); }
+    __host__ void* UnifiedMemoryResource::do_allocate(size_t _Bytes, size_t _Align) { return cudaAllocate(_Bytes); }
 
-    DMT_CPU void UnifiedMemoryResource::do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align)
+    __host__ void UnifiedMemoryResource::do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align)
     {
         cudaDeallocate(_Ptr, _Bytes);
     }
 
-    DMT_CPU bool UnifiedMemoryResource::do_is_equal(memory_resource const& _That) const noexcept { return true; }
+    __host__ bool UnifiedMemoryResource::do_is_equal(memory_resource const& _That) const noexcept { return true; }
 
-    void* UnifiedMemoryResource::allocateBytes(size_t sz, size_t align) { return do_allocate(sz, align); }
+    __host__ __device__ void* UnifiedMemoryResource::allocateBytes(size_t sz, size_t align)
+    {
+#if defined(__CUDA_ARCH__)
+        // you shouldn't be here
+        return nullptr;
+#else
+        return do_allocate(sz, align);
+#endif
+    }
 
-    void UnifiedMemoryResource::freeBytes(void* ptr, size_t sz, size_t align) { return do_deallocate(ptr, sz, align); }
+    __host__ __device__ void UnifiedMemoryResource::freeBytes(void* ptr, size_t sz, size_t align)
+    {
+#if !defined(__CUDA_ARCH__)
+        return do_deallocate(ptr, sz, align);
+#endif
+    }
 
-    void* UnifiedMemoryResource::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ void* UnifiedMemoryResource::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
     {
         assert(false);
         return nullptr;
     }
 
-    void UnifiedMemoryResource::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ void UnifiedMemoryResource::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
     {
         assert(false);
+    }
+
+    __host__ __device__ bool UnifiedMemoryResource::deviceHasAccess(int32_t deviceID) const
+    {
+        int32_t     currDev;
+        cudaError_t cudaErr = cudaGetDevice(&currDev);
+        assert(cudaErr == ::cudaSuccess);
+        int32_t supported = 0;
+        cudaErr           = cudaDeviceGetAttribute(&supported, ::cudaDevAttrManagedMemory, currDev);
+        assert(cudaErr == ::cudaSuccess);
+        return supported != 0;
     }
 
     // ----------------------------------------------------------------------------------------------------------------
 
     // Memory Resouce Interfaces --------------------------------------------------------------------------------------
     // cannot derive std::pmr::memory_resouce here cause we need __device__ on the allocate
-    void* DeviceMemoryReosurce::allocateBytes(size_t sz, size_t align) { return do_allocate(sz, align); }
-    void  DeviceMemoryReosurce::freeBytes(void* ptr, size_t sz, size_t align) { do_deallocate(ptr, sz, align); }
-    void* DeviceMemoryReosurce::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ __device__ void* DeviceMemoryReosurce::allocateBytes(size_t sz, size_t align)
+    {
+        return do_allocate(sz, align);
+    }
+    __host__ __device__ void DeviceMemoryReosurce::freeBytes(void* ptr, size_t sz, size_t align)
+    {
+        do_deallocate(ptr, sz, align);
+    }
+    __host__ void* DeviceMemoryReosurce::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
     {
         assert(false);
         return nullptr;
     }
-    void DeviceMemoryReosurce::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ void DeviceMemoryReosurce::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
     {
         assert(false);
     }
 
-    DMT_CPU_GPU void* DeviceMemoryReosurce::allocate(size_t sz, size_t align) { return do_allocate(sz, align); }
-    DMT_CPU_GPU void  DeviceMemoryReosurce::deallocate(void* ptr, size_t sz, size_t align)
+    __host__ __device__ void* DeviceMemoryReosurce::allocate(size_t sz, size_t align) { return do_allocate(sz, align); }
+    __host__ __device__ void  DeviceMemoryReosurce::deallocate(void* ptr, size_t sz, size_t align)
     {
         do_deallocate(ptr, sz, align);
     }
-    DMT_CPU_GPU bool DeviceMemoryReosurce::operator==(DeviceMemoryReosurce const&) const noexcept { return true; }
+    __host__ __device__ bool DeviceMemoryReosurce::operator==(DeviceMemoryReosurce const&) const noexcept
+    {
+        return true;
+    }
 
-    void* CudaAsyncMemoryReosurce::allocateBytes(size_t sz, size_t align) { return allocate(sz, align); }
-    void  CudaAsyncMemoryReosurce::freeBytes(void* ptr, size_t sz, size_t align) { return deallocate(ptr, sz, align); }
-    void* CudaAsyncMemoryReosurce::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ __device__ void* CudaAsyncMemoryReosurce::allocateBytes(size_t sz, size_t align)
+    {
+#if !defined(__CUDA_ARCH__)
+        return allocate(sz, align);
+#else
+        return nullptr;
+#endif
+    }
+
+    __host__ __device__ void CudaAsyncMemoryReosurce::freeBytes(void* ptr, size_t sz, size_t align)
+    {
+#if !defined(__CUDA_ARCH__)
+        return deallocate(ptr, sz, align);
+#endif
+    }
+
+    __host__ void* CudaAsyncMemoryReosurce::allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
     {
         assert(isValidHandle(stream));
         return do_allocate_async(sz, align, streamRefFromHandle(stream));
     }
-    void CudaAsyncMemoryReosurce::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
+
+    __host__ void CudaAsyncMemoryReosurce::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
     {
         assert(isValidHandle(stream));
         do_deallocate_async(ptr, sz, align, streamRefFromHandle(stream));
     }
 
-    DMT_CPU void* CudaAsyncMemoryReosurce::allocate_async(size_t sz, size_t align, cuda::stream_ref stream)
+    __host__ void* CudaAsyncMemoryReosurce::allocate_async(size_t sz, size_t align, cuda::stream_ref stream)
     {
         assert((align & (align - 1)) == 0 && "alignment should be a power of two");
         return do_allocate_async(sz, align, stream);
     }
-    DMT_CPU void CudaAsyncMemoryReosurce::deallocate_async(void* ptr, size_t sz, size_t align, cuda::stream_ref stream)
+    __host__ void CudaAsyncMemoryReosurce::deallocate_async(void* ptr, size_t sz, size_t align, cuda::stream_ref stream)
     {
         assert((align & (align - 1)) == 0 && "alignment should be a power of two");
         do_deallocate_async(ptr, sz, align, stream);
@@ -271,8 +350,9 @@ namespace dmt {
         prop.type                = ::CU_MEM_ALLOCATION_TYPE_PINNED;
         prop.location.type       = ::CU_MEM_LOCATION_TYPE_DEVICE; // allocate memory on device whose id is given
         prop.location.id         = deviceId;
-        size_t granularity       = 0;
-        assert(cuMemGetAllocationGranularity(&granularity, &prop, ::CU_MEM_ALLOC_GRANULARITY_MINIMUM) == ::CUDA_SUCCESS);
+        size_t   granularity     = 0;
+        CUresult res = cuMemGetAllocationGranularity(&granularity, &prop, ::CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+        assert(res == ::CUDA_SUCCESS);
         if (outProp)
             *outProp = prop;
         return granularity;
@@ -306,7 +386,8 @@ namespace dmt {
         accessDesc.location.id     = deviceId;
         accessDesc.flags           = ::CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 
-        assert(cuMemSetAccess(ptr, size, &accessDesc, 1) == ::CUDA_SUCCESS);
+        CUresult res = cuMemSetAccess(ptr, size, &accessDesc, 1);
+        assert(res == ::CUDA_SUCCESS);
     }
 
     // Memory Resouce Implementations ---------------------------------------------------------------------------------
@@ -317,7 +398,7 @@ namespace dmt {
     }
     bool HostPoolResource::do_is_equal(memory_resource const& _That) const noexcept { return m_res == _That; }
 
-    DMT_CPU_GPU void* CudaMallocResource::do_allocate(size_t sz, [[maybe_unused]] size_t align)
+    __host__ __device__ void* CudaMallocResource::do_allocate(size_t sz, [[maybe_unused]] size_t align)
     {
         void* tmp = nullptr;
         if (cudaMalloc(&tmp, sz) != ::cudaSuccess)
@@ -325,9 +406,10 @@ namespace dmt {
         return tmp;
     }
 
-    DMT_CPU_GPU void CudaMallocResource::do_deallocate(void* ptr, size_t sz, size_t align)
+    __host__ __device__ void CudaMallocResource::do_deallocate(void* ptr, size_t sz, size_t align)
     {
-        assert(cudaFree(ptr) == ::cudaSuccess);
+        cudaError_t err = cudaFree(ptr);
+        assert(err == ::cudaSuccess);
     }
 
     void* CudaMallocAsyncResource::do_allocate(size_t _Bytes, [[maybe_unused]] size_t _Align)
@@ -339,27 +421,30 @@ namespace dmt {
     }
     void CudaMallocAsyncResource::do_deallocate(void* _Ptr, size_t _Bytes, [[maybe_unused]] size_t _Align)
     {
-        assert(cudaFree(_Ptr) == ::cudaSuccess);
+        cudaError_t err = cudaFree(_Ptr);
+        assert(err == ::cudaSuccess);
     }
-    DMT_CPU void* CudaMallocAsyncResource::do_allocate_async(size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream)
+    __host__ void* CudaMallocAsyncResource::do_allocate_async(size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream)
     {
         void* tmp = nullptr;
         if (cudaMallocAsync(&tmp, sz, stream.get()) != ::cudaSuccess)
             return nullptr;
         return tmp;
     }
-    DMT_CPU void CudaMallocAsyncResource::do_deallocate_async(
+    __host__ void CudaMallocAsyncResource::do_deallocate_async(
         void*                   ptr,
         [[maybe_unused]] size_t sz,
         [[maybe_unused]] size_t align,
         cuda::stream_ref        stream)
     {
-        assert(cudaFreeAsync(ptr, stream.get()) == ::cudaSuccess);
+        cudaError_t err = cudaFreeAsync(ptr, stream.get());
+        assert(err == ::cudaSuccess);
     }
     bool CudaMallocAsyncResource::do_is_equal(memory_resource const& _That) const noexcept { return true; }
 
 
     BuddyMemoryResource::BuddyMemoryResource(BuddyResourceSpec const& input) :
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap)),
     m_deviceId(input.deviceId),
     m_minBlockSize(static_cast<uint32_t>(nextPOT(input.minBlockSize)))
     { // TODO better? allocation functions without class? global context map {pid, idx -> ctx}
@@ -368,16 +453,18 @@ namespace dmt {
         m_ctrlBlock = nullptr;
 #else
         assert(input.pHostMemRes);
-        assert(cuDeviceGet(&m_device, m_deviceId) == ::CUDA_SUCCESS);
+        CUresult res = cuDeviceGet(&m_device, m_deviceId);
+        assert(res == ::CUDA_SUCCESS);
         int32_t support = 0;
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, m_device) == ::CUDA_SUCCESS);
+        res             = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, m_device);
+        assert(res == ::CUDA_SUCCESS);
         if (support == 0)
         {
             input.pmctx->pctx.error("CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED not supported on the given device");
             std::abort();
         }
-        assert(cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, m_device) ==
-               ::CUDA_SUCCESS);
+        res = cuDeviceGetAttribute(&support, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, m_device);
+        assert(res == ::CUDA_SUCCESS);
         if (support == 0)
         {
             input.pmctx->pctx.error(
@@ -416,8 +503,8 @@ namespace dmt {
         assert((m_chunkSize < m_maxPoolSize) && (m_maxPoolSize % m_chunkSize == 0));
 
         // allocate physical memory for first device memory chunk, and reserve virtual address space (has to be paired with `cuMemAddressFree`)
-        assert(cuMemAddressReserve(&m_ctrlBlock->ptr, m_maxPoolSize, 0 /*natural align*/, 0 /*hint address*/, 0 /*flags*/) ==
-               ::CUDA_SUCCESS);
+        res = cuMemAddressReserve(&m_ctrlBlock->ptr, m_maxPoolSize, 0 /*natural align*/, 0 /*hint address*/, 0 /*flags*/);
+        assert(res == ::CUDA_SUCCESS);
         CUmemGenericAllocationHandle* arr = vlaStart();
         if (!allocateDevicePhysicalMemory(m_deviceId, m_chunkSize, arr[0]))
         {
@@ -427,7 +514,8 @@ namespace dmt {
         ++m_ctrlBlock->size;
 
         // map the first device memory chunk
-        assert(cuMemMap(m_ctrlBlock->ptr, m_chunkSize, 0, arr[0], 0) == ::CUDA_SUCCESS);
+        res = cuMemMap(m_ctrlBlock->ptr, m_chunkSize, 0, arr[0], 0);
+        assert(res == ::CUDA_SUCCESS);
         setReadWriteDeviceVirtMemory(m_deviceId, m_ctrlBlock->ptr, m_chunkSize);
 
         // allocate the metadata all in one shot, and memset it to
@@ -456,7 +544,8 @@ namespace dmt {
 #endif
     }
 
-    BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource const& other)
+    BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource const& other) :
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap))
     {
         // shouldn't be necessary to lock `transactionInFlight`, cause no device allocation is needed here
         std::shared_lock slk{other.m_mtx};
@@ -472,7 +561,8 @@ namespace dmt {
         m_ctrlBlock->refCount.fetch_add(1, std::memory_order_seq_cst);
     }
 
-    BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource&& other) noexcept
+    BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource&& other) noexcept :
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap))
     {
         // shouldn't be necessary to lock `transactionInFlight`, cause no device allocation is needed here
         std::lock_guard lk{other.m_mtx};
@@ -528,8 +618,9 @@ namespace dmt {
         return *this;
     }
 
-    DMT_CPU void BuddyMemoryResource::cleanup() noexcept
+    __host__ void BuddyMemoryResource::cleanup() noexcept
     {
+        CUresult res;
         if (!m_ctrlBlock)
             return;
 
@@ -551,13 +642,16 @@ namespace dmt {
         CUdeviceptr                   ptr = m_ctrlBlock->ptr;
         for (size_t i = 0; i < m_ctrlBlock->size; ++i)
         {
-            assert(cuMemUnmap(ptr, m_chunkSize) == ::CUDA_SUCCESS);
-            assert(cuMemRelease(arr[i]) == ::CUDA_SUCCESS);
+            res = cuMemUnmap(ptr, m_chunkSize);
+            assert(res == ::CUDA_SUCCESS);
+            res = cuMemRelease(arr[i]);
+            assert(res == ::CUDA_SUCCESS);
             ptr += m_chunkSize;
         }
 
         // free device virtual address reservation
-        assert(cuMemAddressFree(m_ctrlBlock->ptr, m_maxPoolSize) == ::CUDA_SUCCESS);
+        res = cuMemAddressFree(m_ctrlBlock->ptr, m_maxPoolSize);
+        assert(res == ::CUDA_SUCCESS);
 
         std::destroy_at(m_ctrlBlock);
 
@@ -585,8 +679,9 @@ namespace dmt {
             std::bit_cast<uintptr_t>(m_ctrlBlock) + sizeof(UnifiedControlBlock));
     }
 
-    DMT_CPU bool BuddyMemoryResource::grow()
+    __host__ bool BuddyMemoryResource::grow()
     { // assume you already own the spinlock
+        CUresult res;
         assert(m_ctrlBlock);
         if (m_ctrlBlock->size * m_chunkSize >= m_maxPoolSize)
             return false; // pool exhausted
@@ -610,21 +705,22 @@ namespace dmt {
         if (!allocateDevicePhysicalMemory(m_deviceId, m_chunkSize, arr[m_ctrlBlock->size]))
             return false;
 
-        assert(cuMemMap(m_ctrlBlock->ptr + offset, m_chunkSize, 0, arr[m_ctrlBlock->size], 0) == ::CUDA_SUCCESS);
+        res = cuMemMap(m_ctrlBlock->ptr + offset, m_chunkSize, 0, arr[m_ctrlBlock->size], 0);
+        assert(res == ::CUDA_SUCCESS);
         setReadWriteDeviceVirtMemory(m_deviceId, m_ctrlBlock->ptr + offset, m_chunkSize);
         ++m_ctrlBlock->size;
 
         return true;
     }
 
-    DMT_CPU size_t BuddyMemoryResource::minOrder() const
+    __host__ size_t BuddyMemoryResource::minOrder() const
     {
         size_t const lzcntMinSize = std::countl_zero(m_chunkSize);
         size_t const lzcntMaxSize = std::countl_zero(m_maxPoolSize);
         return lzcntMinSize - lzcntMaxSize;
     }
 
-    DMT_CPU size_t BuddyMemoryResource::blockToOrder(size_t size) const
+    __host__ size_t BuddyMemoryResource::blockToOrder(size_t size) const
     { // assumptions: size is already a POT between m_minBlockSize and m_chunkSize
         // should return: minOrder()     for size == m_chunkSize
         // should return: minOrder() + n for size == m_chunkSize >> n
@@ -641,7 +737,7 @@ namespace dmt {
         return order;
     }
 
-    DMT_CPU size_t BuddyMemoryResource::alignUpToBlock(size_t size) const
+    __host__ size_t BuddyMemoryResource::alignUpToBlock(size_t size) const
     {
         size_t alignedSize = m_minBlockSize;
         while (alignedSize < size)
@@ -651,7 +747,7 @@ namespace dmt {
         return alignedSize;
     }
 
-    DMT_CPU void BuddyMemoryResource::split(size_t order, size_t nodeIndex)
+    __host__ void BuddyMemoryResource::split(size_t order, size_t nodeIndex)
     { // shared_lock on m_ctx, lock_guard on transactionInFlight acquired by caller
         // Calculate raw array index of the node
         size_t const index = ((1ULL << order) - 1) + nodeIndex;
@@ -678,7 +774,7 @@ namespace dmt {
         m_ctrlBlock->allocationBitmap[rightChildIndex] = eFree;
     }
 
-    DMT_CPU bool BuddyMemoryResource::coalesce(size_t parentIndex, size_t parentLevel)
+    __host__ bool BuddyMemoryResource::coalesce(size_t parentIndex, size_t parentLevel)
     { // shared_lock on m_ctx, lock_guard on transactionInFlight acquired by caller.
         // parent level > min Order checked by caller
         // Ensure the parent is valid and has children
@@ -836,6 +932,7 @@ namespace dmt {
     // MemPoolAsyncMemoryResource -------------------------------------------------------------------------------------
 
     MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input) :
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool),
     m_ctrlBlock(std::bit_cast<ControlBlock*>(input.pHostMemRes->allocate(sizeof(ControlBlock), alignof(ControlBlock)))),
     m_hostCtrlRes(input.pHostMemRes),
     m_poolSize(nextPOT(input.poolSize)),
@@ -845,6 +942,7 @@ namespace dmt {
         // you shouldn't be here
 #else
         // check successful allocation of control block
+        CUresult res;
         if (m_ctrlBlock == nullptr)
         {
             input.pmctx->pctx.error("Couldn't allocate control block for async memory resource, aborting...");
@@ -855,11 +953,13 @@ namespace dmt {
 
         // recover device
         CUdevice device;
-        assert(cuDeviceGet(&device, m_deviceId) == ::CUDA_SUCCESS);
+        res = cuDeviceGet(&device, m_deviceId);
+        assert(res == ::CUDA_SUCCESS);
 
         // query support for used features
         int32_t support = 0;
-        assert(cuDeviceGetAttribute(&support, ::CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, device) == ::CUDA_SUCCESS);
+        res             = cuDeviceGetAttribute(&support, ::CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED, device);
+        assert(res == ::CUDA_SUCCESS);
         if (support == 0)
         {
             input.pmctx->pctx.error(
@@ -869,8 +969,8 @@ namespace dmt {
 
         // IPC Support (not needed, here just for reference)
         // Multi-GPU support is instead queried with `cudaDeviceCanAccessPeer` and `cudaDeviceEnablePeerAccess`
-        assert(cuDeviceGetAttribute(&support, ::CU_DEVICE_ATTRIBUTE_MEMPOOL_SUPPORTED_HANDLE_TYPES, device) ==
-               ::CUDA_SUCCESS);
+        res = cuDeviceGetAttribute(&support, ::CU_DEVICE_ATTRIBUTE_MEMPOOL_SUPPORTED_HANDLE_TYPES, device);
+        assert(res == ::CUDA_SUCCESS);
         if (support & ::CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) // linux (posix) only
             input.pmctx->pctx
                 .log("device {} can create Memory Pools for Inter Process Comunication based on POSIX File Descriptors",
@@ -894,26 +994,29 @@ namespace dmt {
         props.location.type = ::CU_MEM_LOCATION_TYPE_DEVICE;
         props.location.id   = m_deviceId;
         props.maxSize       = nextPOT(input.poolSize);
-        assert(cuMemPoolCreate(&m_ctrlBlock->memPool, &props) == ::CUDA_SUCCESS);
+        res                 = cuMemPoolCreate(&m_ctrlBlock->memPool, &props);
+        assert(res == ::CUDA_SUCCESS);
 
         // set release threshold and reuse policies
         cuuint64_t releaseThreshold = input.releaseThreshold;
         int32_t    enabled          = 1;
-        assert(cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_RELEASE_THRESHOLD, &releaseThreshold) ==
-               ::CUDA_SUCCESS);
-        assert(cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC, &enabled) ==
-               ::CUDA_SUCCESS);
-        assert(cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES, &enabled) ==
-               ::CUDA_SUCCESS);
-        assert(cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES, &enabled) ==
-               ::CUDA_SUCCESS);
+        res = cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_RELEASE_THRESHOLD, &releaseThreshold);
+        assert(res == ::CUDA_SUCCESS);
+        res = cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC, &enabled);
+        assert(res == ::CUDA_SUCCESS);
+        res = cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES, &enabled);
+        assert(res == ::CUDA_SUCCESS);
+        res = cuMemPoolSetAttribute(m_ctrlBlock->memPool, ::CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES, &enabled);
+        assert(res == ::CUDA_SUCCESS);
 
         // create stream for synchronous allocations
-        assert(cuStreamCreate(&m_ctrlBlock->defaultStream, ::CU_STREAM_NON_BLOCKING) == ::CUDA_SUCCESS);
+        res = cuStreamCreate(&m_ctrlBlock->defaultStream, ::CU_STREAM_NON_BLOCKING);
+        assert(res == ::CUDA_SUCCESS);
 #endif
     }
 
-    MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other)
+    MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other) :
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool)
     {
         std::shared_lock slk{other.m_mtx};
         m_ctrlBlock   = other.m_ctrlBlock;
@@ -925,7 +1028,8 @@ namespace dmt {
         m_ctrlBlock->refCount.fetch_add(1, std::memory_order_seq_cst);
     }
 
-    MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept
+    MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept :
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool)
     {
         std::lock_guard lk{other.m_mtx};
         m_ctrlBlock   = std::exchange(other.m_ctrlBlock, nullptr);
@@ -986,10 +1090,12 @@ namespace dmt {
         // you shouldn't be here
         return nullptr;
 #else
+        CUresult         res;
         std::shared_lock slk{m_mtx};                           // lock to access object
         std::lock_guard  lk{m_ctrlBlock->transactionInFlight}; // lock to allocate memory
         void*            ret = performAlloc(m_ctrlBlock->defaultStream, _Bytes);
-        assert(cuStreamSynchronize(m_ctrlBlock->defaultStream) == ::CUDA_SUCCESS);
+        res                  = cuStreamSynchronize(m_ctrlBlock->defaultStream);
+        assert(res == ::CUDA_SUCCESS);
         return ret;
 #endif
     }
@@ -999,10 +1105,13 @@ namespace dmt {
 #if defined(__CUDA_ARCH__)
         // you shouldn't be here
 #else
+        CUresult         res;
         std::shared_lock slk{m_mtx};                           // lock to access object
         std::lock_guard  lk{m_ctrlBlock->transactionInFlight}; // lock to allocate memory
-        assert(cuMemFreeAsync(std::bit_cast<CUdeviceptr>(_Ptr), m_ctrlBlock->defaultStream) == ::CUDA_SUCCESS);
-        assert(cuStreamSynchronize(m_ctrlBlock->defaultStream) == ::CUDA_SUCCESS);
+        res = cuMemFreeAsync(std::bit_cast<CUdeviceptr>(_Ptr), m_ctrlBlock->defaultStream);
+        assert(res == ::CUDA_SUCCESS);
+        res = cuStreamSynchronize(m_ctrlBlock->defaultStream);
+        assert(res == ::CUDA_SUCCESS);
 #endif
     }
 
@@ -1017,7 +1126,7 @@ namespace dmt {
         return sameDevice && sameCtrlBlock;
     }
 
-    DMT_CPU void* MemPoolAsyncMemoryResource::do_allocate_async(size_t sz, size_t align, cuda::stream_ref streamRef)
+    __host__ void* MemPoolAsyncMemoryResource::do_allocate_async(size_t sz, size_t align, cuda::stream_ref streamRef)
     {
         std::shared_lock slk{m_mtx};                           // lock to access object
         std::lock_guard  lk{m_ctrlBlock->transactionInFlight}; // lock to allocate memory
@@ -1040,16 +1149,18 @@ namespace dmt {
         }
     }
 
-    DMT_CPU void MemPoolAsyncMemoryResource::do_deallocate_async(void* ptr, size_t sz, size_t align, cuda::stream_ref streamRef)
+    __host__ void MemPoolAsyncMemoryResource::do_deallocate_async(void* ptr, size_t sz, size_t align, cuda::stream_ref streamRef)
     {                                                          // should be called on the same stream as the allocation
         std::shared_lock slk{m_mtx};                           // lock to access object
         std::lock_guard  lk{m_ctrlBlock->transactionInFlight}; // lock to allocate memory
         CUstream         stream = static_cast<CUstream>(streamRef.get());
-        assert(cuMemFreeAsync(std::bit_cast<CUdeviceptr>(ptr), stream) == ::CUDA_SUCCESS);
+        CUresult         res    = cuMemFreeAsync(std::bit_cast<CUdeviceptr>(ptr), stream);
+        assert(res == ::CUDA_SUCCESS);
     }
 
     void MemPoolAsyncMemoryResource::cleanup() noexcept
     {
+        CUresult res;
         if (!m_ctrlBlock)
             return;
 
@@ -1068,10 +1179,12 @@ namespace dmt {
 
         // destroy memory pool
         cuCtxSynchronize();
-        assert(cuMemPoolDestroy(m_ctrlBlock->memPool) == ::CUDA_SUCCESS);
+        res = cuMemPoolDestroy(m_ctrlBlock->memPool);
+        assert(res == ::CUDA_SUCCESS);
 
         // destroy default stream
-        assert(cuStreamDestroy(m_ctrlBlock->defaultStream) == ::CUDA_SUCCESS);
+        res = cuStreamDestroy(m_ctrlBlock->defaultStream);
+        assert(res == ::CUDA_SUCCESS);
 
         // trigger destructor of control block
         std::destroy_at(m_ctrlBlock);
@@ -1080,7 +1193,12 @@ namespace dmt {
     }
 
     // Memory Resouce Boilerplate -------------------------------------------------------------------------------------
-    DMT_CPU_GPU void switchOnMemoryResource(EMemoryResourceType eAlloc, BaseMemoryResource* p, size_t* sz, bool destroy, void* ctorParam)
+    __host__ __device__ void switchOnMemoryResource(
+        EMemoryResourceType eAlloc,
+        BaseMemoryResource* p,
+        size_t*             sz,
+        bool                destroy,
+        void*               ctorParam)
     {
         EMemoryResourceType category = extractCategory(eAlloc);
         EMemoryResourceType type     = extractType(eAlloc);
@@ -1166,130 +1284,123 @@ namespace dmt {
         }
     }
 
-    DMT_CPU_GPU size_t sizeForMemoryResource(EMemoryResourceType eAlloc)
+    __host__ __device__ size_t sizeForMemoryResource(EMemoryResourceType eAlloc)
     {
         size_t ret = 0;
         switchOnMemoryResource(eAlloc, nullptr, &ret, true, nullptr);
         return ret;
     }
 
-    DMT_CPU_GPU BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam)
+    __host__ BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam)
     {
         BaseMemoryResource* p = std::bit_cast<BaseMemoryResource*>(ptr);
         switchOnMemoryResource(eAlloc, p, nullptr, false, ctorParam);
         return p;
     }
 
-    DMT_CPU_GPU void destroyMemoryResouceAt(BaseMemoryResource* p, EMemoryResourceType eAlloc)
+    __host__ void destroyMemoryResourceAt(BaseMemoryResource* p, EMemoryResourceType eAlloc)
     {
         switchOnMemoryResource(eAlloc, p, nullptr, true, nullptr);
     }
 
-    DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource* allocator)
+    __host__ __device__ EMemoryResourceType categoryOf(BaseMemoryResource* allocator)
     {
-        if (dynamic_cast<CudaAsyncMemoryReosurce*>(allocator))
-            return EMemoryResourceType::eAsync;
-        else if (dynamic_cast<DeviceMemoryReosurce*>(allocator))
-            return EMemoryResourceType::eDevice;
-        else if (dynamic_cast<UnifiedMemoryResource*>(allocator))
-            return EMemoryResourceType::eUnified;
-        else if (dynamic_cast<std::pmr::memory_resource*>(allocator))
-            return EMemoryResourceType::eHost;
-        assert(false);
-        return EMemoryResourceType::eHost;
+        return extractCategory(allocator->type);
     }
 
-    DMT_CPU_GPU bool isDeviceAllocator(BaseMemoryResource* allocator)
+    __host__ __device__ bool isDeviceAllocator(BaseMemoryResource* allocator, int32_t deviceId)
     {
-        if (dynamic_cast<CudaAsyncMemoryReosurce*>(allocator))
-            return true;
-        else if (dynamic_cast<DeviceMemoryReosurce*>(allocator))
-            return true;
-        else if (dynamic_cast<UnifiedMemoryResource*>(allocator))
-            return true;
-        else if (dynamic_cast<std::pmr::memory_resource*>(allocator))
-            return false;
-
-        return false;
+        return allocator->deviceHasAccess(deviceId);
     }
 
-    DMT_CPU_GPU bool isHostAllocator(BaseMemoryResource* allocator)
-    {
-        if (dynamic_cast<CudaAsyncMemoryReosurce*>(allocator))
-            return false;
-        else if (dynamic_cast<DeviceMemoryReosurce*>(allocator))
-            return false;
-        else if (dynamic_cast<UnifiedMemoryResource*>(allocator))
-            return true;
-        else if (dynamic_cast<std::pmr::memory_resource*>(allocator))
-            return true;
+    __host__ __device__ bool isHostAllocator(BaseMemoryResource* allocator) { return allocator->hostHasAccess(); }
 
-        return false;
-    }
-
-    DMT_CPU_GPU void* allocateFromCategory(BaseMemoryResource* allocator, size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ __device__ void* allocateFromCategory(BaseMemoryResource* allocator, size_t sz, size_t align, CudaStreamHandle stream)
     {
-        if (auto* a = dynamic_cast<CudaAsyncMemoryReosurce*>(allocator); a)
+#if defined(__CUDA_ARCH__)
+        if (categoryOf(allocator) == EMemoryResourceType::eDevice)
         {
-#if defined(__CUDA_ARCH__)
-            return a->allocate(sz, align);
-#else
-            if (stream != noStream)
-            {
-                cuda::stream_ref streamref = streamRefFromHandle(stream);
-                return a->allocate_async(sz, align, streamref);
-            }
-            else
-                return a->allocate(sz, align);
-#endif
+            auto* p = std::bit_cast<DeviceMemoryReosurce*>(allocator);
+            return p->allocate(sz, align);
         }
-        else if (auto* a = dynamic_cast<DeviceMemoryReosurce*>(allocator); a)
-            return a->allocate(sz, align);
-        else if (auto* a = dynamic_cast<UnifiedMemoryResource*>(allocator); a)
-            return a->allocate(sz, align);
-        else if (auto* a = dynamic_cast<std::pmr::memory_resource*>(allocator); a)
-#if defined(__CUDA_ARCH__)
-            return nullptr;
 #else
-            return a->allocate(sz, align);
+        switch (categoryOf(allocator))
+        {
+            using enum EMemoryResourceType;
+            case eHost:
+            {
+                auto* p = std::bit_cast<std::pmr::memory_resource*>(allocator);
+                return p->allocate(sz, align);
+            }
+            case eDevice:
+            {
+                auto* p = std::bit_cast<DeviceMemoryReosurce*>(allocator);
+                return p->allocate(sz, align);
+            }
+            case eAsync:
+            {
+                auto* p = std::bit_cast<CudaAsyncMemoryReosurce*>(allocator);
+                if (stream != noStream)
+                    return p->allocate_async(sz, align, streamRefFromHandle(stream));
+                else
+                    return p->allocate(sz, align);
+            }
+            case eUnified:
+            {
+                auto* p = std::bit_cast<UnifiedMemoryResource*>(allocator);
+                return p->allocate(sz, align);
+            }
+        }
 #endif
-
-        assert(false);
         return nullptr;
     }
 
-    DMT_CPU_GPU void freeFromCategory(BaseMemoryResource* allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
+    __host__ __device__ void freeFromCategory(BaseMemoryResource* allocator, void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
     {
-        if (auto* a = dynamic_cast<CudaAsyncMemoryReosurce*>(allocator); a)
-        {
 #if defined(__CUDA_ARCH__)
-            a->deallocate(ptr, sz, align);
+        if (categoryOf(allocator) == EMemoryResourceType::eDevice)
+        {
+            auto* p = std::bit_cast<DeviceMemoryReosurce*>(allocator);
+            p->deallocate(ptr, sz, align);
+        }
 #else
-            if (stream != noStream)
+        switch (categoryOf(allocator))
+        {
+            using enum EMemoryResourceType;
+            case eHost:
             {
-                cuda::stream_ref streamref = streamRefFromHandle(stream);
-                a->deallocate_async(ptr, sz, align, streamref);
+                auto* p = std::bit_cast<std::pmr::memory_resource*>(allocator);
+                p->deallocate(ptr, sz, align);
+                break;
             }
-            else
-                a->deallocate(ptr, sz, align);
-#endif
+            case eDevice:
+            {
+                auto* p = std::bit_cast<DeviceMemoryReosurce*>(allocator);
+                p->deallocate(ptr, sz, align);
+                break;
+            }
+            case eAsync:
+            {
+                auto* p = std::bit_cast<CudaAsyncMemoryReosurce*>(allocator);
+                if (stream != noStream)
+                    p->deallocate_async(ptr, sz, align, streamRefFromHandle(stream));
+                else
+                    p->deallocate(ptr, sz, align);
+                break;
+            }
+            case eUnified:
+            {
+                auto* p = std::bit_cast<UnifiedMemoryResource*>(allocator);
+                p->deallocate(ptr, sz, align);
+                break;
+            }
         }
-        else if (auto* a = dynamic_cast<DeviceMemoryReosurce*>(allocator); a)
-            a->deallocate(ptr, sz, align);
-        else if (auto* a = dynamic_cast<UnifiedMemoryResource*>(allocator); a)
-            a->deallocate(ptr, sz, align);
-        else if (auto* a = dynamic_cast<std::pmr::memory_resource*>(allocator); a)
-        {
-#if defined(__CUDA_ARCH__)
-#else
-            a->deallocate(ptr, sz, align);
 #endif
-        }
     }
 
     // BaseDeviceContainer --------------------------------------------------------------------------------------------
     // TODO: use cuda::atomic_ref instead of atomic primitives. Reference: https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html
-    DMT_CPU_GPU void BaseDeviceContainer::lockForRead() const
+    __host__ __device__ void BaseDeviceContainer::lockForRead() const
     {
 #if defined(__CUDA_ARCH__)
         // Wait until no writer is active
@@ -1312,7 +1423,7 @@ namespace dmt {
 #endif
     }
 
-    DMT_CPU_GPU void BaseDeviceContainer::unlockForRead() const
+    __host__ __device__ void BaseDeviceContainer::unlockForRead() const
     {
 #if defined(__CUDA_ARCH__)
         // Decrement reader count
@@ -1324,7 +1435,7 @@ namespace dmt {
 #endif
     }
 
-    DMT_CPU_GPU void BaseDeviceContainer::lockForWrite() const
+    __host__ __device__ void BaseDeviceContainer::lockForWrite() const
     {
 #if defined(__CUDA_ARCH__)
         // Wait until no reader or writer is active
@@ -1347,7 +1458,7 @@ namespace dmt {
 #endif
     }
 
-    DMT_CPU_GPU void BaseDeviceContainer::unlockForWrite() const
+    __host__ __device__ void BaseDeviceContainer::unlockForWrite() const
     {
 #if defined(__CUDA_ARCH__)
         // Decrement writer count
@@ -1359,7 +1470,7 @@ namespace dmt {
 #endif
     }
 
-    DMT_CPU_GPU void BaseDeviceContainer::waitWriter() const
+    __host__ __device__ void BaseDeviceContainer::waitWriter() const
     {
 #if defined(__CUDA_ARCH__)
         // Spin-wait until no writer is active
@@ -1378,7 +1489,7 @@ namespace dmt {
     }
 
     // DynaArray ------------------------------------------------------------------------------------------------------
-    DMT_CPU_GPU DynaArray::DynaArray(DynaArray const& other) :
+    __host__ __device__ DynaArray::DynaArray(DynaArray const& other) :
     BaseDeviceContainer(other.m_resource, other.stream),
     m_elemSize(other.m_elemSize)
     {
@@ -1393,7 +1504,8 @@ namespace dmt {
         other.unlockForRead();
     }
 
-    DMT_CPU_GPU DynaArray::DynaArray(DynaArray&& other) noexcept : BaseDeviceContainer(other.m_resource, other.stream)
+    __host__ __device__ DynaArray::DynaArray(DynaArray&& other) noexcept :
+    BaseDeviceContainer(other.m_resource, other.stream)
     {
         other.lockForWrite();
         m_resource = std::exchange(other.m_resource, nullptr);
@@ -1405,7 +1517,7 @@ namespace dmt {
         other.unlockForWrite();
     }
 
-    DMT_CPU_GPU void DynaArray::reserve(size_t newCapacity, bool lock)
+    __host__ __device__ void DynaArray::reserve(size_t newCapacity, bool lock)
     {
         if (lock)
             lockForWrite();
@@ -1424,7 +1536,7 @@ namespace dmt {
             unlockForWrite();
     }
 
-    DMT_CPU_GPU void DynaArray::clear(bool lock) noexcept
+    __host__ __device__ void DynaArray::clear(bool lock) noexcept
     {
         if (lock)
             lockForWrite();
@@ -1437,7 +1549,7 @@ namespace dmt {
             unlockForWrite();
     }
 
-    DMT_CPU_GPU bool DynaArray::push_back(void const* pValue, bool srcHost, bool lock)
+    __host__ __device__ bool DynaArray::push_back(void const* pValue, bool srcHost, bool lock)
     {
         bool ret = true;
         if (lock)
@@ -1454,11 +1566,14 @@ namespace dmt {
         else
             std::memcpy(dest, pValue, m_elemSize);
 #else
-        cudaMemcpyKind kind = isDeviceAllocator(m_resource)
+        int32_t device;
+        auto    cudaret = cudaGetDevice(&device);
+        assert(cudaret == ::cudaSuccess);
+        cudaMemcpyKind kind = isDeviceAllocator(m_resource, device)
                                   ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
                                   : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
-        cudaError_t    res  = cudaMemcpy(dest, pValue, m_elemSize, kind);
-        if (res != ::cudaSuccess)
+        cudaret             = cudaMemcpy(dest, pValue, m_elemSize, kind);
+        if (cudaret != ::cudaSuccess)
             ret = false;
 #endif
         if (ret)
@@ -1469,7 +1584,7 @@ namespace dmt {
         return ret;
     }
 
-    DMT_CPU_GPU void DynaArray::pop_back(bool lock)
+    __host__ __device__ void DynaArray::pop_back(bool lock)
     {
         if (lock)
             lockForWrite();
@@ -1483,11 +1598,15 @@ namespace dmt {
 
     // assumes you already locked for read
 
-    DMT_CPU_GPU void const* DynaArray::at(size_t index) const
+    __host__ __device__ void const* DynaArray::at(size_t index) const
     {
+        cudaError_t cudaRes;
+        int32_t     device;
+        cudaRes = cudaGetDevice(&device);
+        assert(cudaRes == ::cudaSuccess);
         assert(index < m_size);
 #if defined(__CUDA_ARCH__)
-        if (isDeviceAllocator(m_resource))
+        if (isDeviceAllocator(m_resource, device))
             return std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + index * m_elemSize);
         else
             return nullptr;
@@ -1495,14 +1614,14 @@ namespace dmt {
         if (isHostAllocator(m_resource))
             return std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + index * m_elemSize);
         else
-        {
+        { // call cudaMemcpy? no, wasteful
             assert(false);
             return nullptr;
         }
 #endif
     }
 
-    DMT_CPU_GPU void DynaArray::copyFrom(DynaArray const& other)
+    __host__ __device__ void DynaArray::copyFrom(DynaArray const& other)
     {
         if (other.m_size > 0)
         {
@@ -1511,7 +1630,7 @@ namespace dmt {
         }
     }
 
-    DMT_CPU_GPU DynaArray& DynaArray::operator=(DynaArray const& other)
+    __host__ __device__ DynaArray& DynaArray::operator=(DynaArray const& other)
     {
         if (this != &other)
         {
@@ -1529,7 +1648,7 @@ namespace dmt {
         return *this;
     }
 
-    DMT_CPU_GPU DynaArray& DynaArray::operator=(DynaArray&& other) noexcept
+    __host__ __device__ DynaArray& DynaArray::operator=(DynaArray&& other) noexcept
     {
         if (this != &other)
         {
@@ -1547,11 +1666,15 @@ namespace dmt {
         return *this;
     }
 
-    DMT_CPU_GPU DynaArray::~DynaArray() noexcept { clear(); }
+    __host__ __device__ DynaArray::~DynaArray() noexcept { clear(); }
 
-    DMT_CPU bool DynaArray::copyToHostSync(void* /*DMT_RESTRICT*/ dest, bool lock) const
+    __host__ bool DynaArray::copyToHostSync(void* /*DMT_RESTRICT*/ dest, bool lock) const
     {
-        if (!isDeviceAllocator(m_resource))
+        cudaError_t err;
+        int32_t     device;
+        err = cudaGetDevice(&device);
+        assert(err == ::cudaSuccess);
+        if (!isDeviceAllocator(m_resource, device))
         {
             assert(false);
             return false;
@@ -1569,7 +1692,7 @@ namespace dmt {
         return ret;
     }
 
-    DMT_CPU_GPU size_t DynaArray::size(bool lock) const
+    __host__ __device__ size_t DynaArray::size(bool lock) const
     {
         size_t ret = 0;
         if (lock)

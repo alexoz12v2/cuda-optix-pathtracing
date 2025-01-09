@@ -129,12 +129,12 @@ DMT_MODULE_EXPORT dmt {
         // eUnified type
         eCudaMallocManaged = 4 << memoryResouceTypeNumBits,
     };
-    inline constexpr EMemoryResourceType extractCategory(EMemoryResourceType e)
+    DMT_CPU_GPU inline constexpr EMemoryResourceType extractCategory(EMemoryResourceType e)
     {
         return static_cast<EMemoryResourceType>(
             static_cast<std::underlying_type_t<EMemoryResourceType>>(e) & memoryResouceTypeMask);
     }
-    inline constexpr EMemoryResourceType extractType(EMemoryResourceType e)
+    DMT_CPU_GPU inline constexpr EMemoryResourceType extractType(EMemoryResourceType e)
     {
         return static_cast<EMemoryResourceType>(
             static_cast<std::underlying_type_t<EMemoryResourceType>>(e) & ~memoryResouceTypeMask);
@@ -150,29 +150,42 @@ DMT_MODULE_EXPORT dmt {
     class DMT_INTERFACE BaseMemoryResource
     {
     public:
+        BaseMemoryResource(EMemoryResourceType type) : type(type) {}
         virtual ~BaseMemoryResource() = default;
 
         // structures defined inside this CUDA translation unit should dynamic cast to the derived type instead
-        virtual void* allocateBytes(size_t sz, size_t align)                                      = 0;
-        virtual void  freeBytes(void* ptr, size_t sz, size_t align)                               = 0;
-        virtual void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)       = 0;
-        virtual void  freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) = 0;
+        DMT_CPU_GPU virtual void* allocateBytes(size_t sz, size_t align)                                      = 0;
+        DMT_CPU_GPU virtual void  freeBytes(void* ptr, size_t sz, size_t align)                               = 0;
+        DMT_CPU virtual void*     allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)       = 0;
+        DMT_CPU virtual void      freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) = 0;
+        DMT_CPU_GPU virtual bool  deviceHasAccess(int32_t deviceID) const                                     = 0;
+        DMT_CPU_GPU virtual bool  hostHasAccess() const                                                       = 0;
+
+        EMemoryResourceType type;
     };
 
     // Memory Resource Inputs and Types -------------------------------------------------------------------------------
 
     class UnifiedMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
+    public:
+        UnifiedMemoryResource() :
+        BaseMemoryResource(makeMemResId(EMemoryResourceType::eUnified, EMemoryResourceType::eCudaMallocManaged))
+        {
+        }
+
     private:
         DMT_CPU void* do_allocate(size_t _Bytes, size_t _Align) override;
         DMT_CPU void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
         DMT_CPU bool  do_is_equal(memory_resource const& _That) const noexcept override;
 
         // Inherited via BaseMemoryResource
-        void* allocateBytes(size_t sz, size_t align) override;
-        void  freeBytes(void* ptr, size_t sz, size_t align) override;
-        void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override;
-        void  freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
+        DMT_CPU_GPU void* allocateBytes(size_t sz, size_t align) override;
+        DMT_CPU_GPU void  freeBytes(void* ptr, size_t sz, size_t align) override;
+        DMT_CPU void*     allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override;
+        DMT_CPU void      freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
+        DMT_CPU_GPU bool  deviceHasAccess(int32_t deviceID) const override;
+        DMT_CPU_GPU bool  hostHasAccess() const override { return true; }
     };
 
     struct BuddyResourceSpec
@@ -202,17 +215,20 @@ DMT_MODULE_EXPORT dmt {
         return alignof(std::max_align_t); // 8
     }
 
-    size_t sizeForMemoryResource(EMemoryResourceType type);
+    DMT_CPU_GPU size_t sizeForMemoryResource(EMemoryResourceType type);
 
-    BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam);
+    DMT_CPU BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam);
 
-    void destroyMemoryResouceAt(BaseMemoryResource * p, EMemoryResourceType eAlloc);
+    DMT_CPU void destroyMemoryResourceAt(BaseMemoryResource * p, EMemoryResourceType eAlloc);
 
     DMT_CPU_GPU void
         switchOnMemoryResource(EMemoryResourceType eAlloc, BaseMemoryResource * p, size_t * sz, bool destroy, void* ctorParam);
     DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource * allocator);
-    DMT_CPU_GPU bool                isDeviceAllocator(BaseMemoryResource * allocator);
-    DMT_CPU_GPU bool                isHostAllocator(BaseMemoryResource * allocator);
+
+    // whether allocated memory is accessible from device or host (or both). Independent from the fact the allocation functions
+    // can be called by device or host, which is instead encoded in the category
+    DMT_CPU_GPU bool isDeviceAllocator(BaseMemoryResource * allocator, int32_t deviceId);
+    DMT_CPU_GPU bool isHostAllocator(BaseMemoryResource * allocator);
 
     DMT_CPU_GPU void*
         allocateFromCategory(BaseMemoryResource * allocator, size_t sz, size_t align, CudaStreamHandle stream = noStream);
@@ -224,6 +240,8 @@ DMT_MODULE_EXPORT dmt {
 
 
     // Containers -----------------------------------------------------------------------------------------------------
+    // To share Containers between GPU and CPU, you either need to copy (shallow) them back and forth or place them
+    // into
 
     class BaseDeviceContainer
     {
@@ -241,6 +259,8 @@ DMT_MODULE_EXPORT dmt {
         DMT_CPU_GPU void waitWriter() const;
 
         CudaStreamHandle stream;
+
+        DMT_CPU_GPU BaseMemoryResource* resource() const noexcept { return m_resource; }
 
     protected:
         BaseMemoryResource* m_resource;

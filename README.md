@@ -99,3 +99,8 @@ cmake --build --preset Debug-Linux --target dmt-doxygen
 - link esempi github 1: https://github.com/NVIDIA-developer-blog/code-samples/blob/master/posts/cuda-vmm/cuvector.cpp
 - link esempi github 2: https://github.com/eyalroz/cuda-api-wrappers/blob/master/src/cuda/api/context.hpp#L131o
 - link esempi github 3: https://github.com/NVIDIA/cuda-samples/blob/9c688d7ff78455ed42e345124d1495aad6bf66de/Samples/2_Concepts_and_Techniques/streamOrderedAllocation/streamOrderedAllocation.cu#L126
+
+### Appunti e links su CUDA debugging
+- Accendi il programma "NVIDIA NSight Monitor"
+- Documentazione [Qui](https://docs.nvidia.com/nsight-visual-studio-edition/cuda-debugger/)
+- Dopo la build, su Visual Studio, "Extensions" -> "NSight" -> "Start CUDA Debuggging (Next Gen)"

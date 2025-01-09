@@ -324,6 +324,7 @@ macro(dmt_set_target_warnings target)
   set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
   target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                       --extended-lambda
                        -lineinfo
                        -use_fast_math
                        -rdc=true

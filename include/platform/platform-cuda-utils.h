@@ -47,8 +47,8 @@ DMT_MODULE_EXPORT dmt {
         Extent3D     maxBlockDim;
         Extent3D     maxGridDim;
         uint32_t     cudaCapable           : 1;
-        uint32_t     supportsMemoryPools   : 1;
-        uint32_t     supportsVirtualMemory : 1;
+        uint32_t     supportsMemoryPools   : 1; // needed for `MemPoolAsyncResource`
+        uint32_t     supportsVirtualMemory : 1; // needed for `BuddyMemoryResource`
     };
 
     bool logCUDAStatus(MemoryContext * mctx);
@@ -125,6 +125,7 @@ DMT_MODULE_EXPORT dmt {
         eCudaMalloc = 2 << memoryResouceTypeNumBits,
         // eAsync types
         eCudaMallocAsync = 3 << memoryResouceTypeNumBits,
+        eMemPool         = 6 << memoryResouceTypeNumBits,
         // eUnified type
         eCudaMallocManaged = 4 << memoryResouceTypeNumBits,
     };
@@ -184,6 +185,15 @@ DMT_MODULE_EXPORT dmt {
         int32_t  deviceId;
     };
 
+    struct MemPoolAsyncMemoryResourceSpec
+    {
+        MemoryContext*             pmctx;
+        size_t                     poolSize;         // if 0 OS determined
+        size_t                     releaseThreshold; // max memory the pool will retain after a free (eg. max)
+        std::pmr::memory_resource* pHostMemRes;
+        int32_t                    deviceId;
+    };
+
     // Allocation Utilities for Containers ----------------------------------------------------------------------------
 
     enum class EMemoryResourceType : uint32_t;
@@ -192,7 +202,7 @@ DMT_MODULE_EXPORT dmt {
         return alignof(std::max_align_t); // 8
     }
 
-    size_t sizeForMemoryResouce(EMemoryResourceType type);
+    size_t sizeForMemoryResource(EMemoryResourceType type);
 
     BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam);
 

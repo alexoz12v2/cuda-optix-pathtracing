@@ -238,4 +238,47 @@ namespace dmt {
         int32_t  m_deviceId;
         uint32_t m_minBlockSize;
     };
+
+    // Reference for Stream Ordered Allocation (Runtime API): https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#stream-ordered-memory-allocator-intro
+    class MemPoolAsyncMemoryResource :
+    public CudaAsyncMemoryReosurce,
+        public cuda::forward_property<MemPoolAsyncMemoryResource, CudaAsyncMemoryReosurce>
+    {
+    public:
+        MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input);
+        MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other);
+        MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept;
+        MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource const& other);
+        MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource&& other) noexcept;
+        ~MemPoolAsyncMemoryResource() noexcept;
+
+        size_t poolSize() const noexcept { return m_poolSize; }
+
+    private:
+        // Inherited via CudaAsyncMemoryReosurce
+        void*         do_allocate(size_t _Bytes, size_t _Align) override;
+        void          do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
+        bool          do_is_equal(memory_resource const& _That) const noexcept override;
+        DMT_CPU void* do_allocate_async(size_t, size_t, cuda::stream_ref) override;
+        DMT_CPU void  do_deallocate_async(void*, size_t, size_t, cuda::stream_ref) override;
+
+        void  cleanup() noexcept;
+        void* performAlloc(CUstream streamRef, size_t sz);
+
+    private:
+        struct ControlBlock
+        {
+            CUmemoryPool                 memPool;
+            CUstream                     defaultStream;
+            mutable std::atomic<int32_t> refCount;
+            mutable SpinLock             transactionInFlight;
+        };
+
+    private:
+        mutable std::shared_mutex  m_mtx; // shared_lock on allocation, lock_guard on copy control
+        ControlBlock*              m_ctrlBlock;
+        std::pmr::memory_resource* m_hostCtrlRes;
+        size_t                     m_poolSize;
+        int32_t                    m_deviceId;
+    };
 } // namespace dmt

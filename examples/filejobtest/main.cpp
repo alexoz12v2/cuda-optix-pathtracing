@@ -184,6 +184,11 @@ AttributeEnd
     {
         testBuddyDirectly(actx, pMemResBuddy);
     }
+
+    void testPool(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemResPool)
+    {
+        testMemPoolAsyncDirectly(actx, pMemResPool);
+    }
 } // namespace
 
 int32_t main()
@@ -199,7 +204,7 @@ int32_t main()
 
     dmt::EMemoryResourceType const mem     = dmt::makeMemResId(dmt::EMemoryResourceType::eDevice,
                                                            dmt::EMemoryResourceType::eCudaMalloc);
-    size_t const                   memSz   = dmt::sizeForMemoryResouce(mem);
+    size_t const                   memSz   = dmt::sizeForMemoryResource(mem);
     size_t const                   align   = dmt::alignForMemoryResource(mem);
     void*                          storage = alloca(memSz + align - 1);
     storage                                = dmt::alignTo(storage, align);
@@ -244,7 +249,7 @@ int32_t main()
         .deviceId     = info.device,
     };
     auto const memBuddy = dmt::makeMemResId(dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap);
-    size_t const             memSzBuddy       = dmt::sizeForMemoryResouce(memBuddy);
+    size_t const             memSzBuddy       = dmt::sizeForMemoryResource(memBuddy);
     size_t const             alignBuddy       = dmt::alignForMemoryResource(memBuddy);
     void*                    pMemBytes        = std::malloc(memSzBuddy + alignBuddy - 1);
     void*                    pMemBytesAligned = dmt::alignTo(pMemBytes, alignBuddy);
@@ -252,8 +257,26 @@ int32_t main()
 
     testBuddy(actx, pMemResBuddy);
 
+    dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
+        .pmctx            = &actx.mctx,
+        .poolSize         = 2ULL << 20, // 2MB is the minimum allocation granularity for most devices (cc 7.0)
+        .releaseThreshold = std::numeric_limits<size_t>::max(),
+        .pHostMemRes      = std::pmr::get_default_resource(),
+        .deviceId         = info.device,
+    };
+    auto const   memPoolEnum  = dmt::makeMemResId(dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool);
+    size_t const memSzPool    = dmt::sizeForMemoryResource(memPoolEnum);
+    size_t const memAlignPool = dmt::alignForMemoryResource(memPoolEnum);
+    void*        pMemPoolBytes           = std::malloc(memSzPool + memAlignPool - 1);
+    void*        pMemPoolBytesAligned    = dmt::alignTo(pMemPoolBytes, memAlignPool);
+    dmt::BaseMemoryResource* pMemResPool = dmt::constructMemoryResourceAt(pMemPoolBytesAligned, memPoolEnum, &poolSpec);
+
+    testPool(actx, pMemResPool);
+
+    dmt::destroyMemoryResouceAt(pMemResPool, memPoolEnum);
     dmt::destroyMemoryResouceAt(pMemResBuddy, memBuddy);
     dmt::destroyMemoryResouceAt(pMemRes, mem);
     std::free(pMemBytes);
+    std::free(pMemPoolBytes);
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
 }

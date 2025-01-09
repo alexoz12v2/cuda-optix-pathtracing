@@ -6,3 +6,5 @@ namespace dmt {
 } // namespace dmt
 
 void testBuddyDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes);
+
+void testMemPoolAsyncDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes);

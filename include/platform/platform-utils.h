@@ -6,6 +6,8 @@
 #include <charconv> // For std::from_chars
 #include <concepts>
 #include <iterator>
+#include <memory>
+#include <memory_resource>
 #include <source_location>
 #include <string_view>
 #include <type_traits>
@@ -28,6 +30,20 @@ namespace dmt {
 } // namespace dmt
 
 DMT_MODULE_EXPORT dmt {
+    template <typename T>
+    struct PmrDeleter
+    {
+        explicit PmrDeleter(std::pmr::memory_resource* pRes) : resource(pRes) {}
+
+        void operator()(T* ptr) const
+        {
+            if (ptr)
+                resource->deallocate(ptr, sizeof(T), alignof(T));
+        }
+
+        std::pmr::memory_resource* resource;
+    };
+
     template <typename Enum>
         requires(std::is_enum_v<Enum>)
     inline constexpr std::underlying_type_t<Enum> toUnderlying(Enum e)

@@ -2963,12 +2963,13 @@ namespace dmt {
                             auto& projParams = m_parsingState.cameraSpec.params.p;
                             if (projParams.frameAspectRatio == CameraSpec::invalidAspectRatio)
                             {
-                                projParams.frameAspectRatio = m_parsingState.xResolution / m_parsingState.yResolution;
+                                projParams.frameAspectRatio = static_cast<float>(m_parsingState.xResolution) /
+                                                              m_parsingState.yResolution;
                             }
                             if (projParams.screenWindow.p.maxX == CameraSpec::invalidScreen)
                             {
-                                uint32_t idxMaxAxis                         = projParams.frameAspectRatio > 1.f ? 0 : 2;
-                                uint32_t idxMinAxis                         = (idxMaxAxis + 2) >> 2;
+                                uint32_t idxMaxAxis = projParams.frameAspectRatio > 1.f ? 0 : 2;
+                                uint32_t idxMinAxis = (idxMaxAxis + 2) & (projParams.screenWindow.arr.size() - 1);
                                 projParams.screenWindow.arr[idxMinAxis]     = -1.f;
                                 projParams.screenWindow.arr[idxMinAxis + 1] = 1.f;
                                 projParams.screenWindow.arr[idxMaxAxis]     = -projParams.frameAspectRatio;

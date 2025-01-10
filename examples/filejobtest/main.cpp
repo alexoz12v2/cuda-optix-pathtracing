@@ -9,6 +9,7 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <iostream>
 
 #include <cassert>
 #include <cstdint>
@@ -268,4 +269,5 @@ int32_t main()
     std::destroy_at(dynaArrayUnified);
     unified.deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
+    std::cin.get();
 }

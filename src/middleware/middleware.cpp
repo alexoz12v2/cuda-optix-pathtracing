@@ -3251,10 +3251,14 @@ namespace dmt {
     uint32_t SceneParser::parseParams(AppContext& actx, TokenStream& stream, ParamMap& outParams)
     {
         uint32_t i = 0;
-        for (std::string token = stream.peek(); !token.empty(); stream.advance(actx))
+        for (std::string token = stream.peek(); !token.empty(); /**/)
         {
             if (token.starts_with('#')) // TODO isComment function
+            {
+                stream.advance(actx); 
+                token = stream.peek();
                 continue;
+            }
 
             sid_t tokenSid = hashCRC64(dequoteString(token));
             if (isDirective(tokenSid))
@@ -3269,12 +3273,13 @@ namespace dmt {
             }
 
             stream.advance(actx);
+            tokenSid = hashCRC64(dequoteString(token));
             for (token = stream.peek(); !token.empty() && !isParameter(actx, token) && !isDirective(tokenSid);
-                 stream.advance(actx), token = stream.peek(), tokenSid = hashCRC64(dequoteString(token)))
+                stream.advance(actx), token = stream.peek(), tokenSid = hashCRC64(dequoteString(token)))
             {
                 if (token.size() == 1 && (token[0] == '[' || token[0] == ']'))
                     continue;
-                it->second.addParamValue(token);
+                it->second.addParamValue(dequoteString(token));
             }
             if (it->second.values.size() < 1)
             {

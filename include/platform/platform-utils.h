@@ -157,24 +157,16 @@ DMT_MODULE_EXPORT dmt {
         // Return the power of 2 as the mask
         return value - 1;
     }
-    /*
+
     template <std::integral T>
     constexpr T clamp(T val, T min_val, T max_val) noexcept
     {
-        if constexpr (std::is_signed_v<T>)
-        {
-            if (val < min_val)
-                return min_val;
-            if (val > max_val)
-                return max_val;
-            return val;
-        }
-        else
-        {
-            return std::min(std::max(val, min_val), max_val);
-        }
+        if (val < min_val)
+            return min_val;
+        if (val > max_val)
+            return max_val;
+        return val;
     }
-    */
 
     template <typename Enum>
         requires(std::is_enum_v<Enum>)

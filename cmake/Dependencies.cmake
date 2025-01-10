@@ -37,7 +37,7 @@ macro(dmt_setup_dependencies)
 	    GIT_TAG 	bf71a834948186f4097caa076cd2663c69a10e1e #refs/tags/1.0.1
     )
     FetchContent_MakeAvailable(glm)
-    add_compile_definitions(GLM_CONFIG_XYZW_ONLY=1)
+    add_compile_definitions(GLM_FORCE_XYZW_ONLY)
   endif()
 
   find_package(CUDAToolkit REQUIRED)

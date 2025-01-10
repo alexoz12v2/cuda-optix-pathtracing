@@ -1,7 +1,7 @@
-module;
-
+//module;
+#define DMT_INTERFACE_AS_HEADER
 #include "platform-os-utils.h"
-
+#include<platform-utils.h>
 #include <array>
 #include <bit>
 #include <concepts>
@@ -21,9 +21,10 @@ module;
 #undef min
 #endif
 
-module platform;
+//module platform;
 
 namespace dmt {
+    
     // not exported utils --------------------------------------------------------------------------------------------
     void* reserveVirtualAddressSpace(size_t size)
     {

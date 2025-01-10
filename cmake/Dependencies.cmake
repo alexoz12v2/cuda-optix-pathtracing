@@ -12,14 +12,14 @@ macro(dmt_setup_dependencies)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
   endif()
 
-  if(NOT TARGET fmt::fmt)
-    message(STATUS "FMT should be imported with module support ${FMT_MODULE}")
-    FetchContent_Declare(fmt
-      GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-      GIT_TAG        10.1.1 # random version, should be fine
-    )
-    FetchContent_MakeAvailable(fmt)
-  endif()
+#  if(NOT TARGET fmt::fmt)
+#    message(STATUS "FMT should be imported with module support ${FMT_MODULE}")
+#    FetchContent_Declare(fmt
+#      GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+#      GIT_TAG        10.1.1 # random version, should be fine
+#    )
+#    FetchContent_MakeAvailable(fmt)
+#  endif()
 
   if(NOT TARGET Backward::Backward)
     FetchContent_Declare(backward

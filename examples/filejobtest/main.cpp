@@ -4,12 +4,12 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
-#include <iostream>
 
 #include <cassert>
 #include <cstdint>

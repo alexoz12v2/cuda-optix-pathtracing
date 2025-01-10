@@ -14,7 +14,7 @@
 
 #include <cassert>
 #include <cctype>
-#include <cmath>
+//#include <cmath>
 #include <cstdint>
 
 namespace dmt {
@@ -30,6 +30,7 @@ namespace dmt {
 } // namespace dmt
 
 DMT_MODULE_EXPORT dmt {
+    /*
     template <typename T>
     struct PmrDeleter
     {
@@ -43,7 +44,7 @@ DMT_MODULE_EXPORT dmt {
 
         std::pmr::memory_resource* resource;
     };
-
+    */
     template <typename Enum>
         requires(std::is_enum_v<Enum>)
     inline constexpr std::underlying_type_t<Enum> toUnderlying(Enum e)
@@ -156,7 +157,7 @@ DMT_MODULE_EXPORT dmt {
         // Return the power of 2 as the mask
         return value - 1;
     }
-
+    /*
     template <std::integral T>
     constexpr T clamp(T val, T min_val, T max_val) noexcept
     {
@@ -173,6 +174,7 @@ DMT_MODULE_EXPORT dmt {
             return std::min(std::max(val, min_val), max_val);
         }
     }
+    */
 
     template <typename Enum>
         requires(std::is_enum_v<Enum>)

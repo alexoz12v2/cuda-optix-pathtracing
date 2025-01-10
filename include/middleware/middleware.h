@@ -551,6 +551,8 @@ DMT_MODULE_EXPORT dmt {
 
     struct CameraSpec
     {
+        static constexpr float invalidScreen = -std::numeric_limits<float>::infinity();
+        static constexpr float invalidAspectRatio = -1.f;
         CameraSpec()                                 = default;
         CameraSpec(CameraSpec const&)                = default;
         CameraSpec(CameraSpec&&) noexcept            = default;
@@ -567,9 +569,25 @@ DMT_MODULE_EXPORT dmt {
 
         struct Projecting           // perspective or orthographic
         {                           // params are all lowercase in the file
-            float frameAspectRatio; // computed from film
+            struct ScreenWindow {
+                float minX;
+                float maxX;
+                float minY;
+                float maxY;
+            };
+            union UScreenWindow 
+            { 
+                UScreenWindow() {  // set to an arbitrary invalid value
+                    float val = invalidScreen;
+                    for (auto& v : arr)
+                        v = val;
+                }
+                ScreenWindow p;
+                std::array<float, 4> arr;
+            };
+            float frameAspectRatio = invalidAspectRatio; // computed from film
             // [-1, 1] along shorter axis, [-screnWindow, +screenWindow] in longer axis. Default = aspect ratio if > 1, otherwise 1/aspect ratio
-            float screenWindow;
+            UScreenWindow screenWindow;
             float lensRadius    = 0;
             float focalDistance = 1e30f; // 10^30 is near the float limit
             float fov           = 90.f;  // Used only by perspective
@@ -942,9 +960,10 @@ DMT_MODULE_EXPORT dmt {
     };
 
     // ----------------------------------------------------------------------------------------------------------------
+    using ArgsDArray = std::vector<std::string>;
     struct ParamPair
     {
-        using ValueList = std::vector<std::string>;
+        using ValueList = ArgsDArray;
         constexpr explicit ParamPair(sid_t type) : type(type) {}
 
         void addParamValue(std::string_view value) { values.emplace_back(value); }
@@ -954,13 +973,12 @@ DMT_MODULE_EXPORT dmt {
         uint32_t numParams() const { return static_cast<uint32_t>(values.size()); }
 
         // TODO better (char buffer fixed)
-        std::vector<std::string> values;
+        ArgsDArray values;
 
         sid_t type;
     };
 
     using ParamMap   = std::map<sid_t, ParamPair>;
-    using ArgsDArray = std::vector<std::string>;
 
     enum class ETarget : uint8_t
     {
@@ -1360,11 +1378,22 @@ DMT_MODULE_EXPORT dmt {
         void         pushScope(EScope scope);
 
     private:
+        struct ParsingState {
+            // populated once the Camera directive is encountered (or left default constructed)
+            CameraSpec cameraSpec;
+			// populated once the Film directive is encountered
+            int32_t xResolution = -1; 
+            int32_t yResolution = -1;
+        };
+
         // TODO better
         std::forward_list<TokenStream>   m_fileStack;
         std::vector<std::vector<EScope>> m_scopeStacks;
         std::string                      m_basePath;
         IParserTarget*                   m_pTarget;
+
+        ParsingState                     m_parsingState;
+
         EParsingStep                     m_parsingStep        = EParsingStep::eOptions;
         EEncounteredHeaderDirective      m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
     };

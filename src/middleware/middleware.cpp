@@ -1482,6 +1482,30 @@ namespace dmt {
         return true;
     }
 
+    static size_t parseAndSetFloatArray(ParamMap const& params, sid_t paramSid, size_t targetSz, float* DMT_RESTRICT target, float const* DMT_RESTRICT defaultVals)
+    {
+        size_t ret = 0;
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != targetSz)
+                return 0;
+
+            for (/**/; ret < values.numParams(); ++ret)
+            {
+                if (!parseFloat(values.valueAt(ret), target[ret]))
+                    return ret;
+            }
+        }
+        else 
+        {
+            std::memcpy(target, defaultVals, targetSz * sizeof(float));
+            res = targetSz;
+        }
+
+        return ret;
+    }
+
     template <std::size_t NTTPSize>
     static std::size_t parseFloatArray(ArgsDArray const& args, std::array<float, NTTPSize>& outArray)
     {
@@ -1523,28 +1547,36 @@ namespace dmt {
             case ECameraType::ePerspective:
             {
                 auto& projectingParams = cameraSpec.params.p;
-                if (!parseAndSetFloat(params, dict::camera::fov.sid, projectingParams.fov, 90.f))
-                { // error
-                    return dict::camera::fov.sid;
-                }
-                [[fallthrough]];
-            }
-            case ECameraType::eOrthographic:
-            {
-                auto& projectingParams = cameraSpec.params.p;
-                if (!parseAndSetFloat(params, dict::camera::frameaspectratio.sid, projectingParams.frameAspectRatio, 90.f) ||
-                    !parseAndSetFloat(params, dict::camera::screenwindow.sid, projectingParams.screenWindow, 1.f) ||
-                    !parseAndSetFloat(params, dict::camera::lensradius.sid, projectingParams.lensRadius, 0.f) ||
+                projectingParams = std::remove_cvref_t<decltype(projectingParams)>{};
+                if (!parseAndSetFloat(params, dict::camera::lensradius.sid, projectingParams.lensRadius, 0.f) ||
                     !parseAndSetFloat(params, dict::camera::focaldistance.sid, projectingParams.focalDistance, 1e30f))
                 { // error
                     return "orthographic"_side;
                 }
+                if (!parseAndSetFloat(params, dict::camera::fov.sid, projectingParams.fov, 90.f))
+                { // error
+                    return dict::camera::fov.sid;
+                }
+                // NOTE: frameAspectRatio and defaultScreenWindow are set when the film is encountered
+                break;
+            }
+            case ECameraType::eOrthographic:
+            {
+                auto& projectingParams = cameraSpec.params.p;
+                projectingParams = std::remove_cvref_t<decltype(projectingParams)>{};
+                if (!parseAndSetFloat(params, dict::camera::lensradius.sid, projectingParams.lensRadius, 0.f) ||
+                    !parseAndSetFloat(params, dict::camera::focaldistance.sid, projectingParams.focalDistance, 1e30f))
+                { // error
+                    return "orthographic"_side;
+                }
+                // NOTE: frameAspectRatio and defaultScreenWindow are set when the film is encountered
                 break;
             }
             case ECameraType::eRealistic:
             {
                 using namespace std::string_view_literals;
                 auto& realisticParams = cameraSpec.params.r;
+                realisticParams = std::remove_cvref_t<decltype(realisticParams)>{};
                 if (!parseAndSetFloat(params, dict::camera::aperturediameter.sid, realisticParams.apertureDiameter, 1.f) ||
                     !parseAndSetFloat(params, dict::camera::focusdistance.sid, realisticParams.focusDistance, 10.f) ||
                     !parseAndSetString(params, dict::camera::lensfile.sid, realisticParams.lensfile, ""sv) ||
@@ -1560,6 +1592,7 @@ namespace dmt {
             case ECameraType::eSpherical:
             {
                 auto& sphericalParams = cameraSpec.params.s;
+                sphericalParams = std::remove_cvref_t<decltype(sphericalParams)>{};
                 if (!parseAndSetEnum(params,
                                      dict::camera::mapping.sid,
                                      sphericalParams.mapping,
@@ -2687,7 +2720,8 @@ namespace dmt {
               bool (*fromSidFunc)(sid_t, EnumType&),
               sid_t (*setParams)(Spec&, ParamMap const&, Options const&),
               void (IParserTarget::*apiFunc)(Spec const&),
-              EEncounteredHeaderDirective eDirective)
+              EEncounteredHeaderDirective eDirective, 
+              void(*callback)(SceneParser &self, Spec const& spec) = nullptr)
         {
             Spec spec;
             if (!transitionToHeaderIfFirstHeaderDirective(actx, options, eDirective))
@@ -2711,6 +2745,8 @@ namespace dmt {
                 std::abort();
             }
             (m_pTarget->*apiFunc)(spec);
+            if (callback)
+                callback(*this, spec)
         };
 
         auto parseArgumentFloats = [this]<size_t size> // TODO rework without template
@@ -2726,7 +2762,7 @@ namespace dmt {
                 actx.error("Unexpected number of parameters for {} directive", {directive.str});
                 std::abort();
             }
-            if (parseFloatArray(outArgs, outArray) != 9)
+            if (parseFloatArray(outArgs, outArray) != size)
             {
                 actx.error("Error while parsing float arguments for the {} directive", {directive.str});
                 std::abort();
@@ -2799,7 +2835,8 @@ namespace dmt {
                                                    cameraTypeFromSid,
                                                    setCameraParams,
                                                    &IParserTarget::Camera,
-                                                   EEncounteredHeaderDirective::eCamera);
+                                                   EEncounteredHeaderDirective::eCamera, 
+                                                   [](SceneParser& self, CameraSpec const& spec) { self.m_parsingState.cameraSpec = spec; });
                         break;
                     }
                     case dict::directive::Sampler.sid:
@@ -2847,7 +2884,11 @@ namespace dmt {
                                                    filmTypeFromSid,
                                                    setFilmParams,
                                                    &IParserTarget::Film,
-                                                   EEncounteredHeaderDirective::eFilm);
+                                                   EEncounteredHeaderDirective::eFilm, 
+                            [](SceneParser& self, FilmSpec const& spec) {
+                                self.m_parsingState.xResolution = spec.xResolution;
+                                self.m_parsingState.yResolution = spec.yResolution;
+                            });
                         break;
                     }
                     case dict::directive::PixelFilter.sid:
@@ -2898,6 +2939,21 @@ namespace dmt {
                         {
                             actx.error("Encountered WorldBegin more than once");
                             std::abort();
+                        }
+                        // Complete Camera Parsing and pass the complete camera
+                        if (m_parsingState.cameraSpec.type == ECameraType::ePerspective || m_parsingState.cameraSpec.type == ECameraType::eOrthographic)
+                        {
+                            if (m_parsingState.xResolution == -1)
+                            {
+                                FilmSpec defaultFilm;
+                                m_parsingState.xResolution = defaultFilm.xResolution;
+                                m_parsingState.yResolution = defaultFilm.yResolution;
+                            }
+                            auto& projParams = m_parsingState.cameraSpec.params.p;
+                            if (projParams.frameAspectRatio == CameraSpec::invalidAspectRatio)
+                            {
+
+                            }
                         }
                         m_parsingStep = EParsingStep::eWorld;
                         m_pTarget->WorldBegin();
@@ -3227,7 +3283,7 @@ namespace dmt {
     uint32_t SceneParser::parseArgs(AppContext& actx, TokenStream& stream, ArgsDArray& outArr)
     {
         uint32_t i = 0;
-        for (std::string token = stream.peek(); !token.empty(); ++i, stream.advance(actx), token = stream.peek())
+        for (std::string token = stream.peek(); !token.empty(); stream.advance(actx), token = stream.peek())
         {
             if (token.starts_with('#'))
                 continue;
@@ -3237,6 +3293,7 @@ namespace dmt {
                 break;
 
             outArr.emplace_back(std::move(token));
+            ++i;
         }
 
         if (i == 0)
@@ -3277,7 +3334,7 @@ namespace dmt {
             for (token = stream.peek(); !token.empty() && !isParameter(actx, token) && !isDirective(tokenSid);
                 stream.advance(actx), token = stream.peek(), tokenSid = hashCRC64(dequoteString(token)))
             {
-                if (token.size() == 1 && (token[0] == '[' || token[0] == ']'))
+                if ((token.size() == 1 && (token[0] == '[' || token[0] == ']')) || token.starts_with('#'))
                     continue;
                 it->second.addParamValue(dequoteString(token));
             }

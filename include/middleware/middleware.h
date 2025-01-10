@@ -1110,7 +1110,7 @@ DMT_MODULE_EXPORT dmt {
 
         virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-        virtual ~IParserTarget() {};
+        virtual ~IParserTarget(){};
 
         virtual void Option(sid_t name, ParamPair const& value) = 0;
 
@@ -1199,7 +1199,7 @@ DMT_MODULE_EXPORT dmt {
     {
     public:
         template <typename F>
-        void forActiveTransforms(F func)
+        void ForActiveTransforms(F func)
         {
             for (int i = 0; i < TransformSet::maxTransforms; ++i)
                 if (activeTransformBits & (1 << i))
@@ -1282,6 +1282,9 @@ DMT_MODULE_EXPORT dmt {
         FilterSpec      filterSpec;
         IntegratorSpec  integratorSpec;
         AcceleratorSpec acceleratorSpec;
+
+    private:
+        GraphicsState graphicsState;
     };
 
     enum class EParsingStep : uint8_t

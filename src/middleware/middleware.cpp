@@ -2,6 +2,8 @@ module;
 
 #include "dmtmacros.h"
 
+#include <glm/vec3.hpp>
+
 #include <array>
 #include <atomic>
 #include <bit>
@@ -12,6 +14,7 @@ module;
 #include <string_view>
 #include <type_traits>
 #include <vector>
+
 
 #include <cassert>
 #include <cctype>
@@ -3367,9 +3370,17 @@ namespace dmt {
 
     void SceneDescription::Option(sid_t name, ParamPair const&) {}
 
-    void SceneDescription::Identity() {}
+    void SceneDescription::Identity() 
+    {
+        graphicsState.ForActiveTransforms([](auto t) { return pbrt::Transform(); }
+    }
 
-    void SceneDescription::Translate(float dx, float dy, float dz) {}
+    void SceneDescription::Translate(float dx, float dy, float dz) 
+    {
+        graphicsState.ForActiveTransforms(
+            [=](auto t){ return t * dmt::Translate(glm::vec3(dx, dy, dz));}
+        );
+    }
 
     void SceneDescription::Rotate(float angle, float ax, float ay, float az) {}
 

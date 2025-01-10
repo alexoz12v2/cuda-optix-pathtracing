@@ -156,29 +156,29 @@ int main()
         uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
         if (counter++ % 50 == 0)
             ctx.log("Inside allocation hook!");
-    },
+        },
         .freeHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
         uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
         if (counter++ % 50 == 0)
             ctx.log("inside deallocation Hook!");
-    },
+        },
         .data = &counter,
-    };
+        };
     dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
     dmt::PageAllocatorHooks     testhooks{
             .allocHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
         auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
         tracker.track(ctx, alloc);
-    },
+        },
             .freeHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
         auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
         tracker.untrack(ctx, alloc);
-    },
+        },
             .data = &tracker,
-    };
+        };
     dmt::PageAllocator pageAllocator{ctx, testhooks};
     auto               pageAlloc = pageAllocator.allocatePage(platform.ctx());
     if (pageAlloc.address)

@@ -1,7 +1,7 @@
-module;
-
+//module;
+#define DMT_INTERFACE_AS_HEADER
 #include "platform-os-utils.h"
-
+#include<platform-threadPool.h>
 #include <atomic>
 #include <bit>
 #include <functional>
@@ -27,9 +27,10 @@ module;
 #undef min
 #endif
 
-module platform;
+//module platform;
 
 namespace dmt {
+    /*
     ThreadPool::ThreadPool(int const size) :
     busyThreads(size),
     m_threads(std::vector<std::thread>(size)),
@@ -1198,5 +1199,5 @@ namespace dmt {
 #endif
         return ++InputIterator(pData, chunkNum, numChunks);
     }
-
+*/
 } // namespace dmt

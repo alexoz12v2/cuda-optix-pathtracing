@@ -1,7 +1,7 @@
-module;
-
+//module;
+#define DMT_INTERFACE_AS_HEADER
 #include "platform-os-utils.h"
-
+#include<platform-memory.h>
 // NOLINTBEGIN
 #include <array>
 #include <bit>
@@ -43,7 +43,7 @@ module;
 #endif
 // NOLINTEND
 
-module platform;
+//module platform;
 
 namespace dmt {
     char const* memoryTagStr(EMemoryTag tag)

@@ -1,5 +1,6 @@
-module;
-
+//module;
+#define DMT_INTERFACE_AS_HEADER
+#include<platform-logging.h>
 #include <array>
 #include <chrono>
 #include <memory>
@@ -29,7 +30,7 @@ module;
 
 // https://github.com/fmtlib/fmt/blob/master/include/fmt/format.h, line 4153
 
-module platform;
+//module platform;
 
 namespace dmt {
     // CircularOStringStream ------------------------------------------------------------------------------------------

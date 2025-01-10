@@ -275,7 +275,7 @@ macro(dmt_set_target_warnings target)
 
   if(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
     if(DMT_WARNINGS_AS_ERRORS)
-      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: -Werror>)
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
     endif()
     target_compile_options(${target} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:
@@ -436,6 +436,9 @@ endfunction()
 
 function(dmt_add_compile_definitions target)
   if(DMT_OS_WINDOWS)
+    if(DEFINED DMT_COMPILER_MSVC AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+      target_compile_definitions(${target} PUBLIC DMT_NEEDS_MODULE)
+    endif()
     set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
     string(REGEX REPLACE "/" "\\\\\\\\" DMT_PROJ_PATH ${DMT_PROJ_PATH})
   else()
@@ -447,6 +450,23 @@ function(dmt_add_compile_definitions target)
       #$<$<COMPILE_LANGUAGE:CUDA>:DMT_LANGUAGE_CUDA "DMT_CPU_GPU=__host__ __device__" "DMT_CPU=__host__" "DMT_GPU=__device__">
   )
 endfunction()
+
+
+function(dmt_set_target_compiler_versions name)
+  set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX)
+  # modules require C++20 support
+  if(DEFINED DMT_OS_WINDOWS AND DEFINED DMT_COMPILER_MSVC)
+    target_compile_features(${name} PUBLIC cuda_std_20)
+    target_compile_options(${name} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c++20> $<$<COMPILE_LANGUAGE:C>:/std:c17>)
+  else()
+    target_compile_features(${name} PUBLIC cxx_std_20 cuda_std_20)
+  endif()
+
+  if(MSVC)
+    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>)
+  endif()
+endfunction()
+
 
 
 # usage: dmt_add_module_library(target sources...) -> sources in ARGN
@@ -506,9 +526,7 @@ function(dmt_add_module_library name module_name)
   add_library(${name})
 
   # may give problems if CUDA interfaces between modules are shared
-  set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX)
-  # modules require C++20 support
-  target_compile_features(${name} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
+  dmt_set_target_compiler_versions(${name})
 
   # cuda specific
   set_target_properties(${name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
@@ -540,7 +558,7 @@ function(dmt_add_module_library name module_name)
     #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
     #  PUBLIC /reference ${module_name}=${BMI}
     #)
-    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
+    #target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
 
     #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
     #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
@@ -611,9 +629,7 @@ function(dmt_add_module_library name module_name)
     # TODO: handle dependencies
     message(STATUS "clang-tidy requires me to manually setup the prebuilt-module-path,\n\tsetting path for ${name} to ${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir")
     target_compile_options(${name} PRIVATE
-      $<$<COMPILE_LANGUAGE:CXX>:
-        -fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir
-      >
+      $<$<COMPILE_LANGUAGE:CXX>:-fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir>
     )
   endif()
 
@@ -648,19 +664,19 @@ function(dmt_add_module_library name module_name)
   dmt_debug_print_target_props(${name} ${module_name})
   target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/extern)
 
-  if(MSVC)
-    if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
-      message(FATAL_ERROR "Windows with Ninja doesn't find the module interface from the module implementation unit. I don't know why.")
-      # module dependency between module interface unit and module implementation unit works fine on visual studio, 
-      # but not on ninja. Still have no idea why
-      #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${name}.dir/${module_name}.ifc)
-      #message("GENERATOR ------------------- ${CMAKE_GENERATOR}, different from VS. Trying to patch up module on ${BMI}")
-      #target_compile_options(${name}
-      #  PRIVATE /interface /ifcOutput ${BMI}
-      #  PUBLIC /reference ${module_name}=${BMI}
-      # )
-    endif()
-  endif()
+  #if(MSVC)
+  #  if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+  #    message(FATAL_ERROR "Windows with Ninja doesn't find the module interface from the module implementation unit. I don't know why.")
+  #    # module dependency between module interface unit and module implementation unit works fine on visual studio, 
+  #    # but not on ninja. Still have no idea why
+  #    #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${name}.dir/${module_name}.ifc)
+  #    #message("GENERATOR ------------------- ${CMAKE_GENERATOR}, different from VS. Trying to patch up module on ${BMI}")
+  #    #target_compile_options(${name}
+  #    #  PRIVATE /interface /ifcOutput ${BMI}
+  #    #  PUBLIC /reference ${module_name}=${BMI}
+  #    # )
+  #  endif()
+  #endif()
 endfunction()
 
 
@@ -706,16 +722,12 @@ function(dmt_add_example target)
   set_target_properties(${target} PROPERTIES FOLDER "Examples")
   # visual studio startup path for debugging
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
-  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
+
+  dmt_set_target_compiler_versions(${target})
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
   dmt_add_compile_definitions(${target})
-
-  if(MSVC)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
-    #target_compile_options(${target} PRIVATE )
-  endif()
 
   # possible todo: Automatically include dependencies here
 endfunction()
@@ -748,11 +760,7 @@ function(dmt_add_test target)
   set_target_properties(${target} PROPERTIES FOLDER "Tests")
   # startup path for debugging in IDEs
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
-
-  if(MSVC)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>: /std:c17>)
-  endif()
+  dmt_set_target_compiler_versions(${target})
 
   # Iterate over dependencies to add their corresponding BMI paths
   #set(BMI "")

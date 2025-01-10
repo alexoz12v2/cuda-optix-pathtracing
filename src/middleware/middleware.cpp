@@ -2973,12 +2973,15 @@ namespace dmt {
                             }
                             if (projParams.screenWindow.p.maxX == CameraSpec::invalidScreen)
                             {
+                                float    largeValue = projParams.frameAspectRatio > 1.f
+                                                          ? projParams.frameAspectRatio
+                                                          : (1.f / projParams.frameAspectRatio);
                                 uint32_t idxMaxAxis = projParams.frameAspectRatio > 1.f ? 0 : 2;
                                 uint32_t idxMinAxis = (idxMaxAxis + 2) & (projParams.screenWindow.arr.size() - 1);
                                 projParams.screenWindow.arr[idxMinAxis]     = -1.f;
                                 projParams.screenWindow.arr[idxMinAxis + 1] = 1.f;
-                                projParams.screenWindow.arr[idxMaxAxis]     = -projParams.frameAspectRatio;
-                                projParams.screenWindow.arr[idxMaxAxis + 1] = projParams.frameAspectRatio;
+                                projParams.screenWindow.arr[idxMaxAxis]     = -largeValue;
+                                projParams.screenWindow.arr[idxMaxAxis + 1] = largeValue;
                             }
                         }
 

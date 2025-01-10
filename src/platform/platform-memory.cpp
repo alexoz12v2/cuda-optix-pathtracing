@@ -1270,7 +1270,7 @@ namespace dmt {
 #elif defined(DMT_OS_LINUX)
         EPageSize pageSize = m_enabledPageSize;
 #else
-        size_t pageSize = EPageSize::e4KB;
+        EPageSize pageSize = EPageSize::e4KB;
 #endif
 
         if (pageSize == EPageSize::e1GB && opts != EPageAllocationQueryOptions::eNone)

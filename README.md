@@ -133,3 +133,67 @@ dumpbin /ALL middleware-model.cu.obj | findstr "Runtime"
 # esempio di output
    /FAILIFMISMATCH:RuntimeLibrary=MDd_DynamicDebug
 ```
+
+### VSCode Notes
+#### Intellisense and CMake
+To make sure that VSCode can see CMake's `target_compile_definitisons` and more, the build system needs to export a *JSON Compilation Database*, which
+is an array of compilation commands specified by LLVM [Here](https://clang.llvm.org/docs/JSONCompilationDatabase.html). (file `compile_commands.json` in the build directory).
+CMake supports creation of the compilation database out of the box by setting, either in the `CMakePresets.json`, by command line, or inside a script file, 
+the variable [`CMAKE_EXPORT_COMPILE_COMMANDS`](https://cmake.org/cmake/help/latest/variable/CMAKE_EXPORT_COMPILE_COMMANDS.html), *Only* for Ninja Generators and Makefile Generators.
+For the Visual Studio Generator, ie MSBuild, we need a different approach illustrated [Here](https://clangpowertools.com/blog/generate-json-compilation-database.html).
+- Install Visual Studio extension "Clang Power Tools"
+- Right click on the Solution inside "Solution Explorer"
+- Click "Clang Power Tools" -> "Export Compilation Database"
+
+Once the compilation database is generated, in the build directory, there should be a `compile_commands.json` file.
+To let vscode see this, create inside the `.vscode` directory a symlink to the `compile_commands.json` file. 
+(Insert your actual absolute path as target argument. Showing windows cmd command)
+```
+mklink .\.vscode\compile_commands.json Y:\cuda-optix-pathtracing\build\Debug-VS\compile_commands.json  
+```
+Then insert inside the `.vscode/c_cpp_properties.json` the following
+```json
+{
+  "configurations": [
+    {
+      // ...
+      "compileCommands": "${workspaceFolder}/.vscode/compile_commands.json"
+    }
+  ]
+  // ...
+}
+```
+*Remember to refresh the compilation database everytime you run cmake's configure step* (symlink has to be created once)
+
+#### Debugging
+- (Linux/MacOS) you need "CMake Tools" and ["Nsight Visual Studio Code Edition"](https://docs.nvidia.com/nsight-visual-studio-code-edition/install-setup/index.html) and use the following `.vscode/launch.json` file
+  ```json
+  {
+      "version": "0.2.0",
+      "configurations": [
+          {
+              "name": "CUDA C++: Launch",
+              "type": "cuda-gdb",
+              "request": "launch",
+              "program": "${workspaceFolder}/build/path/to/stuff.exe"
+          }
+      ]
+  }
+  ```
+  Then you can launch a cmake executable target in the "CMake" tab, right click and "Debug"
+- (Windows) You can't. Use Visual Studio
+
+#### Seeing modules
+I still don't know
+
+### Strumenti Extra per il `Ninja Multi-Config` Generator
+- necessario avere ninja
+  ```
+  winget install ninja-build.ninja
+  ```
+- scaricare utility `vswhere` e metterla nella env `Path`, [Link](https://github.com/microsoft/vswhere)
+- Configurare command prompt con l'ambiente necessario. Su windows:
+  ```
+  cmd.exe /k "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
+  ```
+  Che puo' essere messo in `.vscode\settings.json` per averlo pronto

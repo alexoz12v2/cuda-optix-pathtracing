@@ -1,10 +1,10 @@
 dmt_add_module_library(dmt-platform platform
   MODULE_INTERFACE platform.cppm
-  MODULE_IMPLEMENTATION platform.cpp
+  # MODULE_IMPLEMENTATION 
   MODULE_PARTITION_INTERFACES platform-utils.cppm platform-logging.cppm platform-threadPool.cppm platform-memory.cppm
-  MODULE_PARTITION_IMPLEMENTATIONS platform-utils.cpp platform-logging.cpp platform-threadPool.cpp platform-memory.cpp
+  # MODULE_PARTITION_IMPLEMENTATIONS 
   HEADERS platform.h platform-logging.h platform-threadPool.h platform-utils.h platform-memory.h platform-cuda-utils.h platform-cuda-utils.cuh
-  PRIVATE_SOURCES platform-os-utils.h platform-os-utils.cpp platform-cuda-utils.cu
+  PRIVATE_SOURCES platform-os-utils.h platform-os-utils.cpp platform-cuda-utils.cu platform-utils.cpp platform-logging.cpp platform-threadPool.cpp platform-memory.cpp platform.cpp
 )
 
 target_link_libraries(dmt-platform 

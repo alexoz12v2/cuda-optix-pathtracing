@@ -2804,6 +2804,11 @@ namespace dmt {
                 ArgsDArray args;
                 ParamMap   params;
                 sid_t      tokenSid = hashCRC64(token);
+                if (token.starts_with('#'))
+                {
+                    currentStream.advance(actx);
+                    continue;
+                }
                 if (!isDirective(tokenSid))
                 {
                     actx.error("Invalid directive {}", {token});

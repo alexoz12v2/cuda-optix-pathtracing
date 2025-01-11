@@ -25,11 +25,9 @@
 #include <compare>
 #include <cstdint>
 
-#if defined(DMT_INTERFACE_AS_HEADER)
+#define DMT_INTERFACE_AS_HEADER
 #include <platform/platform.h>
-#else
-import platform;
-#endif
+
 
 // TODO switch all structures with stack allocator
 // TODO remove default values from clases and leave them only in parsing functions
@@ -104,7 +102,12 @@ DMT_MODULE_EXPORT dmt {
         }
 
         // Swap m and mInv
-        void inverse() { std::swap(m, mInv); }
+        void inverse()
+        {
+            glm::mat4 tmp = m;
+            m             = mInv;
+            mInv          = tmp;
+        }
 
         // Apply the transform to a point
         glm::vec3 applyToPoint(glm::vec3 const& point) const

@@ -232,7 +232,7 @@ int32_t main()
     //testCTrie(actx);
     //testWordTokenization(actx);
     //testJob(actx);
-    textParsing(actx);
+    //textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
 
     dmt::UnifiedMemoryResource unified;

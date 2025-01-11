@@ -1,7 +1,4 @@
-
 #define DMT_INTERFACE_AS_HEADER
-#include<middleware.h>
-
 #include "dmtmacros.h"
 
 #include <glm/vec3.hpp>
@@ -12,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <memory_resource>
+#include <middleware.h>
 #include <numeric>
 #include <string_view>
 #include <type_traits>
@@ -21,7 +19,6 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
-
 
 
 // TODO if this appears after the integrator has bee3n already parsed, you need to modify it somehow
@@ -3374,13 +3371,15 @@ namespace dmt {
 
     void SceneDescription::Identity()
     {
-        graphicsState.ForActiveTransforms([](auto t) {
-            return pbrt::Transform(); }
+        graphicsState.ForActiveTransforms([](auto t) { return dmt::Transform(glm::mat4(1.f)); });
     }
 
     void SceneDescription::Translate(float dx, float dy, float dz)
     {
-        graphicsState.ForActiveTransforms([=](auto t) { return t * dmt::Translate(glm::vec3(dx, dy, dz)); });
+        graphicsState.ForActiveTransforms([=](auto t) {
+            t.translate_(glm::vec3(dx, dy, dz));
+            return t;
+        });
     }
 
     void SceneDescription::Rotate(float angle, float ax, float ay, float az) {}

@@ -63,10 +63,10 @@ export
 
 module :private; // modifying this does not cause recompilation
 // clang-format off
+#include <platform-utils.cpp>
 #include <platform-logging.cpp>
 #include <platform-memory.cpp>
 #include <platform-threadPool.cpp>
-#include <platform-utils.cpp>
 #include <platform.cpp>
 // clang-format on
 

@@ -1,4 +1,3 @@
-
 #define DMT_INTERFACE_AS_HEADER
 #undef DMT_NEEDS_MODULE
 #include "middleware.h"
@@ -3454,7 +3453,14 @@ namespace dmt {
     }
 
     // SceneDescription -----------------------------------------------------------------------------------------------
-    void SceneDescription::Scale(float sx, float sy, float sz) {}
+    void SceneDescription::Scale(float sx, float sy, float sz)
+    {
+        graphicsState.ForActiveTransforms(
+            [=](dmt::Transform t) { // takes a parameter by copy and returns it, NRVO should kick in (TODO check assembly)
+            t.scale_(glm::vec3(sx, sy, sz));
+            return t;
+        });
+    }
 
     void SceneDescription::Shape(EShapeType type, ParamMap const& params) {}
 
@@ -3462,21 +3468,31 @@ namespace dmt {
 
     void SceneDescription::Identity()
     {
-        graphicsState.ForActiveTransforms([](auto t) { return dmt::Transform{}; });
+        graphicsState.ForActiveTransforms([](dmt::Transform t) { return dmt::Transform{}; });
     }
 
     void SceneDescription::Translate(float dx, float dy, float dz)
     {
-        graphicsState.ForActiveTransforms([=](auto t) {
+        graphicsState.ForActiveTransforms([=](dmt::Transform t) {
             t.translate_(glm::vec3{dx, dy, dz});
             return t;
         });
     }
 
-    void SceneDescription::Rotate(float angle, float ax, float ay, float az) {}
+    void SceneDescription::Rotate(float angle, float ax, float ay, float az)
+    {
+        graphicsState.ForActiveTransforms([=](dmt::Transform t) {
+            t.rotate_(angle, glm::vec3(ax, ay, az));
+            return t;
+        });
+    }
 
     void SceneDescription::LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz)
     {
+        graphicsState.ForActiveTransforms([=](dmt::Transform t) {
+            t.lookAt_(glm::vec3(ex, ey, ez), glm::vec3(lx, ly, lz), glm::vec3(ux, uy, uz));
+            return t;
+        });
     }
 
     void SceneDescription::ConcatTransform(std::array<float, 16> const& transform) {}
@@ -3487,15 +3503,23 @@ namespace dmt {
 
     void SceneDescription::CoordSysTransform(sid_t name) {}
 
-    void SceneDescription::ActiveTransformAll() {}
+    void SceneDescription::ActiveTransformAll()
+    {
+        graphicsState.activeTransformBits = std::numeric_limits<uint32_t>::max();
+    }
 
-    void SceneDescription::ActiveTransformEndTime() {}
+    void SceneDescription::ActiveTransformEndTime() { graphicsState.activeTransformBits = 1 << 1; }
 
-    void SceneDescription::ActiveTransformStartTime() {}
+    void SceneDescription::ActiveTransformStartTime() { graphicsState.activeTransformBits = 1 << 0; }
 
-    void SceneDescription::TransformTimes(float start, float end) {}
+    void SceneDescription::TransformTimes(float start, float end)
+    {
+        //verify option
+        graphicsState.transformStartTime = start;
+        graphicsState.transformEndTime   = end;
+    }
 
-    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) {}
+    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) { graphicsState.colorSpace = colorSpace; }
 
     void SceneDescription::PixelFilter(FilterSpec const& spec) {}
 
@@ -3505,7 +3529,11 @@ namespace dmt {
 
     void SceneDescription::Integrator(IntegratorSpec const& spec) {}
 
-    void SceneDescription::Camera(CameraSpec const& params) {}
+    void SceneDescription::Camera(CameraSpec const& params)
+    {
+        TransformSet cameraFormWorld = graphicsState.ctm;
+        TransformSet worldFormCamera = Inverse(graphicsState.ctm);
+    }
 
     void SceneDescription::MakeNamedMedium(sid_t name, ParamMap const& params) {}
 
@@ -3533,7 +3561,11 @@ namespace dmt {
 
     void SceneDescription::AreaLightSource(EAreaLightType type, ParamMap const& params) {}
 
-    void SceneDescription::ReverseOrientation() {}
+    void SceneDescription::ReverseOrientation()
+    {
+        //verify_world
+        graphicsState.reverseOrientation = !graphicsState.reverseOrientation;
+    }
 
     void SceneDescription::ObjectBegin(sid_t name) {}
 

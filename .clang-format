@@ -123,7 +123,7 @@ IncludeCategories:
     Regex: '^<([^c](.+)|coroutine|charconv|chrono|complex|concepts|condition_variable)>$'
   - Priority: 11
     Regex: '^<c(.+)>$'
-SortIncludes: true
+SortIncludes: false # TODO reset to true once you figure out how to handle C++20 modules without hacks
 SortUsingDeclarations: true
 
 # Penalties

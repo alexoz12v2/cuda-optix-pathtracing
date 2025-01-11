@@ -12,9 +12,10 @@
 #include <glm/ext/matrix_clip_space.hpp> // glm::perspective
 #include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
 #include <glm/ext/scalar_constants.hpp>  // glm::pi
-#include <glm/mat4x4.hpp>                // glm::mat4
-#include <glm/vec3.hpp>                  // glm::vec3
-#include <glm/vec4.hpp>                  // glm::vec4
+#include <glm/geometric.hpp>
+#include <glm/mat4x4.hpp> // glm::mat4
+#include <glm/vec3.hpp>   // glm::vec3
+#include <glm/vec4.hpp>   // glm::vec4
 
 #include <array>
 #include <atomic>
@@ -88,6 +89,37 @@ namespace dmt {
             mInv = other.mInv * mInv;
         }
 
+        void lookAt_(glm::vec3 pos, glm::vec3 look, glm::vec3 up)
+        {
+            glm::mat4 worldFromCamera;
+            // Initialize fourth column of viewing matrix
+            worldFromCamera[0][3] = pos.x;
+            worldFromCamera[1][3] = pos.y;
+            worldFromCamera[2][3] = pos.z;
+            worldFromCamera[3][3] = 1;
+
+            // Initialize first three columns of viewing matrix
+            glm::vec3 dir = glm::normalize(look - pos);
+            assert(glm::length(glm::cross(glm::normalize(up), dir)) < std::numeric_limits<float>::epsilon());
+
+            glm::vec3 right       = glm::normalize(glm::cross(glm::normalize(up), dir));
+            glm::vec3 newUp       = glm::cross(dir, right);
+            worldFromCamera[0][0] = right.x;
+            worldFromCamera[1][0] = right.y;
+            worldFromCamera[2][0] = right.z;
+            worldFromCamera[3][0] = 0.;
+            worldFromCamera[0][1] = newUp.x;
+            worldFromCamera[1][1] = newUp.y;
+            worldFromCamera[2][1] = newUp.z;
+            worldFromCamera[3][1] = 0.;
+            worldFromCamera[0][2] = dir.x;
+            worldFromCamera[1][2] = dir.y;
+            worldFromCamera[2][2] = dir.z;
+            worldFromCamera[3][2] = 0.;
+
+            m = m * worldFromCamera;
+        }
+
         // Reset to identity matrix
         void reset()
         {
@@ -96,7 +128,13 @@ namespace dmt {
         }
 
         // Swap m and mInv
-        void inverse() { std::swap(m, mInv); }
+        void inverse()
+        {
+            glm::mat4 tmp = m;
+            m             = mInv;
+            mInv          = tmp;
+        }
+
 
         // Apply the transform to a point
         glm::vec3 applyToPoint(glm::vec3 const& point) const
@@ -111,6 +149,7 @@ namespace dmt {
             glm::vec4 result = mInv * glm::vec4(point, 1.0f);
             return glm::vec3(result);
         }
+
 
         // Equality comparison
         bool operator==(Transform const& other) const { return m == other.m && mInv == other.mInv; }
@@ -1235,7 +1274,7 @@ namespace dmt {
         TransformSet ctm;
         uint32_t     activeTransformBits = std::numeric_limits<uint32_t>::max();
         bool         reverseOrientation  = false;
-        float        transfromStartTime  = 0.f;
+        float        transformStartTime  = 0.f;
         float        transformEndTime    = 1.f;
 
         EColorSpaceType colorSpace = EColorSpaceType::eSRGB;

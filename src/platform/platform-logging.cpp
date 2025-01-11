@@ -6,6 +6,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <platform-logging.h>
 #include <source_location>
 #include <string_view>
 #include <utility>

@@ -15,7 +15,6 @@
 
 #include <cassert>
 #include <cctype>
-//#include <cmath>
 #include <cstdint>
 #endif
 
@@ -30,7 +29,6 @@ DMT_MODULE_EXPORT namespace dmt {
 
     void decommitPage(void* pageAddress, size_t pageSize);
 
-    /*
     template <typename T>
     struct PmrDeleter
     {
@@ -44,7 +42,7 @@ DMT_MODULE_EXPORT namespace dmt {
 
         std::pmr::memory_resource* resource;
     };
-    */
+
     template <typename Enum>
         requires(std::is_enum_v<Enum>)
     inline constexpr std::underlying_type_t<Enum> toUnderlying(Enum e)

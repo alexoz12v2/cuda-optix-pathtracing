@@ -2,15 +2,15 @@
 
 #include "dmtmacros.h"
 
-#if defined(DMT_INTERFACE_AS_HEADER)
+#if !defined(DMT_PLATFORM_IMPORTED)
 #include <platform/platform.h>
-#else
-import platform;
 #endif
 
-DMT_MODULE_EXPORT dmt::model {
+namespace dmt::model {
     using namespace dmt;
-    void test(AppContext & ctx);
-}
+    void test(AppContext& ctx);
+} // namespace dmt::model
 
-DMT_MODULE_EXPORT dmt::model::soa { using namespace dmt; }
+namespace dmt::model::soa {
+    using namespace dmt;
+}

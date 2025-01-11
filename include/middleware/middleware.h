@@ -2,6 +2,13 @@
 
 #include "dmtmacros.h"
 
+
+#if !defined(DMT_NEEDS_MODULE)
+// clang-format off
+#include <platform/platform.h>
+#include <middleware/middleware-model.h>
+// clang-format on
+
 #include <glm/ext/matrix_clip_space.hpp> // glm::perspective
 #include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
 #include <glm/ext/scalar_constants.hpp>  // glm::pi
@@ -24,15 +31,13 @@
 #include <cassert>
 #include <compare>
 #include <cstdint>
-
-#define DMT_INTERFACE_AS_HEADER
-#include <platform/platform.h>
+#endif
 
 // TODO switch all structures with stack allocator
 // TODO remove default values from clases and leave them only in parsing functions
 
 // stuff related to .pbrt file parsing + data structures
-DMT_MODULE_EXPORT dmt {
+namespace dmt {
     // TODO move somewhere else
     class Transform
     {
@@ -515,11 +520,11 @@ DMT_MODULE_EXPORT dmt {
 
     namespace apertures {
         using namespace std::string_view_literals;
-        static inline constexpr std::string_view gaussian = "gaussian"sv;
-        static inline constexpr std::string_view square   = "square"sv;
-        static inline constexpr std::string_view pentagon = "pentagon"sv;
-        static inline constexpr std::string_view star     = "star"sv;
-    }
+        inline constexpr std::string_view gaussian = "gaussian"sv;
+        inline constexpr std::string_view square   = "square"sv;
+        inline constexpr std::string_view pentagon = "pentagon"sv;
+        inline constexpr std::string_view star     = "star"sv;
+    } // namespace apertures
 
     struct CameraSpec
     {
@@ -1390,9 +1395,9 @@ DMT_MODULE_EXPORT dmt {
         EParsingStep                m_parsingStep        = EParsingStep::eOptions;
         EEncounteredHeaderDirective m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
     };
-}
+} // namespace dmt
 
-DMT_MODULE_EXPORT dmt::job {
+namespace dmt::job {
     struct ParseSceneHeaderData
     {
         std::string_view      filePath;
@@ -1405,4 +1410,4 @@ DMT_MODULE_EXPORT dmt::job {
     };
 
     void parseSceneHeader(uintptr_t address);
-}
+} // namespace dmt::job

@@ -1,12 +1,14 @@
 //module;
 #define DMT_INTERFACE_AS_HEADER
+#undef DMT_NEEDS_MODULE
+#include "platform-utils.h"
+
 #include "platform-os-utils.h"
 
 #include <array>
 #include <bit>
 #include <concepts>
 #include <limits>
-#include <platform-utils.h>
 
 #include <cassert>
 

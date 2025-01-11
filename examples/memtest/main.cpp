@@ -11,6 +11,8 @@
 
 import platform;
 
+Point p{.x = 2, .y = 3};
+
 struct TestObject
 {
     int              x, y;

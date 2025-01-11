@@ -1,5 +1,6 @@
 //module;
 #define DMT_INTERFACE_AS_HEADER
+#undef DMT_NEEDS_MODULE
 #include "platform-memory.h"
 
 #include "platform-os-utils.h"
@@ -66,18 +67,20 @@ namespace dmt {
     static thread_local page_info pageInfoPool[howMany4KBsIn1GB];
     static thread_local uint64_t  bitsPool[howMany4KBsIn1GB];
 #elif defined(DMT_OS_WINDOWS)
-    inline constexpr uint32_t                                           tokenPrivilegesBytes = 2048;
-    static thread_local std::array<unsigned char, tokenPrivilegesBytes> sTokenPrivileges;
-    using PVirtualAlloc = PVOID (*)(
-        HANDLE                  Process,
-        PVOID                   BaseAddress,
-        SIZE_T                  Size,
-        ULONG                   AllocationType,
-        ULONG                   PageProtection,
-        MEM_EXTENDED_PARAMETER* ExtendedParameters,
-        ULONG                   ParameterCount);
-    static constexpr uint32_t                              sErrorBufferSize = 256;
-    static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
+    namespace tp {
+        inline constexpr uint32_t                                           tokenPrivilegesBytes = 2048;
+        static thread_local std::array<unsigned char, tokenPrivilegesBytes> sTokenPrivileges;
+        using PVirtualAlloc = PVOID (*)(
+            HANDLE                  Process,
+            PVOID                   BaseAddress,
+            SIZE_T                  Size,
+            ULONG                   AllocationType,
+            ULONG                   PageProtection,
+            MEM_EXTENDED_PARAMETER* ExtendedParameters,
+            ULONG                   ParameterCount);
+        static constexpr uint32_t                              sErrorBufferSize = 256;
+        static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
+    } // namespace tp
 #endif
 
     // StringTable --------------------------------------------------------------------------------------------------------
@@ -548,8 +551,8 @@ namespace dmt {
         if (!GetTokenInformation(hProcessToken, TokenPrivileges, nullptr, 0, &requiredSize) &&
             GetLastError() != ERROR_INSUFFICIENT_BUFFER)
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error(
                 "Could not get the required size {} for the "
                 "`TokenPrivileges` Token Information, error: {}",
@@ -563,7 +566,7 @@ namespace dmt {
         // of LUID_AND_ATTRIBUTES because requiredSize is a (multiple of it + DWORD)
         static_assert(alignof(LUID_AND_ATTRIBUTES) == 4);
         void* pTokenPrivilegesInformation = nullptr;
-        bool  mallocated                  = requiredSize > tokenPrivilegesBytes - sizeof(LUID_AND_ATTRIBUTES);
+        bool  mallocated                  = requiredSize > tp::tokenPrivilegesBytes - sizeof(LUID_AND_ATTRIBUTES);
         if (mallocated)
         {
             ctx.warn("Allocating on the Heap token information");
@@ -575,7 +578,7 @@ namespace dmt {
         }
         else
         {
-            pTokenPrivilegesInformation = sTokenPrivileges.data();
+            pTokenPrivilegesInformation = tp::sTokenPrivileges.data();
         }
 
         if (!pTokenPrivilegesInformation)
@@ -587,16 +590,16 @@ namespace dmt {
         // 2. actually get the TokenPrivileges TOKEN_INFORMATION_CLASS
         if (!GetTokenInformation(hProcessToken, TokenPrivileges, pTokenPrivilegesInformation, requiredSize, &requiredSize))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Could not get the `TokenPrivileges` Token Information, error: {}", {view});
             return false;
         }
 
         // 3. Iterate over the list of TOKEN_PRIVILEGES and find the one with the SeLockMemoryPrivilege LUID
-        TOKEN_PRIVILEGES& tokenPrivilegeStruct = *reinterpret_cast<TOKEN_PRIVILEGES*>(&sTokenPrivileges[0]);
+        TOKEN_PRIVILEGES& tokenPrivilegeStruct = *reinterpret_cast<TOKEN_PRIVILEGES*>(&tp::sTokenPrivileges[0]);
         auto*             pPrivilegeLUIDs      = reinterpret_cast<LUID_AND_ATTRIBUTES*>(
-            sTokenPrivileges.data() + offsetof(TOKEN_PRIVILEGES, Privileges));
+            tp::sTokenPrivileges.data() + offsetof(TOKEN_PRIVILEGES, Privileges));
         bool    seLockMemoryPrivilegeEnabled = false;
         int64_t seLockMemoryPrivilegeIndex   = -1;
         for (uint32_t i = 0; i < tokenPrivilegeStruct.PrivilegeCount; ++i)
@@ -629,17 +632,17 @@ namespace dmt {
         HMODULE hKernel32Dll = LoadLibraryA("kernelbase.dll");
         if (!hKernel32Dll)
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Could not load the kernelbase.dll into an HMODULE, error: {}", {view});
             return false;
         }
 
-        auto* functionPointer = reinterpret_cast<PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
+        auto* functionPointer = reinterpret_cast<tp::PVirtualAlloc>(GetProcAddress(hKernel32Dll, "VirtualAlloc2"));
         if (!functionPointer)
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Could not load the `VirtualAlloc2` from kernelbase.dll, using VirtualAlloc, error: {}", {view});
             ctx.error(
                 "If you are unsure whether you support `VirtualAlloc2` "
@@ -678,8 +681,8 @@ namespace dmt {
             privs.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
             if (!AdjustTokenPrivileges(hProcessToken, false, &privs, sizeof(TOKEN_PRIVILEGES), nullptr, nullptr))
             {
-                uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                std::string_view view{sErrorBuffer.data(), length};
+                uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                std::string_view view{tp::sErrorBuffer.data(), length};
                 ctx.error("Could not add SeLockMemoryPrivilege to the user token, error: {}", {view});
                 return false;
             }
@@ -696,8 +699,8 @@ namespace dmt {
                 BOOL result                          = false;
                 if (!PrivilegeCheck(hProcessToken, &privilegeSet, &result))
                 {
-                    uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                    std::string_view view{sErrorBuffer.data(), length};
+                    uint32_t length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                    std::string_view view{tp::sErrorBuffer.data(), length};
                     ctx.error("Call to `PrivilegeCheck` failed, error: {}", {view});
                     return false;
                 }
@@ -730,8 +733,8 @@ namespace dmt {
         HANDLE   hImpersonationToken = nullptr;
         if (!DuplicateToken(hProcessToken, SecurityImpersonation, &hImpersonationToken))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Failed call to `OpenThreadToken`, error: {}", {view});
             return INVALID_HANDLE_VALUE;
         }
@@ -739,8 +742,8 @@ namespace dmt {
         HANDLE hThread              = GetCurrentThread();
         if (!SetThreadToken(&hThread, hImpersonationToken))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Failed call to `SetThreadToken`, error: {}", {view});
             return INVALID_HANDLE_VALUE;
         }
@@ -771,8 +774,8 @@ namespace dmt {
         LUID seLockMemoryPrivilegeLUID{};
         if (!LookupPrivilegeValue(nullptr /*on the local system*/, SE_LOCK_MEMORY_NAME, &seLockMemoryPrivilegeLUID))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Could not retrieve the LUID for the SeLockMemoryPrivilege. Error: {}", {view});
             return;
         }
@@ -792,8 +795,8 @@ namespace dmt {
         DWORD  tokenAccessMode = TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_DUPLICATE | TOKEN_IMPERSONATE;
         if (!OpenProcessToken(hCurrentProc, tokenAccessMode, &hProcessToken))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error(
                 "Couldn't open in TOKEN_ADJUST_PRIVILEDGES "
                 "mode the user access token. Error: {}",
@@ -931,16 +934,16 @@ namespace dmt {
                          &outAccessMask,
                          &bAccessStatus))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error("Failed call to AccessCheck, error: {}", {view});
             return;
         }
 
         if (!bAccessStatus)
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
+            uint32_t         length = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), length};
             ctx.error(
                 "The Process doesn't own the"
                 " PROCESS_VM_OPERATION access rights, using 2MB large pages. Error: {}",
@@ -979,8 +982,8 @@ namespace dmt {
         uint32_t inputSize   = sizeof(PSAPI_WORKING_SET_EX_INFORMATION);
         if (!QueryWorkingSetEx(GetCurrentProcess(), &input, inputSize))
         {
-            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), errorLength};
+            errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), errorLength};
             ctx.error("Call to `QueryWorkingSetEx` failed, hence cannot check page status, error: {}", {view});
         }
         else if (!input.VirtualAttributes.Valid)
@@ -1007,8 +1010,8 @@ namespace dmt {
         size_t numBytes = VirtualQuery(ret.address, &memoryInfo, memoryInfoBytes);
         if (numBytes == 0)
         {
-            errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), errorLength};
+            errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), errorLength};
             ctx.error("Call to `VirtualQuery` failed, hence cannot acquire virtual page number, error: {}", {view});
         }
         else
@@ -1080,8 +1083,8 @@ namespace dmt {
                 ret.bits    = DMT_OS_WINDOWS_VIRTUALALLOC2;
                 if (!ret.address)
                 {
-                    errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                    std::string_view view{sErrorBuffer.data(), errorLength};
+                    errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                    std::string_view view{tp::sErrorBuffer.data(), errorLength};
                     ctx.error("Failed call to `VirtualAlloc2`, trying `VirtualAlloc`, error: {}", {view});
                 }
             }
@@ -1098,8 +1101,8 @@ namespace dmt {
                 ret.bits    = DMT_OS_WINDOWS_LARGE_PAGE;
                 if (!ret.address)
                 {
-                    errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                    std::string_view view{sErrorBuffer.data(), errorLength};
+                    errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                    std::string_view view{tp::sErrorBuffer.data(), errorLength};
                     ctx.error("`VirtualAlloc` with MEM_LARGE_PAGES, trying without it, error: {}", {view});
                 }
             }
@@ -1113,8 +1116,8 @@ namespace dmt {
             ret.bits    = DMT_OS_WINDOWS_SMALL_PAGE;
             if (!ret.address)
             {
-                errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                std::string_view view{sErrorBuffer.data(), errorLength};
+                errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                std::string_view view{tp::sErrorBuffer.data(), errorLength};
                 ctx.error("`VirtualAlloc` failed, couldn't allocate memory, error: {}", {view});
             }
         }
@@ -1159,8 +1162,8 @@ namespace dmt {
             out.address = VirtualAlloc(nullptr, size, allocationFlags, protectionFlags);
             if (!out.address)
             {
-                errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                std::string_view view{sErrorBuffer.data(), errorLength};
+                errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                std::string_view view{tp::sErrorBuffer.data(), errorLength};
                 ctx.error("`VirtualAlloc` with MEM_LARGE_PAGES, trying without it, error: {}", {view});
             }
             else
@@ -1178,8 +1181,8 @@ namespace dmt {
             out.address = VirtualAlloc(nullptr, size, allocationFlags, protectionFlags);
             if (!out.address)
             {
-                errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                std::string_view view{sErrorBuffer.data(), errorLength};
+                errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+                std::string_view view{tp::sErrorBuffer.data(), errorLength};
                 ctx.error("`VirtualAlloc` failed, error: {}", {view});
                 return false;
             }
@@ -1206,8 +1209,8 @@ namespace dmt {
         DWORD freeType = MEM_RELEASE;
         if (!VirtualFree(alloc.address, 0 /*size 0 if MEM_RELEASE*/, freeType))
         {
-            uint32_t         errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), errorLength};
+            uint32_t         errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+            std::string_view view{tp::sErrorBuffer.data(), errorLength};
             ctx.error("Failed to Free memory at {}, error {}", {allocCopy.address, view});
             ctx.dbgErrorStackTrace();
         }
@@ -1424,8 +1427,8 @@ namespace dmt {
     {
         ctx.error("Couldn't commit the first {} nodes into the reserved space", {initialNodeNum});
 #if defined(DMT_OS_WINDOWS)
-        size_t           errorLength = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-        std::string_view view{sErrorBuffer.data(), errorLength};
+        size_t           errorLength = win32::getLastErrorAsString(tp::sErrorBuffer.data(), tp::sErrorBufferSize);
+        std::string_view view{tp::sErrorBuffer.data(), errorLength};
         ctx.error("{}, error: {}", {str, view});
 #endif
         std::abort();

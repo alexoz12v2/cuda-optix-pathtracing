@@ -71,9 +71,9 @@
         "CMAKE_SYSTEM_PROCESSOR": "AMD64",
         "CMAKE_TOOLCHAIN_FILE": "cmake/Windows.MSVC.toolchain.cmake",
         "CMAKE_VS_VERSION_PRERELEASE": "ON",
-        "CMAKE_CUDA_HOST_COMPILER": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.42.34433/bin/Hostx64/x64/cl.exe",
-        "CMAKE_CXX_COMPILER": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.42.34433/bin/Hostx64/x64/cl.exe",
-        "CMAKE_C_COMPILER": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.42.34433/bin/Hostx64/x64/cl.exe",
+        "CMAKE_CUDA_HOST_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_C_COMPILER": "cl.exe",
         "VS_EXPERIMENTAL_MODULE": "OFF"
       }
     },
@@ -82,7 +82,9 @@
       "hidden": false,
       "inherits": "WindowsNinja",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CONFIGURATION_TYPES": "Debug",
+        "CMAKE_DEFAULT_BUILD_TYPE": "Debug"
       }
     },
     {

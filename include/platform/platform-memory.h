@@ -8,6 +8,9 @@
 
 #include "dmtmacros.h"
 
+#include <platform/platform-logging.h>
+
+#if !defined(DMT_NEEDS_MODULE)
 #include <array>
 #include <bit>
 #include <iterator>
@@ -19,15 +22,9 @@
 #include <cassert>
 #include <compare>
 #include <cstdint>
-
-#if defined(DMT_INTERFACE_AS_HEADER)
-// Keep in sync with .cppm
-#include <platform/platform-logging.h>
-#else
-import <platform/platform-logging.h>;
 #endif
 
-DMT_MODULE_EXPORT dmt {
+DMT_MODULE_EXPORT namespace dmt {
     /**
      * Memory tags for meaningful object allocation tracking. Whenever you add something here, make sure to add a string representation
      * in the `memoryTagStr` function
@@ -61,10 +58,7 @@ DMT_MODULE_EXPORT dmt {
     char const* memoryTagStr(EMemoryTag tag);
 
     using sid_t = uint64_t;
-} // namespace dmt
 
-// not exported
-namespace dmt {
     /**
      * Compile time lookup table used to perform the CRC algorithm on a string_view to get an id
      */
@@ -137,9 +131,7 @@ namespace dmt {
      * the CRC algorithm is an iterative one and needs a starting value.
      */
     inline constexpr uint64_t initialCrc64 = crc64Table[107];
-} // namespace dmt
 
-DMT_MODULE_EXPORT dmt {
     inline constexpr uint64_t hashCRC64(std::string_view str)
     {
         uint64_t crc = initialCrc64;

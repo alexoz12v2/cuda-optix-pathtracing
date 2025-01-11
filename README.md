@@ -197,3 +197,14 @@ I still don't know
   cmd.exe /k "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
   ```
   Che puo' essere messo in `.vscode\settings.json` per averlo pronto
+
+### clang tidy
+Apparently, the built-in support for `clang-tidy` doesn't work on a per cmake target basis out of the box with the target property `CXX_CLANG_TIDY`, because
+the `clang-tidy` executable is called as part of the build process, before the `.ifc` or `.pcm` file has a chance to be generated.
+So the only alternative is to add `clang-tidy` as a separete tool. We therefore need a script which can take into account the current compilation database `compile_commands.json`.
+Therefore, download and put on the `Path` the [`run-clang-tidy`](https://github.com/lmapii/run-clang-tidy/tree/main) python script
+And then run the command (showing an example build configuration)
+```
+run-clang-tidy --build-root build\Debug-WinNinja\  tidy.json
+```
+This will try to check everything, so if some C++20 modules have not been compiled, it will give an error for those

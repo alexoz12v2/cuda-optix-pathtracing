@@ -17,85 +17,85 @@
 
 ##### Global
 # Documents
-*.sql text
-*.md text
-*.adoc text
-*.textile text
-*.mustache text
-*.csv text
-*.tab text
-*.tsv text
-*.coffee text
-*.css text
-*.htm text
-*.html text
-*.xhtml text
-*.inc text
-*.js text
-*.jsx text
-*.less text
-*.od text
-*.onlydata text
-*.sass text
-*.scm text
-*.log text
-*.properties text
-*.scss text
-*.styl text
-*.tag text
-*.ts text
-*.tsx text
-*.dockerignore text
-Dockerfile text
-*.markdown text
-*.mdwn text
-*.mdown text
-*.mkd text
-*.mkdn text
-*.mdtxt text
-*.mdtext text
-*.txt text
-AUTHORS text
-CHANGELOG text
-CHANGES text
-CONTRIBUTING text
-COPYING text
-copyright text
-*COPYRIGHT* text
-INSTALL text
-license text
-LICENSE text
-NEWS text
-readme text
-*README* text
-TODO text
+*.sql text eol=lf
+*.md text eol=lf
+*.adoc text eol=lf
+*.textile text eol=lf
+*.mustache text eol=lf
+*.csv text eol=lf
+*.tab text eol=lf
+*.tsv text eol=lf
+*.coffee text eol=lf
+*.css text eol=lf
+*.htm text eol=lf
+*.html text eol=lf
+*.xhtml text eol=lf
+*.inc text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.less text eol=lf
+*.od text eol=lf
+*.onlydata text eol=lf
+*.sass text eol=lf
+*.scm text eol=lf
+*.log text eol=lf
+*.properties text eol=lf
+*.scss text eol=lf
+*.styl text eol=lf
+*.tag text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.dockerignore text eol=lf
+Dockerfile text eol=lf
+*.markdown text eol=lf
+*.mdwn text eol=lf
+*.mdown text eol=lf
+*.mkd text eol=lf
+*.mkdn text eol=lf
+*.mdtxt text eol=lf
+*.mdtext text eol=lf
+*.txt text eol=lf
+AUTHORS text eol=lf
+CHANGELOG text eol=lf
+CHANGES text eol=lf
+CONTRIBUTING text eol=lf
+COPYING text eol=lf
+copyright text eol=lf
+*COPYRIGHT* text eol=lf
+INSTALL text eol=lf
+license text eol=lf
+LICENSE text eol=lf
+NEWS text eol=lf
+readme text eol=lf
+*README* text eol=lf
+TODO text eol=lf
 # Configuration
-*.cnf text
-*.cfg text
-*.conf text
-*.config text
-*.ini text
-*.json text
-*.xml text
-*.bowerrc text
-.browserslistrc text
-.editorconfig text
-*.npmignore text
-*.yaml text
-*.yml text
-browserslist text
-Makefile text
-makefile text
-Procfile text
-.slugignore text
+*.cnf text eol=lf
+*.cfg text eol=lf
+*.conf text eol=lf
+*.config text eol=lf
+*.ini text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.bowerrc text eol=lf
+.browserslistrc text eol=lf
+.editorconfig text eol=lf
+*.npmignore text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+browserslist text eol=lf
+Makefile text eol=lf
+makefile text eol=lf
+Procfile text eol=lf
+.slugignore text eol=lf
 # Linters
-.csslintrc text
-.eslintrc text
-.htmlhintrc text
-.jscsrc text
-.jshintrc text
-.jshintignore text
-.stylelintrc text
+.csslintrc text eol=lf
+.eslintrc text eol=lf
+.htmlhintrc text eol=lf
+.jscsrc text eol=lf
+.jshintrc text eol=lf
+.jshintignore text eol=lf
+.stylelintrc text eol=lf
 # Video
 *.3gpp binary
 *.3gp binary
@@ -140,7 +140,7 @@ Procfile text
 *.pdf binary
 *.psb binary
 *.psd binary
-*.svg text
+*.svg text eol=lf
 *.svgz binary
 *.wbmp binary
 *.webp binary

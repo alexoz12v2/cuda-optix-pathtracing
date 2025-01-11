@@ -1,6 +1,7 @@
-#include "platform-cuda-utils.cuh"
-
 #define DMT_INTERFACE_AS_HEADER
+#undef DMT_NEEDS_MODULE
+// CANNOT USE os-utils
+#include "platform-cuda-utils.cuh"
 #include "platform-cuda-utils.h"
 #include "platform-memory.h"
 

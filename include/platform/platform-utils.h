@@ -2,6 +2,7 @@
 
 #include "dmtmacros.h"
 
+#if !defined(DMT_NEEDS_MODULE)
 #include <bit>
 #include <charconv> // For std::from_chars
 #include <concepts>
@@ -16,8 +17,9 @@
 #include <cctype>
 //#include <cmath>
 #include <cstdint>
+#endif
 
-namespace dmt {
+DMT_MODULE_EXPORT namespace dmt {
     void* reserveVirtualAddressSpace(size_t size);
 
     size_t systemAlignment();
@@ -27,9 +29,7 @@ namespace dmt {
     bool freeVirtualAddressSpace(void* address, size_t size);
 
     void decommitPage(void* pageAddress, size_t pageSize);
-} // namespace dmt
 
-DMT_MODULE_EXPORT dmt {
     /*
     template <typename T>
     struct PmrDeleter
@@ -522,4 +522,4 @@ DMT_MODULE_EXPORT dmt {
     {
         return (num + den - 1) / den;
     }
-}
+} // namespace dmt

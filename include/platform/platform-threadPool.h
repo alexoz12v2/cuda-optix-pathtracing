@@ -1,6 +1,10 @@
 #pragma once
 
 #include "dmtmacros.h"
+
+#include <platform/platform-memory.h>
+
+#if !defined(DMT_NEEDS_MODULE)
 // Keep in sync with .cppm
 #include <array>
 #include <atomic>
@@ -19,15 +23,9 @@
 #include <vector>
 
 #include <cstdint>
-
-#if defined(DMT_INTERFACE_AS_HEADER)
-// Keep in sync with .cppm
-#include <platform/platform-memory.h>
-#else
-import <platform/platform-memory.h>;
 #endif
 
-DMT_MODULE_EXPORT dmt {
+DMT_MODULE_EXPORT namespace dmt {
     // https://rigtorp.se/spinlock/
     // should be usable with lock_guard
     // TODO move implememntation to cpp

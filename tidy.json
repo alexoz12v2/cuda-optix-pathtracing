@@ -1,0 +1,18 @@
+{
+  "paths": [
+    "src/**/*.cpp",
+    "src/**/*.cppm",
+    "src/**/*.cu",
+    "src/**/*.cuh",
+    "src/**/*.hpp",
+    "src/**/*.h",
+    "include/**/*.cpp",
+    "include/**/*.cppm",
+    "include/**/*.cu",
+    "include/**/*.cuh",
+    "include/**/*.hpp",
+    "include/**/*.h"
+  ],
+  "tidyFile": ".clang-tidy",
+  "tidyRoot": ".",
+}

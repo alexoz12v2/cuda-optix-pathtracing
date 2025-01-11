@@ -2,6 +2,7 @@
 
 #include "dmtmacros.h"
 
+#if !defined(DMT_NEEDS_MODULE)
 #include <bit>
 #include <limits>
 #include <memory_resource>
@@ -9,8 +10,9 @@
 
 #include <cassert>
 #include <cstdint>
+#endif
 
-DMT_MODULE_EXPORT dmt {
+DMT_MODULE_EXPORT namespace dmt {
     struct MemoryContext;
 
     using CudaStreamHandle                     = uintptr_t;
@@ -104,7 +106,7 @@ DMT_MODULE_EXPORT dmt {
     };
 
     template <typename T>
-    static constexpr auto is_unified_v = is_unified<T>::value;
+    inline constexpr auto is_unified_v = is_unified<T>::value;
 
     // TODO include unified memory resouce here
     inline constexpr uint32_t memoryResouceTypeNumBits = 4;

@@ -1,4 +1,5 @@
 #define DMT_INTERFACE_AS_HEADER
+#undef DMT_NEEDS_MODULE
 #include "dmtmacros.h"
 #include "middleware-model.h"
 

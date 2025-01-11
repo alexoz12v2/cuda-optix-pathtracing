@@ -1,5 +1,8 @@
 
 #define DMT_INTERFACE_AS_HEADER
+#undef DMT_NEEDS_MODULE
+#include "middleware.h"
+
 #include "dmtmacros.h"
 
 #include <glm/vec3.hpp>
@@ -10,7 +13,6 @@
 #include <map>
 #include <memory>
 #include <memory_resource>
-#include <middleware.h>
 #include <numeric>
 #include <string_view>
 #include <type_traits>

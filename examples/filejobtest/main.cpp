@@ -14,8 +14,16 @@
 #include <cassert>
 #include <cstdint>
 
+// include cuda interface headers, not exported by C++20 modules
+
 import platform;
 import middleware;
+
+#define DMT_PLATFORM_IMPORTED
+// clang-format off
+#include <platform/platform-cuda-utils.h>
+#include <middleware/middleware-model.h>
+// clang-format on
 
 struct AllocBundle
 {
@@ -260,7 +268,7 @@ int32_t main()
 
     testPool(actx, pool.pMemRes);
 
-    auto* dynaArrayUnified = std::bit_cast<dmt::DynaArray*>(
+    auto* dynaArrayUnified = reinterpret_cast<dmt::DynaArray*>(
         unified.allocate(sizeof(dmt::DynaArray), alignof(dmt::DynaArray)));
     std::construct_at(dynaArrayUnified, sizeof(float), pool.pMemRes);
 

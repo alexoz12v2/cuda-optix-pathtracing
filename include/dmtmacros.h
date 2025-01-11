@@ -1,11 +1,5 @@
 #pragma once
 
-#if !defined(DMT_INTERFACE_AS_HEADER)
-#define DMT_MODULE_EXPORT export namespace
-#else
-#define DMT_MODULE_EXPORT namespace
-#endif
-
 #if defined(__NVCC__) // Test
 #define DMT_INTERFACE
 #elif defined(DMT_COMPILER_MSVC)
@@ -33,4 +27,10 @@
 #define DMT_CPU
 #define DMT_CPU_GPU
 #define DMT_GPU
+#endif
+
+#if defined(DMT_NEEDS_MODULE0) && !defined(__NVCC__)
+#define DMT_MODULE_EXPORT export
+#else
+#define DMT_MODULE_EXPORT
 #endif

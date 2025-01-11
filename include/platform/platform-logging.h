@@ -2,6 +2,9 @@
 
 #include "dmtmacros.h"
 
+#include <platform/platform-utils.h>
+
+#if !defined(DMT_NEEDS_MODULE)
 #include <array>
 #include <chrono>
 #include <concepts>
@@ -17,14 +20,9 @@
 #include <compare>
 #include <cstdint>
 #include <cstring>
-
-#if defined(DMT_INTERFACE_AS_HEADER)
-#include <platform/platform-utils.h>
-#else
-import <platform/platform-utils.h>;
 #endif
 
-DMT_MODULE_EXPORT dmt {
+DMT_MODULE_EXPORT namespace dmt {
     /**
      * Log Level enum, to check whether we should print or not, and to determine the style of the output
      * @brief log levels for logger configuration
@@ -283,10 +281,7 @@ DMT_MODULE_EXPORT dmt {
             len     = -sz;
         }
     };
-} // namespace dmt
 
-// not exported stuff the next classes need
-namespace dmt {
     class BaseAsyncIOManager
     {
     public:
@@ -373,9 +368,6 @@ namespace dmt {
         unsigned char m_padding[8];
     };
 #endif
-} // namespace dmt
-
-DMT_MODULE_EXPORT dmt {
     /**
      * Class which formats all the given arguments into a local buffer
      */

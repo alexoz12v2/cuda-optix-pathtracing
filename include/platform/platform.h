@@ -6,8 +6,9 @@
 
 #if defined(DMT_INTERFACE_AS_HEADER)
 // Keep in sync with .cppm
+#include <platform/platform-display.h>
 #include <platform/platform-logging.h>
-
+#include <platform/platform-threadpool.h>
 #endif
 
 DMT_MODULE_EXPORT dmt {

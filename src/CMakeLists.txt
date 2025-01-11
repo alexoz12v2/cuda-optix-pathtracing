@@ -4,3 +4,4 @@
 add_subdirectory(testdmt)
 add_subdirectory(testdmtpartitions)
 add_subdirectory(platform)
+add_subdirectory(cuda)

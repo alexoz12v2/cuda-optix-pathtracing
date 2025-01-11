@@ -120,7 +120,7 @@ IncludeCategories:
     Regex: '^<([^c](.+)|coroutine|charconv|chrono|complex|concepts|condition_variable)>$'
   - Priority: 11
     Regex: '^<c(.+)>$'
-SortIncludes: true
+SortIncludes: false
 SortUsingDeclarations: true
 
 # Penalties

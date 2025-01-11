@@ -1,4 +1,5 @@
 include(FetchContent)
+include(FindPackageHandleStandardArgs)
 
 macro(dmt_setup_dependencies)
   if(NOT TARGET Catch2::Catch2WithMain)
@@ -20,4 +21,26 @@ macro(dmt_setup_dependencies)
     )
     FetchContent_MakeAvailable(fmt)
   endif()
+  if(NOT TARGET glfw)
+    find_package(OpenGL REQUIRED) 
+    FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG        3.3.4
+    )
+    FetchContent_MakeAvailable(glfw)
+  endif()
+
+  if(NOT TARGET glad)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glad)
+  endif()
+
+  if(NOT TARGET imgui)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
+  endif()
+
+  # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
+  find_package(OpenGL REQUIRED)
+  find_package(CUDAToolkit REQUIRED)
+  find_package(OptiX80 REQUIRED)
 endmacro()

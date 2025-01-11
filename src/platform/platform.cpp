@@ -1,4 +1,3 @@
-//module;
 #define DMT_INTERFACE_AS_HEADER
 <<<<<<< HEAD
 #include <platform.h>

@@ -83,6 +83,39 @@ DMT_MODULE_EXPORT dmt {
             mInv = other.mInv * mInv;
         }
 
+        void lookAt_(glm::vec3 eye, glm::vec3 look, glm::vec3 up)
+        {
+            glm::mat4 worldFromCamera;
+            // Initialize fourth column of viewing matrix
+            worldFromCamera[0][3] = pos.x;
+            worldFromCamera[1][3] = pos.y;
+            worldFromCamera[2][3] = pos.z;
+            worldFromCamera[3][3] = 1;
+
+            // Initialize first three columns of viewing matrix
+            glm::vec3 dir = glm::normalize(look - pos);
+            if (glm::length(glm::cross(glm::normalize(up), dir)) == 0)
+                std::cerr << "Error up and viewing are pointing in the same direction." << std::endl;
+
+            glm::vec3 right = glm::normalize(glm::cross(glm::normailize(up), dir));
+            glm::vec3 newUp = glm::cross(dir, right);
+            worldFromCamera[0][0] = right.x;
+            worldFromCamera[1][0] = right.y;
+            worldFromCamera[2][0] = right.z;
+            worldFromCamera[3][0] = 0.;
+            worldFromCamera[0][1] = newUp.x;
+            worldFromCamera[1][1] = newUp.y;
+            worldFromCamera[2][1] = newUp.z;
+            worldFromCamera[3][1] = 0.;
+            worldFromCamera[0][2] = dir.x;
+            worldFromCamera[1][2] = dir.y;
+            worldFromCamera[2][2] = dir.z;
+            worldFromCamera[3][2] = 0.;
+
+            m = m * worldFromCamera;
+
+        }
+
         // Reset to identity matrix
         void reset()
         {
@@ -98,6 +131,8 @@ DMT_MODULE_EXPORT dmt {
             mInv          = tmp;
         }
 
+        
+
         // Apply the transform to a point
         glm::vec3 applyToPoint(glm::vec3 const& point) const
         {
@@ -111,6 +146,8 @@ DMT_MODULE_EXPORT dmt {
             glm::vec4 result = mInv * glm::vec4(point, 1.0f);
             return glm::vec3(result);
         }
+
+
 
         // Equality comparison
         bool operator==(Transform const& other) const { return m == other.m && mInv == other.mInv; }

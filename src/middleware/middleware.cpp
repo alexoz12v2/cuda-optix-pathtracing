@@ -3448,7 +3448,11 @@ namespace dmt {
     }
 
     // SceneDescription -----------------------------------------------------------------------------------------------
-    void SceneDescription::Scale(float sx, float sy, float sz) {}
+    void SceneDescription::Scale(float sx, float sy, float sz) 
+    {
+        graphicsState.ForActiveTransforms(
+            [=](auto t) { return t.scale_(glm::vec3(sx, sy, sz));});
+    }
 
     void SceneDescription::Shape(EShapeType type, ParamMap const& params) {}
 
@@ -3467,10 +3471,16 @@ namespace dmt {
         });
     }
 
-    void SceneDescription::Rotate(float angle, float ax, float ay, float az) {}
+    void SceneDescription::Rotate(float angle, float ax, float ay, float az) 
+    {
+        graphicsState.ForActiveTransforms([=](auto t) {return t.rotate_(angle, glm::vec3(ax, ay, az));});
+    }
 
     void SceneDescription::LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz)
     {
+        graphicsState.ForActiveTransforms([=](auto t) { return t.lookAt_(glm::vec3(ex, ey, ez), 
+                                                                        glm::vec3(lx, ly, lz), 
+                                                                        glm::vec3(ux, uy, uz));});
     }
 
     void SceneDescription::ConcatTransform(std::array<float, 16> const& transform) {}
@@ -3481,15 +3491,36 @@ namespace dmt {
 
     void SceneDescription::CoordSysTransform(sid_t name) {}
 
-    void SceneDescription::ActiveTransformAll() {}
+    void SceneDescription::ActiveTransformAll() 
+    {
+        graphicsState.activeTransformBits = std::numeric_limits<uint32_t>::max();
+    }
 
-    void SceneDescription::ActiveTransformEndTime() {}
+    void SceneDescription::ActiveTransformEndTime() 
+    {
+        graphicsState.activeTransformBits =  1 << 1;
+    }
 
-    void SceneDescription::ActiveTransformStartTime() {}
+    void SceneDescription::ActiveTransformStartTime() 
+    {
+        graphicsState.activeTransformBits =  1 << 0;
+    }
 
-    void SceneDescription::TransformTimes(float start, float end) {}
+    void SceneDescription::TransformTimes(float start, float end) 
+    {
+        //verify option
+        graphicsState.transformStartTime = start;
+        graphicsState.transformEndTime = end;
+    }
 
-    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) {}
+    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) 
+    {
+        if(static_cast<uint8_t>(colorSpace) < static_cast<uint8_t>(EColorSpaceType::eCOunt))
+        {
+            graphicsState.colorSpace = colorSpace;
+        }
+        else std::cerr << "Color space unknown:" << colorSpace << std::endl;
+    }
 
     void SceneDescription::PixelFilter(FilterSpec const& spec) {}
 
@@ -3527,7 +3558,10 @@ namespace dmt {
 
     void SceneDescription::AreaLightSource(EAreaLightType type, ParamMap const& params) {}
 
-    void SceneDescription::ReverseOrientation() {}
+    void SceneDescription::ReverseOrientation() {
+        //verify_world
+        graphicsState.reverseOrientation = !graphicsState.reverseOrientation;
+    }
 
     void SceneDescription::ObjectBegin(sid_t name) {}
 

@@ -28,19 +28,8 @@
 #define DMT_INTERFACE_AS_HEADER
 #include <platform/platform.h>
 
-
 // TODO switch all structures with stack allocator
 // TODO remove default values from clases and leave them only in parsing functions
-
-DMT_MODULE_EXPORT dmt::model {
-    class Spectrum
-    {
-    public:
-        enum class Type
-        {
-        };
-    };
-}
 
 // stuff related to .pbrt file parsing + data structures
 DMT_MODULE_EXPORT dmt {
@@ -156,21 +145,6 @@ DMT_MODULE_EXPORT dmt {
         void (*free)(MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment);
         void* (*rawPtr)(TaggedPointer pt);
     };
-
-    AllocatorTable AllocatorTable::fromPool(MemoryContext & mctx)
-    {
-        AllocatorTable table;
-        table.allocate = [](MemoryContext& mctx, size_t size, size_t alignment) {
-            uint32_t numBlocks = static_cast<uint32_t>(ceilDiv(size, static_cast<size_t>(toUnderlying(EBlockSize::e32B))));
-            return mctx.poolAllocateBlocks(numBlocks, EBlockSize::e32B, EMemoryTag::eUnknown, 0);
-        };
-        table.free = [](MemoryContext& mctx, TaggedPointer pt, size_t size, size_t alignment) {
-            uint32_t numBlocks = static_cast<uint32_t>(ceilDiv(size, static_cast<size_t>(toUnderlying(EBlockSize::e32B))));
-            mctx.poolFreeBlocks(numBlocks, pt);
-        };
-        table.rawPtr = [](TaggedPointer pt) { return pt.pointer(); };
-        return table;
-    }
 
     class OneShotStackMemoryResource : public std::pmr::memory_resource
     {
@@ -554,11 +528,15 @@ DMT_MODULE_EXPORT dmt {
 
     struct CameraSpec
     {
-        CameraSpec()                                 = default;
-        CameraSpec(CameraSpec const&)                = default;
-        CameraSpec(CameraSpec&&) noexcept            = default;
-        CameraSpec& operator=(CameraSpec const&)     = default;
-        CameraSpec& operator=(CameraSpec&&) noexcept = default;
+    public:
+        static constexpr float invalidScreen      = -std::numeric_limits<float>::infinity();
+        static constexpr float invalidAspectRatio = -1.f;
+        CameraSpec()                              = default;
+        // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
+        CameraSpec(CameraSpec const&);
+        CameraSpec(CameraSpec&&) noexcept;
+        CameraSpec& operator=(CameraSpec const&);
+        CameraSpec& operator=(CameraSpec&&) noexcept;
         ~CameraSpec() noexcept
         {
             if (type == ECameraType::eRealistic)
@@ -568,14 +546,33 @@ DMT_MODULE_EXPORT dmt {
             }
         }
 
-        struct Projecting           // perspective or orthographic
-        {                           // params are all lowercase in the file
-            float frameAspectRatio; // computed from film
+    public:
+        struct Projecting // perspective or orthographic
+        {                 // params are all lowercase in the file
+            struct ScreenWindow
+            {
+                float minX;
+                float maxX;
+                float minY;
+                float maxY;
+            };
+            union UScreenWindow
+            {
+                UScreenWindow()
+                { // set to an arbitrary invalid value
+                    float val = invalidScreen;
+                    for (auto& v : arr)
+                        v = val;
+                }
+                ScreenWindow         p;
+                std::array<float, 4> arr;
+            };
+            float frameAspectRatio = invalidAspectRatio; // computed from film
             // [-1, 1] along shorter axis, [-screnWindow, +screenWindow] in longer axis. Default = aspect ratio if > 1, otherwise 1/aspect ratio
-            float screenWindow;
-            float lensRadius    = 0;
-            float focalDistance = 1e30f; // 10^30 is near the float limit
-            float fov           = 90.f;  // Used only by perspective
+            UScreenWindow screenWindow;
+            float         lensRadius    = 0;
+            float         focalDistance = 1e30f; // 10^30 is near the float limit
+            float         fov           = 90.f;  // Used only by perspective
         };
         struct Spherical
         {
@@ -598,6 +595,10 @@ DMT_MODULE_EXPORT dmt {
             Spherical  s;
         };
 
+    private:
+        void assignParams(Params const& that, bool move);
+
+    public:
         // 8 Byte aligned
         Params params;
 
@@ -945,9 +946,10 @@ DMT_MODULE_EXPORT dmt {
     };
 
     // ----------------------------------------------------------------------------------------------------------------
+    using ArgsDArray = std::vector<std::string>;
     struct ParamPair
     {
-        using ValueList = std::vector<std::string>;
+        using ValueList = ArgsDArray;
         constexpr explicit ParamPair(sid_t type) : type(type) {}
 
         void addParamValue(std::string_view value) { values.emplace_back(value); }
@@ -957,13 +959,12 @@ DMT_MODULE_EXPORT dmt {
         uint32_t numParams() const { return static_cast<uint32_t>(values.size()); }
 
         // TODO better (char buffer fixed)
-        std::vector<std::string> values;
+        ArgsDArray values;
 
         sid_t type;
     };
 
-    using ParamMap   = std::map<sid_t, ParamPair>;
-    using ArgsDArray = std::vector<std::string>;
+    using ParamMap = std::map<sid_t, ParamPair>;
 
     enum class ETarget : uint8_t
     {
@@ -1106,14 +1107,19 @@ DMT_MODULE_EXPORT dmt {
         bool             m_needAdvance = true;
     };
 
-    class IParserTarget
+    struct EndOfHeaderInfo
+    {
+        CameraSpec cameraSpec;
+    };
+
+    class DMT_INTERFACE IParserTarget
     {
     public:
         virtual void Scale(float sx, float sy, float sz) = 0;
 
         virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-        virtual ~IParserTarget(){};
+        virtual ~IParserTarget() {};
 
         virtual void Option(sid_t name, ParamPair const& value) = 0;
 
@@ -1156,8 +1162,9 @@ DMT_MODULE_EXPORT dmt {
         virtual void ObjectEnd()                                                                           = 0;
         virtual void ObjectInstance(sid_t name)                                                            = 0;
 
-        virtual void EndOfOptions(Options const& options) = 0;
-        virtual void EndOfFiles()                         = 0;
+        virtual void EndOfHeader(EndOfHeaderInfo const& info) = 0;
+        virtual void EndOfOptions(Options const& options)     = 0;
+        virtual void EndOfFiles()                             = 0;
     };
 
     // TODO move
@@ -1202,6 +1209,7 @@ DMT_MODULE_EXPORT dmt {
     {
     public:
         template <typename F>
+            requires std::is_invocable_r_v<dmt::Transform, F, dmt::Transform>
         void ForActiveTransforms(F func)
         {
             for (int i = 0; i < TransformSet::maxTransforms; ++i)
@@ -1276,6 +1284,7 @@ DMT_MODULE_EXPORT dmt {
         void ObjectInstance(sid_t name) override;
         void EndOfOptions(Options const& options) override;
         void EndOfFiles() override;
+        void EndOfHeader(EndOfHeaderInfo const& info) override;
 
     public:
         CameraSpec      cameraSpec;
@@ -1366,13 +1375,25 @@ DMT_MODULE_EXPORT dmt {
         void         pushScope(EScope scope);
 
     private:
+        struct ParsingState
+        {
+            // populated once the Camera directive is encountered (or left default constructed)
+            CameraSpec cameraSpec;
+            // populated once the Film directive is encountered
+            int32_t xResolution = -1;
+            int32_t yResolution = -1;
+        };
+
         // TODO better
         std::forward_list<TokenStream>   m_fileStack;
         std::vector<std::vector<EScope>> m_scopeStacks;
         std::string                      m_basePath;
         IParserTarget*                   m_pTarget;
-        EParsingStep                     m_parsingStep        = EParsingStep::eOptions;
-        EEncounteredHeaderDirective      m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
+
+        ParsingState m_parsingState;
+
+        EParsingStep                m_parsingStep        = EParsingStep::eOptions;
+        EEncounteredHeaderDirective m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
     };
 }
 

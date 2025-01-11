@@ -159,14 +159,12 @@ DMT_MODULE_EXPORT dmt {
     template <std::integral T>
     constexpr T clamp(T val, T min_val, T max_val) noexcept
     {
-
         if (val < min_val)
             return min_val;
         if (val > max_val)
             return max_val;
         return val;
     }
-
 
     template <typename Enum>
         requires(std::is_enum_v<Enum>)

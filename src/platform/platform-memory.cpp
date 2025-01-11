@@ -1,7 +1,9 @@
 //module;
 #define DMT_INTERFACE_AS_HEADER
+#include "platform-memory.h"
+
 #include "platform-os-utils.h"
-#include<platform-memory.h>
+
 // NOLINTBEGIN
 #include <array>
 #include <bit>
@@ -2104,34 +2106,36 @@ namespace dmt {
     pageHooks{
         .allocHook =
             [](void* data, LoggingContext& ctx, PageAllocation const& alloc) {
-        auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-        tracker.track(ctx, alloc);
-        },
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.track(ctx, alloc);
+            },
         .freeHook =
             [](void* data, LoggingContext& ctx, PageAllocation const& alloc) {
-        auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-        tracker.untrack(ctx, alloc);
-        },
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.untrack(ctx, alloc);
+            },
         .data = &tracker,
-        },
+    },
     allocHooks{
         .allocHook =
             [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {
-        auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-        tracker.track(ctx, alloc);
-        },
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.track(ctx, alloc);
+            },
         .freeHook =
             [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {
-        auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-        tracker.untrack(ctx, alloc);
-        },
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.untrack(ctx, alloc);
+            },
         .cleanTransients =
             [](void* data, LoggingContext& ctx) {
-        auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
-        tracker.claenTransients(ctx);
-        },
+                auto& tracker = *reinterpret_cast<PageAllocationsTracker*>(data);
+                tracker.claenTransients(ctx);
+            },
         .data = &tracker,
-        }, pageAllocator{pctx, pageHooks}, stackAllocator{pctx, pageAllocator, allocHooks},
+    },
+    pageAllocator{pctx, pageHooks},
+    stackAllocator{pctx, pageAllocator, allocHooks},
     multiPoolAllocator{pctx, pageAllocator, numBlocksPerPool, allocHooks}
     {
     }

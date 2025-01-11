@@ -1,14 +1,22 @@
 //module;
 #define DMT_INTERFACE_AS_HEADER
+<<<<<<< HEAD
 #include <platform.h>
+=======
+#include "platform.h"
+
+>>>>>>> 7927d283b66d090ebdc7959fc958c0785a900c9f
 #include <utility>
 
 #include <cstdint>
 #include <cstdlib>
 
+<<<<<<< HEAD
 //module platform;
 
 
+=======
+>>>>>>> 7927d283b66d090ebdc7959fc958c0785a900c9f
 namespace dmt {
     AppContext::AppContext(uint32_t                                   pageTrackCapacity,
                            uint32_t                                   allocTrackCapacity,

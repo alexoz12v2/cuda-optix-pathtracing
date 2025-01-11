@@ -153,6 +153,7 @@ macro(dmt_define_environment)
     message(FATAL_ERROR "Only architecture supported is x86_64")
     return()
   endif()
+  set(DMT_ARCH "DMT_ARCH_X86_64")
 
   # -- OS Detection (Cmake Variable CMAKE_SYSTEM_NAME) --
   if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
@@ -169,6 +170,7 @@ macro(dmt_define_environment)
   message(STATUS "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
   if(MSVC)
     set(DMT_COMPILER_MSVC 1)
+    set(DMT_COMPILER "DMT_COMPILER_MSVC")
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       set(DMT_COMPILER_CLANG_CL 1)
       message(STATUS "Compiler Found: clang-cl.exe")
@@ -177,16 +179,31 @@ macro(dmt_define_environment)
     endif()
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(DMT_COMPILER_CLANG 1)
+    set(DMT_COMPILER "DMT_COMPILER_CLANG")
     message(STATUS "Compiler Found: clang++")
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     set(DMT_COMPILER_GCC 1)
+    set(DMT_COMPILER "DMT_COMPILER_GCC")
     message(STATUS "Compiler Found: g++")
   else()
+    set(DMT_COMPILER "DMT_COMPILER_UNKNOWN")
     message(WARNING "Unrecognized compiler: ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+
+  # -- build type definition
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(DMT_BUILD_TYPE "DMT_DEBUG")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(DMT_BUILD_TYPE "DMT_RELEASE")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    set(DMT_BUILD_TYPE "DMT_DEBUG")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    set(DMT_BUILD_TYPE "DMT_RELEASE")
   endif()
 endmacro()
 
 
+# Unused for now
 function(dmt_get_msvc_flags out_flags)
   set(out_flags "")
 
@@ -396,7 +413,7 @@ function(dmt_add_compile_definitions target)
   else()
     set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
   endif()
-  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"")
+  target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
 endfunction()
 
 
@@ -458,7 +475,7 @@ function(dmt_add_module_library name module_name)
   # may give problems if CUDA interfaces between modules are shared
   set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX)
   # modules require C++20 support
-  target_compile_features(${name} PUBLIC cxx_std_20)
+  target_compile_features(${name} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   # cuda specific
   set_target_properties(${name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
@@ -490,7 +507,7 @@ function(dmt_add_module_library name module_name)
     #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
     #  PUBLIC /reference ${module_name}=${BMI}
     #)
-    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor>)
+    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
 
     #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
     #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
@@ -547,7 +564,7 @@ function(dmt_add_module_library name module_name)
   # add project include as include directory
   target_include_directories(${name}
     PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include/${target_path}
+    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include
   )
 
   if(NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
@@ -573,7 +590,7 @@ function(dmt_add_module_library name module_name)
         FILE_SET "${module_name}_headers" TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
           FILES ${header_file_list}
       PRIVATE
-        ${implementation_file_list}
+        FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
     )
   else()
     target_sources(${name}
@@ -581,14 +598,15 @@ function(dmt_add_module_library name module_name)
         FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
           FILES ${interface_file_list}
       PRIVATE
-        ${implementation_file_list}
+        FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
     )
   endif()
 
   # create alias
   add_library(${alias_name} ALIAS ${name})
   dmt_debug_print_target_props(${name} ${module_name})
-  
+  target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/extern)
+
   if(MSVC)
     if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
       message(FATAL_ERROR "Windows with Ninja doesn't find the module interface from the module implementation unit. I don't know why.")
@@ -645,13 +663,14 @@ function(dmt_add_example target)
   set_target_properties(${target} PROPERTIES FOLDER "Examples")
   # visual studio startup path for debugging
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
   dmt_add_compile_definitions(${target})
 
   if(MSVC)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor>)
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
     #target_compile_options(${target} PRIVATE )
   endif()
 
@@ -686,10 +705,10 @@ function(dmt_add_test target)
   set_target_properties(${target} PROPERTIES FOLDER "Tests")
   # startup path for debugging in IDEs
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_features(${target} PUBLIC cxx_std_20)
+  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
 
   if(MSVC)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor>)
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>: /std:c17>)
   endif()
 
   # Iterate over dependencies to add their corresponding BMI paths

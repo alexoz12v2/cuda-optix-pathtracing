@@ -3,8 +3,9 @@
 #include "dmtmacros.h"
 
 // Keep in sync with .cppm
-#include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <glad/gl.h>
+
 #include <atomic>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
@@ -15,6 +16,7 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+
 #include <cassert>
 #include <cudaTest.h>
 
@@ -24,7 +26,7 @@ DMT_MODULE_EXPORT dmt {
     {
         GLFWwindow*        window;
         GLFWmonitor*       monitor;
-        const GLFWvidmode* mode;
+        GLFWvidmode const* mode;
         int                displayW;
         int                displayH;
         bool               fullScreenState = true;
@@ -39,15 +41,15 @@ DMT_MODULE_EXPORT dmt {
         bool                 menuBar          = true;
         bool                 close            = false;
         bool                 alwaysAutoResize = false;
-        bool                 noCollapse = true;
+        bool                 noCollapse       = true;
         ImGuiWindowFlags     windowFlags      = 0;
-        const ImGuiViewport* mainViewport;
+        ImGuiViewport const* mainViewport;
     } DMTwindowImGui;
 
     typedef struct DMTwindowOpenGL
     {
-        GLuint                bufferID;
-        GLuint                tex;
+        GLuint bufferID;
+        GLuint tex;
         GLuint vao;
         GLuint vbo;
         GLuint shaderProgram;
@@ -70,13 +72,12 @@ DMT_MODULE_EXPORT dmt {
         void ShowWindow();
         void SetFullScreen(bool value);
         bool IsFullScreen();
-        
+
         //void CreatePBO(GLuint& bufferID, size_t size );
         //void DeletePBO(GLuint& bufferID );
 
     private:
-        
-        static void HelpMarker(const char* desc)
+        static void HelpMarker(char const* desc)
         {
             ImGui::TextDisabled("(?)");
             if (ImGui::BeginItemTooltip())
@@ -132,8 +133,8 @@ DMT_MODULE_EXPORT dmt {
         void PropertyWindowRenderer();
         void InitOpenGL();
 
-        static DMTwindowGLFW  m_winGLFW;
-        static DMTwindowImGui m_winImGui;
+        static DMTwindowGLFW   m_winGLFW;
+        static DMTwindowImGui  m_winImGui;
         static DMTwindowOpenGL m_winOpenGL;
     };
 }

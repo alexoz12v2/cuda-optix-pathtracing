@@ -1,10 +1,12 @@
 module;
 
-#include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <glad/gl.h>
+
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 #include <imgui.h>
+
 #include <cudaTest.h>
 
 module platform;
@@ -12,8 +14,8 @@ module platform;
 namespace dmt
 {
 //glfw staff
-DMTwindowGLFW  Display::m_winGLFW;
-DMTwindowImGui Display::m_winImGui;
+DMTwindowGLFW   Display::m_winGLFW;
+DMTwindowImGui  Display::m_winImGui;
 DMTwindowOpenGL Display::m_winOpenGL;
 
 Display::Display()
@@ -148,7 +150,6 @@ void Display::InitPropertyWindow()
     ImGui_ImplOpenGL3_Init(glsl_version);
 
     Display::InitOpenGL();
-
 }
 
 void Display::ShowPropertyWindow(bool* pOpen)
@@ -261,22 +262,34 @@ bool Display::IsFullScreen()
 void Display::InitOpenGL()
 {
     float quadVertices[16] = {
-    // Positions  // TexCoords
-    -1.0f, -1.0f, 0.0f, 0.0f, // Bottom-left
-    1.0f, -1.0f, 1.0f, 0.0f, // Bottom-right
-    -1.0f,  1.0f, 0.0f, 1.0f, // Top-left
-    1.0f,  1.0f, 1.0f, 1.0f  // Top-right
+        // Positions  // TexCoords
+        -1.0f,
+        -1.0f,
+        0.0f,
+        0.0f, // Bottom-left
+        1.0f,
+        -1.0f,
+        1.0f,
+        0.0f, // Bottom-right
+        -1.0f,
+        1.0f,
+        0.0f,
+        1.0f, // Top-left
+        1.0f,
+        1.0f,
+        1.0f,
+        1.0f // Top-right
     };
 
     glfwGetFramebufferSize(m_winGLFW.window, &m_winGLFW.displayW, &m_winGLFW.displayH);
-    m_winOpenGL.tex = dmt::createOpenGLTexture(0.2f * m_winGLFW.displayW,  0.8f * m_winGLFW.displayH);
+    m_winOpenGL.tex = dmt::createOpenGLTexture(0.2f * m_winGLFW.displayW, 0.8f * m_winGLFW.displayH);
     if (glGetError() != GL_NO_ERROR)
     {
         std::cerr << "Could not allocate texture" << std::endl;
         return;
     }
 
-     // Create VAO and VBO
+    // Create VAO and VBO
     glGenVertexArrays(1, &(m_winOpenGL.vao));
     glGenBuffers(1, &(m_winOpenGL.vbo));
     glBindVertexArray(m_winOpenGL.vao);
@@ -325,12 +338,12 @@ void Display::InitOpenGL()
     glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
     glCompileShader(vertexShader);
 
-    int success;
+    int  success;
     char infoLog[512];
 
     glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    
-    if(!success)
+
+    if (!success)
     {
         glGetShaderInfoLog(vertexShader, 512, nullptr, infoLog);
         std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILES\n" << infoLog << std::endl;
@@ -341,8 +354,8 @@ void Display::InitOpenGL()
     glCompileShader(fragmentShader);
 
     glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    
-    if(!success)
+
+    if (!success)
     {
         glGetShaderInfoLog(fragmentShader, 512, nullptr, infoLog);
         std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILES\n" << infoLog << std::endl;
@@ -355,7 +368,7 @@ void Display::InitOpenGL()
 
     glGetProgramiv(m_winOpenGL.shaderProgram, GL_LINK_STATUS, &success);
 
-    if(!success)
+    if (!success)
     {
         glGetShaderInfoLog(m_winOpenGL.shaderProgram, 512, nullptr, infoLog);
         std::cout << "ERROR::SHADER::SHADERPROGRAM::LINKING_FAILES\n" << infoLog << std::endl;

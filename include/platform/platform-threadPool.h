@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-
 DMT_MODULE_EXPORT dmt {
     class ThreadPool
     {

@@ -3530,7 +3530,11 @@ namespace dmt {
 
     void SceneDescription::Integrator(IntegratorSpec const& spec) {}
 
-    void SceneDescription::Camera(CameraSpec const& params) {}
+    void SceneDescription::Camera(CameraSpec const& params) 
+    {
+        TransformSet cameraFormWorld = graphicsState.ctm;
+        TransformSet worldFormCamera = Inverse(graphicsState.ctm);
+    }
 
     void SceneDescription::MakeNamedMedium(sid_t name, ParamMap const& params) {}
 

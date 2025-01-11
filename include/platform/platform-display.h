@@ -3,8 +3,8 @@
 #include "dmtmacros.h"
 
 // Keep in sync with .cppm
-#include <GLFW/glfw3.h>
 #include <glad/gl.h>
+#include <GLFW/glfw3.h>
 
 #include <atomic>
 #include <backends/imgui_impl_glfw.h>

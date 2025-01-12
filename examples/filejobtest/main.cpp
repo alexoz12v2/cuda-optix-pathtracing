@@ -20,44 +20,13 @@ import platform;
 import middleware;
 
 #define DMT_PLATFORM_IMPORTED
+#define DMT_MIDDLEWARE_IMPORTED
 // clang-format off
+#include "platform/cudaTest.h"
 #include <platform/platform-cuda-utils.h>
 #include <middleware/middleware-model.h>
 // clang-format on
 
-struct AllocBundle
-{
-    AllocBundle(dmt::UnifiedMemoryResource* unified,
-                dmt::EMemoryResourceType    category,
-                dmt::EMemoryResourceType    type,
-                void*                       ctorParam)
-    {
-        pUnified         = unified;
-        memEnum          = dmt::makeMemResId(category, type);
-        memSz            = dmt::sizeForMemoryResource(memEnum);
-        memAlign         = dmt::alignForMemoryResource(memEnum);
-        pMemBytes        = unified->allocate(memSz, memAlign);
-        pMemBytesAligned = dmt::alignTo(pMemBytes, memAlign);
-        pMemRes          = dmt::constructMemoryResourceAt(pMemBytesAligned, memEnum, ctorParam);
-    }
-    AllocBundle(AllocBundle const&)                = delete;
-    AllocBundle(AllocBundle&&) noexcept            = delete;
-    AllocBundle& operator=(AllocBundle const&)     = delete;
-    AllocBundle& operator=(AllocBundle&&) noexcept = delete;
-    ~AllocBundle()
-    {
-        dmt::destroyMemoryResourceAt(pMemRes, memEnum);
-        pUnified->deallocate(pMemBytes, memSz, memAlign);
-    }
-
-    dmt::UnifiedMemoryResource* pUnified;
-    dmt::EMemoryResourceType    memEnum;
-    size_t                      memSz;
-    size_t                      memAlign;
-    void*                       pMemBytes;
-    void*                       pMemBytesAligned;
-    dmt::BaseMemoryResource*    pMemRes;
-};
 
 namespace {
     std::string_view input = R"=(
@@ -243,6 +212,16 @@ int32_t main()
     //textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
 
+    std::vector<float> v3;
+    v3.resize(32);
+    {
+        std::unique_ptr<float[]> v1 = std::make_unique<float[]>(32);
+        std::fill_n(v1.get(), 32, 1.f);
+        std::unique_ptr<float[]> v2 = std::make_unique<float[]>(32);
+        std::fill_n(v2.get(), 32, 2.f);
+        dmt::kernel(v1.get(), v2.get(), 3.f, v3.data(), 32);
+    }
+
     dmt::UnifiedMemoryResource unified;
 
     dmt::BuddyResourceSpec buddySpec{
@@ -253,7 +232,7 @@ int32_t main()
         .minBlocks    = (2ULL << 20) / 256,
         .deviceId     = info.device,
     };
-    AllocBundle buddy{&unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
+    dmt::AllocBundle buddy{&unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
 
     testBuddy(actx, buddy.pMemRes);
 
@@ -264,7 +243,7 @@ int32_t main()
         .pHostMemRes      = std::pmr::get_default_resource(),
         .deviceId         = info.device,
     };
-    AllocBundle pool{&unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
+    dmt::AllocBundle pool{&unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
 
     testPool(actx, pool.pMemRes);
 

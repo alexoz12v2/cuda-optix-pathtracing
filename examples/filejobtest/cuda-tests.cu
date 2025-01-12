@@ -2,6 +2,7 @@
 #include "cuda-tests.h"
 #include "dmtmacros.h"
 #include "platform/platform-cuda-utils.cuh"
+#include <platform/platform-cuda-utils.h>
 #include "platform/platform.h"
 
 #include <cuda_device_runtime_api.h>

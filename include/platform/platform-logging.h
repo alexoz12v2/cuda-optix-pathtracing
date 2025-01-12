@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #include <platform/platform-utils.h>
 
@@ -42,7 +43,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * @param rhs log level no 2
      * @return std::strong_ordering::{less,equivalent,greater} depending on the 2 values
      */
-    constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
+    inline constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
     {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
@@ -52,7 +53,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * @param level log level
      * @return stringified log level
      */
-    constexpr std::string_view stringFromLevel(ELogLevel level)
+    inline constexpr std::string_view stringFromLevel(ELogLevel level)
     {
         using namespace std::string_view_literals;
         constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)>
@@ -282,7 +283,7 @@ DMT_MODULE_EXPORT namespace dmt {
         }
     };
 
-    class BaseAsyncIOManager
+    class DMT_PLATFORM_API BaseAsyncIOManager
     {
     public:
         static inline constexpr uint32_t numAios = 4;
@@ -299,12 +300,12 @@ DMT_MODULE_EXPORT namespace dmt {
 
 #if defined(DMT_OS_LINUX)
 
-    struct alignas(8) AioSpace
+    struct DMT_PLATFORM_API alignas(8) AioSpace
     {
         unsigned char bytes[256];
     };
 
-    class LinuxAsyncIOManager : public BaseAsyncIOManager
+    class DMT_PLATFORM_API LinuxAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         LinuxAsyncIOManager();
@@ -336,12 +337,12 @@ DMT_MODULE_EXPORT namespace dmt {
 
 #elif defined(DMT_OS_WINDOWS)
 
-    struct alignas(8) AioSpace
+    struct DMT_PLATFORM_API alignas(8) AioSpace
     {
         unsigned char bytes[32];
     };
 
-    class WindowsAsyncIOManager : public BaseAsyncIOManager
+    class DMT_PLATFORM_API WindowsAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         WindowsAsyncIOManager();
@@ -371,7 +372,7 @@ DMT_MODULE_EXPORT namespace dmt {
     /**
      * Class which formats all the given arguments into a local buffer
      */
-    class CircularOStringStream
+    class DMT_PLATFORM_API CircularOStringStream
     {
     public:
         CircularOStringStream();
@@ -783,7 +784,7 @@ concept AsyncIOManager = requires(T t) {
          * and bytes of the implementation class
          * @param other
          */
-        ConsoleLogger(ConsoleLogger&& other);
+        DMT_PLATFORM_API ConsoleLogger(ConsoleLogger&& other);
 
         /**
          * Move assignment which frees the current implementation class,
@@ -791,12 +792,12 @@ concept AsyncIOManager = requires(T t) {
          * and bytes of the implementation class
          * @param other
          */
-        ConsoleLogger& operator=(ConsoleLogger&& other);
+        DMT_PLATFORM_API ConsoleLogger& operator=(ConsoleLogger&& other);
 
         /**
          * Destructor which is manually calling the encapsulated class' destructor
          */
-        ~ConsoleLogger();
+        DMT_PLATFORM_API ~ConsoleLogger();
 
         // -- Functions  --
         /**
@@ -805,7 +806,7 @@ concept AsyncIOManager = requires(T t) {
          * @param str input string
          * @param loc source location to use to create a prefix
          */
-        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+        DMT_PLATFORM_API void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
 
         /**
          * function to write to LogDisplay, only if there's the appropriate log level, with arguments and format string
@@ -814,10 +815,10 @@ concept AsyncIOManager = requires(T t) {
          * @param list arguments for the format string
          * @param loc source location used to create a prefix
          */
-        void write(ELogLevel                            level,
-                   std::string_view const&              str,
-                   std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc);
+        DMT_PLATFORM_API void write(ELogLevel                            level,
+                                    std::string_view const&              str,
+                                    std::initializer_list<StrBuf> const& list,
+                                    std::source_location const&          loc);
 
         template <AsyncIOManager T>
         std::remove_cvref_t<T>& getInteralAs()
@@ -825,7 +826,7 @@ concept AsyncIOManager = requires(T t) {
             return *reinterpret_cast<std::remove_cvref_t<T>*>(&m_asyncIOClass);
         }
 
-        size_t maxLogArgBytes() const;
+        DMT_PLATFORM_API size_t maxLogArgBytes() const;
 
     private:
         // -- Constructors --

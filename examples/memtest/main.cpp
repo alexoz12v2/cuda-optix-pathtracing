@@ -1,3 +1,4 @@
+import platform;
 
 #include <bit>
 #include <memory>
@@ -9,9 +10,6 @@
 #include <cstdint>
 #include <cstdio>
 
-import platform;
-
-Point p{.x = 2, .y = 3};
 
 struct TestObject
 {

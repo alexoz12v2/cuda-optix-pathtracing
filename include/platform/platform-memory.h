@@ -7,6 +7,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #include <platform/platform-logging.h>
 
@@ -650,7 +651,7 @@ DMT_MODULE_EXPORT namespace dmt {
                                    void (*func)(void* data, uint64_t freeTime, NodeType::DType const& alloc))
             requires requires(NodeType::DType t) { t.transient; }
         {
-            NodeType* prev = nullptr;
+            //NodeType* prev = nullptr;
             NodeType* curr = m_occupiedHead;
 
             while (curr)

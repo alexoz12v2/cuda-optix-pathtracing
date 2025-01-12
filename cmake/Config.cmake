@@ -320,6 +320,7 @@ macro(dmt_set_target_warnings target)
   endif()
 
   # TODO move to another function
+  set_property(TARGET ${target} PROPERTY POSITION_INDEPENDENT_CODE ON)
   set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON) # default = on for shared, off for static
   set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Shared)
@@ -468,6 +469,8 @@ endfunction()
 # create a c++20 module library, with no target_sources preset, just initialize the bare necessities
 # to have a fully functioning module
 function(dmt_add_module_library name module_name)
+  cmake_parse_arguments(PARSE_ARGV 0 arg "SHARED" "" "")
+  message(STATUS "Received arg: ${arg_SHARED}")
   # parse arguments and extract the clean target path name
   if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "unexpected arguments while calling dmt_add_module_library: ${THIS_ARGS_UNPARSED_ARGUMENTS}")
@@ -481,7 +484,11 @@ function(dmt_add_module_library name module_name)
 
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
-  add_library(${name})
+  if(arg_SHARED)
+    add_library(${name} SHARED)
+  else()
+    add_library(${name})
+  endif()
   dmt_set_target_compiler_versions(${name})
   dmt_set_target_warnings(${name})
   dmt_set_target_optimization(${name})
@@ -490,13 +497,22 @@ function(dmt_add_module_library name module_name)
   # set the exported name of the target (the one you use to target_link_libraries) to dmt::{name}
   # I expect all targets to start with dmt. Replace all - with _,
   # define export symbol (for dlls, linking) as uppercase
-  string(REPLACE "-" "_" NAME_UPPER "${target_path}")
+  string(REPLACE "-" "_" NAME_UPPER "${name}")
   string(TOUPPER "${NAME_UPPER}" NAME_UPPER)
-  set_target_properties(${name} PROPERTIES DEFINE_SYMBOL ${NAME_UPPER}_EXPORTS)
+
+  target_compile_definitions(${name} PRIVATE ${NAME_UPPER}_EXPORTS)
+  if(arg_SHARED)
+    target_compile_definitions(${name} PUBLIC ${NAME_UPPER}_SHARED)
+    set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  else()
+    set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
+  endif()
+
   set_target_properties(${name} PROPERTIES EXPORT_NAME dmt::${target_path})
 
   set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
   set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   set_target_properties(${name} PROPERTIES FOLDER "Modules")
 
   # Possible todo: Handle Shared libraries (SFML)
@@ -554,6 +570,9 @@ function(dmt_add_example target)
   # possible todo: PCH
 
   # put the executable file in the right place
+  set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   set_target_properties(${target} PROPERTIES DEBUG_POSTFIX -d)
   # target folder (will show in visual studio)
@@ -593,6 +612,10 @@ function(dmt_add_test target)
   add_executable(${target})
   target_sources(${target} PRIVATE ${THIS_ARGS_FILES})
   # possible TODO: PCH
+
+  target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
   # showup folder on visual studio
   set_target_properties(${target} PROPERTIES FOLDER "Tests")

@@ -2,6 +2,7 @@
 
 #define DMT_INTERFACE_AS_HEADER
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 #include "platform/platform-cuda-utils.h"
 #include "platform/platform-threadPool.h"
 
@@ -30,6 +31,20 @@ namespace dmt {
         }
     }
 
+    template<typename T>
+    __global__ void initTable(T& self) 
+    {
+        int32_t gid = globalThreadIndex();
+        if (gid == 0)
+        {
+            self.m_device.allocateBytes =   T::allocateBytes;
+            self.m_device.freeBytes =       T::freeBytes;
+            self.m_device.deviceHasAccess = T::deviceHasAccess;
+            self.m_device.hostHasAccess =   T::hostHasAccess;
+        }
+        __syncthreads();
+    }
+
     DMT_CPU_GPU inline constexpr cuda::stream_ref streamRefFromHandle(CudaStreamHandle handle)
     {
         return {std::bit_cast<::cudaStream_t>(handle)};
@@ -56,143 +71,50 @@ namespace dmt {
 
     // Memory Resouce Interfaces --------------------------------------------------------------------------------------
     // cannot derive std::pmr::memory_resouce here cause we need __device__ on the allocate
-    class DMT_INTERFACE DeviceMemoryReosurce : public BaseMemoryResource
+    class DeviceMemoryReosurce : public BaseMemoryResource
     {
     public:
+        friend constexpr void get_property(DeviceMemoryReosurce const&, cuda::mr::device_accessible) noexcept {}
+    protected:
         DeviceMemoryReosurce(EMemoryResourceType t) : BaseMemoryResource(makeMemResId(EMemoryResourceType::eDevice, t))
         {
         }
 
-        friend constexpr void get_property(DeviceMemoryReosurce const&, cuda::mr::device_accessible) noexcept {}
-        // BesaMemoryResouce
-        DMT_CPU_GPU void* allocateBytes(size_t sz, size_t align) override;
-        DMT_CPU_GPU void  freeBytes(void* ptr, size_t sz, size_t align) override;
-        DMT_CPU void*     allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override;
-        DMT_CPU void      freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
-
-        DMT_CPU_GPU void* allocate(size_t sz, size_t align);
-        DMT_CPU_GPU void  deallocate(void* ptr, size_t sz, size_t align);
-        DMT_CPU_GPU bool  operator==(DeviceMemoryReosurce const&) const noexcept;
-        DMT_CPU_GPU bool  hostHasAccess() const override { return false; }
-
-    private:
-        DMT_CPU_GPU virtual void* do_allocate(size_t sz, size_t align)              = 0;
-        DMT_CPU_GPU virtual void  do_deallocate(void* ptr, size_t sz, size_t align) = 0;
     };
-    static_assert(cuda::mr::resource<DeviceMemoryReosurce> &&
-                  cuda::has_property<DeviceMemoryReosurce, cuda::mr::device_accessible>);
+     static_assert(cuda::has_property<DeviceMemoryReosurce, cuda::mr::device_accessible>);
 
-    class DMT_INTERFACE CudaAsyncMemoryReosurce : public BaseMemoryResource, public std::pmr::memory_resource
+    class DMT_INTERFACE CudaAsyncMemoryReosurce : public BaseMemoryResource
     {
-    public:
+    protected:
         CudaAsyncMemoryReosurce(EMemoryResourceType t) :
         BaseMemoryResource(makeMemResId(EMemoryResourceType::eAsync, t))
         {
         }
 
         friend constexpr void get_property(CudaAsyncMemoryReosurce const&, cuda::mr::device_accessible) noexcept {}
-
-        DMT_CPU_GPU void* allocateBytes(size_t sz, size_t align);
-        DMT_CPU_GPU void  freeBytes(void* ptr, size_t sz, size_t align);
-        DMT_CPU void*     allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override;
-        DMT_CPU void      freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override;
-
-        DMT_CPU_GPU virtual bool deviceHasAccess(int32_t deviceID) const = 0;
-
-        DMT_CPU void*    allocate_async(size_t sz, size_t align, cuda::stream_ref stream);
-        DMT_CPU void     deallocate_async(void* ptr, size_t sz, size_t align, cuda::stream_ref stream);
-        DMT_CPU_GPU bool hostHasAccess() const override { return false; }
-
-    private:
-        DMT_CPU virtual void* do_allocate_async(size_t, size_t, cuda::stream_ref)          = 0;
-        DMT_CPU virtual void  do_deallocate_async(void*, size_t, size_t, cuda::stream_ref) = 0;
     };
-    static_assert(cuda::mr::async_resource<CudaAsyncMemoryReosurce> &&
-                  cuda::has_property<CudaAsyncMemoryReosurce, cuda::mr::device_accessible>);
+    static_assert(cuda::has_property<CudaAsyncMemoryReosurce, cuda::mr::device_accessible>);
 
     // Memory Resouce Implementations ---------------------------------------------------------------------------------
-    template <typename T>
-    class BaseHostResource : public BaseMemoryResource, public std::pmr::memory_resource
-    {
-    public:
-        BaseHostResource(EMemoryResourceType t) : BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, t)) {}
-
-        DMT_CPU_GPU bool hostHasAccess() const override { return true; }
-
-    private:
-        DMT_CPU_GPU void* allocateBytes(size_t sz, size_t align) override
-        {
-#if !defined(__CUDA_ARCH__)
-            return std::bit_cast<T*>(this)->m_res.allocate(sz, align);
-#else
-            return nullptr;
-#endif
-        }
-
-        DMT_CPU_GPU void freeBytes(void* ptr, size_t sz, size_t align) override
-        {
-#if !defined(__CUDA_ARCH__)
-            std::bit_cast<T*>(this)->m_res.deallocate(ptr, sz, align);
-#endif
-        }
-
-        DMT_CPU void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override
-        {
-            assert(false);
-            return nullptr;
-        }
-
-        DMT_CPU void freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override
-        {
-            assert(false);
-        }
-
-        // Inherited via BaseMemoryResource
-        DMT_CPU_GPU bool deviceHasAccess(int32_t deviceID) const override { return false; }
-
-        // Inherited via memory_resource
-        void* do_allocate(size_t _Bytes, size_t _Align) override { return nullptr; }
-        void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override {}
-        bool  do_is_equal(memory_resource const& _That) const noexcept override { return false; }
-    };
-
-    class HostPoolResource : public BaseHostResource<HostPoolResource>
-    {
-        friend class BaseHostResource<HostPoolResource>;
-        using Super = BaseHostResource<HostPoolResource>;
-
-    public:
-        HostPoolResource() : Super(EMemoryResourceType::ePool) {}
-
-    private:
-        void* do_allocate(size_t _Bytes, size_t _Align) override;
-        void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
-        bool  do_is_equal(memory_resource const& _That) const noexcept override;
-
-        static inline std::pmr::pool_options opts{
-            .max_blocks_per_chunk        = 32,
-            .largest_required_pool_block = 256,
-        };
-        // TODO use our multipool allocator
-        std::pmr::synchronized_pool_resource m_res{opts};
-    };
 
     class CudaMallocResource :
     public DeviceMemoryReosurce,
         public cuda::forward_property<CudaMallocResource, DeviceMemoryReosurce>
     {
     public:
-        CudaMallocResource() : DeviceMemoryReosurce(EMemoryResourceType::eCudaMalloc) {}
+        DMT_CPU CudaMallocResource();
 
-    private:
-        DMT_CPU_GPU void* do_allocate(size_t sz, [[maybe_unused]] size_t align) override;
+        DMT_CPU_GPU void* allocate(size_t sz, [[maybe_unused]] size_t align);
+        DMT_CPU_GPU void  deallocate(void* ptr, size_t sz, size_t align);
+        DMT_CPU_GPU bool  operator==(CudaMallocResource const&) const noexcept { return true; }
 
-        DMT_CPU_GPU void do_deallocate(void* ptr, size_t sz, size_t align) override;
-
-        DMT_CPU_GPU bool deviceHasAccess(int32_t deviceID) const override
-        { // assumes cudaMalloc on current context device
-            return true;
-        }
+    public:
+        static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
+        static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
+        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static inline DMT_CPU_GPU bool deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID) { return true; }
+        static inline DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
     };
     static_assert(cuda::mr::resource<CudaMallocResource> &&
                   cuda::has_property<CudaMallocResource, cuda::mr::device_accessible>);
@@ -202,39 +124,57 @@ namespace dmt {
         public cuda::forward_property<CudaMallocAsyncResource, CudaAsyncMemoryReosurce>
     {
     public:
-        CudaMallocAsyncResource() : CudaAsyncMemoryReosurce(EMemoryResourceType::eCudaMallocAsync) {}
+        DMT_CPU CudaMallocAsyncResource();
 
-    private:
-        void*         do_allocate(size_t _Bytes, [[maybe_unused]] size_t _Align) override;
-        void          do_deallocate(void* _Ptr, size_t _Bytes, [[maybe_unused]] size_t _Align) override;
-        DMT_CPU void* do_allocate_async(size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream) override;
-        DMT_CPU void  do_deallocate_async(void*                   ptr,
+        void*         allocate(size_t _Bytes, [[maybe_unused]] size_t _Align) ;
+        void          deallocate(void* _Ptr, size_t _Bytes, [[maybe_unused]] size_t _Align) ;
+        DMT_CPU void* allocate_async(size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream) ;
+        DMT_CPU void  deallocate_async(void*                   ptr,
                                           [[maybe_unused]] size_t sz,
                                           [[maybe_unused]] size_t align,
-                                          cuda::stream_ref        stream) override;
-        bool          do_is_equal(memory_resource const& _That) const noexcept override;
+                                          cuda::stream_ref        stream) ;
+        DMT_CPU_GPU bool operator==(CudaMallocAsyncResource const&) const noexcept { return true; }
 
-        // Inherited via CudaAsyncMemoryReosurce
-        DMT_CPU_GPU bool deviceHasAccess(int32_t deviceID) const override
-        { // allocation uses currect context device
-            return true;
-        }
-    };
-
-    class BuddyMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
-    {
     public:
-        BuddyMemoryResource(BuddyResourceSpec const& input);
-        BuddyMemoryResource(BuddyMemoryResource const& other);
-        BuddyMemoryResource(BuddyMemoryResource&& other) noexcept;
-        BuddyMemoryResource& operator=(BuddyMemoryResource const& other);
-        BuddyMemoryResource& operator=(BuddyMemoryResource&& other) noexcept;
-        ~BuddyMemoryResource() override;
+        static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
+        static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
+        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static inline DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID) { return true; }
+        static inline DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
+    };
+    static_assert(cuda::mr::async_resource<CudaMallocAsyncResource> &&
+                  cuda::has_property<CudaMallocAsyncResource, cuda::mr::device_accessible>);
+
+    class BuddyMemoryResource : public BaseMemoryResource
+    {
+        friend constexpr void get_property(BuddyMemoryResource const&, cuda::mr::device_accessible) noexcept {}
+    public:
+        DMT_CPU BuddyMemoryResource(BuddyResourceSpec const& input);
+        DMT_CPU BuddyMemoryResource(BuddyMemoryResource const& other);
+        DMT_CPU BuddyMemoryResource(BuddyMemoryResource&& other) noexcept;
+        DMT_CPU BuddyMemoryResource& operator=(BuddyMemoryResource const& other);
+        DMT_CPU BuddyMemoryResource& operator=(BuddyMemoryResource&& other) noexcept;
+        DMT_CPU ~BuddyMemoryResource();
 
         DMT_CPU_GPU size_t maxPoolSize() const noexcept { return m_maxPoolSize; }
         DMT_CPU_GPU size_t maxBlockSize() const noexcept { return m_chunkSize; }
-        DMT_CPU_GPU bool   deviceHasAccess(int32_t deviceID) const override { return m_device == deviceID; }
-        DMT_CPU_GPU bool   hostHasAccess() const override { return false; }
+
+        // Inherited via std::pmr::memory_resource
+        DMT_CPU void* allocate(size_t _Bytes, size_t _Align);
+        DMT_CPU void  deallocate(void* _Ptr, size_t _Bytes, size_t _Align);
+        DMT_CPU_GPU bool  operator==(BuddyMemoryResource const& that) const noexcept;
+
+    public:
+        static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
+        static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
+        static inline DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream) {
+            assert(false);
+            return nullptr;
+        }
+        static inline DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream) { assert(false); }
+        static DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
+        static inline DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
 
     private:
         enum EBitTree : uint8_t
@@ -269,37 +209,6 @@ namespace dmt {
         DMT_CPU void                  split(size_t order, size_t nodeIndex);
         DMT_CPU bool                  coalesce(size_t parentIndex, size_t parentLevel);
 
-        // Inherited via std::pmr::memory_resource
-        void* do_allocate(size_t _Bytes, size_t _Align) override;
-        void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
-        bool  do_is_equal(memory_resource const& that) const noexcept override;
-
-        // Inherited via BaseMemoryResource (Boilerplate basically)
-        DMT_CPU_GPU void* allocateBytes(size_t sz, size_t align) override
-        {
-#if !defined(__CUDA_ARCH__)
-            return do_allocate(sz, align);
-#else
-            return nullptr;
-#endif
-        }
-
-        DMT_CPU_GPU void freeBytes(void* ptr, size_t sz, size_t align) override
-        {
-#if !defined(__CUDA_ARCH__)
-            do_deallocate(ptr, sz, align);
-#endif
-        }
-        DMT_CPU void* allocatesBytesAsync(size_t sz, size_t align, CudaStreamHandle stream) override
-        {
-            assert(false);
-            return nullptr;
-        }
-        DMT_CPU void freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream) override
-        {
-            assert(false);
-        }
-
     private:
         UnifiedControlBlock* m_ctrlBlock; // when moved from, this is nullptr, and if it is, allocation functions return always nullptr
 
@@ -308,10 +217,12 @@ namespace dmt {
         size_t m_ctrlBlockReservedVMemBytes;
         size_t m_chunkSize;
         mutable std::shared_mutex m_mtx; // allocation functions use a std::shared_lock on this, while std::lock_guard used by copy control and cleanup
-        CUdevice m_device;
+        CUdevice m_deviceHnd;
         int32_t  m_deviceId;
         uint32_t m_minBlockSize;
     };
+    static_assert(cuda::mr::resource<BuddyMemoryResource> &&
+                  cuda::has_property<BuddyMemoryResource, cuda::mr::device_accessible>);
 
     // Reference for Stream Ordered Allocation (Runtime API): https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#stream-ordered-memory-allocator-intro
     class MemPoolAsyncMemoryResource :
@@ -319,26 +230,33 @@ namespace dmt {
         public cuda::forward_property<MemPoolAsyncMemoryResource, CudaAsyncMemoryReosurce>
     {
     public:
-        MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input);
-        MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other);
-        MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept;
-        MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource const& other);
-        MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource&& other) noexcept;
-        ~MemPoolAsyncMemoryResource() noexcept;
+        DMT_CPU MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input);
+        DMT_CPU MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other);
+        DMT_CPU MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept;
+        DMT_CPU MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource const& other);
+        DMT_CPU MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource&& other) noexcept;
+        DMT_CPU ~MemPoolAsyncMemoryResource() noexcept;
 
-        size_t           poolSize() const noexcept { return m_poolSize; }
-        DMT_CPU_GPU bool deviceHasAccess(int32_t deviceID) const override { return m_deviceId == deviceID; }
+        DMT_CPU_GPU size_t poolSize() const noexcept { return m_poolSize; }
+
+        DMT_CPU void* allocate(size_t _Bytes, size_t _Align);
+        DMT_CPU void  deallocate(void* _Ptr, size_t _Bytes, size_t _Align);
+        DMT_CPU void* allocate_async(size_t, size_t, cuda::stream_ref);
+        DMT_CPU void  deallocate_async(void*, size_t, size_t, cuda::stream_ref);
+
+        DMT_CPU_GPU bool operator==(MemPoolAsyncMemoryResource const& _That) const noexcept;
 
     private:
-        // Inherited via CudaAsyncMemoryReosurce
-        void*         do_allocate(size_t _Bytes, size_t _Align) override;
-        void          do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
-        bool          do_is_equal(memory_resource const& _That) const noexcept override;
-        DMT_CPU void* do_allocate_async(size_t, size_t, cuda::stream_ref) override;
-        DMT_CPU void  do_deallocate_async(void*, size_t, size_t, cuda::stream_ref) override;
+        DMT_CPU void  cleanup() noexcept;
+        DMT_CPU void* performAlloc(CUstream streamRef, size_t sz);
 
-        void  cleanup() noexcept;
-        void* performAlloc(CUstream streamRef, size_t sz);
+    public:
+        static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
+        static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
+        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
+        static inline DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
 
     private:
         struct ControlBlock
@@ -356,4 +274,6 @@ namespace dmt {
         size_t                     m_poolSize;
         int32_t                    m_deviceId;
     };
+    static_assert(cuda::mr::async_resource<MemPoolAsyncMemoryResource> &&
+                  cuda::has_property<MemPoolAsyncMemoryResource, cuda::mr::device_accessible>);
 } // namespace dmt

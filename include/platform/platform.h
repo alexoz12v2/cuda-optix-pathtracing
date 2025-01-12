@@ -2,13 +2,15 @@
 
 // keep in sync with .cppm file
 #include "dmtmacros.h"
+#include "platform/platform-macros.h"
 
+#include <platform/platform-utils.h>
 #include <platform/platform-logging.h>
 #include <platform/platform-memory.h>
 #include <platform/platform-threadPool.h>
-#include <platform/platform-utils.h>
+#include <platform/platform-display.h>
 
-#if !defined(DMT_NEEDS_MODULE0)
+#if !defined(DMT_NEEDS_MODULE)
 #include <array>
 #include <bit>
 #include <charconv>
@@ -26,41 +28,37 @@
 #include <cstdint>
 #endif
 
-DMT_MODULE_EXPORT struct Point {
-    int x;
-    int y;
-};
+DMT_MODULE_EXPORT namespace dmt {
+    struct AppContext : public InterfaceLogger<AppContext>
+    {
+        AppContext(uint32_t                                   pageTrackCapacity,
+                   uint32_t                                   allocTrackCapacity,
+                   std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
+        AppContext(AppContext const&)                = delete;
+        AppContext(AppContext&&) noexcept            = delete;
+        AppContext& operator=(AppContext const&)     = delete;
+        AppContext& operator=(AppContext&&) noexcept = delete;
+        ~AppContext();
 
-    namespace dmt {
-DMT_MODULE_EXPORT struct AppContext :
-public InterfaceLogger<AppContext> {
-    AppContext(uint32_t                                   pageTrackCapacity,
-               uint32_t                                   allocTrackCapacity,
-               std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
-    AppContext(AppContext const&)                = delete;
-    AppContext(AppContext&&) noexcept            = delete;
-    AppContext& operator=(AppContext const&)     = delete;
-    AppContext& operator=(AppContext&&) noexcept = delete;
-    ~AppContext();
+        size_t maxLogArgBytes() const;
+        void   write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+        void   write(ELogLevel                            level,
+                     std::string_view const&              str,
+                     std::initializer_list<StrBuf> const& list,
+                     std::source_location const&          loc);
+        void   addJob(Job const& job, EJobLayer layer);
 
-    size_t maxLogArgBytes() const;
-    void   write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
-    void   write(ELogLevel                            level,
-                 std::string_view const&              str,
-                 std::initializer_list<StrBuf> const& list,
-                 std::source_location const&          loc);
-    void   addJob(Job const& job, EJobLayer layer);
-
-    MemoryContext mctx;
-    ThreadPoolV2  threadPool;
-};
+        MemoryContext mctx;
+        ThreadPoolV2  threadPool;
+    };
 
     // TODO boot up request sudo access
     /**
      * @class Platform
      * @brief Class whose constructor initializes all the necessary objects to bootstrap the application
      */
-    DMT_MODULE_EXPORT class Platform {
+    class Platform
+    {
     public:
         Platform();
         Platform(Platform const&) = delete;
@@ -71,9 +69,9 @@ public InterfaceLogger<AppContext> {
 
         [[nodiscard]] uint64_t getSize() const;
 
-        AppContext& ctx()& { return m_ctx; }
+        AppContext& ctx() & { return m_ctx; }
 
     private:
         AppContext m_ctx{toUnderlying(EPageSize::e1GB), toUnderlying(EPageSize::e1GB), {8192, 4096, 2048, 1024}};
     };
-    } // namespace dmt
+} // namespace dmt

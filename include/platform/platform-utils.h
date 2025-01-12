@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #if !defined(DMT_NEEDS_MODULE)
 #include <bit>
@@ -19,15 +20,11 @@
 #endif
 
 DMT_MODULE_EXPORT namespace dmt {
-    void* reserveVirtualAddressSpace(size_t size);
-
-    size_t systemAlignment();
-
-    bool commitPhysicalMemory(void* address, size_t size);
-
-    bool freeVirtualAddressSpace(void* address, size_t size);
-
-    void decommitPage(void* pageAddress, size_t pageSize);
+    DMT_PLATFORM_API void*  reserveVirtualAddressSpace(size_t size);
+    DMT_PLATFORM_API size_t systemAlignment();
+    DMT_PLATFORM_API bool   commitPhysicalMemory(void* address, size_t size);
+    DMT_PLATFORM_API bool   freeVirtualAddressSpace(void* address, size_t size);
+    DMT_PLATFORM_API void   decommitPage(void* pageAddress, size_t pageSize);
 
     template <typename T>
     struct PmrDeleter

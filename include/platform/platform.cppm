@@ -42,9 +42,11 @@ module;
 #include <numbers>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <memory_resource> // std::pmr::memory_resource
 #include <queue>
 #include <source_location>
+#include <shared_mutex>
 #include <string_view>
 #include <sstream>
 #include <thread>
@@ -83,8 +85,8 @@ export
 }
 
 module :private; // modifying this does not cause recompilation
-#if 0            // these componentgs 
 // clang-format off
+#if 0            // these componentgs 
 #include <platform-utils.cpp>
 #include <platform-logging.cpp>
 #include <platform-memory.cpp>

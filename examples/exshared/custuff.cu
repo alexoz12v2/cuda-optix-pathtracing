@@ -10,7 +10,7 @@ class DMT_INTERFACE IStuff
 {
 public:
     __host__ __device__ IStuff() {}
-    __host__ __device__ virtual ~IStuff() {}
+    __host__            __device__ virtual ~IStuff() {}
 
     __host__ __device__ virtual int32_t giveMeNumber() = 0;
 };
@@ -18,9 +18,10 @@ public:
 class Three : public IStuff
 {
 public:
-    __host__ __device__ Three() : IStuff() { //
+    __host__ __device__ Three() : IStuff()
+    { //
 #if !defined(__CUDA_ARCH__)
-        std::cout << "Constructor inside host" << std::endl; 
+        std::cout << "Constructor inside host" << std::endl;
 #endif
     }
 
@@ -42,20 +43,21 @@ private:
     bool m_called = false;
 };
 
-static __managed__ bool  s_deviceHasAccess = false;
-static __managed__ int32_t s_number = 0;
+static __managed__ bool    s_deviceHasAccess = false;
+static __managed__ int32_t s_number          = 0;
 
 // A virtual function call on device code gives MMU Fault if the vtable doesn't reside in device memory
-// the vtable is allocated on the device if the object is constructed on the device (for the first time), 
+// the vtable is allocated on the device if the object is constructed on the device (for the first time),
 // and on the host if it is constructed on the host, even if the underlying backing memory for the class is managed memory
-// a Hack to force usage of virtual functions for a host constructed object seems to involve a call to 
-// the copy constructor on a __managed__ object inside the device code, to force vtable allocation upon 
-// the first usage of the class. This is horrible and I would prefer to allocate a vtable manually. Keeping 
+// a Hack to force usage of virtual functions for a host constructed object seems to involve a call to
+// the copy constructor on a __managed__ object inside the device code, to force vtable allocation upon
+// the first usage of the class. This is horrible and I would prefer to allocate a vtable manually. Keeping
 // this for reference
-template<typename T>
-__device__ void fixVirtualPointers(T *other) {
-        T temp =  T(*other); // object-copy moves the "guts" of the object w/o changing vtable
-        memcpy(other, &temp, sizeof(T)); // pointer copy seems to move vtable
+template <typename T>
+__device__ void fixVirtualPointers(T* other)
+{
+    T temp = T(*other);              // object-copy moves the "guts" of the object w/o changing vtable
+    memcpy(other, &temp, sizeof(T)); // pointer copy seems to move vtable
 }
 
 static __global__ void testVirtualFunctionsFromManagedObjectWithHostCopyControl(IStuff* stuff)
@@ -118,17 +120,18 @@ static bool almostEqual(float a, float b, float epsilon = std::numeric_limits<fl
 
 void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
 {
-    cudaError_t cudaStatus;
-    size_t   cap             = arr.capacity();
-    uint32_t threadsPerBlock = 32u; // note: equal to warp size
-    uint32_t blocks          = static_cast<uint32_t>(dmt::ceilDiv(cap, 32ull));
+    dmt::AppContextJanitor j;
+    cudaError_t            cudaStatus;
+    size_t                 cap             = arr.capacity();
+    uint32_t               threadsPerBlock = 32u; // note: equal to warp size
+    uint32_t               blocks          = static_cast<uint32_t>(dmt::ceilDiv(cap, 32ull));
 
     Three* three = nullptr;
-    cudaStatus = cudaMallocManaged(&three, sizeof(Three));
+    cudaStatus   = cudaMallocManaged(&three, sizeof(Three));
     assert(cudaStatus == ::cudaSuccess);
     std::construct_at(three);
 
-    std::cout << "Calling managed object virtual function: " << reinterpret_cast<IStuff*>(three)->giveMeNumber() << std::endl;
+    j.actx.log("Calling managed object virtual function: {}", {reinterpret_cast<IStuff*>(three)->giveMeNumber()});
     testVirtualFunctionsFromManagedObjectWithHostCopyControl<<<1, threadsPerBlock>>>(three);
     cudaDeviceSynchronize();
 
@@ -139,10 +142,10 @@ void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
     testResource<<<1, threadsPerBlock>>>(arr);
     cudaDeviceSynchronize();
     if (s_deviceHasAccess)
-        std::cout << "Successfully tested memory resource for memory access from device" << std::endl;
+        j.actx.log("Successfully tested memory resource for memory access from device");
     else
     {
-        std::cerr << "something went wrong horribly" << std::endl;
+        j.actx.error("something went wrong horribly");
         return;
     }
 
@@ -152,10 +155,10 @@ void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
     // copy and check initial value
     arr.copyToHostSync(cpu);
     if (almostEqual(cpu[0], val))
-        std::cout << "Successfully put value " << val << " inside DynaArray" << std::endl;
+        j.actx.log("Successfully put value {} inside DynaArray", {val});
     else
     {
-        std::cerr << "Failed to put value " << val << " inside DynaArray" << std::endl;
+        j.actx.error("Failed to put value {} inside DynaArray", {val});
         return;
     }
 
@@ -164,7 +167,7 @@ void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
 
     arr.copyToHostSync(cpu);
     if (almostEqual(cpu[0], after))
-        std::cout << "Successfully updated value from " << val << " to " << after << std::endl;
+        j.actx.log("Successfully updated value from {} to {}", {val, after});
     else
-        std::cerr << "Failed to update value from " << val << " to " << after << std::endl;
+        j.actx.error("Failed to update value from {} to {}", {val, after});
 }

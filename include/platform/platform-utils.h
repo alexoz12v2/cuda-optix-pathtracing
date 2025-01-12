@@ -11,6 +11,7 @@
 #include <memory>
 #include <memory_resource>
 #include <source_location>
+#include <shared_mutex>
 #include <string_view>
 #include <type_traits>
 
@@ -420,7 +421,7 @@ DMT_MODULE_EXPORT namespace dmt {
      *   std::cout << "Dereferenced value: " << std::dec << tp.operator* <int>() << "\n";
      * TODO: we can template this class on the number of low bits we expect to be zeroed out
      */
-    class TaggedPointer
+    class DMT_PLATFORM_API TaggedPointer
     {
     public:
         // Constructor
@@ -516,5 +517,10 @@ DMT_MODULE_EXPORT namespace dmt {
     inline constexpr I ceilDiv(I num, I den)
     {
         return (num + den - 1) / den;
+    }
+
+    namespace detail {
+        extern DMT_PLATFORM_API uintptr_t g_currentContext;
+        extern DMT_PLATFORM_API std::shared_mutex g_slk;
     }
 } // namespace dmt

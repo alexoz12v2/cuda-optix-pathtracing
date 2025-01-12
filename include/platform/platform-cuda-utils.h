@@ -127,7 +127,7 @@ DMT_MODULE_EXPORT namespace dmt {
 
         // the other 30 bits are for the type
         // eHost types
-        eHostToDevMemMap = 5 < memoryResouceTypeNumBits,  // host to device
+        eHostToDevMemMap = 5 < memoryResouceTypeNumBits, // host to device
         // eDevice types
         eCudaMalloc = 2 << memoryResouceTypeNumBits,
         // eAsync types
@@ -158,38 +158,40 @@ DMT_MODULE_EXPORT namespace dmt {
     {
     public:
         DMT_CPU_GPU void* tryAllocateAsync(size_t sz, size_t align, CudaStreamHandle stream = noStream);
-        DMT_CPU_GPU void tryFreeAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream = noStream);
+        DMT_CPU_GPU void  tryFreeAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream = noStream);
         DMT_CPU_GPU void* allocateBytes(size_t sz, size_t align);
         DMT_CPU_GPU void  freeBytes(void* ptr, size_t sz, size_t align);
-        DMT_CPU void* allocateBytesAsync(size_t sz, size_t align, CudaStreamHandle stream);
-        DMT_CPU void freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        DMT_CPU void*     allocateBytesAsync(size_t sz, size_t align, CudaStreamHandle stream);
+        DMT_CPU void      freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
         DMT_CPU_GPU bool  deviceHasAccess(int32_t deviceID) const;
         DMT_CPU_GPU bool  hostHasAccess() const;
 
         EMemoryResourceType type;
+
     protected:
         BaseMemoryResource(EMemoryResourceType type) : type(type) {}
+
     public:
         struct VTableHost
         {
-           void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align) = nullptr;
-           void  (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
-           void* (*allocateBytesAsync)(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
-           void  (*freeBytesAsync)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
-           bool  (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID) = nullptr;
-           bool  (*hostHasAccess)(BaseMemoryResource const* pAlloc) = nullptr;
+            void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align)       = nullptr;
+            void (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
+            void* (*allocateBytesAsync)(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
+            void (*freeBytesAsync)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
+            bool (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID) = nullptr;
+            bool (*hostHasAccess)(BaseMemoryResource const* pAlloc)                     = nullptr;
         };
-        struct VTableDevice 
+        struct VTableDevice
         {
-           void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align) = nullptr;
-           void  (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
-           bool  (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID) = nullptr;
-           bool  (*hostHasAccess)(BaseMemoryResource const* pAlloc) = nullptr;
+            void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align)       = nullptr;
+            void (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
+            bool (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID)       = nullptr;
+            bool (*hostHasAccess)(BaseMemoryResource const* pAlloc)                           = nullptr;
         };
         // you can either store it here or store a pointer
         // storing inline means that every instance of the same derived class duplicates the table
         // but avoids double indirection. Since it is likely that we have 1 instance per allocator type, store it inline
-        VTableHost m_host;
+        VTableHost   m_host;
         VTableDevice m_device;
     };
 
@@ -208,14 +210,14 @@ DMT_MODULE_EXPORT namespace dmt {
         DMT_CPU void* do_allocate(size_t _Bytes, size_t _Align) override;
         DMT_CPU void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
         DMT_CPU bool  do_is_equal(memory_resource const& _That) const noexcept override;
-        
+
     public:
         static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
         static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
-        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
-        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
-        static DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
-        static DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc);
+        static DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU_GPU bool deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
+        static DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const* pAlloc);
     };
 
     struct BuddyResourceSpec

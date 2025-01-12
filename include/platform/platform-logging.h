@@ -156,7 +156,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * Class whose purpose is to convert to a string representation whichever types are to be supported by default in the
      * `CircularOStringStream` formatting facilities`. Uses ASCII
      */
-    struct StrBuf
+    struct DMT_PLATFORM_API StrBuf
     {
         /**
          * Basic constructor which initializes memberwise
@@ -684,7 +684,7 @@ concept AsyncIOManager = requires(T t) {
      * Implementation of the `AsyncIOManager` concept which does nothing. Used to fill moved-from
      * `ConsoleLogger` objects
      */
-    class alignas(8) NullAsyncIOManager : public BaseAsyncIOManager
+    class alignas(8) DMT_PLATFORM_API NullAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         char* operator[](uint32_t i) { return m_padding; }
@@ -710,7 +710,7 @@ concept AsyncIOManager = requires(T t) {
      * Operating system.
      * Note: OS API usage is not beneficial to performance here, but it's for learning and reference
      */
-    class ConsoleLogger : public BaseLogger<ConsoleLogger>
+    class DMT_PLATFORM_API ConsoleLogger : public BaseLogger<ConsoleLogger>
     {
     public:
         // -- Types --
@@ -784,7 +784,7 @@ concept AsyncIOManager = requires(T t) {
          * and bytes of the implementation class
          * @param other
          */
-        DMT_PLATFORM_API ConsoleLogger(ConsoleLogger&& other);
+        ConsoleLogger(ConsoleLogger&& other);
 
         /**
          * Move assignment which frees the current implementation class,
@@ -792,12 +792,12 @@ concept AsyncIOManager = requires(T t) {
          * and bytes of the implementation class
          * @param other
          */
-        DMT_PLATFORM_API ConsoleLogger& operator=(ConsoleLogger&& other);
+        ConsoleLogger& operator=(ConsoleLogger&& other);
 
         /**
          * Destructor which is manually calling the encapsulated class' destructor
          */
-        DMT_PLATFORM_API ~ConsoleLogger();
+        ~ConsoleLogger();
 
         // -- Functions  --
         /**
@@ -806,7 +806,7 @@ concept AsyncIOManager = requires(T t) {
          * @param str input string
          * @param loc source location to use to create a prefix
          */
-        DMT_PLATFORM_API void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
 
         /**
          * function to write to LogDisplay, only if there's the appropriate log level, with arguments and format string
@@ -815,10 +815,10 @@ concept AsyncIOManager = requires(T t) {
          * @param list arguments for the format string
          * @param loc source location used to create a prefix
          */
-        DMT_PLATFORM_API void write(ELogLevel                            level,
-                                    std::string_view const&              str,
-                                    std::initializer_list<StrBuf> const& list,
-                                    std::source_location const&          loc);
+        void write(ELogLevel                            level,
+                   std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc);
 
         template <AsyncIOManager T>
         std::remove_cvref_t<T>& getInteralAs()
@@ -826,7 +826,7 @@ concept AsyncIOManager = requires(T t) {
             return *reinterpret_cast<std::remove_cvref_t<T>*>(&m_asyncIOClass);
         }
 
-        DMT_PLATFORM_API size_t maxLogArgBytes() const;
+        size_t maxLogArgBytes() const;
 
     private:
         // -- Constructors --
@@ -836,7 +836,7 @@ concept AsyncIOManager = requires(T t) {
         /**
          * Interface type calling into the type erased class implementation
          */
-        struct Table
+        struct DMT_PLATFORM_API Table
         {
             bool (*tryAsyncLog)(unsigned char*          pClazz,
                                 ELogLevel               level,
@@ -951,10 +951,10 @@ concept AsyncIOManager = requires(T t) {
         static inline std::mutex s_writeMutex;
     };
 
-    class LoggingContext : public InterfaceLogger<LoggingContext>
+    class DMT_PLATFORM_API LoggingContext : public InterfaceLogger<LoggingContext>
     {
     public:
-        LoggingContext() : logger(ConsoleLogger::create()), start(std::chrono::high_resolution_clock::now()) {}
+        LoggingContext();
 
         /**
          * Setter for the `m_level`
@@ -1010,14 +1010,9 @@ concept AsyncIOManager = requires(T t) {
 
         size_t maxLogArgBytes() const;
 
-        uint64_t millisFromStart() const
-        {
-            auto now      = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
-            return static_cast<uint64_t>(duration.count());
-        }
+        uint64_t millisFromStart() const;
 
-        ConsoleLogger                                  logger;
-        std::chrono::high_resolution_clock::time_point start;
+        ConsoleLogger logger;
+        int64_t       start;
     };
 } // namespace dmt

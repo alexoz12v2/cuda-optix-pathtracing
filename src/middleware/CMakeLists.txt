@@ -26,9 +26,9 @@ target_sources(dmt-middleware
 
 target_link_libraries(dmt-middleware 
   PUBLIC
-    dmt::platform
+    dmt-platform-mixed
     glm::glm
   PRIVATE 
-    CUDA::cudart
-    CUDA::cuda_driver
+    #CUDA::cudart
+    #CUDA::cuda_driver
 )

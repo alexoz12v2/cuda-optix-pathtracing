@@ -7,8 +7,15 @@
 
 int32_t main()
 {
+    using namespace std::string_view_literals;
     // Hello stuff
-    std::cout << dmt::add(4u, 3u) << " should be 3" << std::endl;
+    dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
+    dmt::ctx::init(actx);
+    actx.log("{} should be 3", {dmt::add(4u, 3u)});
+    dmt::StringTable strTable;
+    dmt::sid_t       sid = strTable.intern("fdsafsf"sv);
+    actx.log("{}", {strTable.lookup(sid)});
+
     dmt::CUDAHelloInfo info = dmt::cudaHello(nullptr);
 
     // create allocators
@@ -41,15 +48,17 @@ int32_t main()
         std::unique_ptr<float[]> a = std::make_unique<float[]>(dynaArrayUnified->capacity());
         fillVector(*dynaArrayUnified, 5.f, 7.f, a.get());
 
-        std::cout << "Vec: { ";
+        actx.log("Vec: { ");
         dynaArrayUnified->copyToHostSync(a.get());
+        std::string str = "\n";
         for (size_t i = 0; i < dynaArrayUnified->size(); ++i)
         {
-            std::cout << a[i] << " ";
+            str += std::to_string(a[i]);
+            str += " ";
             if (i % 8 == 0)
-                std::cout << "\n      ";
+                str += "\n      ";
         }
-        std::cout << std::endl;
+        actx.log("{}", {str});
 
         std::destroy_at(dynaArrayUnified);
         unified.deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
@@ -58,4 +67,5 @@ int32_t main()
     std::cout << "Press Any key to exit" << std::endl;
     std::cin.get();
     std::cout << "Goodbye!" << std::endl;
+    dmt::ctx::unregister();
 }

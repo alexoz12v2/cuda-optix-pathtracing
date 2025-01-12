@@ -23,7 +23,7 @@ target_link_libraries(dmt-platform
     Backward::Backward
 ) 
 
-dmt_add_module_library(dmt-platform-cuda platformCuda)
+dmt_add_module_library(dmt-platform-cuda platform)
 target_sources(dmt-platform-cuda
   PUBLIC
     FILE_SET platform_cuda_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform
@@ -49,12 +49,14 @@ target_sources(dmt-platform-mixed
     FILE_SET platform_mized_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform
       FILES ${CMAKE_SOURCE_DIR}/include/platform/platform-display.h
             ${CMAKE_SOURCE_DIR}/include/platform/platform.h 
+            ${CMAKE_SOURCE_DIR}/include/platform/platform-mixed-macros.h
   PRIVATE
     platform-display.cpp platform.cpp
 )
 target_link_libraries(dmt-platform-mixed 
   PUBLIC 
     dmt-platform-cuda
+    dmt-platform
   PRIVATE
     $<$<BOOL:${DMT_OS_LINUX}>:rt pthread > # needed by async io linux
     $<$<BOOL:${DMT_OS_WINDOWS}>:kernel32.dll advapi32.dll> # needed by fileapi.h (does it automatically with dll, clarity)

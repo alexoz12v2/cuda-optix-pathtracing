@@ -31,16 +31,16 @@ namespace dmt {
         }
     }
 
-    template<typename T>
-    __global__ void initTable(T& self) 
+    template <typename T>
+    __global__ void initTable(T& self)
     {
         int32_t gid = globalThreadIndex();
         if (gid == 0)
         {
-            self.m_device.allocateBytes =   T::allocateBytes;
-            self.m_device.freeBytes =       T::freeBytes;
+            self.m_device.allocateBytes   = T::allocateBytes;
+            self.m_device.freeBytes       = T::freeBytes;
             self.m_device.deviceHasAccess = T::deviceHasAccess;
-            self.m_device.hostHasAccess =   T::hostHasAccess;
+            self.m_device.hostHasAccess   = T::hostHasAccess;
         }
         __syncthreads();
     }
@@ -75,13 +75,13 @@ namespace dmt {
     {
     public:
         friend constexpr void get_property(DeviceMemoryReosurce const&, cuda::mr::device_accessible) noexcept {}
+
     protected:
         DeviceMemoryReosurce(EMemoryResourceType t) : BaseMemoryResource(makeMemResId(EMemoryResourceType::eDevice, t))
         {
         }
-
     };
-     static_assert(cuda::has_property<DeviceMemoryReosurce, cuda::mr::device_accessible>);
+    static_assert(cuda::has_property<DeviceMemoryReosurce, cuda::mr::device_accessible>);
 
     class DMT_INTERFACE CudaAsyncMemoryReosurce : public BaseMemoryResource
     {
@@ -111,10 +111,16 @@ namespace dmt {
     public:
         static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
         static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
-        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
-        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
-        static inline DMT_CPU_GPU bool deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID) { return true; }
-        static inline DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
+        static DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static inline DMT_CPU_GPU bool deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID)
+        {
+            return true;
+        }
+        static inline DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const* pAlloc)
+        {
+            return false;
+        }
     };
     static_assert(cuda::mr::resource<CudaMallocResource> &&
                   cuda::has_property<CudaMallocResource, cuda::mr::device_accessible>);
@@ -126,22 +132,25 @@ namespace dmt {
     public:
         DMT_CPU CudaMallocAsyncResource();
 
-        void*         allocate(size_t _Bytes, [[maybe_unused]] size_t _Align) ;
-        void          deallocate(void* _Ptr, size_t _Bytes, [[maybe_unused]] size_t _Align) ;
-        DMT_CPU void* allocate_async(size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream) ;
-        DMT_CPU void  deallocate_async(void*                   ptr,
-                                          [[maybe_unused]] size_t sz,
-                                          [[maybe_unused]] size_t align,
-                                          cuda::stream_ref        stream) ;
+        void*         allocate(size_t _Bytes, [[maybe_unused]] size_t _Align);
+        void          deallocate(void* _Ptr, size_t _Bytes, [[maybe_unused]] size_t _Align);
+        DMT_CPU void* allocate_async(size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream);
+        DMT_CPU void deallocate_async(void* ptr, [[maybe_unused]] size_t sz, [[maybe_unused]] size_t align, cuda::stream_ref stream);
         DMT_CPU_GPU bool operator==(CudaMallocAsyncResource const&) const noexcept { return true; }
 
     public:
         static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
         static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
-        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
-        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
-        static inline DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID) { return true; }
-        static inline DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
+        static DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static inline DMT_CPU_GPU bool deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID)
+        {
+            return true;
+        }
+        static inline DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const* pAlloc)
+        {
+            return false;
+        }
     };
     static_assert(cuda::mr::async_resource<CudaMallocAsyncResource> &&
                   cuda::has_property<CudaMallocAsyncResource, cuda::mr::device_accessible>);
@@ -149,10 +158,11 @@ namespace dmt {
     class BuddyMemoryResource : public BaseMemoryResource
     {
         friend constexpr void get_property(BuddyMemoryResource const&, cuda::mr::device_accessible) noexcept {}
+
     public:
-        DMT_CPU BuddyMemoryResource(BuddyResourceSpec const& input);
-        DMT_CPU BuddyMemoryResource(BuddyMemoryResource const& other);
-        DMT_CPU BuddyMemoryResource(BuddyMemoryResource&& other) noexcept;
+        DMT_CPU                      BuddyMemoryResource(BuddyResourceSpec const& input);
+        DMT_CPU                      BuddyMemoryResource(BuddyMemoryResource const& other);
+        DMT_CPU                      BuddyMemoryResource(BuddyMemoryResource&& other) noexcept;
         DMT_CPU BuddyMemoryResource& operator=(BuddyMemoryResource const& other);
         DMT_CPU BuddyMemoryResource& operator=(BuddyMemoryResource&& other) noexcept;
         DMT_CPU ~BuddyMemoryResource();
@@ -161,20 +171,27 @@ namespace dmt {
         DMT_CPU_GPU size_t maxBlockSize() const noexcept { return m_chunkSize; }
 
         // Inherited via std::pmr::memory_resource
-        DMT_CPU void* allocate(size_t _Bytes, size_t _Align);
-        DMT_CPU void  deallocate(void* _Ptr, size_t _Bytes, size_t _Align);
-        DMT_CPU_GPU bool  operator==(BuddyMemoryResource const& that) const noexcept;
+        DMT_CPU void*    allocate(size_t _Bytes, size_t _Align);
+        DMT_CPU void     deallocate(void* _Ptr, size_t _Bytes, size_t _Align);
+        DMT_CPU_GPU bool operator==(BuddyMemoryResource const& that) const noexcept;
 
     public:
         static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
         static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
-        static inline DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream) {
+        static inline DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream)
+        {
             assert(false);
             return nullptr;
         }
-        static inline DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream) { assert(false); }
-        static DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
-        static inline DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
+        static inline DMT_CPU void freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
+        {
+            assert(false);
+        }
+        static DMT_CPU_GPU bool        deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
+        static inline DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const* pAlloc)
+        {
+            return false;
+        }
 
     private:
         enum EBitTree : uint8_t
@@ -230,9 +247,9 @@ namespace dmt {
         public cuda::forward_property<MemPoolAsyncMemoryResource, CudaAsyncMemoryReosurce>
     {
     public:
-        DMT_CPU MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input);
-        DMT_CPU MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other);
-        DMT_CPU MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept;
+        DMT_CPU                             MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input);
+        DMT_CPU                             MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other);
+        DMT_CPU                             MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept;
         DMT_CPU MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource const& other);
         DMT_CPU MemPoolAsyncMemoryResource& operator=(MemPoolAsyncMemoryResource&& other) noexcept;
         DMT_CPU ~MemPoolAsyncMemoryResource() noexcept;
@@ -253,10 +270,13 @@ namespace dmt {
     public:
         static DMT_CPU_GPU void* allocateBytes(BaseMemoryResource* pAlloc, size_t sz, size_t align);
         static DMT_CPU_GPU void  freeBytes(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align);
-        static DMT_CPU void*     allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
-        static DMT_CPU void      freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
-        static DMT_CPU_GPU bool  deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
-        static inline DMT_CPU_GPU bool  hostHasAccess([[maybe_unused]] BaseMemoryResource const*  pAlloc) { return false; }
+        static DMT_CPU void* allocateBytesAsync(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU void freeBytesAsync(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream);
+        static DMT_CPU_GPU bool        deviceHasAccess(BaseMemoryResource const* pAlloc, int32_t deviceID);
+        static inline DMT_CPU_GPU bool hostHasAccess([[maybe_unused]] BaseMemoryResource const* pAlloc)
+        {
+            return false;
+        }
 
     private:
         struct ControlBlock

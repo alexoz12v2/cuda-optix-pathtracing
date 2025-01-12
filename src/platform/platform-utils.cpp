@@ -8,6 +8,7 @@
 #include <array>
 #include <bit>
 #include <concepts>
+#include <shared_mutex>
 #include <limits>
 
 #include <cassert>
@@ -85,5 +86,10 @@ namespace dmt {
         madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
 #endif
     }
+
+    namespace detail {
+        uintptr_t         g_currentContext = 0;
+        std::shared_mutex g_slk;
+    } // namespace detail
 
 } // namespace dmt

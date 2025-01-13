@@ -59,8 +59,6 @@ DMT_MODULE_EXPORT namespace dmt {
         eEmpty   = static_cast<uint32_t>(-1),
     };
 
-    constexpr uint32_t toUnderlying(EJobLayer a) { return static_cast<uint32_t>(a); }
-
     constexpr std::strong_ordering operator<=>(EJobLayer a, EJobLayer b) { return toUnderlying(a) <=> toUnderlying(b); }
 
     struct Job

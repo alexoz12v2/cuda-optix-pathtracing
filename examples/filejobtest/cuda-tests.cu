@@ -19,7 +19,7 @@ __global__ void fillBufferKernel(uint8_t* buffer, size_t size, uint8_t value)
 void testBuddyDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes)
 {
     using namespace std::string_view_literals;
-    dmt::BuddyMemoryResource* pBuddy = dynamic_cast<dmt::BuddyMemoryResource*>(pMemRes);
+    dmt::BuddyMemoryResource* pBuddy = reinterpret_cast<dmt::BuddyMemoryResource*>(pMemRes);
     assert(pBuddy && "incorrect allocator type");
     actx.error("THis is an error {}", {"err"sv});
 
@@ -191,7 +191,7 @@ void testBuddyDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes)
 void testMemPoolAsyncDirectly(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemRes)
 {
     using namespace std::string_view_literals;
-    auto* pPool = dynamic_cast<dmt::MemPoolAsyncMemoryResource*>(pMemRes);
+    auto* pPool = reinterpret_cast<dmt::MemPoolAsyncMemoryResource*>(pMemRes);
     assert(pPool && "incorrect memory resource type");
     assert(cudaGetLastError() == ::cudaSuccess);
     actx.log("Starting tests for MemPoolAsyncMemoryResource.");

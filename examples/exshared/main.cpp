@@ -18,7 +18,7 @@ int32_t main()
 
     auto env = dmt::getEnv();
 
-    dmt::CUDAHelloInfo info = dmt::cudaHello(nullptr);
+    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx());
     actx.log("CUDA Initialized");
 
     // create allocators
@@ -26,7 +26,7 @@ int32_t main()
     { // no allocator/alloocation should outlive unified
         actx.log("Unified Memory Resource Constructed");
         dmt::BuddyResourceSpec buddySpec{
-            .pmctx        = nullptr,
+            .pmctx        = &actx.mctx(),
             .pHostMemRes  = std::pmr::get_default_resource(),
             .maxPoolSize  = 4ULL << 20, // 1ULL << 30,
             .minBlockSize = 256,
@@ -36,7 +36,7 @@ int32_t main()
         dmt::AllocBundle buddy{unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
         actx.log("Buddy Memory Resource constructed");
         dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
-            .pmctx            = nullptr,
+            .pmctx            = &actx.mctx(),
             .poolSize         = 2ULL << 20, // 2MB is the minimum allocation granularity for most devices (cc 7.0)
             .releaseThreshold = std::numeric_limits<size_t>::max(),
             .pHostMemRes      = std::pmr::get_default_resource(),

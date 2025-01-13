@@ -49,8 +49,6 @@ DMT_MODULE_EXPORT namespace dmt {
         eCount,
     };
 
-    inline constexpr uint16_t toUnderlying(EMemoryTag tag) { return static_cast<uint16_t>(tag); }
-
     inline constexpr std::strong_ordering operator<=>(EMemoryTag a, EMemoryTag b)
     {
         return toUnderlying(a) <=> toUnderlying(b);
@@ -228,11 +226,6 @@ DMT_MODULE_EXPORT namespace dmt {
         e1GB  = 1u << 30u,
         Count = 3
     };
-
-    /**
-     * Boilerplate to extract the number from a strong enum type. C++23 standardised this
-     */
-    constexpr uint32_t toUnderlying(EPageSize ePageSize) { return static_cast<uint32_t>(ePageSize); }
 
     /**
      * Boilerplate to compare strong enum types
@@ -1101,11 +1094,6 @@ DMT_MODULE_EXPORT namespace dmt {
         e128B = 128u,
         e256B = 256u,
     };
-
-    /**
-     * Boilerplate to extract the number from a strong enum type. C++23 standardised this
-     */
-    inline constexpr uint16_t toUnderlying(EBlockSize blkSize) { return static_cast<uint16_t>(blkSize); }
 
     /**
      * `MultiPoolAllocator` makes use of `TaggedPointesr`, as all allocations are 32 byte aligned (5 least significant bits free to use)

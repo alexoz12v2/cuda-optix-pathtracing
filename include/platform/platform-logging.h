@@ -994,15 +994,15 @@ concept AsyncIOManager = requires(T t) {
          * @param level log level requested
          * @return bool signaling whether the requested log level is enabled
          */
-        bool enabled(ELogLevel level) { return logger.enabled(level); }
+        bool enabled(ELogLevel level) const { return logger.enabled(level); }
 
-        bool traceEnabled() { return enabled(ELogLevel::TRACE); }
+        bool traceEnabled() const { return enabled(ELogLevel::TRACE); }
 
-        bool logEnabled() { return enabled(ELogLevel::LOG); }
+        bool logEnabled() const { return enabled(ELogLevel::LOG); }
 
-        bool warnEnabled() { return enabled(ELogLevel::WARNING); }
+        bool warnEnabled() const { return enabled(ELogLevel::WARNING); }
 
-        bool errorEnabled() { return enabled(ELogLevel::ERR); }
+        bool errorEnabled() const { return enabled(ELogLevel::ERR); }
 
         void dbgTraceStackTrace();
 

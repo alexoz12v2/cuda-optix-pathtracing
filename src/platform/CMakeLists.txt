@@ -36,16 +36,12 @@ target_sources(dmt-platform-cuda
 target_link_libraries(dmt-platform-cuda 
   PUBLIC 
     dmt-platform
-    #CUDA::cudart # automatically linked
-    #CUDA::cuda_driver # automatically linkedb
     dmtcuda-Optix8
 )
 
 dmt_add_module_library(dmt-platform-mixed platform)
 target_sources(dmt-platform-mixed
   PUBLIC
-    FILE_SET platform TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform
-      FILES ${CMAKE_SOURCE_DIR}/include/platform/platform.cppm
     FILE_SET platform_mized_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform
       FILES ${CMAKE_SOURCE_DIR}/include/platform/platform-display.h
             ${CMAKE_SOURCE_DIR}/include/platform/platform.h 

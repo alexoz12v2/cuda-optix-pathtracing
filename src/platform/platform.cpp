@@ -1,11 +1,12 @@
+#if !defined(DMT_NEEDS_MODULE)
 #define DMT_INTERFACE_AS_HEADER
-#undef DMT_NEEDS_MODULE
 #include "platform.h"
 
 #include <utility>
 
 #include <cstdint>
 #include <cstdlib>
+#endif
 
 namespace dmt {
 
@@ -77,16 +78,130 @@ namespace dmt {
         m_pimpl->mctx.pctx.write(level, str, list, loc);
     }
 
+    bool AppContext::enabled(ELogLevel level) const
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.pctx.enabled(level);
+    }
+
+    bool AppContext::traceEnabled() const
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.pctx.enabled(ELogLevel::TRACE);
+    }
+
+    bool AppContext::logEnabled() const
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.pctx.enabled(ELogLevel::LOG);
+    }
+
+    bool AppContext::warnEnabled() const
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.pctx.enabled(ELogLevel::WARNING);
+    }
+
+    bool AppContext::errorEnabled() const
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.pctx.enabled(ELogLevel::ERR);
+    }
+
+    void AppContext::dbgTraceStackTrace()
+    {
+        assert(m_pimpl);
+        m_pimpl->mctx.pctx.dbgTraceStackTrace();
+    }
+
+    void AppContext::dbgErrorStackTrace()
+    {
+        assert(m_pimpl);
+        m_pimpl->mctx.pctx.dbgErrorStackTrace();
+    }
+
     size_t AppContext::maxLogArgBytes() const
     {
         assert(m_pimpl);
         return m_pimpl->mctx.pctx.maxLogArgBytes();
     }
 
+    uint64_t AppContext::millisFromStart() const
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.pctx.millisFromStart();
+    }
+
     void AppContext::addJob(Job const& job, EJobLayer layer)
     {
         assert(m_pimpl);
         m_pimpl->threadPool.addJob(m_pimpl->mctx, job, layer);
+    }
+
+    void AppContext::kickJobs()
+    {
+        assert(m_pimpl);
+        m_pimpl->threadPool.kickJobs();
+    }
+
+    void AppContext::pauseJobs()
+    {
+        assert(m_pimpl);
+        m_pimpl->threadPool.pauseJobs();
+    }
+
+    bool AppContext::otherLayerActive(EJobLayer& layer) const
+    {
+        assert(m_pimpl);
+        return m_pimpl->threadPool.otherLayerActive(layer);
+    }
+
+    void* AppContext::stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid)
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.stackAllocate(size, alignment, tag, sid);
+    }
+
+    void AppContext::stackReset()
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.stackReset();
+    }
+
+    TaggedPointer AppContext::poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid)
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.poolAllocateBlocks(numBlocks, blockSize, tag, sid);
+    }
+
+    void AppContext::poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr)
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.poolFreeBlocks(numBlocks, ptr);
+    }
+
+    PageAllocationsTracker& AppContext::tracker()
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.tracker;
+    }
+
+    sid_t AppContext::intern(std::string_view str)
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.strTable.intern(str);
+    }
+
+    std::string_view AppContext::lookup(sid_t sid)
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx.strTable.lookup(sid);
+    }
+
+    MemoryContext& AppContext::mctx()
+    {
+        assert(m_pimpl);
+        return m_pimpl->mctx;
     }
 
     static void cleanupContext(AppContextImpl* pctx)

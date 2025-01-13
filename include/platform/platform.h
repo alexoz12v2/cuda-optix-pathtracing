@@ -29,7 +29,7 @@
 #include <cstdint>
 #endif
 
-DMT_MODULE_EXPORT namespace dmt {
+namespace dmt {
     class AppContext;
     namespace ctx {
         using namespace dmt;
@@ -37,7 +37,7 @@ DMT_MODULE_EXPORT namespace dmt {
         DMT_PLATFORM_MIXED_API AppContext* acquireCurrent();
         DMT_PLATFORM_MIXED_API void        releaseCurrent();
         DMT_PLATFORM_MIXED_API void        unregister();
-    }
+    } // namespace ctx
 
     class DMT_PLATFORM_MIXED_API AppContextJanitor
     {
@@ -69,13 +69,42 @@ DMT_MODULE_EXPORT namespace dmt {
         ~AppContext() noexcept;
 
     public:
-        size_t maxLogArgBytes() const;
-        void   write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
-        void   write(ELogLevel                            level,
-                     std::string_view const&              str,
-                     std::initializer_list<StrBuf> const& list,
-                     std::source_location const&          loc);
-        void   addJob(Job const& job, EJobLayer layer);
+        // logging methods
+        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+        void write(ELogLevel                            level,
+                   std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc);
+
+        bool     enabled(ELogLevel level) const;
+        bool     traceEnabled() const;
+        bool     logEnabled() const;
+        bool     warnEnabled() const;
+        bool     errorEnabled() const;
+        void     dbgTraceStackTrace();
+        void     dbgErrorStackTrace();
+        size_t   maxLogArgBytes() const;
+        uint64_t millisFromStart() const;
+
+        // threadpool methods
+        void addJob(Job const& job, EJobLayer layer);
+        void kickJobs();
+        void pauseJobs();
+        bool otherLayerActive(EJobLayer& layer) const;
+
+        // memory methods
+        void*                   stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
+        void                    stackReset();
+        TaggedPointer           poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid);
+        void                    poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr);
+        PageAllocationsTracker& tracker();
+
+        // string table
+        sid_t            intern(std::string_view str);
+        std::string_view lookup(sid_t sid);
+
+        // Necessary evil for `cudaHello` function. don't use this
+        MemoryContext& mctx();
 
     private:
         void cleanup() noexcept;

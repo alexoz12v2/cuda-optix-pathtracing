@@ -20,7 +20,7 @@
 #include <cstdint>
 #endif
 
-DMT_MODULE_EXPORT namespace dmt {
+namespace dmt {
     DMT_PLATFORM_API void*  reserveVirtualAddressSpace(size_t size);
     DMT_PLATFORM_API size_t systemAlignment();
     DMT_PLATFORM_API bool   commitPhysicalMemory(void* address, size_t size);
@@ -226,7 +226,7 @@ DMT_MODULE_EXPORT namespace dmt {
     }
 
     template <std::integral I>
-    inline constexpr bool parseInt(std::string_view str, I & outValue)
+    inline constexpr bool parseInt(std::string_view str, I& outValue)
     {
         if (str.empty())
         {
@@ -525,5 +525,5 @@ DMT_MODULE_EXPORT namespace dmt {
     namespace detail {
         extern DMT_PLATFORM_API uintptr_t g_currentContext;
         extern DMT_PLATFORM_API std::shared_mutex g_slk;
-    }
+    } // namespace detail
 } // namespace dmt

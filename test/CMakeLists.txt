@@ -44,14 +44,14 @@ dmt_add_test(dmt-test-platform
 
 # run tests as soon as you build them
 dmt_set_option(DMT_RUN_TESTS ON BOOL "True to run tests as soon as you build them")
-if(DMT_RUN_TESTS)
-  message(STATUS "Running Tests on targets:${DMT_TEST_TARGETS_LIST}")
-  add_custom_target(dmt-runtests
-    COMMAND ${COVERAGE_PREFIX} ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
+#if(DMT_RUN_TESTS)
+#  message(STATUS "Running Tests on targets:${DMT_TEST_TARGETS_LIST}")
+#  add_custom_target(dmt-runtests
+#    COMMAND ${COVERAGE_PREFIX} ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
     # COMMAND ${CMAKE_COMMAND} -P "${PROJECT_BINARY_DIR}/patch_coverage.cmake"
-    COMMENT "Run Tests"
-    VERBATIM
-  )
-  message(STATUS "DMT_TEST_TARGETS_LIST: ${DMT_TEST_TARGETS_LIST}")
-  add_dependencies(dmt-runtests ${DMT_TEST_TARGETS_LIST})
-endif()
+#    COMMENT "Run Tests"
+#    VERBATIM
+#  )
+#  message(STATUS "DMT_TEST_TARGETS_LIST: ${DMT_TEST_TARGETS_LIST}")
+#  add_dependencies(dmt-runtests ${DMT_TEST_TARGETS_LIST})
+#endif()

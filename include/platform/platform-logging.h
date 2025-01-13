@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #include <platform/platform-utils.h>
 
@@ -42,7 +43,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * @param rhs log level no 2
      * @return std::strong_ordering::{less,equivalent,greater} depending on the 2 values
      */
-    constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
+    inline constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
     {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
@@ -52,7 +53,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * @param level log level
      * @return stringified log level
      */
-    constexpr std::string_view stringFromLevel(ELogLevel level)
+    inline constexpr std::string_view stringFromLevel(ELogLevel level)
     {
         using namespace std::string_view_literals;
         constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)>
@@ -155,7 +156,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * Class whose purpose is to convert to a string representation whichever types are to be supported by default in the
      * `CircularOStringStream` formatting facilities`. Uses ASCII
      */
-    struct StrBuf
+    struct DMT_PLATFORM_API StrBuf
     {
         /**
          * Basic constructor which initializes memberwise
@@ -282,7 +283,7 @@ DMT_MODULE_EXPORT namespace dmt {
         }
     };
 
-    class BaseAsyncIOManager
+    class DMT_PLATFORM_API BaseAsyncIOManager
     {
     public:
         static inline constexpr uint32_t numAios = 4;
@@ -299,12 +300,12 @@ DMT_MODULE_EXPORT namespace dmt {
 
 #if defined(DMT_OS_LINUX)
 
-    struct alignas(8) AioSpace
+    struct DMT_PLATFORM_API alignas(8) AioSpace
     {
         unsigned char bytes[256];
     };
 
-    class LinuxAsyncIOManager : public BaseAsyncIOManager
+    class DMT_PLATFORM_API LinuxAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         LinuxAsyncIOManager();
@@ -336,12 +337,12 @@ DMT_MODULE_EXPORT namespace dmt {
 
 #elif defined(DMT_OS_WINDOWS)
 
-    struct alignas(8) AioSpace
+    struct DMT_PLATFORM_API alignas(8) AioSpace
     {
         unsigned char bytes[32];
     };
 
-    class WindowsAsyncIOManager : public BaseAsyncIOManager
+    class DMT_PLATFORM_API WindowsAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         WindowsAsyncIOManager();
@@ -371,7 +372,7 @@ DMT_MODULE_EXPORT namespace dmt {
     /**
      * Class which formats all the given arguments into a local buffer
      */
-    class CircularOStringStream
+    class DMT_PLATFORM_API CircularOStringStream
     {
     public:
         CircularOStringStream();
@@ -683,7 +684,7 @@ concept AsyncIOManager = requires(T t) {
      * Implementation of the `AsyncIOManager` concept which does nothing. Used to fill moved-from
      * `ConsoleLogger` objects
      */
-    class alignas(8) NullAsyncIOManager : public BaseAsyncIOManager
+    class alignas(8) DMT_PLATFORM_API NullAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         char* operator[](uint32_t i) { return m_padding; }
@@ -709,7 +710,7 @@ concept AsyncIOManager = requires(T t) {
      * Operating system.
      * Note: OS API usage is not beneficial to performance here, but it's for learning and reference
      */
-    class ConsoleLogger : public BaseLogger<ConsoleLogger>
+    class DMT_PLATFORM_API ConsoleLogger : public BaseLogger<ConsoleLogger>
     {
     public:
         // -- Types --
@@ -835,7 +836,7 @@ concept AsyncIOManager = requires(T t) {
         /**
          * Interface type calling into the type erased class implementation
          */
-        struct Table
+        struct DMT_PLATFORM_API Table
         {
             bool (*tryAsyncLog)(unsigned char*          pClazz,
                                 ELogLevel               level,
@@ -950,10 +951,10 @@ concept AsyncIOManager = requires(T t) {
         static inline std::mutex s_writeMutex;
     };
 
-    class LoggingContext : public InterfaceLogger<LoggingContext>
+    class DMT_PLATFORM_API LoggingContext : public InterfaceLogger<LoggingContext>
     {
     public:
-        LoggingContext() : logger(ConsoleLogger::create()), start(std::chrono::high_resolution_clock::now()) {}
+        LoggingContext();
 
         /**
          * Setter for the `m_level`
@@ -993,15 +994,15 @@ concept AsyncIOManager = requires(T t) {
          * @param level log level requested
          * @return bool signaling whether the requested log level is enabled
          */
-        bool enabled(ELogLevel level) { return logger.enabled(level); }
+        bool enabled(ELogLevel level) const { return logger.enabled(level); }
 
-        bool traceEnabled() { return enabled(ELogLevel::TRACE); }
+        bool traceEnabled() const { return enabled(ELogLevel::TRACE); }
 
-        bool logEnabled() { return enabled(ELogLevel::LOG); }
+        bool logEnabled() const { return enabled(ELogLevel::LOG); }
 
-        bool warnEnabled() { return enabled(ELogLevel::WARNING); }
+        bool warnEnabled() const { return enabled(ELogLevel::WARNING); }
 
-        bool errorEnabled() { return enabled(ELogLevel::ERR); }
+        bool errorEnabled() const { return enabled(ELogLevel::ERR); }
 
         void dbgTraceStackTrace();
 
@@ -1009,14 +1010,9 @@ concept AsyncIOManager = requires(T t) {
 
         size_t maxLogArgBytes() const;
 
-        uint64_t millisFromStart() const
-        {
-            auto now      = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
-            return static_cast<uint64_t>(duration.count());
-        }
+        uint64_t millisFromStart() const;
 
-        ConsoleLogger                                  logger;
-        std::chrono::high_resolution_clock::time_point start;
+        ConsoleLogger logger;
+        int64_t       start;
     };
 } // namespace dmt

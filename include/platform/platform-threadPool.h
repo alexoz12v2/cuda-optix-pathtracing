@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #include <platform/platform-memory.h>
 
@@ -34,11 +35,9 @@ DMT_MODULE_EXPORT namespace dmt {
     {
         std::atomic<bool> lock_ = {0};
 
-        void lock() noexcept;
-
-        bool try_lock() noexcept;
-
-        void unlock() noexcept;
+        DMT_PLATFORM_API void lock() noexcept;
+        DMT_PLATFORM_API bool try_lock() noexcept;
+        DMT_PLATFORM_API void unlock() noexcept;
     };
 
     using JobSignature = void (*)(uintptr_t data);
@@ -59,8 +58,6 @@ DMT_MODULE_EXPORT namespace dmt {
         eTest1   = 1,
         eEmpty   = static_cast<uint32_t>(-1),
     };
-
-    constexpr uint32_t toUnderlying(EJobLayer a) { return static_cast<uint32_t>(a); }
 
     constexpr std::strong_ordering operator<=>(EJobLayer a, EJobLayer b) { return toUnderlying(a) <=> toUnderlying(b); }
 
@@ -123,21 +120,18 @@ DMT_MODULE_EXPORT namespace dmt {
         friend void               jobWorkerThread(ThreadPoolV2* threadPool);
 
     public:
-        ThreadPoolV2(MemoryContext& ctx);
+        DMT_PLATFORM_API ThreadPoolV2(MemoryContext& ctx);
         ThreadPoolV2(ThreadPoolV2 const&)                = delete;
         ThreadPoolV2(ThreadPoolV2&&) noexcept            = delete;
         ThreadPoolV2& operator=(ThreadPoolV2 const&)     = delete;
         ThreadPoolV2& operator=(ThreadPoolV2&&) noexcept = delete;
+        // TODO Destr5uctor?
 
-        void addJob(MemoryContext& ctx, Job const& job, EJobLayer layer);
-
-        void cleanup(MemoryContext& ctx);
-
-        void kickJobs();
-
-        void pauseJobs();
-
-        bool otherLayerActive(EJobLayer& layer) const;
+        DMT_PLATFORM_API void addJob(MemoryContext& ctx, Job const& job, EJobLayer layer);
+        DMT_PLATFORM_API void cleanup(MemoryContext& ctx);
+        DMT_PLATFORM_API void kickJobs();
+        DMT_PLATFORM_API void pauseJobs();
+        DMT_PLATFORM_API bool otherLayerActive(EJobLayer& layer) const;
 
     private:
         static constexpr bool isTrueTaggedPointer(TaggedPointer ptr) { return ptr.tag() != nullTag; }
@@ -257,15 +251,15 @@ DMT_MODULE_EXPORT namespace dmt {
         uint32_t chunkNum;
     };
 
-    class alignas(32) ChunkedFileReader
+    class DMT_PLATFORM_API alignas(32) ChunkedFileReader
     {
     public:
 
     private:
-        struct EndSentinel
+        struct DMT_PLATFORM_API EndSentinel
         {
         };
-        struct InputIterator
+        struct DMT_PLATFORM_API InputIterator
         {
         public:
             using difference_type = std::ptrdiff_t;
@@ -295,7 +289,7 @@ DMT_MODULE_EXPORT namespace dmt {
         };
         static_assert(std::input_iterator<InputIterator>);
 
-        struct Range
+        struct DMT_PLATFORM_API Range
         {
             constexpr Range(void* pData, uint32_t chunkNum, uint32_t numChunks) :
             pData(pData),

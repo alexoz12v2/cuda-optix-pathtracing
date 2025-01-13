@@ -7,6 +7,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #include <platform/platform-logging.h>
 
@@ -47,8 +48,6 @@ DMT_MODULE_EXPORT namespace dmt {
         eSpectrum,              /** tag associated for a sampled light spectrum */
         eCount,
     };
-
-    inline constexpr uint16_t toUnderlying(EMemoryTag tag) { return static_cast<uint16_t>(tag); }
 
     inline constexpr std::strong_ordering operator<=>(EMemoryTag a, EMemoryTag b)
     {
@@ -182,7 +181,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param str string to be interned
          * @return `sid_t` string id
          */
-        sid_t intern(std::string_view str);
+        DMT_PLATFORM_API sid_t intern(std::string_view str);
 
         /**
          * Method to store the association sid -> string into the `m_stringTable` Red Black Tree
@@ -190,14 +189,14 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param sz  number of characters (1 byte each, it's supposed to be ASCII)
          * @return `sid_t` string id
          */
-        sid_t intern(char const* str, uint64_t sz);
+        DMT_PLATFORM_API sid_t intern(char const* str, uint64_t sz);
 
         /**
          * Method to return an interned string from its sid. If not found, the string `"NOT FOUND"` is returned
          * @param sid string id
          * @return `std::string_view` string associated to the sid
          */
-        std::string_view lookup(sid_t sid) const;
+        DMT_PLATFORM_API std::string_view lookup(sid_t sid) const;
 
     private:
         static inline std::pmr::pool_options const opts{
@@ -227,11 +226,6 @@ DMT_MODULE_EXPORT namespace dmt {
         e1GB  = 1u << 30u,
         Count = 3
     };
-
-    /**
-     * Boilerplate to extract the number from a strong enum type. C++23 standardised this
-     */
-    constexpr uint32_t toUnderlying(EPageSize ePageSize) { return static_cast<uint32_t>(ePageSize); }
 
     /**
      * Boilerplate to compare strong enum types
@@ -272,7 +266,7 @@ DMT_MODULE_EXPORT namespace dmt {
     /**
      * Tracking data for a page allocation
      */
-    struct alignas(8) PageAllocation
+    struct DMT_PLATFORM_API alignas(8) PageAllocation
     {
         void*     address;
         int64_t   pageNum; // in linux, 55 bits, windows void pointer, but it should be at least 4KB aligned
@@ -288,7 +282,7 @@ DMT_MODULE_EXPORT namespace dmt {
     /**
      * struct for the return type of the `PageAllocator` allocate Bytes method
      */
-    struct AllocatePageForBytesResult
+    struct DMT_PLATFORM_API AllocatePageForBytesResult
     {
         size_t   numBytes;
         uint32_t numPages;
@@ -300,7 +294,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * We use function pointers instead of directly injecting the type `PageAllocationTracker` to give the ability
      * to turn off memory tracking at runtime
      */
-    struct PageAllocatorHooks
+    struct DMT_PLATFORM_API PageAllocatorHooks
     {
         void (*allocHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
         void (*freeHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
@@ -320,12 +314,12 @@ DMT_MODULE_EXPORT namespace dmt {
         static constexpr uint32_t num4KBIn2MB = toUnderlying(EPageSize::e2MB) / toUnderlying(EPageSize::e4KB);
 
         // -- Construtors/Copy Control --
-        PageAllocator(LoggingContext& ctx, PageAllocatorHooks const& hooks);
-        PageAllocator(PageAllocator const&)            = default;
-        PageAllocator(PageAllocator&&) noexcept        = default;
-        PageAllocator& operator=(PageAllocator const&) = default;
-        PageAllocator& operator=(PageAllocator&&)      = default;
-        ~PageAllocator();
+        DMT_PLATFORM_API                PageAllocator(LoggingContext& ctx, PageAllocatorHooks const& hooks);
+        DMT_PLATFORM_API                PageAllocator(PageAllocator const&)     = default;
+        DMT_PLATFORM_API                PageAllocator(PageAllocator&&) noexcept = default;
+        DMT_PLATFORM_API PageAllocator& operator=(PageAllocator const&)         = default;
+        DMT_PLATFORM_API PageAllocator& operator=(PageAllocator&&)              = default;
+        DMT_PLATFORM_API ~PageAllocator();
 
         // -- Functions --
         /**
@@ -341,7 +335,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param pageSize page size override (instead of preferring the maximum possible)
          * @return `AllocatePageForBytesResult` allocated pages information (bytes and number of pages)
          */
-        [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(
+        DMT_PLATFORM_API [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(
             LoggingContext& ctx,
             size_t          numBytes,
             PageAllocation* pOut,
@@ -359,10 +353,11 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param opts enum options for the behaviour of the function
          * @return `EPageSize` page size used for the `inOutNum` computation
          */
-        EPageSize allocatePagesForBytesQuery(LoggingContext&             ctx,
-                                             size_t                      numBytes,
-                                             uint32_t&                   inOutNum,
-                                             EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
+        DMT_PLATFORM_API EPageSize allocatePagesForBytesQuery(
+            LoggingContext&             ctx,
+            size_t                      numBytes,
+            uint32_t&                   inOutNum,
+            EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
 
         /**
          * @warning do not use this
@@ -372,7 +367,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param ctx `LoggingContext` to perform console only logs
          * @param pageSize the page size we want to check availability for
          */
-        bool checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize);
+        DMT_PLATFORM_API bool checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize);
 
         /**
          * Allocate 2MB of memory using the larges page size possible, ie. either a 2MB page or a bunch of 4KB pages
@@ -380,7 +375,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param out `PageAllocation` containing, among other things, a pointer to the allocated page
          * @retuns `true` if the allocation was successful, `false` otherwise
          */
-        bool allocate2MB(LoggingContext& ctx, PageAllocation& out);
+        DMT_PLATFORM_API bool allocate2MB(LoggingContext& ctx, PageAllocation& out);
 
         /**
          * Allocate the largest page available on the system (or the page size suggested from the override parameter).
@@ -391,7 +386,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param sizeOverride page size override
          * @return `PageAllocation` struct containing the address to the allocated memory and its size, or `nullptr` if it failed
          */
-        PageAllocation allocatePage(LoggingContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
+        DMT_PLATFORM_API PageAllocation allocatePage(LoggingContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
 
         /**
          * Static method which performs a page deallocation without updating a tracker
@@ -399,14 +394,14 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param ctx `LoggingContext` console only logging
          * @param alloc page(s) to deallocate
          */
-        static void deallocatePage(LoggingContext& ctx, PageAllocation& alloc);
+        DMT_PLATFORM_API static void deallocatePage(LoggingContext& ctx, PageAllocation& alloc);
 
         /**
          * Method to deallocate a page allocated with `allocate2MB`, `allocatePage` or `AllocatePagesForBytes`
          * @param ctx `LoggingContext` console only logging
          * @param alloc page(s) to deallocate
          */
-        void deallocPage(LoggingContext& ctx, PageAllocation& alloc);
+        DMT_PLATFORM_API void deallocPage(LoggingContext& ctx, PageAllocation& alloc);
 
     protected:
 #if defined(DMT_OS_WINDOWS)
@@ -458,7 +453,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * Tracking data for an *Object* allocation, ie. coming from the `StackAllocator`, `MultiPoolAllocator`, or any other
      * Allocation function which uses a `PageAllocator` instance as its memory backing
      */
-    struct alignas(8) AllocationInfo
+    struct DMT_PLATFORM_API alignas(8) AllocationInfo
     {
         void*         address;
         uint64_t      allocTime; // millieconds from start of app
@@ -478,7 +473,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * We use function pointers instead of directly injecting the type `PageAllocationTracker` to give the ability
      * to turn off memory tracking at runtime
      */
-    struct AllocatorHooks
+    struct DMT_PLATFORM_API AllocatorHooks
     {
         void (*allocHook)(void* data, LoggingContext& ctx, AllocationInfo const& alloc) =
             [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {};
@@ -650,7 +645,7 @@ DMT_MODULE_EXPORT namespace dmt {
                                    void (*func)(void* data, uint64_t freeTime, NodeType::DType const& alloc))
             requires requires(NodeType::DType t) { t.transient; }
         {
-            NodeType* prev = nullptr;
+            //NodeType* prev = nullptr;
             NodeType* curr = m_occupiedHead;
 
             while (curr)
@@ -721,8 +716,8 @@ DMT_MODULE_EXPORT namespace dmt {
             m_freeHead       = node;
         }
     };
-    template class FreeList<PageNode>;
-    template class FreeList<AllocNode>;
+    template class DMT_PLATFORM_API FreeList<PageNode>;
+    template class DMT_PLATFORM_API FreeList<AllocNode>;
 
     inline constexpr uint32_t log16GB = 30 + 4;
     inline constexpr size_t   num16GB = 1ULL << log16GB;
@@ -732,10 +727,10 @@ DMT_MODULE_EXPORT namespace dmt {
     // You will keep an array of pointers and an active index. Such buffers will have an header, having a uintptr_t to the first
     //   address not yet committed, and a uintptr_t to the start of the next buffer (limit).
     //   the uintptr_t to the start of the buffer is implicitly computed as alignToAddr(start + sizeof(Header), alignof(AllocInfo))
-    class ObjectAllocationsSlidingWindow
+    class DMT_PLATFORM_API ObjectAllocationsSlidingWindow
     {
     private:
-        struct Header
+        struct DMT_PLATFORM_API Header
         {
             uintptr_t firstNotCommitted;
             uintptr_t limit;
@@ -755,13 +750,13 @@ DMT_MODULE_EXPORT namespace dmt {
         }
 
     public:
-        struct EndSentinel
+        struct DMT_PLATFORM_API EndSentinel
         {
             constexpr EndSentinel(uintptr_t last) : last{last} {}
             uintptr_t last;
         };
 
-        struct AllocIterator
+        struct DMT_PLATFORM_API AllocIterator
         {
         public:
             using difference_type = std::ptrdiff_t;
@@ -794,7 +789,7 @@ DMT_MODULE_EXPORT namespace dmt {
             AllocationInfo const* m_ptr;
         };
 
-        struct AllocRange
+        struct DMT_PLATFORM_API AllocRange
         {
         public:
             AllocRange(Header* block) : m_block(block) {}
@@ -812,7 +807,7 @@ DMT_MODULE_EXPORT namespace dmt {
             Header* m_block;
         };
 
-        struct WindowIterator
+        struct DMT_PLATFORM_API WindowIterator
         {
         public:
             using difference_type = std::ptrdiff_t;
@@ -876,10 +871,10 @@ DMT_MODULE_EXPORT namespace dmt {
      * Class which reserves a large portion of the virtual address to memory tracking and manage such space as two linked lists
      * on one end we'll track page allocations, on the other object allocation.
      */
-    class alignas(8) PageAllocationsTracker
+    class DMT_PLATFORM_API alignas(8) PageAllocationsTracker
     {
     public:
-        struct PageAllocationView
+        struct DMT_PLATFORM_API PageAllocationView
         {
             PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking) {}
             auto begin() { return m_pageTracking->beginAllocated(); }
@@ -888,7 +883,7 @@ DMT_MODULE_EXPORT namespace dmt {
         private:
             FreeList<PageNode>* m_pageTracking;
         };
-        struct AllocationView
+        struct DMT_PLATFORM_API AllocationView
         {
             AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking) {}
             auto begin() { return m_allocTracking->beginAllocated(); }
@@ -1024,7 +1019,7 @@ DMT_MODULE_EXPORT namespace dmt {
     class StackAllocator
     {
     public:
-        StackAllocator(LoggingContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks);
+        DMT_PLATFORM_API StackAllocator(LoggingContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks);
         StackAllocator(StackAllocator const&)                = delete;
         StackAllocator(StackAllocator&&) noexcept            = delete;
         StackAllocator& operator=(StackAllocator const&)     = delete;
@@ -1035,7 +1030,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param ctx `LoggingContext` console only logging
          * @param pageAllocator pageAllocator
          */
-        void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
+        DMT_PLATFORM_API void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
 
         /**
          * Method to allocate some space, with a given `size` and `alignment` on a free enough stack
@@ -1044,7 +1039,12 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param size number of bytes requested
          * @param alignment alignment requirement of the allocation
          */
-        void* allocate(LoggingContext& ctx, PageAllocator& pageAllocator, size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
+        DMT_PLATFORM_API void* allocate(LoggingContext& ctx,
+                                        PageAllocator&  pageAllocator,
+                                        size_t          size,
+                                        size_t          alignment,
+                                        EMemoryTag      tag,
+                                        sid_t           sid);
 
         /**
          * Ends a reset cycle for the stack allocator, resetting all stack pointers, and deallocating all stack buffers
@@ -1054,7 +1054,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param ctx `LoggingContext` console only logging
          * @param pageAllocator pageAllocator
          */
-        void reset(LoggingContext& ctx, PageAllocator& pageAllocator);
+        DMT_PLATFORM_API void reset(LoggingContext& ctx, PageAllocator& pageAllocator);
 
     private:
         struct alignas(8) StackHeader
@@ -1096,17 +1096,12 @@ DMT_MODULE_EXPORT namespace dmt {
     };
 
     /**
-     * Boilerplate to extract the number from a strong enum type. C++23 standardised this
-     */
-    constexpr uint16_t toUnderlying(EBlockSize blkSize) { return static_cast<uint16_t>(blkSize); }
-
-    /**
      * `MultiPoolAllocator` makes use of `TaggedPointesr`, as all allocations are 32 byte aligned (5 least significant bits free to use)
      * and we are supporting only x86_64 (hence 57 bit wide virtual addresses), gaining a total of 12 bits for a tag. Of these,
      * 2 bits are used to encode the block size of the allocation
      * The remaining 10 are for the buffer index, as the `MultiPoolAllocator`, like the `StackAllocator`, manages a linked list of buffers
      */
-    constexpr uint8_t blockSizeEncoding(EBlockSize blkSize)
+    inline constexpr uint8_t blockSizeEncoding(EBlockSize blkSize)
     {
         switch (blkSize)
         {
@@ -1124,7 +1119,7 @@ DMT_MODULE_EXPORT namespace dmt {
     /**
      * Boilerplate to get the size of the block from the encoded information inside a `TaggedPointer` returned by `MultiPoolAllocator`
      */
-    constexpr EBlockSize fromEncoding(uint8_t encoding)
+    inline constexpr EBlockSize fromEncoding(uint8_t encoding)
     {
         using enum EBlockSize;
         switch (encoding)
@@ -1153,10 +1148,10 @@ DMT_MODULE_EXPORT namespace dmt {
         static constexpr size_t   bufferSize        = toUnderlying(EPageSize::e2MB);
 
     public:
-        MultiPoolAllocator(LoggingContext&                     ctx,
-                           PageAllocator&                      pageAllocator,
-                           std::array<uint32_t, numBlockSizes> numBlocksPerPool,
-                           AllocatorHooks const&               hooks);
+        DMT_PLATFORM_API MultiPoolAllocator(LoggingContext&                     ctx,
+                                            PageAllocator&                      pageAllocator,
+                                            std::array<uint32_t, numBlockSizes> numBlocksPerPool,
+                                            AllocatorHooks const&               hooks);
         MultiPoolAllocator(MultiPoolAllocator const&)                = delete;
         MultiPoolAllocator(MultiPoolAllocator&&) noexcept            = delete;
         MultiPoolAllocator& operator=(MultiPoolAllocator const&)     = delete;
@@ -1179,7 +1174,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param ctx `LoggingContext` console only logging
          * @param pageAllocator pageAllocator
          */
-        void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
+        DMT_PLATFORM_API void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
 
         /**
          * Allocate `numBlocks` adjacent 32 byte aligned block of the requested size
@@ -1190,12 +1185,13 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param blockSize size of the block
          * @return tagged pointer to allocated block. 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
          */
-        TaggedPointer allocateBlocks(LoggingContext& ctx,
-                                     PageAllocator&  pageAllocator,
-                                     uint32_t        numBlocks,
-                                     EBlockSize      blockSize,
-                                     EMemoryTag      tag,
-                                     sid_t           sid);
+        DMT_PLATFORM_API TaggedPointer allocateBlocks(
+            LoggingContext& ctx,
+            PageAllocator&  pageAllocator,
+            uint32_t        numBlocks,
+            EBlockSize      blockSize,
+            EMemoryTag      tag,
+            sid_t           sid);
 
         /**
          * Free `numBlocks` adjacent blocks previously allocated with the `MultiPoolAllocator`
@@ -1204,7 +1200,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param numBlocks numbers of blocks to free. Should be equal to the number passed to `allocateBlocks`
          * @param ptr Tagged pointer obtained by a previous call to `allocateBlocks`
          */
-        void freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
+        DMT_PLATFORM_API void freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
 
     private:
         struct BufferHeader
@@ -1246,20 +1242,20 @@ DMT_MODULE_EXPORT namespace dmt {
      */
     struct MemoryContext
     {
-        MemoryContext(uint32_t                                   pageTrackCapacity,
-                      uint32_t                                   allocTrackCapacity,
-                      std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
+        DMT_PLATFORM_API MemoryContext(uint32_t                                   pageTrackCapacity,
+                                       uint32_t                                   allocTrackCapacity,
+                                       std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
 
         // stack methods
-        void* stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
-        void  stackReset();
+        DMT_PLATFORM_API void* stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
+        DMT_PLATFORM_API void  stackReset();
 
         // pool methods
-        TaggedPointer poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid);
-        void          poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr);
+        DMT_PLATFORM_API TaggedPointer poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid);
+        DMT_PLATFORM_API void poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr);
 
         // clean up everything (TODO: move to destructor)
-        void cleanup();
+        DMT_PLATFORM_API void cleanup();
 
         LoggingContext         pctx;
         PageAllocationsTracker tracker;

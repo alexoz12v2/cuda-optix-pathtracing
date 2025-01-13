@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
 #if !defined(DMT_NEEDS_MODULE)
 #include <bit>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <memory_resource>
 #include <source_location>
+#include <shared_mutex>
 #include <string_view>
 #include <type_traits>
 
@@ -18,16 +20,15 @@
 #include <cstdint>
 #endif
 
-DMT_MODULE_EXPORT namespace dmt {
-    void* reserveVirtualAddressSpace(size_t size);
+namespace dmt {
+    DMT_PLATFORM_API void*  reserveVirtualAddressSpace(size_t size);
+    DMT_PLATFORM_API size_t systemAlignment();
+    DMT_PLATFORM_API bool   commitPhysicalMemory(void* address, size_t size);
+    DMT_PLATFORM_API bool   freeVirtualAddressSpace(void* address, size_t size);
+    DMT_PLATFORM_API void   decommitPage(void* pageAddress, size_t pageSize);
 
-    size_t systemAlignment();
-
-    bool commitPhysicalMemory(void* address, size_t size);
-
-    bool freeVirtualAddressSpace(void* address, size_t size);
-
-    void decommitPage(void* pageAddress, size_t pageSize);
+    // for debugging purposes only, so we don't care about memory
+    DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
 
     template <typename T>
     struct PmrDeleter
@@ -225,7 +226,7 @@ DMT_MODULE_EXPORT namespace dmt {
     }
 
     template <std::integral I>
-    inline constexpr bool parseInt(std::string_view str, I & outValue)
+    inline constexpr bool parseInt(std::string_view str, I& outValue)
     {
         if (str.empty())
         {
@@ -423,7 +424,7 @@ DMT_MODULE_EXPORT namespace dmt {
      *   std::cout << "Dereferenced value: " << std::dec << tp.operator* <int>() << "\n";
      * TODO: we can template this class on the number of low bits we expect to be zeroed out
      */
-    class TaggedPointer
+    class DMT_PLATFORM_API TaggedPointer
     {
     public:
         // Constructor
@@ -520,4 +521,9 @@ DMT_MODULE_EXPORT namespace dmt {
     {
         return (num + den - 1) / den;
     }
+
+    namespace detail {
+        extern DMT_PLATFORM_API uintptr_t g_currentContext;
+        extern DMT_PLATFORM_API std::shared_mutex g_slk;
+    } // namespace detail
 } // namespace dmt

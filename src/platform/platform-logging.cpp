@@ -588,7 +588,15 @@ namespace dmt {
 
     static_assert(LogDisplay<ConsoleLogger>);
 
+
     // LoggingContext -------------------------------------------------------------------------------------------------
+    LoggingContext::LoggingContext() :
+    logger(ConsoleLogger::create()),
+    start(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch())
+              .count())
+    {
+    }
+
     void LoggingContext::dbgTraceStackTrace()
     {
 #if defined(DMT_DEBUG)
@@ -618,5 +626,13 @@ namespace dmt {
     }
 
     size_t LoggingContext::maxLogArgBytes() const { return logger.maxLogArgBytes(); }
+
+    uint64_t LoggingContext::millisFromStart() const
+    {
+        int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::high_resolution_clock::now().time_since_epoch())
+                          .count();
+        return static_cast<uint64_t>(now - start);
+    }
 
 } // namespace dmt

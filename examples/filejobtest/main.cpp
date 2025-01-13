@@ -16,48 +16,12 @@
 
 // include cuda interface headers, not exported by C++20 modules
 
-import platform;
-import middleware;
-
-#define DMT_PLATFORM_IMPORTED
-// clang-format off
+#include <platform/platform.h>
+#include <middleware/middleware.h>
+#include "platform/cudaTest.h"
 #include <platform/platform-cuda-utils.h>
 #include <middleware/middleware-model.h>
-// clang-format on
 
-struct AllocBundle
-{
-    AllocBundle(dmt::UnifiedMemoryResource* unified,
-                dmt::EMemoryResourceType    category,
-                dmt::EMemoryResourceType    type,
-                void*                       ctorParam)
-    {
-        pUnified         = unified;
-        memEnum          = dmt::makeMemResId(category, type);
-        memSz            = dmt::sizeForMemoryResource(memEnum);
-        memAlign         = dmt::alignForMemoryResource(memEnum);
-        pMemBytes        = unified->allocate(memSz, memAlign);
-        pMemBytesAligned = dmt::alignTo(pMemBytes, memAlign);
-        pMemRes          = dmt::constructMemoryResourceAt(pMemBytesAligned, memEnum, ctorParam);
-    }
-    AllocBundle(AllocBundle const&)                = delete;
-    AllocBundle(AllocBundle&&) noexcept            = delete;
-    AllocBundle& operator=(AllocBundle const&)     = delete;
-    AllocBundle& operator=(AllocBundle&&) noexcept = delete;
-    ~AllocBundle()
-    {
-        dmt::destroyMemoryResourceAt(pMemRes, memEnum);
-        pUnified->deallocate(pMemBytes, memSz, memAlign);
-    }
-
-    dmt::UnifiedMemoryResource* pUnified;
-    dmt::EMemoryResourceType    memEnum;
-    size_t                      memSz;
-    size_t                      memAlign;
-    void*                       pMemBytes;
-    void*                       pMemBytesAligned;
-    dmt::BaseMemoryResource*    pMemRes;
-};
 
 namespace {
     std::string_view input = R"=(
@@ -114,11 +78,10 @@ AttributeEnd
     void             testWordTokenization(dmt::AppContext& actx)
     {
         using CharBuffer = std::array<char, 256>;
-        dmt::OneShotStackMemoryResource mem{&actx.mctx};
-        dmt::WordParser                 parser;
+        dmt::WordParser parser;
 
         size_t tokenCapacity = 8;
-        void*  rawMemory     = mem.allocate(tokenCapacity * sizeof(CharBuffer), alignof(CharBuffer));
+        void*  rawMemory     = std::malloc(tokenCapacity * sizeof(CharBuffer));
         if (!rawMemory)
         {
             assert(false);
@@ -127,8 +90,7 @@ AttributeEnd
         }
         auto* arrayPtr = static_cast<CharBuffer*>(rawMemory);
 
-        std::unique_ptr<CharBuffer[], dmt::StackArrayDeleter<CharBuffer>> tokens{arrayPtr,
-                                                                                 dmt::StackArrayDeleter<CharBuffer>{}};
+        std::unique_ptr<CharBuffer[]> tokens{arrayPtr};
 
         size_t   chunkSize    = 512;
         size_t   offset       = 0;
@@ -166,12 +128,13 @@ AttributeEnd
 
             offset += chunkSize;
         }
+        std::free(rawMemory);
     }
 
     void testJob(dmt::AppContext& actx)
     {
         using namespace std::string_view_literals;
-        actx.threadPool.kickJobs();
+        actx.kickJobs();
 
         dmt::job::ParseSceneHeaderData jobData{};
         jobData.filePath = "../res/scenes/disney-cloud/disney-cloud.pbrt"sv;
@@ -192,19 +155,6 @@ AttributeEnd
         // all following reads must happen after the atomic retrieval
         std::atomic_thread_fence(std::memory_order_acquire);
         actx.warn("Finished job");
-    }
-
-    constexpr auto doNothing = [](dmt::MemoryContext& mctx, void* value) {};
-    void           testCTrie(dmt::AppContext& actx)
-    {
-        dmt::CTrie ctrie{actx.mctx, dmt::AllocatorTable::fromPool(actx.mctx), sizeof(uint32_t), alignof(uint32_t)};
-        uint32_t   testValue  = 43;
-        uint32_t   testValue2 = 80;
-        ctrie.insert(actx.mctx, 0x0000'0000, &testValue);
-        ctrie.insert(actx.mctx, 0x2900'0000, &testValue2);
-        ctrie.remove(actx.mctx, 0x2900'0000);
-        actx.log("inserted value {}", {testValue});
-        ctrie.cleanup(actx.mctx, doNothing);
     }
 
     void textParsing(dmt::AppContext& actx)
@@ -233,49 +183,72 @@ AttributeEnd
 
 int32_t main()
 {
-    dmt::Platform platform;
-    auto&         actx = platform.ctx();
+    dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
+    dmt::ctx::init(actx);
+
+    auto env = dmt::getEnv();
+
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
     dmt::model::test(actx);
     //testCTrie(actx);
     //testWordTokenization(actx);
     //testJob(actx);
     //textParsing(actx);
-    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
+    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx());
+    actx.log("CUDA Initialized");
 
-    dmt::UnifiedMemoryResource unified;
+    std::vector<float> v3;
+    v3.resize(32);
+    {
+        std::unique_ptr<float[]> v1 = std::make_unique<float[]>(32);
+        std::fill_n(v1.get(), 32, 1.f);
+        std::unique_ptr<float[]> v2 = std::make_unique<float[]>(32);
+        std::fill_n(v2.get(), 32, 2.f);
+        dmt::kernel(v1.get(), v2.get(), 3.f, v3.data(), 32);
+    }
 
-    dmt::BuddyResourceSpec buddySpec{
-        .pmctx        = &actx.mctx,
-        .pHostMemRes  = std::pmr::get_default_resource(),
-        .maxPoolSize  = 4ULL << 20, // 1ULL << 30,
-        .minBlockSize = 256,
-        .minBlocks    = (2ULL << 20) / 256,
-        .deviceId     = info.device,
-    };
-    AllocBundle buddy{&unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
+    // create allocators
+    dmt::UnifiedMemoryResource* unified = dmt::UnifiedMemoryResource::create();
+    { // no allocator/alloocation should outlive unified
+        actx.log("Unified Memory Resource Constructed");
+        dmt::BuddyResourceSpec buddySpec{
+            .pmctx        = &actx.mctx(),
+            .pHostMemRes  = std::pmr::get_default_resource(),
+            .maxPoolSize  = 4ULL << 20, // 1ULL << 30,
+            .minBlockSize = 256,
+            .minBlocks    = (2ULL << 20) / 256,
+            .deviceId     = info.device,
+        };
+        dmt::AllocBundle buddy{unified, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &buddySpec};
+        actx.log("Buddy Memory Resource constructed");
+        dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
+            .pmctx            = &actx.mctx(),
+            .poolSize         = 2ULL << 20, // 2MB is the minimum allocation granularity for most devices (cc 7.0)
+            .releaseThreshold = std::numeric_limits<size_t>::max(),
+            .pHostMemRes      = std::pmr::get_default_resource(),
+            .deviceId         = info.device,
+        };
+        dmt::AllocBundle pool{unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
+        actx.log("Pool Async Memory Resource constructed");
 
-    testBuddy(actx, buddy.pMemRes);
 
-    dmt::MemPoolAsyncMemoryResourceSpec poolSpec{
-        .pmctx            = &actx.mctx,
-        .poolSize         = 2ULL << 20, // 2MB is the minimum allocation granularity for most devices (cc 7.0)
-        .releaseThreshold = std::numeric_limits<size_t>::max(),
-        .pHostMemRes      = std::pmr::get_default_resource(),
-        .deviceId         = info.device,
-    };
-    AllocBundle pool{&unified, dmt::EMemoryResourceType::eAsync, dmt::EMemoryResourceType::eMemPool, &poolSpec};
+        testBuddy(actx, buddy.pMemRes);
+        testPool(actx, pool.pMemRes);
 
-    testPool(actx, pool.pMemRes);
+        auto* dynaArrayUnified = reinterpret_cast<dmt::DynaArray*>(
+            unified->allocate(sizeof(dmt::DynaArray), alignof(dmt::DynaArray)));
+        std::construct_at(dynaArrayUnified, sizeof(float), pool.pMemRes);
 
-    auto* dynaArrayUnified = reinterpret_cast<dmt::DynaArray*>(
-        unified.allocate(sizeof(dmt::DynaArray), alignof(dmt::DynaArray)));
-    std::construct_at(dynaArrayUnified, sizeof(float), pool.pMemRes);
+        testDynaArrayDirectly(actx, *dynaArrayUnified);
 
-    testDynaArrayDirectly(actx, *dynaArrayUnified);
+        std::destroy_at(dynaArrayUnified);
+        unified->deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
+        actx.log("\nPrass anything To exit");
+    }
 
-    std::destroy_at(dynaArrayUnified);
-    unified.deallocate(dynaArrayUnified, sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
-    actx.log("\nPrass anything To exit");
+    dmt::UnifiedMemoryResource::destroy(unified);
+    std::cout << "Press Any key to exit" << std::endl;
     std::cin.get();
+    std::cout << "Goodbye!" << std::endl;
+    dmt::ctx::unregister();
 }

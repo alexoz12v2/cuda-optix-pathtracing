@@ -1,5 +1,5 @@
+#if !defined(DMT_NEEDS_MODULE)
 #define DMT_INTERFACE_AS_HEADER
-#undef DMT_NEEDS_MODULE
 #include "middleware.h"
 
 #include "dmtmacros.h"
@@ -21,12 +21,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
-
-
-// TODO if this appears after the integrator has bee3n already parsed, you need to modify it somehow
-// Option "bool wavefront" true
-// TODO if this asppears after the sampler has been alread, you need to modify it somehow
-// Option "integer seed" 15
+#endif
 
 namespace dmt {
     // values can also be closed into arrays even if something expects a scalar. parameters are unordered
@@ -3496,13 +3491,7 @@ namespace dmt {
         });
     }
 
-    void SceneDescription::ConcatTransform(std::array<float, 16> const& transform)
-    {
-        graphicsState.ForActiveTransforms([=](auto t) {
-            t.concatTrasform_(transform);
-            return t;
-        });
-    }
+    void SceneDescription::ConcatTransform(std::array<float, 16> const& transform) {}
 
     void SceneDescription::Transform(std::array<float, 16> transform) {}
 
@@ -3673,19 +3662,19 @@ namespace dmt::job {
         actx.log("Starting Parse Scene Header Job");
         bool error = false;
 
-        ChunkedFileReader reader{actx.mctx.pctx, data.filePath.data(), 512};
+        ChunkedFileReader reader{actx.mctx().pctx, data.filePath.data(), 512};
         if (reader)
         {
             for (uint32_t chunkNum = 0; chunkNum < reader.numChunks(); ++chunkNum)
             {
-                bool status = reader.requestChunk(actx.mctx.pctx, buffer, chunkNum);
+                bool status = reader.requestChunk(actx.mctx().pctx, buffer, chunkNum);
                 if (!status)
                 {
                     error = true;
                     break;
                 }
 
-                status = reader.waitForPendingChunk(actx.mctx.pctx);
+                status = reader.waitForPendingChunk(actx.mctx().pctx);
                 if (!status)
                 {
                     error = true;

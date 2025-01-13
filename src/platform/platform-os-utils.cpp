@@ -1,5 +1,7 @@
 #include "platform-os-utils.h"
 
+#include <memory>
+
 namespace dmt {
 #if defined(DMT_OS_WINDOWS)
     namespace win32 {
@@ -37,6 +39,21 @@ namespace dmt {
                 LocalFree(messageBuffer);
                 return actual;
             }
+        }
+
+        // TODO if used beyond debugging, write a version which uses our memory systems
+        std::u8string utf8FromUtf16(std::wstring_view wideStr)
+        {
+            using namespace std::string_literals;
+            int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), wideStr.length(), nullptr, 0, nullptr, nullptr);
+            if (sizeNeeded == 0)
+            {
+                return u8""s;
+            }
+            std::unique_ptr<char[]> buf = std::make_unique<char[]>(sizeNeeded + 1);
+            buf[sizeNeeded]             = '\0';
+            WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), wideStr.length(), buf.get(), sizeNeeded, nullptr, nullptr);
+            return std::u8string(reinterpret_cast<char8_t const*>(buf.get()));
         }
 
     } // namespace win32

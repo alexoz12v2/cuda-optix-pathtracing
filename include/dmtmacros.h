@@ -34,3 +34,11 @@
 #else
 #define DMT_MODULE_EXPORT
 #endif
+
+#if defined(DMT_OS_WINDOWS) || defined(DMT_COMPILER_MSVC)
+#define DMT_API_IMPORT __declspec(dllimport)
+#define DMT_API_EXPORT __declspec(dllexport)
+#else
+#define DMT_API_IMPORT __attribute__((__visibility__("default")))
+#define DMT_API_EXPORT __attribute__((__visibility__("default")))
+#endif

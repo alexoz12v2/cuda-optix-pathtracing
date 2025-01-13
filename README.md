@@ -208,3 +208,22 @@ And then run the command (showing an example build configuration)
 run-clang-tidy --build-root build\Debug-WinNinja\  tidy.json
 ```
 This will try to check everything, so if some C++20 modules have not been compiled, it will give an error for those
+
+## Installazione CUDA OptiX
+- Navigare su [Questo Link](https://developer.nvidia.com/designworks/optix/download) e scaricare la SDK 8.0.0
+- Se lo installi in una directory diversa da
+  ```
+  (Win32) "C:\ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0"
+  (Unix)  "~/NVIDIA-OptiX-SDK-8.0.0-linux64"
+  ```
+  Allora verificare che la variabile di ambiente `OPTIX80_PATH` sia settata correttamente
+- se la variabile di ambiente `OPTIX80_PATH` non viene settata in installazione, settarla manualmente
+
+## Linking da un exsecutable target a CUDA
+Ogni cmake target di tipo library non possiede l'opzione di `nvlink` "`-dlink`", la quale triggera il linking con il device code.
+Dunque sta agli executable targets performare questo step aggiuntivo. Il problema e' che se un executable target non possiede nessuna sorgente `.cu`,
+il linker chiamato di default sara' quello della C++ toolchain in uso piuttosto di quello di CUDA, causando un linker error del tipo
+```
+error LNK2019: unresolved external symbol __cudaRegisterLinkedBinary_988c167c_11_cudaTest_cu_68a51f74 
+```
+- Un fix possibile e' quello di aggiungere nel target un file `.cu` vuoto

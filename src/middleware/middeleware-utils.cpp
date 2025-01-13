@@ -70,7 +70,7 @@ namespace dmt {
         worldFromCamera[2][2] = dir.z;
         worldFromCamera[3][2] = 0.;
 
-        m = m * worldFromCamera;
+        m    = m * worldFromCamera;
         mInv = glm::inverse(worldFromCamera) * mInv;
     }
 

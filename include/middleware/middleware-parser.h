@@ -699,6 +699,34 @@ DMT_MODULE_EXPORT namespace dmt {
         eCount
     };
 
+    struct DMT_MIDDLEWARE_API SceneEntity 
+    {
+        // SceneEntity Public Methods
+        SceneEntity() = default;
+        SceneEntity(sid_t &name, ParamMap parameters)
+            : name(internedStrings.Lookup(name)), parameters(parameters) {}
+        }
+
+        // SceneEntity Public Members
+        sid_t name;
+        ParamMap parameters;
+    };
+
+    // CameraSceneEntity Definition
+    struct DMT_MIDDLEWARE_API CameraSceneEntity : public SceneEntity {
+        // CameraSceneEntity Public Methods
+        CameraSceneEntity() = default;
+        CameraSceneEntity(const sid_t &name, ParamMap parameters, 
+        const CameraTransform &cameraTransform, const std::string &medium)
+            : SceneEntity(name, parameters),
+              cameraTransform(cameraTransform),
+              medium(medium) {}
+
+        CameraTransform cameraTransform;
+        sid_t medium;
+    };
+
+
     // LightSource ----------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API LightSourceSpec
     {
@@ -883,6 +911,8 @@ DMT_MODULE_EXPORT namespace dmt {
         float        transformStartTime  = 0.f;
         float        transformEndTime    = 1.f;
 
+
+        std::map<sid_t, TransformSet> namedCoordinateSystems;
         EColorSpaceType colorSpace = EColorSpaceType::eSRGB;
     };
 

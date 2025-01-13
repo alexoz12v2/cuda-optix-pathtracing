@@ -117,7 +117,15 @@ namespace dmt {
             worldFromCamera[2][2] = dir.z;
             worldFromCamera[3][2] = 0.;
 
-            m = m * worldFromCamera;
+            m    = m * worldFromCamera;
+            mInv = glm::inverse(worldFromCamera) * mInv;
+        }
+
+        void concatTrasform_(std::array<float, 16> const& transform)
+        {
+            Transform concatT = glm::traspose(glm::mat4(transform.data()));
+            m                 = m * concatT;
+            mInv              = concatT.mInv * mInv;
         }
 
         // Reset to identity matrix
@@ -1158,7 +1166,7 @@ namespace dmt {
 
         virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-        virtual ~IParserTarget() {};
+        virtual ~IParserTarget(){};
 
         virtual void Option(sid_t name, ParamPair const& value) = 0;
 
@@ -1335,7 +1343,14 @@ namespace dmt {
         AcceleratorSpec acceleratorSpec;
 
     private:
-        GraphicsState graphicsState;
+        GraphicsState   graphicsState;
+        class Transform renderFromWorld;
+        enum class BlockState
+        {
+            OptionsBlock,
+            WorldBlock
+        };                                                  // for check
+        BlockState currentBlock = BlockState::OptionsBlock; //for check
     };
 
     enum class EParsingStep : uint8_t

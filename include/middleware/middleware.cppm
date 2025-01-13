@@ -34,10 +34,9 @@ export module middleware;
 import platform;
 
 #define DMT_NEEDS_MODULE
-export
-{
+export {
 #include <middleware/middleware.h>
 }
 
-module :private;
+module : private;
 #include <middleware.cpp>

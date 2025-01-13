@@ -56,12 +56,11 @@ module;
 export module platform;
 
 #define DMT_NEEDS_MODULE
-export
-{
+export {
 #include <platform/platform.h>
 }
 
-module :private; // modifying this does not cause recompilation
+module : private; // modifying this does not cause recompilation
 // clang-format off
 #include <platform-utils.cpp>
 #include <platform-logging.cpp>

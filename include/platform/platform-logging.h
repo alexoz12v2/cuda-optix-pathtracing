@@ -156,7 +156,7 @@ DMT_MODULE_EXPORT namespace dmt {
      * Class whose purpose is to convert to a string representation whichever types are to be supported by default in the
      * `CircularOStringStream` formatting facilities`. Uses ASCII
      */
-    struct DMT_PLATFORM_API StrBuf
+    struct StrBuf
     {
         /**
          * Basic constructor which initializes memberwise
@@ -164,31 +164,37 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param len length of the pointed string, excluding the '\0' (expected positive)
          *
          */
-        constexpr StrBuf(char const* str, int32_t len) : str(str), len(len) {}
+        inline constexpr StrBuf(char const* str, int32_t len) : str(str), len(len) {}
 
         /**
          * Constructor which initializes from a \0 terminated string with strlen
          * @param str
          */
-        StrBuf(char const* str) : str(str), len(static_cast<int32_t>(std::strlen(str))) {}
+        inline StrBuf(char const* str) : str(str), len(static_cast<int32_t>(std::strlen(str))) {}
 
         /**
          * Converting constructor from a string_view. NOT `explicit` on purpose
          * @param view
          */
-        constexpr StrBuf(std::string_view const& view) : str(view.data()), len(static_cast<int32_t>(view.length())) {}
+        inline constexpr StrBuf(std::string_view const& view) :
+        str(view.data()),
+        len(static_cast<int32_t>(view.length()))
+        {
+        }
 
         /**
          * Converting constructor from a string_view. NOT `explicit` on purpose
          * @param view
          */
-        constexpr StrBuf(std::string const& view) : str(view.c_str()), len(static_cast<int32_t>(view.length())) {}
+        inline constexpr StrBuf(std::string const& view) : str(view.c_str()), len(static_cast<int32_t>(view.length()))
+        {
+        }
 
         /**
          * Converting constructor for formatting booleans
          * @param b
          */
-        constexpr StrBuf(bool b) : StrBuf(b ? strue : sfalse) {}
+        inline constexpr StrBuf(bool b) : StrBuf(b ? strue : sfalse) {}
 
         /**
          * Constructor from a floating point value. If the format string is reasonable, it shouldn't allocate and use
@@ -199,7 +205,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param fstr formatting string
          */
         template <std::floating_point F>
-        constexpr StrBuf(F f, char const* fstr = "%.3f")
+        inline constexpr StrBuf(F f, char const* fstr = "%.3f")
         {
             initialize(f, fstr);
         }
@@ -211,7 +217,7 @@ DMT_MODULE_EXPORT namespace dmt {
          */
         template <typename P>
             requires std::is_pointer_v<P>
-        constexpr StrBuf(P f)
+        inline constexpr StrBuf(P f)
         {
             initialize(reinterpret_cast<uintptr_t>(f), "0x%" PRIXPTR);
         }
@@ -223,7 +229,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param fstr
          */
         template <std::integral I>
-        constexpr StrBuf(I i, char const* fstr = defaultFormatter<I>())
+        inline constexpr StrBuf(I i, char const* fstr = defaultFormatter<I>())
         {
             initialize(i, fstr);
         }
@@ -474,6 +480,7 @@ concept LogDisplay = requires(T t)
 };
     // clang-format on
 
+    // TODO ForceInline
     template <typename Derived>
     class InterfaceLogger
     {
@@ -483,7 +490,8 @@ concept LogDisplay = requires(T t)
          * @param str the string to print
          * @param loc source location of the caller, auto calculated
          */
-        void log(std::string_view const& str, std::source_location const& loc = std::source_location::current())
+        DMT_FORCEINLINE void log(std::string_view const&     str,
+                                 std::source_location const& loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::LOG, str, loc);
         }
@@ -493,7 +501,8 @@ concept LogDisplay = requires(T t)
          * @param str the string to print
          * @param loc source location of the caller, auto calculated
          */
-        void error(std::string_view const& str, std::source_location const& loc = std::source_location::current())
+        DMT_FORCEINLINE void error(std::string_view const&     str,
+                                   std::source_location const& loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::ERR, str, loc);
         }
@@ -503,7 +512,8 @@ concept LogDisplay = requires(T t)
          * @param str the string to print
          * @param loc source location of the caller, auto calculated
          */
-        void warn(std::string_view const& str, std::source_location const& loc = std::source_location::current())
+        DMT_FORCEINLINE void warn(std::string_view const&     str,
+                                  std::source_location const& loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, loc);
         }
@@ -513,7 +523,8 @@ concept LogDisplay = requires(T t)
          * @param str the string to print
          * @param loc source location of the caller, auto calculated
          */
-        void trace(std::string_view const& str, std::source_location const& loc = std::source_location::current())
+        DMT_FORCEINLINE void trace(std::string_view const&     str,
+                                   std::source_location const& loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, loc);
         }
@@ -525,9 +536,9 @@ concept LogDisplay = requires(T t)
          * @param list list of arguments
          * @param loc source location of the caller, auto calculated
          */
-        void log(std::string_view const&              str,
-                 std::initializer_list<StrBuf> const& list,
-                 std::source_location const&          loc = std::source_location::current())
+        DMT_FORCEINLINE void log(std::string_view const&              str,
+                                 std::initializer_list<StrBuf> const& list,
+                                 std::source_location const&          loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::LOG, str, list, loc);
         }
@@ -539,9 +550,9 @@ concept LogDisplay = requires(T t)
          * @param list list of arguments
          * @param loc source location of the caller, auto calculated
          */
-        void error(std::string_view const&              str,
-                   std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc = std::source_location::current())
+        DMT_FORCEINLINE void error(std::string_view const&              str,
+                                   std::initializer_list<StrBuf> const& list,
+                                   std::source_location const&          loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::ERR, str, list, loc);
         }
@@ -553,9 +564,9 @@ concept LogDisplay = requires(T t)
          * @param list list of arguments
          * @param loc source location of the caller, auto calculated
          */
-        void warn(std::string_view const&              str,
-                  std::initializer_list<StrBuf> const& list,
-                  std::source_location const&          loc = std::source_location::current())
+        DMT_FORCEINLINE void warn(std::string_view const&              str,
+                                  std::initializer_list<StrBuf> const& list,
+                                  std::source_location const&          loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, list, loc);
         }
@@ -567,9 +578,9 @@ concept LogDisplay = requires(T t)
          * @param list list of arguments
          * @param loc source location of the caller, auto calculated
          */
-        void trace(std::string_view const&              str,
-                   std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc = std::source_location::current())
+        DMT_FORCEINLINE void trace(std::string_view const&              str,
+                                   std::initializer_list<StrBuf> const& list,
+                                   std::source_location const&          loc = std::source_location::current())
         {
             static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, list, loc);
         }
@@ -601,7 +612,7 @@ concept LogDisplay = requires(T t)
          * @param level log level
          * @return boolean indicating whether the given log level is enabled
          */
-        [[nodiscard]] bool enabled(ELogLevel level) const { return m_level <= level; }
+        [[nodiscard]] bool enabled(ELogLevel level) const { return m_level >= level; }
 
         /**
          * Checks if the `LOG` log level is enabled
@@ -705,13 +716,19 @@ concept AsyncIOManager = requires(T t) {
 #endif
     static_assert(AsyncIOManager<NullAsyncIOManager>);
 
+    class DMT_PLATFORM_API ConsoleLogger;
+    extern template BaseLogger<ConsoleLogger>;
+
     /**
      * Class implementing basic console logging while making use of the async IO facilities of the Windows and Linux
      * Operating system.
      * Note: OS API usage is not beneficial to performance here, but it's for learning and reference
      */
-    class DMT_PLATFORM_API ConsoleLogger : public BaseLogger<ConsoleLogger>
+    class DMT_PLATFORM_API ConsoleLogger
     {
+    public:
+        ELogLevel level;
+
     public:
         // -- Types --
         /**
@@ -830,7 +847,7 @@ concept AsyncIOManager = requires(T t) {
 
     private:
         // -- Constructors --
-        explicit ConsoleLogger(ELogLevel level) : BaseLogger<ConsoleLogger>(level) {}
+        explicit ConsoleLogger(ELogLevel level) : level(level) {}
 
         // -- Types --
         /**
@@ -961,7 +978,27 @@ concept AsyncIOManager = requires(T t) {
          * @param level new level
          * @warning Purposefully name hiding the `BaseLogger`
          */
-        void setLevel(ELogLevel level) { logger.setLevel(level); }
+        void setLevel(ELogLevel level) { logger.level = level; }
+
+        void log(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void log(std::string_view const&              str,
+                 std::initializer_list<StrBuf> const& list,
+                 std::source_location const&          loc = std::source_location::current());
+
+        void warn(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void warn(std::string_view const&              str,
+                  std::initializer_list<StrBuf> const& list,
+                  std::source_location const&          loc = std::source_location::current());
+
+        void error(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void error(std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc = std::source_location::current());
+
+        void trace(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void trace(std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc = std::source_location::current());
 
         /**
          * Write function mandated by the CRTP pattern of the class `BaseLogger`
@@ -969,10 +1006,7 @@ concept AsyncIOManager = requires(T t) {
          * @param str string to output
          * @param loc location of the log
          */
-        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc)
-        {
-            logger.write(level, str, loc);
-        }
+        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
 
         /**
          * Write function mandated by the CRTP pattern of the class `BaseLogger`
@@ -984,17 +1018,14 @@ concept AsyncIOManager = requires(T t) {
         void write(ELogLevel                            level,
                    std::string_view const&              str,
                    std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc)
-        {
-            logger.write(level, str, list, loc);
-        }
+                   std::source_location const&          loc);
 
         /**
          * CRTP overridden function to check if the true underlying logger is enabled on the log level
          * @param level log level requested
          * @return bool signaling whether the requested log level is enabled
          */
-        bool enabled(ELogLevel level) const { return logger.enabled(level); }
+        bool enabled(ELogLevel level) const { return level >= logger.level; }
 
         bool traceEnabled() const { return enabled(ELogLevel::TRACE); }
 

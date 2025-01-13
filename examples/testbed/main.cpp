@@ -1,6 +1,6 @@
-import platform;
-
-#define DMT_PLATFORM_IMPORTED
+#include <platform/platform.h>
+#include <platform/cudaTest.h>
+#include <platform/platform-cuda-utils.h>
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -19,10 +19,6 @@ import platform;
 
 #include <cassert>
 #include <cstring>
-
-// clang-format off
-#include <platform/cudaTest.h>
-#include <platform/platform-cuda-utils.h>
 
 namespace // all functions declared in an anonymous namespace (from the global namespace) are static by default
 {
@@ -174,19 +170,9 @@ namespace // all functions declared in an anonymous namespace (from the global n
         glfwTerminate();
     }
 
-    void printSome(dmt::ConsoleLogger& logger)
+    void testLoggingInMultithreadedEnvironment(int32_t numThreads = static_cast<int32_t>(std::thread::hardware_concurrency()))
     {
-        using namespace std::string_view_literals;
-        logger.log("Hello World from logger");
-        logger.warn("Hello Warn from logger");
-        logger.error("Hello error from logger");
-        logger.log("Hello World from logger");
-        logger.log("Hello {} from logger", {"world"sv});
-    }
-
-    void testLoggingInMultithreadedEnvironment(dmt::ConsoleLogger& logger,
-                                               int32_t numThreads = static_cast<int32_t>(std::thread::hardware_concurrency()))
-    {
+        dmt::AppContextJanitor j;
         // Vector to hold all the threads
         std::vector<std::jthread> threads;
 
@@ -194,15 +180,15 @@ namespace // all functions declared in an anonymous namespace (from the global n
         std::atomic<int32_t> completedThreads{0};
 
         // Lambda function for thread execution
-        auto logTask = [&logger, &completedThreads](int32_t id) {
+        auto logTask = [&j, &completedThreads](int32_t id) {
             using namespace std::string_view_literals;
 
             // Each thread logs different messages
-            logger.log("Thread ID {}: Hello World from logger", {id});
-            logger.warn("Thread ID {}: Hello Warn from logger", {id});
-            logger.error("Thread ID {}: Hello error from logger", {id});
-            logger.log("Thread ID {}: Hello World from logger", {id});
-            logger.log("Thread ID {}: Hello {} from logger", {id, "multithreaded"sv});
+            j.actx.log("Thread ID {}: Hello World from logger", {id});
+            j.actx.warn("Thread ID {}: Hello Warn from logger", {id});
+            j.actx.error("Thread ID {}: Hello error from logger", {id});
+            j.actx.log("Thread ID {}: Hello World from logger", {id});
+            j.actx.log("Thread ID {}: Hello {} from logger", {id, "multithreaded"sv});
 
             // Increment the atomic counter to signal completion
             completedThreads.fetch_add(1, std::memory_order_relaxed);
@@ -221,7 +207,7 @@ namespace // all functions declared in an anonymous namespace (from the global n
         }
 
         // Ensure all threads completed
-        logger.log("All threads completed logging. Total threads: {}", {completedThreads.load()});
+        j.actx.log("All threads completed logging. Total threads: {}", {completedThreads.load()});
     }
 
     void testStackAllocator(dmt::LoggingContext& ctx, dmt::PageAllocator& pageAllocator, dmt::StackAllocator& stackAllocator)
@@ -349,27 +335,12 @@ namespace // all functions declared in an anonymous namespace (from the global n
 int main()
 {
     using namespace std::string_view_literals;
-    dmt::CircularOStringStream oss;
-    char const*                formatStr = "this is a \\{} {} string. Pi: {}, 4 pi: {}, 1000 == {}, thuthy: {}\n";
-    float                      pi        = std::numbers::pi_v<float>;
-    bool                       b         = true;
-    int                        thou      = 1000;
-    std::string_view           arg{"format"};
-    oss.logInitList(formatStr, {arg, pi, dmt::StrBuf(pi, "%.5f"), thou, b});
-    std::cout << oss.str() << std::endl;
-    dmt::ConsoleLogger logger = dmt::ConsoleLogger::create();
+    dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
+    dmt::ctx::init(actx);
 
+    testLoggingInMultithreadedEnvironment();
 
-    printSome(logger);
-    testLoggingInMultithreadedEnvironment(logger);
-    logger.trace("I shall not be seen");
-
-    dmt::Platform platform;
-    auto&         ctx = platform.ctx().mctx.pctx;
-    auto& actx = platform.ctx();
-    if (platform.ctx().mctx.pctx.logEnabled())
-        platform.ctx().log("We are in the platform now");
-    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx);
+    dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx());
 
     uint32_t                counter = 0;
     dmt::PageAllocatorHooks hooks{
@@ -387,7 +358,7 @@ int main()
     },
         .data = &counter,
     };
-    dmt::PageAllocationsTracker tracker{ctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
+    dmt::PageAllocationsTracker tracker{actx.mctx().pctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
     dmt::PageAllocatorHooks     testhooks{
             .allocHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
@@ -401,33 +372,37 @@ int main()
     },
             .data = &tracker,
     };
-    dmt::PageAllocator pageAllocator{ctx, testhooks};
-    auto               pageAlloc = pageAllocator.allocatePage(platform.ctx().mctx.pctx);
+    dmt::PageAllocator pageAllocator{actx.mctx().pctx, testhooks};
+    auto               pageAlloc = pageAllocator.allocatePage(actx.mctx().pctx);
     if (pageAlloc.address)
     {
-        platform.ctx().log("Allocated page at {}, frame number {} of size {}",
-                           {pageAlloc.address, pageAlloc.pageNum, dmt::toUnderlying(pageAlloc.pageSize)});
+        actx.log("Allocated page at {}, frame number {} of size {}",
+                 {pageAlloc.address, pageAlloc.pageNum, dmt::toUnderlying(pageAlloc.pageSize)});
     }
     else
     {
-        platform.ctx().error("Couldn't allocate memory");
+        actx.error("Couldn't allocate memory");
     }
-    pageAllocator.deallocPage(platform.ctx().mctx.pctx, pageAlloc);
+    pageAllocator.deallocPage(actx.mctx().pctx, pageAlloc);
 
-    platform.ctx().log("Completed");
+    actx.log("Completed");
 
     std::string_view str = "thishtisdfasdf"sv;
-    platform.ctx().mctx.strTable.intern(str);
-    dmt::sid_t sid = dmt::hashCRC64(str);
-    platform.ctx().log("{}", {platform.ctx().mctx.strTable.lookup(sid)});
+    dmt::sid_t       sid = actx.intern(str);
+    actx.log("{}", {actx.lookup(sid)});
 
     //testAllocations(ctx, pageAllocator, tracker, counter);
 
     dmt::AllocatorHooks defHooks;
-    dmt::StackAllocator stackAllocator{ctx, pageAllocator, defHooks};
+    dmt::StackAllocator stackAllocator{actx.mctx().pctx, pageAllocator, defHooks};
     TestThreadPool();
     //WindowGUI();
     TestDisplay();
-    testStackAllocator(ctx, pageAllocator, stackAllocator);
-    stackAllocator.cleanup(ctx, pageAllocator);
+    testStackAllocator(actx.mctx().pctx, pageAllocator, stackAllocator);
+    stackAllocator.cleanup(actx.mctx().pctx, pageAllocator);
+
+    {
+    }
+
+    dmt::ctx::unregister();
 }

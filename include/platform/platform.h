@@ -53,7 +53,7 @@ namespace dmt {
     };
 
     struct AppContextImpl;
-    class DMT_PLATFORM_MIXED_API AppContext : public InterfaceLogger<AppContext>
+    class DMT_PLATFORM_MIXED_API AppContext
     {
         friend DMT_PLATFORM_MIXED_API void ctx::init(AppContext& ctx);
         friend DMT_PLATFORM_MIXED_API void ctx::unregister();
@@ -70,11 +70,31 @@ namespace dmt {
 
     public:
         // logging methods
-        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+        void log(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void log(std::string_view const&              str,
+                 std::initializer_list<StrBuf> const& list,
+                 std::source_location const&          loc = std::source_location::current());
+        void warn(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void warn(std::string_view const&              str,
+                  std::initializer_list<StrBuf> const& list,
+                  std::source_location const&          loc = std::source_location::current());
+        void error(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void error(std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc = std::source_location::current());
+        void trace(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void trace(std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc = std::source_location::current());
+
+
+        void write(ELogLevel                   level,
+                   std::string_view const&     str,
+                   std::source_location const& loc = std::source_location::current());
         void write(ELogLevel                            level,
                    std::string_view const&              str,
                    std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc);
+                   std::source_location const&          loc = std::source_location::current());
 
         bool     enabled(ELogLevel level) const;
         bool     traceEnabled() const;

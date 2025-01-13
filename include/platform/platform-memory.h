@@ -54,7 +54,7 @@ DMT_MODULE_EXPORT namespace dmt {
         return toUnderlying(a) <=> toUnderlying(b);
     }
 
-    char const* memoryTagStr(EMemoryTag tag);
+    DMT_PLATFORM_API char const* memoryTagStr(EMemoryTag tag);
 
     using sid_t = uint64_t;
 
@@ -640,54 +640,7 @@ DMT_MODULE_EXPORT namespace dmt {
         }
 
 
-        void forEachTransientNodes(void*    data,
-                                   uint64_t freeTime,
-                                   void (*func)(void* data, uint64_t freeTime, NodeType::DType const& alloc))
-            requires requires(NodeType::DType t) { t.transient; }
-        {
-            //NodeType* prev = nullptr;
-            NodeType* curr = m_occupiedHead;
-
-            while (curr)
-            {
-                if (curr->data.alloc.transient) // Check if node is transient
-                {
-                    func(data, freeTime, curr->data.alloc);
-                }
-                curr = getNextOccupied(curr);
-            }
-        }
-
-        void removeTransientNodes()
-            requires requires(NodeType::DType t) { t.transient; }
-        {
-            NodeType* prev = nullptr;
-            NodeType* curr = m_occupiedHead;
-
-            while (curr)
-            {
-                if (curr->data.alloc.transient) // Check if node is transient
-                {
-                    // Remove the node from the occupied list
-                    if (prev)
-                        setNextOccupied(prev, getNextOccupied(curr));
-                    else
-                        m_occupiedHead = getNextOccupied(curr);
-
-                    // Return the node to the free list
-                    setFreeNode(curr);
-                }
-                else
-                {
-                    prev = curr; // Only move the previous pointer if we don't remove the node
-                }
-
-                // Move to the next node in the occupied list
-                curr = getNextOccupied(curr);
-            }
-        }
-
-    private:
+    protected:
         NodeType* m_freeHead      = nullptr; // Head of the free list
         NodeType* m_occupiedHead  = nullptr; // Head of the occupied list
         uint32_t  m_capacity      = 0;       // Total capacity of the list
@@ -716,8 +669,60 @@ DMT_MODULE_EXPORT namespace dmt {
             m_freeHead       = node;
         }
     };
+
+    template <typename NodeType>
+    class TransientFreeList : public FreeList<NodeType>
+    {
+    public:
+        void forEachTransientNodes(void*    data,
+                                   uint64_t freeTime,
+                                   void (*func)(void* data, uint64_t freeTime, NodeType::DType const& alloc))
+            requires std::is_same_v<NodeType, AllocNode>
+        {
+            //NodeType* prev = nullptr;
+            NodeType* curr = this->m_occupiedHead;
+
+            while (curr)
+            {
+                if (curr->data.alloc.transient) // Check if node is transient
+                {
+                    func(data, freeTime, curr->data.alloc);
+                }
+                curr = this->getNextOccupied(curr);
+            }
+        }
+
+        void removeTransientNodes()
+            requires std::is_same_v<NodeType, AllocNode>
+        {
+            NodeType* prev = nullptr;
+            NodeType* curr = this->m_occupiedHead;
+
+            while (curr)
+            {
+                if (curr->data.alloc.transient) // Check if node is transient
+                {
+                    // Remove the node from the occupied list
+                    if (prev)
+                        this->setNextOccupied(prev, this->getNextOccupied(curr));
+                    else
+                        this->m_occupiedHead = this->getNextOccupied(curr);
+
+                    // Return the node to the free list
+                    this->setFreeNode(curr);
+                }
+                else
+                {
+                    prev = curr; // Only move the previous pointer if we don't remove the node
+                }
+
+                // Move to the next node in the occupied list
+                curr = this->getNextOccupied(curr);
+            }
+        }
+    };
     template class DMT_PLATFORM_API FreeList<PageNode>;
-    template class DMT_PLATFORM_API FreeList<AllocNode>;
+    template class DMT_PLATFORM_API TransientFreeList<AllocNode>;
 
     inline constexpr uint32_t log16GB = 30 + 4;
     inline constexpr size_t   num16GB = 1ULL << log16GB;
@@ -998,7 +1003,7 @@ DMT_MODULE_EXPORT namespace dmt {
 
         ObjectAllocationsSlidingWindow m_slidingWindow;
         FreeList<PageNode>             m_pageTracking;
-        FreeList<AllocNode>            m_allocTracking;
+        TransientFreeList<AllocNode>   m_allocTracking;
         void*                          m_base   = nullptr;
         void*                          m_buffer = nullptr;
         size_t                         m_bufferBytes;

@@ -716,14 +716,16 @@ DMT_MODULE_EXPORT namespace dmt {
     struct DMT_MIDDLEWARE_API CameraSceneEntity : public SceneEntity {
         // CameraSceneEntity Public Methods
         CameraSceneEntity() = default;
-        CameraSceneEntity(const sid_t &name, ParamMap parameters, 
-        const CameraTransform &cameraTransform, const sid_t &medium)
-            : SceneEntity(name, parameters),
+        CameraSceneEntity(const sid_t &name, CameraSpec parameters, 
+        const CameraTransform &, const sid_t &medium)
+            : name(name), params(parameters),
               cameraTransform(cameraTransform),
               medium(medium) {}
 
-        CameraTransform cameraTransform;
+        sid_t name;
         sid_t medium;
+        CameraTransform cameraTransform;
+        CameraSpec params;
     };
 
 
@@ -972,6 +974,7 @@ DMT_MODULE_EXPORT namespace dmt {
 
     private:
         GraphicsState graphicsState;
+        CameraSceneEntity camera;
     };
 
     enum class DMT_MIDDLEWARE_API EParsingStep : uint8_t

@@ -704,7 +704,7 @@ DMT_MODULE_EXPORT namespace dmt {
         // SceneEntity Public Methods
         SceneEntity() = default;
         SceneEntity(sid_t &name, ParamMap parameters)
-            : name(internedStrings.Lookup(name)), parameters(parameters) {}
+            : name(sid_t), parameters(parameters) {}
         }
 
         // SceneEntity Public Members
@@ -717,7 +717,7 @@ DMT_MODULE_EXPORT namespace dmt {
         // CameraSceneEntity Public Methods
         CameraSceneEntity() = default;
         CameraSceneEntity(const sid_t &name, ParamMap parameters, 
-        const CameraTransform &cameraTransform, const std::string &medium)
+        const CameraTransform &cameraTransform, const sid_t &medium)
             : SceneEntity(name, parameters),
               cameraTransform(cameraTransform),
               medium(medium) {}

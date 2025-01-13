@@ -140,7 +140,10 @@ void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
     assert(cudaStatus == ::cudaSuccess);
 
     testResource<<<1, threadsPerBlock>>>(arr);
-    cudaDeviceSynchronize();
+    cudaStatus = cudaGetLastError();
+    assert(cudaStatus == ::cudaSuccess);
+    cudaStatus = cudaDeviceSynchronize();
+    assert(cudaStatus == ::cudaSuccess);
     if (s_deviceHasAccess)
         j.actx.log("Successfully tested memory resource for memory access from device");
     else
@@ -150,6 +153,8 @@ void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
     }
 
     fillKernel<<<blocks * cap, threadsPerBlock>>>(arr, val, cap); // 1 push_back per warp
+    cudaStatus = cudaGetLastError();
+    assert(cudaStatus == ::cudaSuccess);
     cudaDeviceSynchronize();
 
     // copy and check initial value
@@ -163,7 +168,10 @@ void fillVector(dmt::DynaArray& arr, float val, float after, float* cpu)
     }
 
     changeValue<<<blocks, threadsPerBlock>>>(arr, after);
-    cudaDeviceSynchronize();
+    cudaStatus = cudaGetLastError();
+    assert(cudaStatus == ::cudaSuccess);
+    cudaStatus = cudaDeviceSynchronize();
+    assert(cudaStatus == ::cudaSuccess);
 
     arr.copyToHostSync(cpu);
     if (almostEqual(cpu[0], after))

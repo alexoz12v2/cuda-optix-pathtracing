@@ -27,6 +27,9 @@ DMT_MODULE_EXPORT namespace dmt {
     DMT_PLATFORM_API bool   freeVirtualAddressSpace(void* address, size_t size);
     DMT_PLATFORM_API void   decommitPage(void* pageAddress, size_t pageSize);
 
+    // for debugging purposes only, so we don't care about memory
+    DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
+
     template <typename T>
     struct PmrDeleter
     {

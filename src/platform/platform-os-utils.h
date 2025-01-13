@@ -4,6 +4,7 @@
 #include <platform/platform-macros.h>
 
 #include <utility> // std::min
+#include <string>
 
 #include <cmath> // std::min
 #include <cstdint>
@@ -42,6 +43,8 @@ namespace dmt {
             return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
         }
 
+        // TODO if used beyond debugging, write a version which uses our memory systems
+        std::u8string utf8FromUtf16(std::wstring_view wideStr);
     } // namespace win32
 #elif defined(DMT_OS_LINUX)
     namespace linux {

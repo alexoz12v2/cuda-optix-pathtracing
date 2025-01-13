@@ -110,14 +110,16 @@ namespace dmt {
         }
         size_t totalBytes = ret.totalMemInBytes = 0;
         if (cudaMemGetInfo(nullptr, &totalBytes) != ::cudaSuccess)
+        {
             if (mctx)
                 mctx->pctx.error("Couldn't get the total Memory in bytes of the device");
-            else
-            {
-                ret.totalMemInBytes = totalBytes;
-                if (mctx)
-                    mctx->pctx.log("Total Device Memory: {}", {ret.totalMemInBytes});
-            }
+        }
+        else
+        {
+            ret.totalMemInBytes = totalBytes;
+            if (mctx)
+                mctx->pctx.log("Total Device Memory: {}", {ret.totalMemInBytes});
+        }
 
         if (actualProps.canMapHostMemory)
         { // all flags starts with `cudaDevice*`
@@ -269,9 +271,30 @@ namespace dmt {
             cudaFree(ptr);
     }
 
+    __host__ UnifiedMemoryResource* UnifiedMemoryResource::create()
+    {
+        auto* ptr = reinterpret_cast<UnifiedMemoryResource*>(cudaAllocate(sizeof(UnifiedMemoryResource)));
+        if (!ptr)
+            return nullptr;
+
+        new (ptr) UnifiedMemoryResource;
+        return ptr;
+    }
+
+    __host__ void UnifiedMemoryResource::destroy(UnifiedMemoryResource* ptr)
+    {
+        if (ptr)
+        {
+            std::destroy_at(ptr);
+            cudaError_t err = cudaFree(ptr);
+            assert(err == ::cudaSuccess);
+        }
+    }
+
     __host__ UnifiedMemoryResource::UnifiedMemoryResource() :
     BaseMemoryResource(makeMemResId(EMemoryResourceType::eUnified, EMemoryResourceType::eCudaMallocManaged))
     {
+        cudaError_t cudaStatus;
         m_host.allocateBytes      = UnifiedMemoryResource::allocateBytes;
         m_host.freeBytes          = UnifiedMemoryResource::freeBytes;
         m_host.allocateBytesAsync = UnifiedMemoryResource::allocateBytesAsync;
@@ -279,7 +302,10 @@ namespace dmt {
         m_host.deviceHasAccess    = UnifiedMemoryResource::deviceHasAccess;
         m_host.hostHasAccess      = UnifiedMemoryResource::hostHasAccess;
         initTable<<<1, 32>>>(*this);
-        cudaDeviceSynchronize();
+        cudaStatus = cudaGetLastError();
+        assert(cudaStatus == ::cudaSuccess);
+        cudaStatus = cudaDeviceSynchronize();
+        assert(cudaStatus == ::cudaSuccess);
     }
 
     __host__ void* UnifiedMemoryResource::do_allocate(size_t sz, size_t align)
@@ -488,6 +514,7 @@ namespace dmt {
 
     __host__ CudaMallocResource::CudaMallocResource() : DeviceMemoryReosurce(EMemoryResourceType::eCudaMalloc)
     {
+        cudaError_t cudaStatus;
         m_host.allocateBytes      = CudaMallocResource::allocateBytes;
         m_host.freeBytes          = CudaMallocResource::freeBytes;
         m_host.allocateBytesAsync = CudaMallocResource::allocateBytesAsync;
@@ -495,7 +522,10 @@ namespace dmt {
         m_host.deviceHasAccess    = CudaMallocResource::deviceHasAccess;
         m_host.hostHasAccess      = CudaMallocResource::hostHasAccess;
         initTable<<<1, 32>>>(*this);
-        cudaDeviceSynchronize();
+        cudaStatus = cudaGetLastError();
+        assert(cudaStatus == ::cudaSuccess);
+        cudaStatus = cudaDeviceSynchronize();
+        assert(cudaStatus == ::cudaSuccess);
     }
     __host__ __device__ void* CudaMallocResource::allocate(size_t sz, size_t align)
     {
@@ -536,6 +566,7 @@ namespace dmt {
     __host__ CudaMallocAsyncResource::CudaMallocAsyncResource() :
     CudaAsyncMemoryReosurce(EMemoryResourceType::eCudaMallocAsync)
     {
+        cudaError_t cudaStatus;
         m_host.allocateBytes      = CudaMallocAsyncResource::allocateBytes;
         m_host.freeBytes          = CudaMallocAsyncResource::freeBytes;
         m_host.allocateBytesAsync = CudaMallocAsyncResource::allocateBytesAsync;
@@ -543,7 +574,10 @@ namespace dmt {
         m_host.hostHasAccess      = CudaMallocAsyncResource::hostHasAccess;
         m_host.deviceHasAccess    = CudaMallocAsyncResource::deviceHasAccess;
         initTable<<<1, 32>>>(*this);
-        cudaDeviceSynchronize();
+        cudaStatus = cudaGetLastError();
+        assert(cudaStatus == ::cudaSuccess);
+        cudaStatus = cudaDeviceSynchronize();
+        assert(cudaStatus == ::cudaSuccess);
     }
 
     void* CudaMallocAsyncResource::allocate(size_t _Bytes, [[maybe_unused]] size_t _Align)
@@ -586,7 +620,10 @@ namespace dmt {
         m_host.deviceHasAccess    = BuddyMemoryResource::deviceHasAccess;
         m_host.hostHasAccess      = BuddyMemoryResource::hostHasAccess;
         initTable<<<1, 32>>>(*this);
-        cudaDeviceSynchronize();
+        cudaError_t cudaStatus = cudaGetLastError();
+        assert(cudaStatus == ::cudaSuccess);
+        cudaStatus = cudaDeviceSynchronize();
+        assert(cudaStatus == ::cudaSuccess);
 
         // TODO better? allocation functions without class? global context map {pid, idx -> ctx}
         assert(input.pHostMemRes);
@@ -1096,7 +1133,10 @@ namespace dmt {
         m_host.deviceHasAccess    = MemPoolAsyncMemoryResource::deviceHasAccess;
         m_host.hostHasAccess      = MemPoolAsyncMemoryResource::hostHasAccess;
         initTable<<<1, 32>>>(*this);
-        cudaDeviceSynchronize();
+        cudaError_t cudaStatus = cudaGetLastError();
+        assert(cudaStatus == ::cudaSuccess);
+        cudaStatus = cudaDeviceSynchronize();
+        assert(cudaStatus == ::cudaSuccess);
 
         // check successful allocation of control block
         CUresult res;
@@ -1439,20 +1479,7 @@ namespace dmt {
                         break;
                 }
                 break;
-            case eUnified:
-                switch (type)
-                {
-                    case eCudaMallocManaged:
-                        if (p)
-                            if (destroy)
-                                std::destroy_at(std::bit_cast<UnifiedMemoryResource*>(p));
-                            else
-                                std::construct_at(std::bit_cast<UnifiedMemoryResource*>(p));
-                        else if (sz)
-                            *sz = sizeof(UnifiedMemoryResource);
-                        break;
-                }
-                break;
+                // unified should be constructed by itself
         }
     }
 

@@ -204,6 +204,10 @@ DMT_MODULE_EXPORT namespace dmt {
     class UnifiedMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     public:
+        DMT_CPU static UnifiedMemoryResource* create();
+        DMT_CPU static void                   destroy(UnifiedMemoryResource* ptr);
+
+    private:
         DMT_CPU UnifiedMemoryResource();
 
     private:

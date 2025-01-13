@@ -96,6 +96,10 @@ namespace dmt {
         dim3 blockDim(16, 16);
         dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
         fillTextureKernel<<<gridDim, blockDim>>>(devPtr, width, height);
+        reMgs = cudaGetLastError();
+        assert(reMgs == ::cudaSuccess);
+        reMgs = cudaDeviceSynchronize();
+        assert(reMgs == ::cudaSuccess);
 
         // Copy the CUDA memory to the OpenGL texture
         cudaMemcpyToArray(texArray, 0, 0, devPtr, width * height * sizeof(uchar4), cudaMemcpyDeviceToDevice);

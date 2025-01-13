@@ -3066,7 +3066,12 @@ namespace dmt {
     void SceneDescription::Camera(CameraSpec const& params)
     {
         TransformSet cameraFormWorld = graphicsState.ctm;
-        TransformSet worldFormCamera = Inverse(graphicsState.ctm);
+        TransformSet worldFromCamera = Inverse(graphicsState.ctm);
+        namedCoordinateSystems[dict::directive::Camera.sid] = worldFromCamera;
+        CameraTransform cameraTransform();                  
+        renderFromWorld = cameraTransform.RenderFromWorld();
+        camera = CameraSceneEntity(dict::directive::Camera.sid, params, cameraTransform,
+                               graphicsState.currentOutsideMedium);
     }
 
     void SceneDescription::MakeNamedMedium(sid_t name, ParamMap const& params) {}

@@ -15,7 +15,7 @@
 #endif
 
 DMT_MODULE_EXPORT namespace dmt {
-    DMT_MIDDLEWARE_API glm::mat4;
+    DMT_MIDDLEWARE_API       glm::mat4;
     class DMT_MIDDLEWARE_API Transform
     {
     public:
@@ -45,6 +45,8 @@ DMT_MODULE_EXPORT namespace dmt {
 
         void lookAt_(glm::vec3 pos, glm::vec3 look, glm::vec3 up);
 
+        void concatTrasform_(std::array<float, 16> const& transform);
+        
         // Reset to identity matrix
         void reset();
 

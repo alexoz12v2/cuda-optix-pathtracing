@@ -23,11 +23,25 @@
 #include <sysinfoapi.h>
 #undef max
 #undef min
+#elif defined(DMT_OS_LINUX)
+#include <unistd.h>
 #endif
 
 //module platform;
 
 namespace dmt {
+    uint64_t processId()
+    {
+        uint64_t ret = 0;
+#if defined(DMT_OS_WINDOWS)
+        DWORD const pid = GetCurrentProcessId();
+        ret             = static_cast<uint64_t>(pid);
+#elif defined(DMT_OS_LINUX)
+        pid_t const pid = getpid();
+        ret             = static_cast<uint64_t>(pid);
+#endif
+        return ret;
+    }
 
     // not exported utils --------------------------------------------------------------------------------------------
     void* reserveVirtualAddressSpace(size_t size)
@@ -123,8 +137,8 @@ namespace dmt {
     }
 
     namespace detail {
-        uintptr_t         g_currentContext = 0;
-        std::shared_mutex g_slk;
+        std::map<uint64_t, CtxCtrlBlock> g_ctxMap;
+        std::shared_mutex                g_slk;
     } // namespace detail
 
 } // namespace dmt

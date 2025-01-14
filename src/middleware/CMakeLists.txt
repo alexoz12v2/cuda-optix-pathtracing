@@ -11,6 +11,7 @@ target_sources(dmt-middleware
 target_link_libraries(dmt-middleware 
   PUBLIC
     dmt-platform-mixed
+    dmt-cudautils
     glm::glm
 )
 

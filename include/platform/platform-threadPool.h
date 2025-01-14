@@ -171,9 +171,9 @@ DMT_MODULE_EXPORT namespace dmt {
     class ThreadPool
     {
     public:
-        ThreadPool(int const size);
+        DMT_PLATFORM_API ThreadPool(int const size);
 
-        ~ThreadPool();
+        DMT_PLATFORM_API ~ThreadPool();
 
         //ThreadPool cannot be copied or assigned
         ThreadPool(ThreadPool const&)            = delete;
@@ -183,7 +183,7 @@ DMT_MODULE_EXPORT namespace dmt {
         ThreadPool(ThreadPool&&)            = delete;
         ThreadPool& operator=(ThreadPool&&) = delete;
 
-        void Shutdown();
+        DMT_PLATFORM_API void Shutdown();
 
         //Allow to the user to add different functions with a arbitrary type and arbitrary arguments
         //f function, args function arguments, detect the return a futere of the detection function type returned
@@ -210,7 +210,7 @@ DMT_MODULE_EXPORT namespace dmt {
             return task_ptr->get_future();
         }
 
-        int QueueSize();
+        DMT_PLATFORM_API int QueueSize();
 
     private:
         //callable object

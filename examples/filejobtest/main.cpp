@@ -185,7 +185,6 @@ int32_t main()
 {
     dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
     dmt::ctx::init(actx);
-
     auto env = dmt::getEnv();
 
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});

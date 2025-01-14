@@ -9,7 +9,6 @@
 #endif
 
 namespace dmt {
-
     struct AppContextImpl
     {
         AppContextImpl(uint32_t                                   pageTrackCapacity,
@@ -222,44 +221,125 @@ namespace dmt {
 
     AppContext::~AppContext() noexcept { cleanup(); }
 
+    void AppContext::log(std::string_view const& str, std::source_location const& loc)
+    {
+        write(ELogLevel::LOG, str, loc);
+    }
+
+    void AppContext::log(std::string_view const& str, std::initializer_list<StrBuf> const& list, std::source_location const& loc)
+    {
+        write(ELogLevel::LOG, str, list, loc);
+    }
+
+    void AppContext::warn(std::string_view const& str, std::source_location const& loc)
+    {
+        write(ELogLevel::WARNING, str, loc);
+    }
+
+    void AppContext::warn(std::string_view const& str, std::initializer_list<StrBuf> const& list, std::source_location const& loc)
+    {
+        write(ELogLevel::WARNING, str, list, loc);
+    }
+
+    void AppContext::error(std::string_view const& str, std::source_location const& loc)
+    {
+        write(ELogLevel::ERR, str, loc);
+    }
+
+    void AppContext::error(std::string_view const&              str,
+                           std::initializer_list<StrBuf> const& list,
+                           std::source_location const&          loc)
+    {
+        write(ELogLevel::ERR, str, list, loc);
+    }
+
+    void AppContext::trace(std::string_view const& str, std::source_location const& loc)
+    {
+        write(ELogLevel::TRACE, str, loc);
+    }
+
+    void AppContext::trace(std::string_view const&              str,
+                           std::initializer_list<StrBuf> const& list,
+                           std::source_location const&          loc)
+    {
+        write(ELogLevel::TRACE, str, list, loc);
+    }
+
 } // namespace dmt
 
 namespace dmt::ctx {
     using namespace dmt;
     void init(AppContext& ctx)
     {
+        uint64_t        pid = processId();
         std::lock_guard lk{detail::g_slk};
-        if (detail::g_currentContext != 0)
+        auto            it = detail::g_ctxMap.find(pid);
+        if (it == detail::g_ctxMap.end())
         {
-            auto* curr = std::bit_cast<AppContext*>(&detail::g_currentContext);
+            auto [it2, wasInserted] = detail::g_ctxMap.try_emplace(pid);
+            assert(wasInserted);
+            it = it2;
+        }
+        detail::CtxCtrlBlock& ctrl = it->second;
+        std::lock_guard       lk2{ctrl.slk};
+        if (ctrl.ctx != 0)
+        {
+            auto* curr = std::bit_cast<AppContext*>(&ctrl.ctx);
             std::destroy_at(curr);
-            detail::g_currentContext = 0;
+            ctrl.ctx = 0;
         }
         // trygger copy constructor
-        auto* ptr = std::bit_cast<AppContext*>(&detail::g_currentContext);
+        auto* ptr = std::bit_cast<AppContext*>(&ctrl.ctx);
         std::construct_at(ptr, ctx);
     }
 
     AppContext* acquireCurrent()
     {
-        assert(detail::g_currentContext);
-        detail::g_slk.lock_shared();
-        auto* ptr = std::bit_cast<AppContext*>(&detail::g_currentContext);
+        uint64_t pid = processId();
+        auto     it  = detail::g_ctxMap.find(pid);
+        if (it == detail::g_ctxMap.end())
+        {
+            assert(false);
+            return nullptr;
+        }
+        detail::CtxCtrlBlock& ctrl = it->second;
+
+        ctrl.slk.lock_shared();
+
+        auto* ptr = std::bit_cast<AppContext*>(&ctrl.ctx);
         return ptr;
     }
 
     DMT_PLATFORM_MIXED_API void releaseCurrent()
     {
-        assert(detail::g_currentContext);
-        detail::g_slk.unlock_shared();
+        uint64_t pid = processId();
+        auto     it  = detail::g_ctxMap.find(pid);
+        if (it == detail::g_ctxMap.end())
+        {
+            assert(false);
+        }
+        else
+        {
+            detail::CtxCtrlBlock& ctrl = it->second;
+            ctrl.slk.unlock_shared();
+        }
     }
 
     void unregister()
     {
-        assert(detail::g_currentContext);
-        std::lock_guard lk{detail::g_slk};
-        auto*           curr = std::bit_cast<AppContext*>(&detail::g_currentContext);
+        uint64_t pid = processId();
+        auto     it  = detail::g_ctxMap.find(pid);
+        if (it == detail::g_ctxMap.end())
+        {
+            assert(false);
+            return;
+        }
+        detail::CtxCtrlBlock& ctrl = it->second;
+        std::unique_lock      lk0{ctrl.slk, std::defer_lock};
+        std::unique_lock      lk{detail::g_slk, std::defer_lock};
+        std::lock(lk0, lk);
+        auto* curr = std::bit_cast<AppContext*>(&ctrl);
         std::destroy_at(curr);
-        detail::g_currentContext = 0;
+        detail::g_ctxMap.erase(it);
     }
 } // namespace dmt::ctx

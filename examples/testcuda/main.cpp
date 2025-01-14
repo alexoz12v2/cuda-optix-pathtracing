@@ -1,5 +1,7 @@
-// Include local CUDA header files.
-#include <cudaTest.h>
+#include <platform/platform.h>
+#include <platform/cudaTest.h>
+#include <cudashared/cudashared.h>
+#include "dummy.h"
 
 // Include C++ header files.
 // Clang format shouldn't mess with the order of OpenGL includes
@@ -12,8 +14,6 @@
 #include <random>
 #include <source_location>
 #include <string>
-
-import platform;
 
 inline constexpr uint32_t N = 10000;
 
@@ -28,8 +28,9 @@ namespace {
         }
     }
 
-    void display(dmt::ConsoleLogger& logger)
+    void display()
     {
+        dmt::AppContextJanitor j;
         class Janitor
         {
         public:
@@ -59,7 +60,7 @@ namespace {
 
         if (!glfwInit())
         {
-            logger.error("Could not initialize the GLFW library");
+            j.actx.error("Could not initialize the GLFW library");
             return;
         }
         janitor.initCalled = true;
@@ -72,7 +73,7 @@ namespace {
         GLFWwindow* window = glfwCreateWindow(800, 600, "CUDA GL Test", nullptr, nullptr);
         if (!window)
         {
-            logger.error("Couldn't open window");
+            j.actx.error("Couldn't open window");
             return;
         }
 
@@ -82,14 +83,14 @@ namespace {
         int32_t version = gladLoadGL(glfwGetProcAddress);
         if (version == 0)
         {
-            logger.error("Failed to initialize OpenGL context");
+            j.actx.error("Failed to initialize OpenGL context");
             return;
         }
 
         janitor.texture = dmt::createOpenGLTexture(800, 600);
         if (glGetError() != GL_NO_ERROR)
         {
-            logger.error("Could not allocate texture");
+            j.actx.error("Could not allocate texture");
             return;
         }
 
@@ -194,30 +195,31 @@ int main()
 {
     static constexpr uint32_t             threshold = 10e-4;
     std::random_device                    seed;
-    std::mt19937                          gen{seed()};
+    std::unique_ptr<std::mt19937>         gen{std::make_unique<std::mt19937>(seed())};
     std::uniform_real_distribution<float> random;
     float                                 A[N];
     float                                 B[N];
     float                                 C[N], C_cpu[N];
-    float const                           scalar = random(gen);
-    dmt::ConsoleLogger                    logger = dmt::ConsoleLogger::create();
+    float const                           scalar = random(*gen);
+    dmt::AppContext                       actx{512, 8192, {4096, 4096, 4096, 4096}};
+    dmt::ctx::init(actx);
 
     for (int i = 0; i < N; i++)
     {
-        A[i]     = random(gen);
-        B[i]     = random(gen);
+        A[i]     = random(*gen);
+        B[i]     = random(*gen);
         C_cpu[i] = 0;
         C[i]     = 0;
     }
 
-    logger.log("Starting saxpy computation on the CPU...");
+    actx.log("Starting saxpy computation on the CPU...");
     cpu_saxpy_vect(A, B, scalar, C_cpu, N);
-    logger.log("Done!");
+    actx.log("Done!");
 
-    logger.log("Starting saxpy computation on the GPU...");
+    actx.log("Starting saxpy computation on the GPU...");
     dmt::kernel(A, B, scalar, C, N);
-    logger.log("Done! Showing first 4 elements of each result:");
-    logger.log("CPU[0:3] = ");
+    actx.log("Done! Showing first 4 elements of each result:");
+    actx.log("CPU[0:3] = ");
 
     std::string str;
     for (uint32_t i = 0; i != 4; ++i)
@@ -225,15 +227,15 @@ int main()
         str += std::to_string(C_cpu[i]) + ' ';
     }
 
-    logger.log("  {}", {dmt::StrBuf(str)});
-    logger.log("GPU[0:3] = ");
+    actx.log("  {}", {dmt::StrBuf(str)});
+    actx.log("GPU[0:3] = ");
     str.clear();
 
     for (uint32_t i = 0; i != 4; ++i)
     {
         str += std::to_string(C[i]) + ' ';
     }
-    logger.log("  {}\n", {dmt::StrBuf(str)});
+    actx.log("  {}\n", {dmt::StrBuf(str)});
 
     bool  error = false;
     float diff  = 0.0;
@@ -243,18 +245,24 @@ int main()
         if (diff > threshold)
         {
             error = true;
-            logger.log("{} {} {} {}", {i, diff, C[i], C_cpu[i]});
+            actx.log("{} {} {} {}", {i, diff, C[i], C_cpu[i]});
         }
     }
 
     if (error)
-        logger.log("The Results are Different!");
+        actx.log("The Results are Different!");
     else
-        logger.log("The Results match!");
+        actx.log("The Results match!");
 
-    logger.log("trying to create a window and fill a screen greenish?");
+    actx.log("trying to create a window and fill a screen greenish?");
 
-    display(logger);
+    float hostres = dmt::test::multiply(3.f, 4.f);
+    actx.log("HOST RES: {}", {hostres});
+    std::unique_ptr<float[]> ptr = std::make_unique<float[]>(32);
+    dmt::test::multiplyArr(ptr.get());
 
-    logger.log("Programm Finished!");
+    display();
+
+    actx.log("Programm Finished!");
+    dmt::ctx::unregister();
 }

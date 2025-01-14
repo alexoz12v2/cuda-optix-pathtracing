@@ -12,6 +12,7 @@
 #include <memory_resource>
 #include <source_location>
 #include <shared_mutex>
+#include <map>
 #include <string_view>
 #include <type_traits>
 
@@ -21,11 +22,12 @@
 #endif
 
 namespace dmt {
-    DMT_PLATFORM_API void*  reserveVirtualAddressSpace(size_t size);
-    DMT_PLATFORM_API size_t systemAlignment();
-    DMT_PLATFORM_API bool   commitPhysicalMemory(void* address, size_t size);
-    DMT_PLATFORM_API bool   freeVirtualAddressSpace(void* address, size_t size);
-    DMT_PLATFORM_API void   decommitPage(void* pageAddress, size_t pageSize);
+    DMT_PLATFORM_API uint64_t processId();
+    DMT_PLATFORM_API void*    reserveVirtualAddressSpace(size_t size);
+    DMT_PLATFORM_API size_t   systemAlignment();
+    DMT_PLATFORM_API bool     commitPhysicalMemory(void* address, size_t size);
+    DMT_PLATFORM_API bool     freeVirtualAddressSpace(void* address, size_t size);
+    DMT_PLATFORM_API void     decommitPage(void* pageAddress, size_t pageSize);
 
     // for debugging purposes only, so we don't care about memory
     DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
@@ -523,7 +525,19 @@ namespace dmt {
     }
 
     namespace detail {
-        extern DMT_PLATFORM_API uintptr_t g_currentContext;
+        struct CtxCtrlBlock
+        {
+            uintptr_t         ctx = 0;
+            std::shared_mutex slk;
+        };
+        extern DMT_PLATFORM_API std::map<uint64_t, CtxCtrlBlock> g_ctxMap;
         extern DMT_PLATFORM_API std::shared_mutex g_slk;
     } // namespace detail
+
+    template <typename T>
+    struct ArrayView
+    {
+        T*       data;
+        uint32_t length; // count of elements
+    };
 } // namespace dmt

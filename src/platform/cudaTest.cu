@@ -138,9 +138,6 @@ namespace dmt {
      */
     void kernel(float const* A, float const* B, float scalar, float* C, uint32_t N)
     {
-        dmt::ConsoleLogger logger = dmt::ConsoleLogger::create();
-        logger.log("Hello from a nvcc file!");
-
         // Launch CUDA kernel.
         float *                         d_A, *d_B, *d_C;
         SaxpyScalarConstants_Type const constants[numConstants]{{.f = scalar}, {.n = N}};

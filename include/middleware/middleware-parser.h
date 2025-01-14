@@ -4,7 +4,6 @@
 
 #include <middleware/middleware-utils.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <platform/platform.h>
 
 #include <array>
@@ -22,17 +21,8 @@
 #include <cassert>
 #include <compare>
 #include <cstdint>
-#endif
 
-DMT_MODULE_EXPORT namespace dmt {
-    enum class DMT_MIDDLEWARE_API ERenderCoordSys : uint8_t
-    {
-        eCameraWorld = 0,
-        eCamera,
-        eWorld,
-        eCount
-    };
-
+namespace dmt {
     // f = .pbrt file option, c = command line option, o = refers to the presence or absence of some other option
     // some file options are also present from command line and override what's in the file
     // the files ones are to OR with what we got from the command line, hence the job will yield bool options too
@@ -399,7 +389,7 @@ DMT_MODULE_EXPORT namespace dmt {
         eCount
     };
 
-    float                     defaultRadiusFromFilterType(EFilterType e);
+    float defaultRadiusFromFilterType(EFilterType e);
     struct DMT_MIDDLEWARE_API FilterSpec
     {
         struct DMT_MIDDLEWARE_API Gaussian
@@ -701,32 +691,30 @@ DMT_MODULE_EXPORT namespace dmt {
 
     struct DMT_MIDDLEWARE_API SceneEntity
     {
-        // SceneEntity Public Methods
         SceneEntity() = default;
-        SceneEntity(sid_t& name, ParamMap parameters) : name(sid_t), parameters(parameters) {}
-    }
+        SceneEntity(sid_t name, ParamMap parameters) : name(name), parameters(parameters) {}
 
-    // SceneEntity Public Members
-    sid_t    name;
-    ParamMap parameters;
+        sid_t    name = 0;
+        ParamMap parameters;
     };
 
     // CameraSceneEntity Definition
-    struct DMT_MIDDLEWARE_API CameraSceneEntity : public SceneEntity {
-    // CameraSceneEntity Public Methods
-    CameraSceneEntity() = default;
-    CameraSceneEntity(const sid_t& name, CameraSpec parameters, const CameraTransform&, const sid_t& medium) :
-    name(name),
-    params(parameters),
-    cameraTransform(cameraTransform),
-    medium(medium)
+    struct DMT_MIDDLEWARE_API CameraSceneEntity : public SceneEntity
     {
-    }
+        // CameraSceneEntity Public Methods
+        CameraSceneEntity() = default;
+        CameraSceneEntity(sid_t const& name, CameraSpec parameters, CameraTransform const&, sid_t const& medium) :
+        name(name),
+        params(parameters),
+        cameraTransform(cameraTransform),
+        medium(medium)
+        {
+        }
 
-    sid_t           name;
-    sid_t           medium;
-    CameraTransform cameraTransform;
-    CameraSpec      params;
+        sid_t           name;
+        sid_t           medium;
+        CameraTransform cameraTransform;
+        CameraSpec      params;
     };
 
 
@@ -795,7 +783,7 @@ public:
 
     virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-    virtual ~IParserTarget(){};
+        virtual ~IParserTarget() {};
 
     virtual void Option(sid_t name, ParamPair const& value) = 0;
 
@@ -915,8 +903,8 @@ public:
     float        transformEndTime    = 1.f;
 
 
-    std::map<sid_t, TransformSet> namedCoordinateSystems;
-    EColorSpaceType               colorSpace = EColorSpaceType::eSRGB;
+        std::map<sid_t, TransformSet> namedCoordinateSystems;
+        EColorSpaceType               colorSpace = EColorSpaceType::eSRGB;
     };
 
     class SceneDescription : public IParserTarget
@@ -974,9 +962,11 @@ public:
     IntegratorSpec  integratorSpec;
     AcceleratorSpec acceleratorSpec;
 
-private:
-    GraphicsState     graphicsState;
-    CameraSceneEntity camera;
+    private:
+        GraphicsState                 graphicsState;
+        CameraSceneEntity             camera;
+        std::map<sid_t, TransformSet> m_namedCoordinateSystems;
+        dmt::Transform                renderFromWorld;
     };
 
     enum class DMT_MIDDLEWARE_API EParsingStep : uint8_t

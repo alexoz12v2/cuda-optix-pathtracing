@@ -467,7 +467,7 @@ namespace dmt {
 
     void ConsoleLogger::write(ELogLevel level, std::string_view const& str, std::source_location const& loc)
     {
-        if (enabled(level))
+        if (level >= this->level)
         {
             std::lock_guard<std::mutex> lock(s_writeMutex);
             std::string_view            date     = getCurrentTimestamp();
@@ -482,7 +482,7 @@ namespace dmt {
                               std::initializer_list<StrBuf> const& list,
                               std::source_location const&          loc)
     {
-        if (enabled(level))
+        if (level >= this->level)
         {
             std::lock_guard<std::mutex> lock(s_writeMutex);
             std::string_view            date     = getCurrentTimestamp();
@@ -553,7 +553,7 @@ namespace dmt {
         return m_timestampBuf;
     }
 
-    ConsoleLogger::ConsoleLogger(ConsoleLogger&& other) : BaseLogger<ConsoleLogger>(other.m_level)
+    ConsoleLogger::ConsoleLogger(ConsoleLogger&& other) : level(other.level)
     {
         std::lock_guard lock{s_writeMutex};
         stealResourcesFrom(std::move(other));
@@ -586,15 +586,73 @@ namespace dmt {
         return std::min(static_cast<size_t>(BaseAsyncIOManager::lineSize) >> 1, m_oss.maxLogArgBytes());
     }
 
-    static_assert(LogDisplay<ConsoleLogger>);
-
-
     // LoggingContext -------------------------------------------------------------------------------------------------
     LoggingContext::LoggingContext() :
     logger(ConsoleLogger::create()),
     start(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch())
               .count())
     {
+    }
+
+    void LoggingContext::log(std::string_view const& str, std::source_location const& loc)
+    {
+        logger.write(ELogLevel::LOG, str, loc);
+    }
+
+    void LoggingContext::log(std::string_view const&              str,
+                             std::initializer_list<StrBuf> const& list,
+                             std::source_location const&          loc)
+    {
+        logger.write(ELogLevel::LOG, str, list, loc);
+    }
+
+    void LoggingContext::warn(std::string_view const& str, std::source_location const& loc)
+    {
+        logger.write(ELogLevel::WARNING, str, loc);
+    }
+
+    void LoggingContext::warn(std::string_view const&              str,
+                              std::initializer_list<StrBuf> const& list,
+                              std::source_location const&          loc)
+    {
+        logger.write(ELogLevel::WARNING, str, list, loc);
+    }
+
+    void LoggingContext::error(std::string_view const& str, std::source_location const& loc)
+    {
+        logger.write(ELogLevel::ERR, str, loc);
+    }
+
+    void LoggingContext::error(std::string_view const&              str,
+                               std::initializer_list<StrBuf> const& list,
+                               std::source_location const&          loc)
+    {
+        logger.write(ELogLevel::ERR, str, list, loc);
+    }
+
+    void LoggingContext::trace(std::string_view const& str, std::source_location const& loc)
+    {
+        logger.write(ELogLevel::TRACE, str, loc);
+    }
+
+    void LoggingContext::trace(std::string_view const&              str,
+                               std::initializer_list<StrBuf> const& list,
+                               std::source_location const&          loc)
+    {
+        logger.write(ELogLevel::TRACE, str, list, loc);
+    }
+
+    void LoggingContext::write(ELogLevel level, std::string_view const& str, std::source_location const& loc)
+    {
+        logger.write(level, str, loc);
+    }
+
+    void LoggingContext::write(ELogLevel                            level,
+                               std::string_view const&              str,
+                               std::initializer_list<StrBuf> const& list,
+                               std::source_location const&          loc)
+    {
+        logger.write(level, str, list, loc);
     }
 
     void LoggingContext::dbgTraceStackTrace()

@@ -2,6 +2,6 @@
 
 namespace dmt::test {
 
-void multiplyArr(float* ptr);
+    void multiplyArr(float* ptr);
 
 }

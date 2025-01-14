@@ -533,4 +533,11 @@ namespace dmt {
         extern DMT_PLATFORM_API std::map<uint64_t, CtxCtrlBlock> g_ctxMap;
         extern DMT_PLATFORM_API std::shared_mutex g_slk;
     } // namespace detail
+
+    template <typename T>
+    struct ArrayView
+    {
+        T*       data;
+        uint32_t length; // count of elements
+    };
 } // namespace dmt

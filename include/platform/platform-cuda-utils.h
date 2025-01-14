@@ -2,10 +2,9 @@
 
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
-
-#if !defined(DMT_NEEDS_MODULE)
 #include <platform/platform-utils.h>
 
+#include <array>
 #include <bit>
 #include <limits>
 #include <memory_resource>
@@ -13,9 +12,9 @@
 
 #include <cassert>
 #include <cstdint>
-#endif
 
-DMT_MODULE_EXPORT namespace dmt {
+namespace dmt {
+    // Cuda Hello -----------------------------------------------------------------------------------------------------
     struct MemoryContext;
 
     using CudaStreamHandle                     = uintptr_t;
@@ -56,11 +55,11 @@ DMT_MODULE_EXPORT namespace dmt {
         uint32_t     supportsVirtualMemory : 1; // needed for `BuddyMemoryResource`
     };
 
-    bool logCUDAStatus(MemoryContext * mctx);
+    bool logCUDAStatus(MemoryContext* mctx);
 
     // you need to check support for unified memory allocation with `cudaDevAttrManagedMemory`
     // `cudaMalloc` and `cudaMallocManaged` say this about alignment: "The allocated memory is suitably aligned for any kind of variable"
-    DMT_CPU CUDAHelloInfo cudaHello(MemoryContext * mctx);
+    DMT_CPU CUDAHelloInfo cudaHello(MemoryContext* mctx);
 
     DMT_GPU int32_t globalThreadIndex();
     DMT_GPU int32_t warpWideThreadIndex();
@@ -90,13 +89,13 @@ DMT_MODULE_EXPORT namespace dmt {
     };
 
     template <class T, class U>
-    auto operator==(UnifiedAllocator<T> const&, UnifiedAllocator<U> const&)->bool
+    auto operator==(UnifiedAllocator<T> const&, UnifiedAllocator<U> const&) -> bool
     {
         return true;
     }
 
     template <class T, class U>
-    auto operator!=(UnifiedAllocator<T> const&, UnifiedAllocator<U> const&)->bool
+    auto operator!=(UnifiedAllocator<T> const&, UnifiedAllocator<U> const&) -> bool
     {
         return false;
     }
@@ -255,16 +254,15 @@ DMT_MODULE_EXPORT namespace dmt {
 
     DMT_CPU BaseMemoryResource* constructMemoryResourceAt(void* ptr, EMemoryResourceType eAlloc, void* ctorParam);
 
-    DMT_CPU void destroyMemoryResourceAt(BaseMemoryResource * p, EMemoryResourceType eAlloc);
+    DMT_CPU void destroyMemoryResourceAt(BaseMemoryResource* p, EMemoryResourceType eAlloc);
 
-    DMT_CPU_GPU void
-        switchOnMemoryResource(EMemoryResourceType eAlloc, BaseMemoryResource * p, size_t * sz, bool destroy, void* ctorParam);
-    DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource * allocator);
+    DMT_CPU_GPU void switchOnMemoryResource(EMemoryResourceType eAlloc, BaseMemoryResource* p, size_t* sz, bool destroy, void* ctorParam);
+    DMT_CPU_GPU EMemoryResourceType categoryOf(BaseMemoryResource* allocator);
 
     // whether allocated memory is accessible from device or host (or both). Independent from the fact the allocation functions
     // can be called by device or host, which is instead encoded in the category
-    DMT_CPU_GPU bool isDeviceAllocator(BaseMemoryResource * allocator, int32_t deviceId);
-    DMT_CPU_GPU bool isHostAllocator(BaseMemoryResource * allocator);
+    DMT_CPU_GPU bool isDeviceAllocator(BaseMemoryResource* allocator, int32_t deviceId);
+    DMT_CPU_GPU bool isHostAllocator(BaseMemoryResource* allocator);
 
     struct AllocBundle
     {

@@ -24,6 +24,11 @@
 #include <cstdint>
 
 namespace dmt {
+    /**
+     * Tag which signals that the containing class should have a correspondance inside the `soa` namespace
+     */
+    struct SOA {};
+
     // Enums ----------------------------------------------------------------------------------------------------------
     enum class ERenderCoordSys : uint8_t
     {
@@ -49,6 +54,7 @@ namespace dmt {
     // TODO SOA
     struct Intervalf
     {
+        friend SOA;
     public:
         Intervalf() = default;
         DMT_CPU_GPU explicit Intervalf(float v);

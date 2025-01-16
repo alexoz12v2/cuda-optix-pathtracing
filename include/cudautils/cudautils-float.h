@@ -17,7 +17,7 @@ namespace dmt::fl {
     DMT_CPU_GPU inline bool isinf(float f)
     {
 #if defined(__CUDA_ARCH__)
-        return isinf(f); // the last f stands for float32
+        return __isinff(f); // the last f stands for float32
 #else
         return std::isinf(f);
 #endif

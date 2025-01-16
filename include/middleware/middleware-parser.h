@@ -721,186 +721,186 @@ namespace dmt {
     // LightSource ----------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API LightSourceSpec
     {
-        // 4 byte aligned, coommon
-        union DMT_MIDDLEWARE_API PowerOrIlluminance
-        { // there is no default, one of these must be present
-            // all except distant and infinite
-            float power;
-            // distant, infinite
-            float illuminance;
-            bool  illum;
-        };
-        PowerOrIlluminance po;
-        float              scale = 1.f;
-        // 1 byte aligned
-        ELightType type;
+    // 4 byte aligned, coommon
+    union DMT_MIDDLEWARE_API PowerOrIlluminance
+    { // there is no default, one of these must be present
+        // all except distant and infinite
+        float power;
+        // distant, infinite
+        float illuminance;
+        bool  illum;
+    };
+    PowerOrIlluminance po;
+    float              scale = 1.f;
+    // 1 byte aligned
+    ELightType type;
     };
 
     // Parsing --------------------------------------------------------------------------------------------------------
     class TokenStream
     {
-    public:
-        static constexpr uint32_t chunkSize = 512;
+public:
+    static constexpr uint32_t chunkSize = 512;
 
-        DMT_MIDDLEWARE_API TokenStream(AppContext& actx, std::string_view filePath);
-        TokenStream(TokenStream const&)                = delete;
-        TokenStream(TokenStream&&) noexcept            = delete;
-        TokenStream& operator=(TokenStream const&)     = delete;
-        TokenStream& operator=(TokenStream&&) noexcept = delete;
-        DMT_MIDDLEWARE_API ~TokenStream() noexcept;
+    DMT_MIDDLEWARE_API TokenStream(AppContext & actx, std::string_view filePath);
+    TokenStream(TokenStream const&)                = delete;
+    TokenStream(TokenStream&&) noexcept            = delete;
+    TokenStream& operator=(TokenStream const&)     = delete;
+    TokenStream& operator=(TokenStream&&) noexcept = delete;
+    DMT_MIDDLEWARE_API ~TokenStream() noexcept;
 
-        DMT_MIDDLEWARE_API std::string next(AppContext& actx);
-        DMT_MIDDLEWARE_API void        advance(AppContext& actx);
-        DMT_MIDDLEWARE_API std::string peek();
+    DMT_MIDDLEWARE_API std::string next(AppContext & actx);
+    DMT_MIDDLEWARE_API void        advance(AppContext & actx);
+    DMT_MIDDLEWARE_API std::string peek();
 
-    private:
-        union U
-        {
-            U() {}
-            ~U() {}
+private:
+    union U
+    {
+        U() {}
+        ~U() {}
 
-            ChunkedFileReader reader;
-        };
-        U                m_delayedCtor;
-        WordParser*      m_tokenizer = nullptr;
-        std::string      m_token;
-        std::string_view m_chunk       = "";
-        char*            m_buffer      = nullptr;
-        uint32_t         m_chunkNum    = 0;
-        bool             m_newChunk    = true;
-        bool             m_needAdvance = true;
+        ChunkedFileReader reader;
+    };
+    U                m_delayedCtor;
+    WordParser*      m_tokenizer = nullptr;
+    std::string      m_token;
+    std::string_view m_chunk       = "";
+    char*            m_buffer      = nullptr;
+    uint32_t         m_chunkNum    = 0;
+    bool             m_newChunk    = true;
+    bool             m_needAdvance = true;
     };
 
     struct DMT_MIDDLEWARE_API EndOfHeaderInfo
     {
-        CameraSpec cameraSpec;
+    CameraSpec cameraSpec;
     };
 
     class DMT_MIDDLEWARE_API DMT_INTERFACE IParserTarget
     {
-    public:
-        virtual void Scale(float sx, float sy, float sz) = 0;
+public:
+    virtual void Scale(float sx, float sy, float sz) = 0;
 
-        virtual void Shape(EShapeType type, ParamMap const& params) = 0;
+    virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
         virtual ~IParserTarget() {};
 
-        virtual void Option(sid_t name, ParamPair const& value) = 0;
+    virtual void Option(sid_t name, ParamPair const& value) = 0;
 
-        virtual void Identity()                                        = 0;
-        virtual void Translate(float dx, float dy, float dz)           = 0;
-        virtual void Rotate(float angle, float ax, float ay, float az) = 0;
-        virtual void LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz) = 0;
-        virtual void ConcatTransform(std::array<float, 16> const& transform) = 0;
-        virtual void Transform(std::array<float, 16> transform)              = 0;
-        virtual void CoordinateSystem(sid_t name)                            = 0;
-        virtual void CoordSysTransform(sid_t name)                           = 0;
-        virtual void ActiveTransformAll()                                    = 0;
-        virtual void ActiveTransformEndTime()                                = 0;
-        virtual void ActiveTransformStartTime()                              = 0;
-        virtual void TransformTimes(float start, float end)                  = 0;
+    virtual void Identity()                                                                                       = 0;
+    virtual void Translate(float dx, float dy, float dz)                                                          = 0;
+    virtual void Rotate(float angle, float ax, float ay, float az)                                                = 0;
+    virtual void LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz) = 0;
+    virtual void ConcatTransform(std::array<float, 16> const& transform)                                          = 0;
+    virtual void Transform(std::array<float, 16> transform)                                                       = 0;
+    virtual void CoordinateSystem(sid_t name)                                                                     = 0;
+    virtual void CoordSysTransform(sid_t name)                                                                    = 0;
+    virtual void ActiveTransformAll()                                                                             = 0;
+    virtual void ActiveTransformEndTime()                                                                         = 0;
+    virtual void ActiveTransformStartTime()                                                                       = 0;
+    virtual void TransformTimes(float start, float end)                                                           = 0;
 
-        virtual void ColorSpace(EColorSpaceType colorSpace)   = 0;
-        virtual void PixelFilter(FilterSpec const& spec)      = 0;
-        virtual void Film(FilmSpec const& spec)               = 0;
-        virtual void Accelerator(AcceleratorSpec const& spec) = 0;
-        virtual void Integrator(IntegratorSpec const& spec)   = 0;
-        virtual void Camera(CameraSpec const& params)         = 0;
-        virtual void Sampler(SamplerSpec const& spec)         = 0;
+    virtual void ColorSpace(EColorSpaceType colorSpace)   = 0;
+    virtual void PixelFilter(FilterSpec const& spec)      = 0;
+    virtual void Film(FilmSpec const& spec)               = 0;
+    virtual void Accelerator(AcceleratorSpec const& spec) = 0;
+    virtual void Integrator(IntegratorSpec const& spec)   = 0;
+    virtual void Camera(CameraSpec const& params)         = 0;
+    virtual void Sampler(SamplerSpec const& spec)         = 0;
 
-        virtual void MakeNamedMedium(sid_t name, ParamMap const& params)  = 0;
-        virtual void MediumInterface(sid_t insideName, sid_t outsideName) = 0;
+    virtual void MakeNamedMedium(sid_t name, ParamMap const& params)  = 0;
+    virtual void MediumInterface(sid_t insideName, sid_t outsideName) = 0;
 
-        virtual void WorldBegin()                                                                          = 0;
-        virtual void AttributeBegin()                                                                      = 0;
-        virtual void AttributeEnd()                                                                        = 0;
-        virtual void Attribute(ETarget target, ParamMap const& params)                                     = 0;
-        virtual void Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) = 0;
-        virtual void Material(EMaterialType type, ParamMap const& params)                                  = 0;
-        virtual void MakeNamedMaterial(sid_t name, ParamMap const& params)                                 = 0;
-        virtual void NamedMaterial(sid_t name)                                                             = 0;
-        virtual void LightSource(ELightType type, ParamMap const& params)                                  = 0;
-        virtual void AreaLightSource(EAreaLightType type, ParamMap const& params)                          = 0;
-        virtual void ReverseOrientation()                                                                  = 0;
-        virtual void ObjectBegin(sid_t name)                                                               = 0;
-        virtual void ObjectEnd()                                                                           = 0;
-        virtual void ObjectInstance(sid_t name)                                                            = 0;
+    virtual void WorldBegin()                                                                          = 0;
+    virtual void AttributeBegin()                                                                      = 0;
+    virtual void AttributeEnd()                                                                        = 0;
+    virtual void Attribute(ETarget target, ParamMap const& params)                                     = 0;
+    virtual void Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) = 0;
+    virtual void Material(EMaterialType type, ParamMap const& params)                                  = 0;
+    virtual void MakeNamedMaterial(sid_t name, ParamMap const& params)                                 = 0;
+    virtual void NamedMaterial(sid_t name)                                                             = 0;
+    virtual void LightSource(ELightType type, ParamMap const& params)                                  = 0;
+    virtual void AreaLightSource(EAreaLightType type, ParamMap const& params)                          = 0;
+    virtual void ReverseOrientation()                                                                  = 0;
+    virtual void ObjectBegin(sid_t name)                                                               = 0;
+    virtual void ObjectEnd()                                                                           = 0;
+    virtual void ObjectInstance(sid_t name)                                                            = 0;
 
-        virtual void EndOfHeader(EndOfHeaderInfo const& info) = 0;
-        virtual void EndOfOptions(Options const& options)     = 0;
-        virtual void EndOfFiles()                             = 0;
+    virtual void EndOfHeader(EndOfHeaderInfo const& info) = 0;
+    virtual void EndOfOptions(Options const& options)     = 0;
+    virtual void EndOfFiles()                             = 0;
     };
 
     // TODO move
     struct DMT_MIDDLEWARE_API TransformSet
     {
-        static constexpr uint32_t maxTransforms = 2;
-        // TransformSet Public Methods
-        Transform& operator[](int i)
-        {
-            assert(i >= 0);
-            assert(i < maxTransforms);
-            return t[i];
-        }
-        Transform const& operator[](int i) const
-        {
-            assert(i >= 0);
-            assert(i < maxTransforms);
-            return t[i];
-        }
+    static constexpr uint32_t maxTransforms = 2;
+    // TransformSet Public Methods
+    Transform& operator[](int i)
+    {
+        assert(i >= 0);
+        assert(i < maxTransforms);
+        return t[i];
+    }
+    Transform const& operator[](int i) const
+    {
+        assert(i >= 0);
+        assert(i < maxTransforms);
+        return t[i];
+    }
 
-        friend TransformSet Inverse(TransformSet const& ts)
-        {
-            TransformSet tInv = ts;
-            for (int i = 0; i < maxTransforms; ++i)
-                tInv.t[i].inverse();
-            return tInv;
-        }
+    friend TransformSet Inverse(TransformSet const& ts)
+    {
+        TransformSet tInv = ts;
+        for (int i = 0; i < maxTransforms; ++i)
+            tInv.t[i].inverse();
+        return tInv;
+    }
 
-        bool IsAnimated() const
-        {
-            for (int i = 0; i < maxTransforms - 1; ++i)
-                if (t[i] != t[i + 1])
-                    return true;
-            return false;
-        }
+    bool IsAnimated() const
+    {
+        for (int i = 0; i < maxTransforms - 1; ++i)
+            if (t[i] != t[i + 1])
+                return true;
+        return false;
+    }
 
-    private:
-        Transform t[maxTransforms];
+private:
+    Transform t[maxTransforms];
     };
 
     struct GraphicsState
     {
-    public:
-        template <typename F>
-            requires std::is_invocable_r_v<dmt::Transform, F, dmt::Transform>
-        void ForActiveTransforms(F func)
-        {
-            for (int i = 0; i < TransformSet::maxTransforms; ++i)
-                if (activeTransformBits & (1 << i))
-                    ctm[i] = func(ctm[i]);
-        }
+public:
+    template <typename F>
+        requires std::is_invocable_r_v<dmt::Transform, F, dmt::Transform>
+    void ForActiveTransforms(F func)
+    {
+        for (int i = 0; i < TransformSet::maxTransforms; ++i)
+            if (activeTransformBits & (1 << i))
+                ctm[i] = func(ctm[i]);
+    }
 
-    public:
-        sid_t currentInsideMedium  = 0;
-        sid_t currentOutsideMedium = 0;
+public:
+    sid_t currentInsideMedium  = 0;
+    sid_t currentOutsideMedium = 0;
 
-        sid_t   currentMaterialName  = 0;
-        int32_t currentMaterialIndex = 0;
+    sid_t   currentMaterialName  = 0;
+    int32_t currentMaterialIndex = 0;
 
-        sid_t    areaLightName = 0;
-        ParamMap areaLightParams;
+    sid_t    areaLightName = 0;
+    ParamMap areaLightParams;
 
-        ParamMap shapeAttributes;
-        ParamMap lightAttributes;
-        ParamMap materialAttributes;
-        ParamMap textureAttributes;
+    ParamMap shapeAttributes;
+    ParamMap lightAttributes;
+    ParamMap materialAttributes;
+    ParamMap textureAttributes;
 
-        TransformSet ctm;
-        uint32_t     activeTransformBits = std::numeric_limits<uint32_t>::max();
-        bool         reverseOrientation  = false;
-        float        transformStartTime  = 0.f;
-        float        transformEndTime    = 1.f;
+    TransformSet ctm;
+    uint32_t     activeTransformBits = std::numeric_limits<uint32_t>::max();
+    bool         reverseOrientation  = false;
+    float        transformStartTime  = 0.f;
+    float        transformEndTime    = 1.f;
 
 
         std::map<sid_t, TransformSet> namedCoordinateSystems;
@@ -909,57 +909,58 @@ namespace dmt {
 
     class SceneDescription : public IParserTarget
     {
-    public:
-        DMT_MIDDLEWARE_API void Scale(float sx, float sy, float sz) override;
-        DMT_MIDDLEWARE_API void Shape(EShapeType type, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void Option(sid_t name, ParamPair const& value) override;
-        DMT_MIDDLEWARE_API void Identity() override;
-        DMT_MIDDLEWARE_API void Translate(float dx, float dy, float dz) override;
-        DMT_MIDDLEWARE_API void Rotate(float angle, float ax, float ay, float az) override;
-        DMT_MIDDLEWARE_API void LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz) override;
-        DMT_MIDDLEWARE_API void ConcatTransform(std::array<float, 16> const& transform) override;
-        DMT_MIDDLEWARE_API void Transform(std::array<float, 16> transform) override;
-        DMT_MIDDLEWARE_API void CoordinateSystem(sid_t name) override;
-        DMT_MIDDLEWARE_API void CoordSysTransform(sid_t name) override;
-        DMT_MIDDLEWARE_API void ActiveTransformAll() override;
-        DMT_MIDDLEWARE_API void ActiveTransformEndTime() override;
-        DMT_MIDDLEWARE_API void ActiveTransformStartTime() override;
-        DMT_MIDDLEWARE_API void TransformTimes(float start, float end) override;
-        DMT_MIDDLEWARE_API void ColorSpace(EColorSpaceType colorSpace) override;
-        DMT_MIDDLEWARE_API void PixelFilter(FilterSpec const& spec) override;
-        DMT_MIDDLEWARE_API void Film(FilmSpec const& spec) override;
-        DMT_MIDDLEWARE_API void Accelerator(AcceleratorSpec const& spec) override;
-        DMT_MIDDLEWARE_API void Integrator(IntegratorSpec const& spec) override;
-        DMT_MIDDLEWARE_API void Camera(CameraSpec const& params) override;
-        DMT_MIDDLEWARE_API void MakeNamedMedium(sid_t name, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void MediumInterface(sid_t insideName, sid_t outsideName) override;
-        DMT_MIDDLEWARE_API void Sampler(SamplerSpec const& spec) override;
-        DMT_MIDDLEWARE_API void WorldBegin() override;
-        DMT_MIDDLEWARE_API void AttributeBegin() override;
-        DMT_MIDDLEWARE_API void AttributeEnd() override;
-        DMT_MIDDLEWARE_API void Attribute(ETarget target, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void Material(EMaterialType type, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void MakeNamedMaterial(sid_t name, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void NamedMaterial(sid_t name) override;
-        DMT_MIDDLEWARE_API void LightSource(ELightType type, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void AreaLightSource(EAreaLightType type, ParamMap const& params) override;
-        DMT_MIDDLEWARE_API void ReverseOrientation() override;
-        DMT_MIDDLEWARE_API void ObjectBegin(sid_t name) override;
-        DMT_MIDDLEWARE_API void ObjectEnd() override;
-        DMT_MIDDLEWARE_API void ObjectInstance(sid_t name) override;
-        DMT_MIDDLEWARE_API void EndOfOptions(Options const& options) override;
-        DMT_MIDDLEWARE_API void EndOfFiles() override;
-        DMT_MIDDLEWARE_API void EndOfHeader(EndOfHeaderInfo const& info) override;
+public:
+    DMT_MIDDLEWARE_API void Scale(float sx, float sy, float sz) override;
+    DMT_MIDDLEWARE_API void Shape(EShapeType type, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void Option(sid_t name, ParamPair const& value) override;
+    DMT_MIDDLEWARE_API void Identity() override;
+    DMT_MIDDLEWARE_API void Translate(float dx, float dy, float dz) override;
+    DMT_MIDDLEWARE_API void Rotate(float angle, float ax, float ay, float az) override;
+    DMT_MIDDLEWARE_API void LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz)
+        override;
+    DMT_MIDDLEWARE_API void ConcatTransform(std::array<float, 16> const& transform) override;
+    DMT_MIDDLEWARE_API void Transform(std::array<float, 16> transform) override;
+    DMT_MIDDLEWARE_API void CoordinateSystem(sid_t name) override;
+    DMT_MIDDLEWARE_API void CoordSysTransform(sid_t name) override;
+    DMT_MIDDLEWARE_API void ActiveTransformAll() override;
+    DMT_MIDDLEWARE_API void ActiveTransformEndTime() override;
+    DMT_MIDDLEWARE_API void ActiveTransformStartTime() override;
+    DMT_MIDDLEWARE_API void TransformTimes(float start, float end) override;
+    DMT_MIDDLEWARE_API void ColorSpace(EColorSpaceType colorSpace) override;
+    DMT_MIDDLEWARE_API void PixelFilter(FilterSpec const& spec) override;
+    DMT_MIDDLEWARE_API void Film(FilmSpec const& spec) override;
+    DMT_MIDDLEWARE_API void Accelerator(AcceleratorSpec const& spec) override;
+    DMT_MIDDLEWARE_API void Integrator(IntegratorSpec const& spec) override;
+    DMT_MIDDLEWARE_API void Camera(CameraSpec const& params) override;
+    DMT_MIDDLEWARE_API void MakeNamedMedium(sid_t name, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void MediumInterface(sid_t insideName, sid_t outsideName) override;
+    DMT_MIDDLEWARE_API void Sampler(SamplerSpec const& spec) override;
+    DMT_MIDDLEWARE_API void WorldBegin() override;
+    DMT_MIDDLEWARE_API void AttributeBegin() override;
+    DMT_MIDDLEWARE_API void AttributeEnd() override;
+    DMT_MIDDLEWARE_API void Attribute(ETarget target, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void Material(EMaterialType type, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void MakeNamedMaterial(sid_t name, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void NamedMaterial(sid_t name) override;
+    DMT_MIDDLEWARE_API void LightSource(ELightType type, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void AreaLightSource(EAreaLightType type, ParamMap const& params) override;
+    DMT_MIDDLEWARE_API void ReverseOrientation() override;
+    DMT_MIDDLEWARE_API void ObjectBegin(sid_t name) override;
+    DMT_MIDDLEWARE_API void ObjectEnd() override;
+    DMT_MIDDLEWARE_API void ObjectInstance(sid_t name) override;
+    DMT_MIDDLEWARE_API void EndOfOptions(Options const& options) override;
+    DMT_MIDDLEWARE_API void EndOfFiles() override;
+    DMT_MIDDLEWARE_API void EndOfHeader(EndOfHeaderInfo const& info) override;
 
-    public:
-        CameraSpec      cameraSpec;
-        SamplerSpec     samplerSpec;
-        ColorSpaceSpec  colorSpaceSpec;
-        FilmSpec        filmSpec;
-        FilterSpec      filterSpec;
-        IntegratorSpec  integratorSpec;
-        AcceleratorSpec acceleratorSpec;
+public:
+    CameraSpec      cameraSpec;
+    SamplerSpec     samplerSpec;
+    ColorSpaceSpec  colorSpaceSpec;
+    FilmSpec        filmSpec;
+    FilterSpec      filterSpec;
+    IntegratorSpec  integratorSpec;
+    AcceleratorSpec acceleratorSpec;
 
     private:
         GraphicsState                 graphicsState;
@@ -994,74 +995,72 @@ namespace dmt {
     };
     inline constexpr bool hasFlag(EEncounteredHeaderDirective e, EEncounteredHeaderDirective val)
     {
-        return (toUnderlying(e) & toUnderlying(val)) != 0;
+    return (toUnderlying(e) & toUnderlying(val)) != 0;
     }
     inline EEncounteredHeaderDirective putFlag(EEncounteredHeaderDirective e, EEncounteredHeaderDirective val)
     {
-        return static_cast<EEncounteredHeaderDirective>(toUnderlying(e) | toUnderlying(val));
+    return static_cast<EEncounteredHeaderDirective>(toUnderlying(e) | toUnderlying(val));
     }
     // TODO move to cpp with dict constants
     inline std::string_view toStr(EEncounteredHeaderDirective e)
     {
-        using namespace std::string_view_literals;
-        switch (e)
-        {
-            using enum EEncounteredHeaderDirective;
-            case eCamera: return "Camera"sv;
-            case eSampler: return "Sampler"sv;
-            case eColorSpace: return "ColorSpace"sv;
-            case eFilm: return "Film"sv;
-            case eIntegrator: return "Integrator"sv;
-            case ePixelFilter: return "PixelFilter"sv;
-            case eAccelerator: return "Accelerator"sv;
-        }
-        return ""sv;
+    using namespace std::string_view_literals;
+    switch (e)
+    {
+        using enum EEncounteredHeaderDirective;
+        case eCamera: return "Camera"sv;
+        case eSampler: return "Sampler"sv;
+        case eColorSpace: return "ColorSpace"sv;
+        case eFilm: return "Film"sv;
+        case eIntegrator: return "Integrator"sv;
+        case ePixelFilter: return "PixelFilter"sv;
+        case eAccelerator: return "Accelerator"sv;
+    }
+    return ""sv;
     }
 
     // TOSO Option directives must precede anything else
     // TODO AreaLight is applied to a shape AFTERWARDS
     class SceneParser
     {
-    public:
-        DMT_MIDDLEWARE_API      SceneParser(AppContext& actx, IParserTarget* pTarget, std::string_view filePath);
-        DMT_MIDDLEWARE_API void parse(AppContext& actx, Options& inOutOptions);
+public:
+    DMT_MIDDLEWARE_API      SceneParser(AppContext & actx, IParserTarget * pTarget, std::string_view filePath);
+    DMT_MIDDLEWARE_API void parse(AppContext & actx, Options & inOutOptions);
 
-    private:
-        static bool setOptionParam(AppContext& actx, ParamMap const& params, Options& outOptions);
+private:
+    static bool setOptionParam(AppContext & actx, ParamMap const& params, Options& outOptions);
 
-    private:
-        uint32_t     parseArgs(AppContext& actx, TokenStream& stream, ArgsDArray& outArr);
-        uint32_t     parseParams(AppContext& actx, TokenStream& stream, ParamMap& outParams);
-        bool         transitionToHeaderIfFirstHeaderDirective(AppContext&                 actx,
-                                                              Options const&              outOptions,
-                                                              EEncounteredHeaderDirective val);
-        void         pushFile(AppContext& actx, std::string_view filePath, bool isImportOrMainFile);
-        void         popFile(bool isImportOrMainFile);
-        TokenStream& topFile();
-        bool         hasScope() const;
-        EScope       currentScope() const;
-        void         popScope();
-        void         pushScope(EScope scope);
+private:
+    uint32_t parseArgs(AppContext & actx, TokenStream & stream, ArgsDArray & outArr);
+    uint32_t parseParams(AppContext & actx, TokenStream & stream, ParamMap & outParams);
+    bool transitionToHeaderIfFirstHeaderDirective(AppContext & actx, Options const& outOptions, EEncounteredHeaderDirective val);
+    void         pushFile(AppContext & actx, std::string_view filePath, bool isImportOrMainFile);
+    void         popFile(bool isImportOrMainFile);
+    TokenStream& topFile();
+    bool         hasScope() const;
+    EScope       currentScope() const;
+    void         popScope();
+    void         pushScope(EScope scope);
 
-    private:
-        struct ParsingState
-        {
-            // populated once the Camera directive is encountered (or left default constructed)
-            CameraSpec cameraSpec;
-            // populated once the Film directive is encountered
-            int32_t xResolution = -1;
-            int32_t yResolution = -1;
-        };
+private:
+    struct ParsingState
+    {
+        // populated once the Camera directive is encountered (or left default constructed)
+        CameraSpec cameraSpec;
+        // populated once the Film directive is encountered
+        int32_t xResolution = -1;
+        int32_t yResolution = -1;
+    };
 
-        // TODO better
-        std::forward_list<TokenStream>   m_fileStack;
-        std::vector<std::vector<EScope>> m_scopeStacks;
-        std::string                      m_basePath;
-        IParserTarget*                   m_pTarget;
+    // TODO better
+    std::forward_list<TokenStream>   m_fileStack;
+    std::vector<std::vector<EScope>> m_scopeStacks;
+    std::string                      m_basePath;
+    IParserTarget*                   m_pTarget;
 
-        ParsingState m_parsingState;
+    ParsingState m_parsingState;
 
-        EParsingStep                m_parsingStep        = EParsingStep::eOptions;
-        EEncounteredHeaderDirective m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
+    EParsingStep                m_parsingStep        = EParsingStep::eOptions;
+    EEncounteredHeaderDirective m_encounteredHeaders = EEncounteredHeaderDirective::eNone;
     };
 } // namespace dmt

@@ -50,7 +50,7 @@ namespace dmt {
         void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
         return address; // to check whether it is different than nullptr
 #elif defined(DMT_OS_LINUX)
-        void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void* address   = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (address == MAP_FAILED)
         {
             return nullptr;

@@ -25,6 +25,7 @@
 
 namespace dmt {
     // Enums ----------------------------------------------------------------------------------------------------------
+    //I don't understand
     enum class ERenderCoordSys : uint8_t
     {
         eCameraWorld = 0,
@@ -41,10 +42,11 @@ namespace dmt {
         ePoint  = 0x3f80'0000, // 1.f
     };
     namespace fl {
-        DMT_CPU_GPU float inline bitsToFloat(EVecType32 e) {
+        DMT_CPU_GPU inline float bitsToFloat(EVecType32 e)
+        {
             return bitsToFloat(static_cast<std::underlying_type_t<EVecType32>>(e));
         }
-    }
+    } // namespace fl
 
     // TODO SOA
     struct Intervalf
@@ -76,6 +78,7 @@ namespace dmt {
     using Vec4f  = glm::vec4;
     using Mat4f  = glm::mat4;
     using Quat   = glm::quat;
+    using Pt2f   = glm::vec2;
 
     class Transform
     {
@@ -113,7 +116,6 @@ namespace dmt {
 
         // Swap m and mInv
         DMT_CPU_GPU void inverse_();
-
         // Apply the transform to a point
         DMT_CPU_GPU Vec3f applyToPoint(Vec3f const& point) const;
 
@@ -128,11 +130,14 @@ namespace dmt {
         // Inequality comparison
         DMT_CPU_GPU bool operator!=(Transform const& other) const;
 
-        DMT_CPU_GPU bool     hasScale(float tolerance = 1e-3f) const;
-        DMT_CPU_GPU Vec3f    applyInverse(Vec3f vpn, EVecType32 type, bool normalize = false) const;
-        DMT_CPU_GPU Vec3f    operator()(Vec3f vpn, EVecType32 type, bool normalize = false) const;
+        DMT_CPU_GPU bool            hasScale(float tolerance = 1e-3f) const;
+        DMT_CPU_GPU Vec3f           applyInverse(Vec3f vpn, EVecType32 type, bool normalize = false) const;
+        DMT_CPU_GPU Vec3f           operator()(Vec3f vpn, EVecType32 type, bool normalize = false) const;
         DMT_CPU_GPU struct Bounds3f operator()(struct Bounds3f const& b) const;
     };
+
+    // retrun a Tranfrom with the Inverse mat of t passed
+    DMT_CPU_GPU inline Transform Inverse(Transform const& t) { return Transform(t.mInv); }
 
     struct Bounds3f
     {
@@ -253,6 +258,8 @@ namespace dmt {
         DMT_CPU_GPU       CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys);
         AnimatedTransform renderFromCamera;
         Transform         worldFromRender;
+
+        DMT_CPU_GPU Transform RenderFromWorld() const { return worldFromRender; }
     };
 
 } // namespace dmt

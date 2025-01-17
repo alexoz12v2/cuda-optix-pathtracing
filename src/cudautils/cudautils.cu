@@ -151,6 +151,7 @@ namespace dmt {
         mInv = Mat4f(1.0f);
     }
 
+
     __host__ __device__ void Transform::inverse_()
     {
         Mat4f tmp = m;
@@ -261,10 +262,10 @@ namespace dmt {
     {
         using enum EVecType32;
         Bounds3f bRet;
-        for (int i = 0; i < 8 /*corners*/; ++i) 
+        for (int i = 0; i < 8 /*corners*/; ++i)
         {
             Pt3f point = b.corner(static_cast<Bounds3f::EBoundsCorner>(i));
-            bRet = bbUnion(bRet, (*this)(point, ePoint));
+            bRet       = bbUnion(bRet, (*this)(point, ePoint));
         }
         return bRet;
     }
@@ -320,7 +321,7 @@ namespace dmt {
     __host__ __device__ Pt3f Bounds3f::corner(EBoundsCorner corner) const
     {
         Pt3f const ret{
-            operator[](corner & eRight).x,
+            operator[](corner& eRight).x,
             operator[]((corner & eForward) >> 1).y,
             operator[]((corner & eTop) >> 2).z,
         };

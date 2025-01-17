@@ -316,14 +316,14 @@ namespace dmt {
     }
 
     template <VectorScalable T>
-    DMT_CPU_GPU inline T& operator*(T& v, typename T::value_type k)
+    DMT_CPU_GPU inline T& operator*=(T& v, typename T::value_type k)
     {
         for (int32_t i = 0; i < T::numComponents(); ++i)
             v[i] *= k;
-        return ret;
+        return v;
     }
     template <VectorScalable T>
-    DMT_CPU_GPU inline T& operator/(T& v, typename T::value_type k)
+    DMT_CPU_GPU inline T& operator/=(T& v, typename T::value_type k)
     {
         T ret;
         for (int32_t i = 0; i < T::numComponents(); ++i)
@@ -463,46 +463,30 @@ namespace dmt {
     DMT_CPU_GPU bool near(Tuple4i a, Tuple4i b);
 
     DMT_CPU_GPU Tuple2f::value_type dot(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple2i::value_type dot(Tuple2i a, Tuple2i b);
     DMT_CPU_GPU Tuple3f::value_type dot(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple3i::value_type dot(Tuple3i a, Tuple3i b);
     DMT_CPU_GPU Tuple4f::value_type dot(Tuple4f a, Tuple4f b);
-    DMT_CPU_GPU Tuple4i::value_type dot(Tuple4i a, Tuple4i b);
 
     DMT_CPU_GPU Tuple2f::value_type absDot(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple2i::value_type absDot(Tuple2i a, Tuple2i b);
     DMT_CPU_GPU Tuple3f::value_type absDot(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple3i::value_type absDot(Tuple3i a, Tuple3i b);
     DMT_CPU_GPU Tuple4f::value_type absDot(Tuple4f a, Tuple4f b);
-    DMT_CPU_GPU Tuple4i::value_type absDot(Tuple4i a, Tuple4i b);
 
     DMT_CPU_GPU Tuple3f cross(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple3i cross(Tuple3i a, Tuple3i b);
 
     DMT_CPU_GPU Tuple2f normalize(Tuple2f v);
     DMT_CPU_GPU Tuple3f normalize(Tuple3f v);
     DMT_CPU_GPU Tuple4f normalize(Tuple4f v);
 
     DMT_CPU_GPU Tuple2f::value_type normL2(Tuple2f v);
-    DMT_CPU_GPU Tuple2i::value_type normL2(Tuple2i v);
     DMT_CPU_GPU Tuple3f::value_type normL2(Tuple3f v);
-    DMT_CPU_GPU Tuple3i::value_type normL2(Tuple3i v);
     DMT_CPU_GPU Tuple4f::value_type normL2(Tuple4f v);
-    DMT_CPU_GPU Tuple4i::value_type normL2(Tuple4i v);
 
     DMT_CPU_GPU Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple2i::value_type distanceL2(Tuple2i a, Tuple2i b);
     DMT_CPU_GPU Tuple3f::value_type distanceL2(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple3i::value_type distanceL2(Tuple3i a, Tuple3i b);
     DMT_CPU_GPU Tuple4f::value_type distanceL2(Tuple4f a, Tuple4f b);
-    DMT_CPU_GPU Tuple4i::value_type distanceL2(Tuple4i a, Tuple4i b);
 
     DMT_CPU_GPU Tuple2f::value_type dotSelf(Tuple2f v);
-    DMT_CPU_GPU Tuple2i::value_type dotSelf(Tuple2i v);
     DMT_CPU_GPU Tuple3f::value_type dotSelf(Tuple3f v);
-    DMT_CPU_GPU Tuple3i::value_type dotSelf(Tuple3i v);
     DMT_CPU_GPU Tuple4f::value_type dotSelf(Tuple4f v);
-    DMT_CPU_GPU Tuple4i::value_type dotSelf(Tuple4i v);
 
     // Vector Types: Geometric Functions ------------------------------------------------------------------------------
     template <VectorNormalized N, Vector V>
@@ -671,12 +655,15 @@ namespace dmt {
     // define a rotation in the plane defined by two axes
     DMT_CPU_GPU Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta);
     DMT_CPU_GPU QR       qr(Matrix4f const& m, int32_t numIter = 10);
-    DMT_CPU_GPU SVD      svd(Matrix4f const& m);
-    DMT_CPU_GPU bool     isSingular(Matrix4f const& m, float tolerance = 1e-6f);
+    DMT_CPU     SVD      svd(Matrix4f const& m);
+    DMT_CPU     bool     isSingular(Matrix4f const& m, float tolerance = 1e-6f);
 
     DMT_CPU_GPU Matrix4f operator+(Matrix4f const& a, Matrix4f const& b);
     DMT_CPU_GPU Matrix4f operator-(Matrix4f const& a, Matrix4f const& b);
     DMT_CPU_GPU Matrix4f operator*(Matrix4f const& a, Matrix4f const& b);
+    DMT_CPU_GPU Matrix4f operator*(float v, Matrix4f const& m);
+    DMT_CPU_GPU Matrix4f operator*(Matrix4f const& m, float v);
+    DMT_CPU_GPU Matrix4f operator/(Matrix4f const& m, float v);
 
     DMT_CPU_GPU Matrix4f& operator+=(Matrix4f& a, Matrix4f const& b);
     DMT_CPU_GPU Matrix4f& operator-=(Matrix4f& a, Matrix4f const& b);

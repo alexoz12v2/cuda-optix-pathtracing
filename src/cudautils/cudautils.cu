@@ -2,6 +2,16 @@
 
 #include <platform/platform.h>
 
+__host__ __device__ float arg(float f)
+{
+    if (f > 0 || dmt::fl::floatToBits(f) == 0u)
+        return 0;
+    if (f < 0 || dmt::fl::floatToBits(f) == 0x8000'0000u)
+        return dmt::fl::pi();
+    else
+        return std::numeric_limits<float>::quiet_NaN();
+}
+
 // silence warnings __host__ __device__ on a defaulted copy control
 #if defined(__NVCC__)
 #pragma nv_diag_suppress 20012
@@ -553,17 +563,10 @@ namespace dmt {
     }
 
     __host__ __device__ Tuple2f::value_type dot(Tuple2f a, Tuple2f b) { return glm::dot(toGLM(a), toGLM(b)); }
-    __host__ __device__ Tuple2i::value_type dot(Tuple2i a, Tuple2i b) { return glm::dot(toGLM(a), toGLM(b)); }
     __host__ __device__ Tuple3f::value_type dot(Tuple3f a, Tuple3f b) { return glm::dot(toGLM(a), toGLM(b)); }
-    __host__ __device__ Tuple3i::value_type dot(Tuple3i a, Tuple3i b) { return glm::dot(toGLM(a), toGLM(b)); }
     __host__ __device__ Tuple4f::value_type dot(Tuple4f a, Tuple4f b) { return glm::dot(toGLM(a), toGLM(b)); }
-    __host__ __device__ Tuple4i::value_type dot(Tuple4i a, Tuple4i b) { return glm::dot(toGLM(a), toGLM(b)); }
 
     __host__ __device__ Tuple2f::value_type absDot(Tuple2f a, Tuple2f b)
-    {
-        return glm::abs(glm::dot(toGLM(a), toGLM(b)));
-    }
-    __host__ __device__ Tuple2i::value_type absDot(Tuple2i a, Tuple2i b)
     {
         return glm::abs(glm::dot(toGLM(a), toGLM(b)));
     }
@@ -571,38 +574,22 @@ namespace dmt {
     {
         return glm::abs(glm::dot(toGLM(a), toGLM(b)));
     }
-    __host__ __device__ Tuple3i::value_type absDot(Tuple3i a, Tuple3i b)
-    {
-        return glm::abs(glm::dot(toGLM(a), toGLM(b)));
-    }
     __host__ __device__ Tuple4f::value_type absDot(Tuple4f a, Tuple4f b)
-    {
-        return glm::abs(glm::dot(toGLM(a), toGLM(b)));
-    }
-    __host__ __device__ Tuple4i::value_type absDot(Tuple4i a, Tuple4i b)
     {
         return glm::abs(glm::dot(toGLM(a), toGLM(b)));
     }
 
     __host__ __device__ Tuple3f cross(Tuple3f a, Tuple3f b) { return {fromGLM(glm::cross(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple3i cross(Tuple3i a, Tuple3i b) { return {fromGLM(glm::cross(toGLM(a), toGLM(b)))}; }
 
     __host__ __device__ Tuple2f normalize(Tuple2f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
     __host__ __device__ Tuple3f normalize(Tuple3f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
     __host__ __device__ Tuple4f normalize(Tuple4f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
 
     __host__ __device__ Tuple2f::value_type normL2(Tuple2f v) { return glm::length(toGLM(v)); }
-    __host__ __device__ Tuple2i::value_type normL2(Tuple2i v) { return glm::length(toGLM(v)); }
     __host__ __device__ Tuple3f::value_type normL2(Tuple3f v) { return glm::length(toGLM(v)); }
-    __host__ __device__ Tuple3i::value_type normL2(Tuple3i v) { return glm::length(toGLM(v)); }
     __host__ __device__ Tuple4f::value_type normL2(Tuple4f v) { return glm::length(toGLM(v)); }
-    __host__ __device__ Tuple4i::value_type normL2(Tuple4i v) { return glm::length(toGLM(v)); }
 
     __host__ __device__ Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b)
-    {
-        return glm::distance(toGLM(a), toGLM(b));
-    }
-    __host__ __device__ Tuple2i::value_type distanceL2(Tuple2i a, Tuple2i b)
     {
         return glm::distance(toGLM(a), toGLM(b));
     }
@@ -610,25 +597,14 @@ namespace dmt {
     {
         return glm::distance(toGLM(a), toGLM(b));
     }
-    __host__ __device__ Tuple3i::value_type distanceL2(Tuple3i a, Tuple3i b)
-    {
-        return glm::distance(toGLM(a), toGLM(b));
-    }
     __host__ __device__ Tuple4f::value_type distanceL2(Tuple4f a, Tuple4f b)
-    {
-        return glm::distance(toGLM(a), toGLM(b));
-    }
-    __host__ __device__ Tuple4i::value_type distanceL2(Tuple4i a, Tuple4i b)
     {
         return glm::distance(toGLM(a), toGLM(b));
     }
 
     __host__ __device__ Tuple2f::value_type dotSelf(Tuple2f v) { return glm::length2(toGLM(v)); }
-    __host__ __device__ Tuple2i::value_type dotSelf(Tuple2i v) { return glm::length2(toGLM(v)); }
     __host__ __device__ Tuple3f::value_type dotSelf(Tuple3f v) { return glm::length2(toGLM(v)); }
-    __host__ __device__ Tuple3i::value_type dotSelf(Tuple3i v) { return glm::length2(toGLM(v)); }
     __host__ __device__ Tuple4f::value_type dotSelf(Tuple4f v) { return glm::length2(toGLM(v)); }
-    __host__ __device__ Tuple4i::value_type dotSelf(Tuple4i v) { return glm::length2(toGLM(v)); }
 
     // Vector Types: Geometric Functions ------------------------------------------------------------------------------
     __host__ __device__ float angleBetween(Normal3f a, Normal3f b) { return glm::dot(toGLM(a), toGLM(b)); }
@@ -741,8 +717,8 @@ namespace dmt {
     __host__ __device__ Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b)
     {
         Bounds3f bRet;
-        bRet.pMin = glm::min(a.pMin, b.pMin);
-        bRet.pMax = glm::max(a.pMax, b.pMax);
+        bRet.pMin = min(a.pMin, b.pMin);
+        bRet.pMax = max(a.pMax, b.pMax);
         return bRet;
     }
 
@@ -955,7 +931,7 @@ namespace dmt {
         return ret;
     }
 
-    __host__ __device__ SVD svd(Matrix4f const& m, uint32_t maxIterations = 100)
+    __host__ SVD svd(Matrix4f const& m, uint32_t maxIterations = 100)
     {
         static constexpr int32_t numCols = 4;
         static constexpr int32_t numRows = 4;
@@ -986,7 +962,7 @@ namespace dmt {
         return ret;
     }
 
-    __host__ __device__ bool isSingular(Matrix4f const& m, float tolerance)
+    __host__ bool isSingular(Matrix4f const& m, float tolerance)
     {
         assert(tolerance > 0.f);
         // Convert the input Matrix4f to Eigen::Matrix4f
@@ -1021,6 +997,27 @@ namespace dmt {
     __host__ __device__ Matrix4f operator*(Matrix4f const& a, Matrix4f const& b)
     {
         return fromGLMmat(toGLMmat(a) * toGLMmat(b));
+    }
+    __host__ __device__ Matrix4f operator*(float v, Matrix4f const& m)
+    {
+        Matrix4f ret = m;
+        for (int32_t i = 0; i < 16; ++i)
+            ret.m[i] *= v;
+        return ret;
+    }
+    __host__ __device__ Matrix4f operator*(Matrix4f const& m, float v)
+    {
+        Matrix4f ret = m;
+        for (int32_t i = 0; i < 16; ++i)
+            ret.m[i] *= v;
+        return ret;
+    }
+    __host__ __device__ Matrix4f operator/(Matrix4f const& m, float v)
+    {
+        Matrix4f ret = m;
+        for (int32_t i = 0; i < 16; ++i)
+            ret.m[i] /= v;
+        return ret;
     }
 
     __host__ __device__ Matrix4f& operator+=(Matrix4f& a, Matrix4f const& b)
@@ -1068,7 +1065,6 @@ namespace dmt {
 
     __host__ __device__ Matrix4f inverse(Matrix4f const& m)
     {
-        assert(!isSingular(m));
         return fromGLMmat(glm::inverse(toGLMmat(m)));
     }
 
@@ -1278,40 +1274,35 @@ namespace dmt {
     }
 
     // Inequality comparison
-    __host__ __device__ bool Transform::operator!=(Transform const& other) const {
-        return !(*this == other); }
+    __host__ __device__ bool Transform::operator!=(Transform const& other) const { return !(*this == other); }
 
     __host__ __device__ bool Transform::hasScale(float tolerance) const
     {
         // compute the length of the three reference unit vectors after being transformed. if any of these has been
         // scaled, then the transformation has a scaling component
-        Vector3f const scales{ {glm::length2(operator()(Vec3f{1.f, 0.f, 0.f}),
-                           glm::length2(operator()(Vec3f{0.f, 1.f, 0.f}),
-                           glm::length2(operator()(Vec3f{0.f, 0.f, 1.f})} };
-        bool res = !near(scales, Vec3f{{1.f, 1.f, 1.f}});
+        float const    x = dotSelf(operator()(Vector3f{{1.f, 0.f, 0.f}}));
+        float const    y = dotSelf(operator()(Vector3f{{0.f, 1.f, 0.f}}));
+        float const    z = dotSelf(operator()(Vector3f{{0.f, 0.f, 1.f}}));
+        Vector3f const scales{{x, y, z}};
+
+        bool res = !near(scales, Vector3f{{1.f, 1.f, 1.f}});
         return res;
     }
 
-    __host__ __device__ Vector3f Transform::applyInverse(Vector3f v) const {
-        return mul(mInv, v); }
-    __host__ __device__ Normal3f Transform::applyInverse(Point3f v) const {
-        return mul(mInv, v); }
-    __host__ __device__ Point3f  Transform::applyInverse(Normal3f v) const {
-        return mul(mInv, v); }
-    __host__ __device__ Vector3f Transform::operator()(Vector3f v) const {
-        return mul(m, v); }
-    __host__ __device__ Point3f  Transform::operator()(Point3f v) const {
-        return mul(m, v); }
-    __host__ __device__ Normal3f Transform::operator()(Normal3f v) const {
-        return mul(m, v); }
+    __host__ __device__ Vector3f Transform::applyInverse(Vector3f v) const { return mul(mInv, v); }
+    __host__ __device__ Normal3f Transform::applyInverse(Point3f v) const { return mul(mInv, v); }
+    __host__ __device__ Point3f  Transform::applyInverse(Normal3f v) const { return mul(mInv, v); }
+    __host__ __device__ Vector3f Transform::operator()(Vector3f v) const { return mul(m, v); }
+    __host__ __device__ Point3f  Transform::operator()(Point3f v) const { return mul(m, v); }
+    __host__ __device__ Normal3f Transform::operator()(Normal3f v) const { return mul(m, v); }
 
     __host__ __device__ Bounds3f Transform::operator()(Bounds3f const& b) const
     {
         Bounds3f bRet;
         for (int i = 0; i < 8 /*corners*/; ++i)
         {
-            Point3f point = b.corner(static_cast<Bounds3f::EBoundsCorner>(i));
-            bRet       = bbUnion(bRet, operator()(point));
+            Point3f point = b.corner(static_cast<EBoundsCorner>(i));
+            bRet          = bbUnion(bRet, operator()(point));
         }
         return bRet;
     }
@@ -1343,17 +1334,18 @@ namespace dmt {
         endTransform.decompose(m_t[1], m_r[1], m_s[1]);
 
         // Flip _R[1]_ if needed to select shortest path
-        if (glm::dot(m_r[0], m_r[1]) < 0)
+        if (dot(m_r[0], m_r[1]) < 0)
             m_r[1] = -m_r[1];
 
-        if (glm::dot(m_r[0], m_r[1]) < 0.9995f)
+        if (dot(m_r[0], m_r[1]) < 0.9995f)
             m_state = static_cast<EState>(m_state | eHasRotation);
         // Compute terms of motion derivative function
         if ((m_state & eHasRotation) != 0)
         {
-            float cosTheta = glm::dot(m_r[0], m_r[1]);
+            float cosTheta = dot(m_r[0], m_r[1]);
             float theta    = glm::acos(glm::clamp(cosTheta, -1.f, 1.f));
-            Quat  qperp    = glm::normalize(m_r[1] - m_r[0] * cosTheta);
+
+            Quaternion qperp = normalize(m_r[1] - m_r[0] * cosTheta);
 
             float t0x    = m_t[0].x;
             float t0y    = m_t[0].y;
@@ -1818,8 +1810,7 @@ namespace dmt {
         }
     }
 
-    __host__ __device__ bool AnimatedTransform::isAnimated() const {
-        return (m_state & eAnimated) != 0; }
+    __host__ __device__ bool AnimatedTransform::isAnimated() const { return (m_state & eAnimated) != 0; }
 
     __host__ __device__ Vector3f AnimatedTransform::applyInverse(Vector3f vpn, float time) const
     {
@@ -1908,8 +1899,7 @@ namespace dmt {
         return startTransform.hasScale() || endTransform.hasScale();
     }
 
-    __host__ __device__ bool AnimatedTransform::hasRotation() const {
-        return (m_state & eHasRotation) != 0; }
+    __host__ __device__ bool AnimatedTransform::hasRotation() const { return (m_state & eHasRotation) != 0; }
 
     __host__ __device__ Transform AnimatedTransform::interpolate(float time) const
     {
@@ -1922,16 +1912,16 @@ namespace dmt {
         float dt = (time - startTime) / (endTime - startTime);
 
         // Interpolate translation at _dt_
-        Vector3f trans = (1 - dt) * m_t[0] + dt * m_t[1]; // typedef glm::vec3
+        Vector3f trans = (1 - dt) * m_t[0] + dt * m_t[1];
 
         // Interpolate rotation at _dt_
-        Quaternion rotate = slerp(m_r[0], m_r[1], dt); // glm::quat
+        Quaternion rotate = slerp(dt, m_r[0], m_r[1]);
 
         // Interpolate scale at _dt_
-        Matrix4f scale = (1 - dt) * m_s[0] + dt * m_s[1]; // glm::mat4
+        Matrix4f scale = (1 - dt) * m_s[0] + dt * m_s[1];
 
         // Construct the final transformation matrix
-        Matrix4f transform = glm::mat4(1.0f); // Start with identity
+        Matrix4f transform = Matrix4f::identity(); // Start with identity
 
         // Apply scale (scale matrix)
         transform = scale;
@@ -1957,7 +1947,7 @@ namespace dmt {
         else // Return motion bounds accounting for animated rotation
         {
             for (int32_t corner = 0; corner < 8; ++corner)
-                bounds = bbUnion(bounds, boundsPointMotion(b.corner(static_cast<Bounds3f::EBoundsCorner>(corner))));
+                bounds = bbUnion(bounds, boundsPointMotion(b.corner(static_cast<EBoundsCorner>(corner))));
         }
 
         return bounds;
@@ -1969,7 +1959,7 @@ namespace dmt {
             return Bounds3f(startTransform(p));
 
         Bounds3f bounds(startTransform(p), endTransform(p));
-        float    cosTheta = glm::dot(m_r[0], m_r[1]);
+        float    cosTheta = dot(m_r[0], m_r[1]);
         float    theta    = glm::acos(glm::clamp(cosTheta, -1.f, 1.f));
         for (int c = 0; c < 3; ++c)
         {

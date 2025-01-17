@@ -12,4 +12,5 @@ target_link_libraries(dmt-cudautils
     dmt-platform-mixed 
   PRIVATE
     glm::glm
+    Eigen3::Eigen
 )

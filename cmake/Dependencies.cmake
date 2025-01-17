@@ -2,6 +2,11 @@ include(FetchContent)
 include(FindPackageHandleStandardArgs)
 
 macro(dmt_setup_dependencies)
+  # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
+  find_package(OpenGL REQUIRED)
+  find_package(CUDAToolkit REQUIRED)
+  find_package(OptiX80 REQUIRED)
+
   if(NOT TARGET Catch2::Catch2WithMain)
     FetchContent_Declare(Catch2
       GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -32,17 +37,6 @@ macro(dmt_setup_dependencies)
     add_compile_definitions(GLM_FORCE_XYZW_ONLY)
   endif()
 
-  find_package(CUDAToolkit REQUIRED)
-  if(NOT TARGET glfw)
-    find_package(OpenGL REQUIRED) 
-    FetchContent_Declare(
-    glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG        3.3.4
-    )
-    FetchContent_MakeAvailable(glfw)
-  endif()
-
   if(NOT TARGET glad)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glad)
   endif()
@@ -51,8 +45,33 @@ macro(dmt_setup_dependencies)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
   endif()
 
-  # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
-  find_package(OpenGL REQUIRED)
-  find_package(CUDAToolkit REQUIRED)
-  find_package(OptiX80 REQUIRED)
+  if(NOT TARGET Eigen3::Eigen)
+    FetchContent_Declare(
+      Eigen
+      GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+      GIT_TAG 3.4.0
+      GIT_SHALLOW TRUE
+      GIT_PROGRESS TRUE)
+    # note: To disable eigen tests,
+    # you should put this code in a add_subdirectory to avoid to change
+    # BUILD_TESTING for your own project too since variables are directory
+    # scoped
+    set(BUILD_TESTING OFF)
+    set(EIGEN_BUILD_TESTING OFF)
+    set(EIGEN_MPL2_ONLY ON)
+    set(EIGEN_BUILD_PKGCONFIG OFF)
+    set(EIGEN_BUILD_DOC OFF)
+    set(EIGEN_BUILD_CMAKE_PACKAGE OFF)
+    FetchContent_MakeAvailable(Eigen)
+  endif()
+
+  if(NOT TARGET glfw)
+    FetchContent_Declare(
+      glfw
+      GIT_REPOSITORY https://github.com/glfw/glfw.git
+      GIT_TAG        3.3.4
+    )
+    FetchContent_MakeAvailable(glfw)
+  endif()
+
 endmacro()

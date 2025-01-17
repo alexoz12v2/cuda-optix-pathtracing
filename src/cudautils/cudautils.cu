@@ -15,13 +15,20 @@
 #include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
 #include <glm/ext/scalar_constants.hpp>  // glm::pi
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtc/epsilon.hpp>
 #include <glm/gtx/matrix_decompose.hpp> // glm::decompose
 #include <glm/gtx/norm.hpp>             // glm::length2
+
+#include <Eigen/Dense>
 #if defined(__NVCC__)
 #pragma nv_diag_default 20012
 #endif
+
+
+// TODO generated optimized assembly for x64 uses vectorized instructions for floating point types, like "[v]addps", but integer types
+// don't seem to use SSE2
 
 namespace dmt {
     // Vector Types: Static Assertions --------------------------------------------------------------------------------
@@ -153,7 +160,25 @@ namespace dmt {
         return *std::bit_cast<Quaternion const*>(&q);
     }
 
+    inline constexpr __host__ __device__ glm::mat4& toGLMmat(Matrix4f& m) { return *std::bit_cast<glm::mat4*>(&m); }
+    inline constexpr __host__ __device__ glm::mat4 const& toGLMmat(Matrix4f const& m)
+    {
+        return *std::bit_cast<glm::mat4 const*>(&m);
+    }
+    inline constexpr __host__ __device__ Matrix4f& fromGLMmat(glm::mat4& m) { return *std::bit_cast<Matrix4f*>(&m); }
+    inline constexpr __host__ __device__ Matrix4f const& fromGLMmat(glm::mat4 const& m)
+    {
+        return *std::bit_cast<Matrix4f const*>(&m);
+    }
+
     // Vector Types: Basic Operations ---------------------------------------------------------------------------------
+    __host__ __device__ Point2i::operator Vector2i() { return *std::bit_cast<Vector2i const*>(this); }
+    __host__ __device__ Point2f::operator Vector2f() { return *std::bit_cast<Vector2f const*>(this); }
+    __host__ __device__ Point3i::operator Vector3i() { return *std::bit_cast<Vector3i const*>(this); }
+    __host__ __device__ Point3f::operator Vector3f() { return *std::bit_cast<Vector3f const*>(this); }
+    __host__ __device__ Point4i::operator Vector4i() { return *std::bit_cast<Vector4i const*>(this); }
+    __host__ __device__ Point4f::operator Vector4f() { return *std::bit_cast<Vector4f const*>(this); }
+
     __host__ __device__ Point2i  operator+(Point2i a, Vector2i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
     __host__ __device__ Point2f  operator+(Point2f a, Vector2f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
     __host__ __device__ Point3i  operator+(Point3i a, Vector3i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
@@ -232,8 +257,6 @@ namespace dmt {
     __host__ __device__ Vector3f operator/(Vector3f a, Vector3f b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
     __host__ __device__ Vector4i operator/(Vector4i a, Vector4i b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
     __host__ __device__ Vector4f operator/(Vector4f a, Vector4f b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
-
-    __host__ __device__ Quaternion operator/(Quaternion a, Quaternion b) { return fromGLMquat(toGLM(a) / toGLM(b)); }
 
     __host__ __device__ Point2i& operator+=(Point2i& a, Vector2i b)
     {
@@ -427,23 +450,10 @@ namespace dmt {
         return a;
     }
 
-    __host__ __device__ Quaternion& operator/=(Quaternion& a, Quaternion b)
-    {
-        toGLM(a) /= toGLM(b);
-        return a;
-    }
-
     __host__ __device__ Normal2f normalFrom(Vector2f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
     __host__ __device__ Normal3f normalFrom(Vector3f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
 
     // Vector Types: Generic Tuple Operations -------------------------------------------------------------------------
-    __host__ __device__ Tuple2f abs(Tuple2f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple2i abs(Tuple2i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple3f abs(Tuple3f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple3i abs(Tuple3i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple4f abs(Tuple4f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple4i abs(Tuple4i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-
     __host__ __device__ Tuple2f abs(Tuple2f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
     __host__ __device__ Tuple2i abs(Tuple2i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
     __host__ __device__ Tuple3f abs(Tuple3f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
@@ -511,34 +521,34 @@ namespace dmt {
     __host__ __device__ Tuple4f max(Tuple4f a, Tuple4f b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
     __host__ __device__ Tuple4i max(Tuple4i a, Tuple4i b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
 
-    __host__ __device__ bool near(Tuple2f a, Tuple2f b, float tolerance = fl::eqTol())
+    __host__ __device__ bool near(Tuple2f a, Tuple2f b, float tolerance)
     {
         auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
         return bvec.x && bvec.y;
     }
     __host__ __device__ bool near(Tuple2i a, Tuple2i b)
     {
-        auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
+        auto bvec = toGLM(a) = toGLM(b);
         return bvec.x && bvec.y;
     }
-    __host__ __device__ bool near(Tuple3f a, Tuple3f b, float tolerance = fl::eqTol())
+    __host__ __device__ bool near(Tuple3f a, Tuple3f b, float tolerance)
     {
         auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
         return bvec.x && bvec.y && bvec.z;
     }
     __host__ __device__ bool near(Tuple3i a, Tuple3i b)
     {
-        auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
+        auto bvec = toGLM(a) = toGLM(b);
         return bvec.x && bvec.y && bvec.z;
     }
-    __host__ __device__ bool near(Tuple4f a, Tuple4f b, float tolerance = fl::eqTol())
+    __host__ __device__ bool near(Tuple4f a, Tuple4f b, float tolerance)
     {
         auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
         return bvec.x && bvec.y && bvec.z && bvec.w;
     }
     __host__ __device__ bool near(Tuple4i a, Tuple4i b)
     {
-        auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
+        auto bvec = toGLM(a) = toGLM(b);
         return bvec.x && bvec.y && bvec.z && bvec.w;
     }
 
@@ -581,12 +591,12 @@ namespace dmt {
     __host__ __device__ Tuple3f normalize(Tuple3f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
     __host__ __device__ Tuple4f normalize(Tuple4f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
 
-    __host__ __device__ Tuple2f::value_type normL2(Tuple2f v) { return {fromGLM(glm::length(toGLM(v)))}; }
-    __host__ __device__ Tuple2i::value_type normL2(Tuple2i v) { return {fromGLM(glm::length(toGLM(v)))}; }
-    __host__ __device__ Tuple3f::value_type normL2(Tuple3f v) { return {fromGLM(glm::length(toGLM(v)))}; }
-    __host__ __device__ Tuple3i::value_type normL2(Tuple3i v) { return {fromGLM(glm::length(toGLM(v)))}; }
-    __host__ __device__ Tuple4f::value_type normL2(Tuple4f v) { return {fromGLM(glm::length(toGLM(v)))}; }
-    __host__ __device__ Tuple4i::value_type normL2(Tuple4i v) { return {fromGLM(glm::length(toGLM(v)))}; }
+    __host__ __device__ Tuple2f::value_type normL2(Tuple2f v) { return glm::length(toGLM(v)); }
+    __host__ __device__ Tuple2i::value_type normL2(Tuple2i v) { return glm::length(toGLM(v)); }
+    __host__ __device__ Tuple3f::value_type normL2(Tuple3f v) { return glm::length(toGLM(v)); }
+    __host__ __device__ Tuple3i::value_type normL2(Tuple3i v) { return glm::length(toGLM(v)); }
+    __host__ __device__ Tuple4f::value_type normL2(Tuple4f v) { return glm::length(toGLM(v)); }
+    __host__ __device__ Tuple4i::value_type normL2(Tuple4i v) { return glm::length(toGLM(v)); }
 
     __host__ __device__ Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b)
     {
@@ -633,17 +643,14 @@ namespace dmt {
     __host__ __device__ Frame coordinateSystem(Normal3f xAxis)
     {
         Frame frame;
-        frame.xAxis = xAxis;
-#if defined(__CUDA_ARCH__)
-        float sign = ::copysign(1.f, xAxis.z);
-#else
-        float sign = std::copysign(1.f, xAxis.z);
-#endif
-        float a     = -1.f / (sign + xAxis.z);
-        float b     = xAxis.z * xAxis.y * a;
-        frame.yAxis = fromGLM(
-            glm::normalize(toGLM({{.x = (1 + sign + xAxis.x * xAxis.x * a), .y = (sign * b), .z = (-sign * xAxis.x)}})));
-        frame.zAxis = fromGLM(glm::normalize(toGLM({{.x = (b), .y = (sign + xAxis.y * xAxis.y * a), .z = (-xAxis.y)}})));
+        frame.xAxis    = xAxis;
+        float     sign = fl::copysign(1.f, xAxis.z);
+        float     a    = -1.f / (sign + xAxis.z);
+        float     b    = xAxis.z * xAxis.y * a;
+        glm::vec3 y    = {(1 + sign + xAxis.x * xAxis.x * a), (sign * b), (-sign * xAxis.x)};
+        glm::vec3 z    = {(b), (sign + xAxis.y * xAxis.y * a), (-xAxis.y)};
+        frame.yAxis    = {fromGLM(glm::normalize(y))};
+        frame.zAxis    = {fromGLM(glm::normalize(z))};
         return frame;
     }
 
@@ -653,10 +660,12 @@ namespace dmt {
     }
 
     // Vector Types: Spherical Geometry Functions ---------------------------------------------------------------------
+    // https://brsr.github.io/2021/05/01/vector-spherical-geometry.html (Section Area of a Triangle)
     __host__ __device__ float sphericalTriangleArea(Vector3f edge0, Vector3f edge1, Vector3f edge2)
     {
-        return glm::abs(
-            2 * glm::atan2(dot(edge0, cross(edge1, edge2)), 1 + dot(edge0, edge1) + dot(edge0, edge2), dot(edge1, edge2)));
+        float scalarTripleProduct = dot(edge0, cross(edge1, edge2));
+        float cosExcess           = 1 + dot(edge0, edge1) + dot(edge0, edge2) + dot(edge1, edge2);
+        return glm::abs(2.f * fl::atan2(scalarTripleProduct, cosExcess));
     }
     __host__ __device__ float sphericalQuadArea(Vector3f edge0, Vector3f edge1, Vector3f edge2, Vector3f edge3)
     {
@@ -676,7 +685,7 @@ namespace dmt {
         float gamma = angleBetween(bxc, -cxd);
         float delta = angleBetween(cxd, -dxa);
 
-        return glm::abs(alpha + beta + gamma + delta - fl::twoPi);
+        return glm::abs(alpha + beta + gamma + delta - fl::twoPi());
     }
     __host__ __device__ Vector3f sphericalDirection(float sinTheta, float cosTheta, float phi)
     {
@@ -690,8 +699,8 @@ namespace dmt {
     __host__ __device__ float sphericalTheta(Vector3f v) { return fl::acosClamp(v.z); }
     __host__ __device__ float sphericalPhi(Vector3f v)
     {
-        float p = glm::atan2(v.y, v.z);
-        return (p < 0.f) ? (p + fl::twoPi) : p;
+        float p = fl::atan2(v.y, v.z);
+        return (p < 0.f) ? (p + fl::twoPi()) : p;
     }
     __host__ __device__ float cosTheta(Vector3f v) { return v.z; }
     __host__ __device__ float cos2Theta(Vector3f v) { return v.z * v.z; }
@@ -719,230 +728,14 @@ namespace dmt {
 
         return glm::clamp((wa.x * wb.x + wa.y * wb.y) / glm::sqrt(waxy * wbxy), -1.f, 1.f);
     }
-    __host__ __device__ bool sameHemisphere(Vector3f w, Normal3f ap) { return w.z * wp.z > 0; }
+    __host__ __device__ bool sameHemisphere(Vector3f w, Normal3f ap) { return w.z * ap.z > 0; }
 
-    // math utilities: vector -----------------------------------------------------------------------------------------
-    __host__ __device__ Transform::Transform() : m(Mat4f(1.0f)), mInv(Mat4f(1.0f)) {}
-    __host__ __device__ Transform::Transform(Mat4f const& matrix) : m(matrix), mInv(glm::inverse(matrix)) {}
-
-    __host__ __device__ void Transform::translate_(Vec3f const& translation)
-    {
-        m    = glm::translate(m, translation);
-        mInv = glm::translate(mInv, -translation);
-    }
-
-    // Apply scaling
-    __host__ __device__ void Transform::scale_(Vec3f const& scaling)
-    {
-        m    = glm::scale(m, scaling);
-        mInv = glm::scale(mInv, 1.0f / scaling);
-    }
-
-    // Apply rotation (angle in degrees)
-    __host__ __device__ void Transform::rotate_(float angle, Vec3f const& axis)
-    {
-        m    = glm::rotate(m, glm::radians(angle), axis);
-        mInv = glm::rotate(mInv, -glm::radians(angle), axis);
-    }
-
-    // Combine with another transform
-    __host__ __device__ Transform Transform::combine(Transform const& other) const
-    {
-        Transform result;
-        result.m    = m * other.m;
-        result.mInv = other.mInv * mInv;
-        return result;
-    }
-
-    // Combine with another transform
-    __host__ __device__ void Transform::combine_(Transform const& other)
-    {
-        m    = m * other.m;
-        mInv = other.mInv * mInv;
-    }
-
-    __host__ __device__ void Transform::lookAt_(Vec3f pos, Vec3f look, Vec3f up)
-    {
-        Mat4f worldFromCamera;
-        // Initialize fourth column of viewing matrix
-        worldFromCamera[0][3] = pos.x;
-        worldFromCamera[1][3] = pos.y;
-        worldFromCamera[2][3] = pos.z;
-        worldFromCamera[3][3] = 1;
-
-        // Initialize first three columns of viewing matrix
-        Vec3f dir = glm::normalize(look - pos);
-        assert(glm::length(glm::cross(glm::normalize(up), dir)) < std::numeric_limits<float>::epsilon());
-
-        Vec3f right           = glm::normalize(glm::cross(glm::normalize(up), dir));
-        Vec3f newUp           = glm::cross(dir, right);
-        worldFromCamera[0][0] = right.x;
-        worldFromCamera[1][0] = right.y;
-        worldFromCamera[2][0] = right.z;
-        worldFromCamera[3][0] = 0.;
-        worldFromCamera[0][1] = newUp.x;
-        worldFromCamera[1][1] = newUp.y;
-        worldFromCamera[2][1] = newUp.z;
-        worldFromCamera[3][1] = 0.;
-        worldFromCamera[0][2] = dir.x;
-        worldFromCamera[1][2] = dir.y;
-        worldFromCamera[2][2] = dir.z;
-        worldFromCamera[3][2] = 0.;
-
-        m    = m * worldFromCamera;
-        mInv = glm::inverse(worldFromCamera) * mInv;
-    }
-
-    __host__ __device__ void Transform::concatTrasform_(std::array<float, 16> const& t)
-    {
-        Mat4f mt{t[0], t[1], t[2], t[3], /**/ t[4], t[5], t[6], t[7], /**/ t[8], t[9], t[10], t[11], /**/ t[12], t[13], t[14], t[15]};
-        Transform concatT{glm::transpose(m)};
-        m    = m * concatT.m;
-        mInv = concatT.mInv * mInv;
-    }
-
-    __host__ __device__ void Transform::reset_()
-    {
-        m    = Mat4f(1.0f);
-        mInv = Mat4f(1.0f);
-    }
-
-    __host__ __device__ void Transform::inverse_()
-    {
-        Mat4f tmp = m;
-        m         = mInv;
-        mInv      = tmp;
-    }
-
-
-    __host__ __device__ Vec3f Transform::applyToPoint(Vec3f const& point) const
-    {
-        Vec4f result = m * Vec4f(point, 1.0f);
-        return Vec3f(result);
-    }
-
-    // Apply the inverse transform to a point
-    __host__ __device__ Vec3f Transform::applyInverseToPoint(Vec3f const& point) const
-    {
-        Vec4f result = mInv * Vec4f(point, 1.0f);
-        return Vec3f(result);
-    }
-
-    __host__ __device__ void Transform::decompose(Vec3f& outT, Quat& outR, Mat4f& outS) const
-    {
-        // discarded components
-        Vec3f scale;
-        Vec3f skew;
-        Vec4f perspective;
-        glm::decompose(m, scale, outR, outT, skew, perspective);
-        // decompose actually returs the conjugate quaternion
-        outR = glm::conjugate(outR);
-        // inglobe all the rest into a matrixc
-        // Start with an identity matrix
-        outS = Mat4f(1.f);
-
-        // Apply scaling
-        outS[0][0] = scale.x;
-        outS[1][1] = scale.y;
-        outS[2][2] = scale.z;
-
-        // Apply skew (off-diagonal elements)
-        outS[1][0] = skew.x; // Skew Y by X
-        outS[2][0] = skew.y; // Skew Z by X
-        outS[2][1] = skew.z; // Skew Z by Y
-
-        // Apply perspective (set the last row)
-        outS[3] = perspective;
-    }
-
-
-    // Equality comparison
-    __host__ __device__ bool Transform::operator==(Transform const& other) const
-    {
-        return m == other.m && mInv == other.mInv;
-    }
-
-    // Inequality comparison
-    __host__ __device__ bool Transform::operator!=(Transform const& other) const { return !(*this == other); }
-
-    __host__ __device__ bool Transform::hasScale(float tolerance) const
-    {
-        // compute the length of the three reference unit vectors after being transformed. if any of these has been
-        // scaled, then the transformation has a scaling component
-        using enum EVecType32;
-        Vec3f const scales{glm::length2(operator()(Vec3f{1.f, 0.f, 0.f}, eVector)),
-                           glm::length2(operator()(Vec3f{0.f, 1.f, 0.f}, eVector)),
-                           glm::length2(operator()(Vec3f{0.f, 0.f, 1.f}, eVector))};
-        auto        bVec = glm::epsilonEqual(scales, Vec3f{1.f, 1.f, 1.f}, tolerance);
-        return !(bVec.x && bVec.y && bVec.z);
-    }
-
-    __host__ __device__ Vec3f Transform::applyInverse(Vec3f vpn, EVecType32 type, bool normalize) const
-    {
-        Vec3f     ret; // NRVO
-        glm::vec4 temp{vpn.x, vpn.y, vpn.z, fl::bitsToFloat(type)};
-        temp = mInv * temp;
-        temp /= temp.w;
-        ret.x = temp.x;
-        ret.y = temp.y;
-        ret.z = temp.z;
-        if (normalize)
-        {
-            assert(type == EVecType32::eVector);
-            ret = glm::normalize(ret);
-        }
-
-        return ret;
-    }
-
-    __host__ __device__ Vec3f Transform::operator()(Vec3f vpn, EVecType32 type, bool normalize) const
-    {
-        Vec3f     ret; // NRVO
-        glm::vec4 temp{vpn.x, vpn.y, vpn.z, fl::bitsToFloat(type)};
-        temp = m * temp;
-        temp /= temp.w;
-        ret.x = temp.x;
-        ret.y = temp.y;
-        ret.z = temp.z;
-        if (normalize)
-        {
-            assert(type == EVecType32::eVector);
-            ret = glm::normalize(ret);
-        }
-
-        return ret;
-    }
-
-    __host__ __device__ Bounds3f Transform::operator()(Bounds3f const& b) const
-    {
-        using enum EVecType32;
-        Bounds3f bRet;
-        for (int i = 0; i < 8 /*corners*/; ++i)
-        {
-            Pt3f point = b.corner(static_cast<Bounds3f::EBoundsCorner>(i));
-            bRet       = bbUnion(bRet, (*this)(point, ePoint));
-        }
-        return bRet;
-    }
-
-    // Bounds3f -------------------------------------------------------------------------------------------------------
-    __host__ __device__ bool inside(Pt3f p, Bounds3f const& b)
+    // Vector Types: Axis Aligned Bounding Boxes ----------------------------------------------------------------------
+    // TODO: If more types of bounds are needed, refactor these into translation unit private templated functions called by the front facing ones
+    __host__ __device__ bool inside(Point3f p, Bounds3f const& b)
     {
         return (p.x >= b.pMin.x && p.x <= b.pMax.x && p.y >= b.pMin.y && p.y <= b.pMax.y && p.z >= b.pMin.z &&
                 p.z <= b.pMax.z);
-    }
-
-    __host__ __device__ bool almostEqual(Mat4f const& a, Mat4f const& b)
-    {
-        bool result = true;
-        for (uint32_t i = 0; i < 4; ++i)
-        {
-            auto bVec = glm::epsilonEqual(a[i], b[i], fl::eqTol());
-            result    = result && bVec.x && bVec.y && bVec.z;
-            if (!result)
-                return result;
-        }
-        return result;
     }
 
     __host__ __device__ Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b)
@@ -953,53 +746,53 @@ namespace dmt {
         return bRet;
     }
 
-    __host__ __device__ Bounds3f bbUnion(Bounds3f const& b, Pt3f p)
+    __host__ __device__ Bounds3f bbUnion(Bounds3f const& b, Point3f p)
     {
         Bounds3f bRet;
-        bRet.pMin = glm::min(b.pMin, p);
-        bRet.pMax = glm::max(b.pMax, p);
+        bRet.pMin = min(b.pMin, p);
+        bRet.pMax = max(b.pMax, p);
         return bRet;
     }
 
-    __host__ __device__ Vec3f& Bounds3f::operator[](int32_t i)
+    __host__ __device__ Point3f& Bounds3f::operator[](int32_t i)
     {
         assert(i == 0 || i == 1);
         return i == 0 ? pMin : pMax;
     }
 
-    __host__ __device__ Vec3f const& Bounds3f::operator[](int32_t i) const
+    __host__ __device__ Point3f const& Bounds3f::operator[](int32_t i) const
     {
         assert(i == 0 || i == 1);
         return i == 0 ? pMin : pMax;
     }
 
-    __host__ __device__ Pt3f Bounds3f::corner(EBoundsCorner corner) const
+    __host__ __device__ Point3f Bounds3f::corner(EBoundsCorner corner) const
     {
-        Pt3f const ret{
+        Point3f const ret{{
             operator[](corner & eRight).x,
             operator[]((corner & eForward) >> 1).y,
             operator[]((corner & eTop) >> 2).z,
-        };
+        }};
         return ret;
     }
 
-    __host__ __device__ Vec3f Bounds3f::diagonal() const { return pMax - pMin; }
+    __host__ __device__ Vector3f Bounds3f::diagonal() const { return pMax - pMin; }
 
     __host__ __device__ float Bounds3f::surfaceAraa() const
     {
-        Vec3f const d = diagonal();
+        Vector3f const d = diagonal();
         return 2 * (d.x * d.y + d.x * d.z + d.y * d.z);
     }
 
     __host__ __device__ float Bounds3f::volume() const
     {
-        Vec3f const d = diagonal();
+        Vector3f const d = diagonal();
         return d.x * d.y * d.z;
     }
 
     __host__ __device__ int32_t Bounds3f::maxDimention() const
     {
-        Vec3f const d = diagonal();
+        Vector3f const d = diagonal();
         if (d.x > d.y && d.x > d.z)
             return 0;
         else if (d.y > d.z)
@@ -1008,15 +801,15 @@ namespace dmt {
             return 2;
     }
 
-    __host__ __device__ Pt3f Bounds3f::lerp(Pt3f t) const
+    __host__ __device__ Point3f Bounds3f::lerp(Point3f t) const
     {
-        Pt3f const ret{glm::lerp(pMin, pMax, t)};
+        Point3f const ret{{glm::lerp(pMax.x, pMin.x, t.x), glm::lerp(pMax.y, pMin.y, t.y), glm::lerp(pMax.z, pMin.z, t.z)}};
         return ret;
     }
 
-    __host__ __device__ Vec3f Bounds3f::offset(Pt3f p) const
+    __host__ __device__ Vector3f Bounds3f::offset(Point3f p) const
     {
-        Vec3f o = p - pMin;
+        Vector3f o = p - pMin;
         if (pMax.x > pMin.x)
             o.x /= pMax.x - pMin.x;
         if (pMax.y > pMin.y)
@@ -1026,10 +819,10 @@ namespace dmt {
         return o;
     }
 
-    __host__ __device__ void Bounds3f::boundingSphere(Pt3f& outCenter, float& outRadius) const
+    __host__ __device__ void Bounds3f::boundingSphere(Point3f& outCenter, float& outRadius) const
     {
         outCenter = (pMin + pMax) / 2.f;
-        outRadius = inside(outCenter, *this) ? glm::distance(outCenter, pMax) : 0.f;
+        outRadius = inside(outCenter, *this) ? glm::distance(toGLM(outCenter), toGLM(pMax)) : 0.f;
     }
 
     __host__ __device__ bool Bounds3f::isEmpty() const
@@ -1044,11 +837,11 @@ namespace dmt {
 
     __host__ __device__ bool Bounds3f::operator==(Bounds3f const& that) const
     {
-        auto bVec = glm::epsilonEqual(pMin, that.pMin, fl::eqTol()) && glm::epsilonEqual(pMax, that.pMax, fl::eqTol());
-        return bVec.x && bVec.y && bVec.z;
+        bool b = near(pMin, that.pMin) && near(pMax, that.pMax);
+        return b;
     }
 
-    __host__ __device__ bool Bounds3f::intersectP(Pt3f o, Vec3f d, float tMax, float* DMT_RESTRICT hit0, float* DMT_RESTRICT hit1) const
+    __host__ __device__ bool Bounds3f::intersectP(Point3f o, Vector3f d, float tMax, float* DMT_RESTRICT hit0, float* DMT_RESTRICT hit1) const
     {
         float t0 = 0, t1 = tMax;
         for (int32_t i = 0; i < 3; ++i)
@@ -1076,7 +869,7 @@ namespace dmt {
         return true;
     }
 
-    __host__ __device__ bool Bounds3f::intersectP(Pt3f o, Vec3f d, float rayMax, Vec3f invDir, std::array<int32_t, 3> dirIsNeg) const
+    __host__ __device__ bool Bounds3f::intersectP(Point3f o, Vector3f d, float rayMax, Vector3f invDir, int32_t dirIsNeg[3]) const
     {
         Bounds3f const& self = *this;
         // check ray intersection agains x and y slabs
@@ -1111,7 +904,417 @@ namespace dmt {
         return (tMin < rayMax) && (tMax > 0);
     }
 
+    // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------
+    __host__ __device__ Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta)
+    {
+        assert(axis0 > axis1 && axis0 >= 0 && axis1 >= 0 && axis0 < 4 && axis1 < 4);
+        Matrix4f ret{Matrix4f::identity()};
+        float    cosTheta        = glm::cos(theta);
+        float    sinTheta        = glm::sin(theta);
+        ret.m[axis0 + 4 * axis1] = sinTheta;
+        ret.m[axis1 + 4 * axis0] = -sinTheta;
+        ret.m[axis0 + 4 * axis0] = ret.m[axis1 + 4 * axis1] = cosTheta;
+        return ret;
+    }
 
+    __host__ __device__ QR qr(Matrix4f const& m, int32_t numIter)
+    {
+        QR        ret;
+        glm::mat4 QT{1.f};
+        glm::mat4 R = toGLMmat(m);
+        for (int32_t iter = 0; iter < numIter; ++iter)
+        {
+            for (int32_t idx = 0; idx < 3; ++idx)
+            {
+                bool converge = true;
+                for (int32_t numel = 0; numel <= idx; ++numel)
+                {
+                    Index2 i{.row = 3 - idx + numel, .col = numel};
+                    assert(i.row > i.col);
+                    float elem1 = reinterpret_cast<float*>(&R)[i.row + i.col * 4];
+                    if (glm::epsilonEqual(elem1, 0.f, 1e-6f))
+                        continue;
+
+                    converge = false;
+
+                    int32_t const cIdx  = glm::min(i.row, i.col);
+                    float         elem0 = reinterpret_cast<float*>(&R)[cIdx + cIdx * 4];
+                    //float theta = glm::acos(elem0 / glm::sqrt(elem0 * elem0 + elem1 * elem1));
+                    float    theta = fl::atan2(-elem1, elem0);
+                    Matrix4f G     = givensRotation(i.row, i.col, theta);
+                    QT             = toGLMmat(G) * QT;
+                    R              = toGLMmat(G) * R;
+                }
+
+                if (converge)
+                    break;
+            }
+        }
+        ret.qOrthogonal = fromGLMmat(glm::transpose(QT));
+        ret.rUpper      = fromGLMmat(R);
+        return ret;
+    }
+
+    __host__ __device__ SVD svd(Matrix4f const& m, uint32_t maxIterations = 100)
+    {
+        static constexpr int32_t numCols = 4;
+        static constexpr int32_t numRows = 4;
+
+        SVD             ret{.unitary = m, .singularValues = {{}}, .vunitary = Matrix4f::identity()};
+        Eigen::Matrix4f matrix;
+        matrix << m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5], m.m[6], m.m[7], m.m[8], m.m[9], m.m[10], m.m[11],
+            m.m[12], m.m[13], m.m[14], m.m[15];
+        Eigen::JacobiSVD<Eigen::Matrix4f> svd(matrix, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+        Eigen::Vector4f singularValues = svd.singularValues();
+        Eigen::Matrix4f U              = svd.matrixU();
+        Eigen::Matrix4f V              = svd.matrixV();
+
+        for (int32_t row = 0; row < numRows; ++row)
+        {
+            for (int32_t col = 0; col < numCols; ++col)
+            {
+                ret.unitary[{row, col}]  = U(row, col);
+                ret.vunitary[{row, col}] = V(row, col);
+            }
+        }
+        ret.singularValues.x = singularValues[0];
+        ret.singularValues.y = singularValues[1];
+        ret.singularValues.z = singularValues[2];
+        ret.singularValues.w = singularValues[3];
+
+        return ret;
+    }
+
+    __host__ __device__ bool isSingular(Matrix4f const& m, float tolerance)
+    {
+        assert(tolerance > 0.f);
+        // Convert the input Matrix4f to Eigen::Matrix4f
+        Eigen::Matrix4f matrix;
+        matrix << m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5], m.m[6], m.m[7], m.m[8], m.m[9], m.m[10], m.m[11],
+            m.m[12], m.m[13], m.m[14], m.m[15];
+
+        // Perform SVD using JacobiSVD with only singular values computation
+        Eigen::JacobiSVD<Eigen::Matrix4f> svd(matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
+        Eigen::Vector4f                   singularValues = svd.singularValues();
+
+        // Check if any singular value is below the tolerance
+        for (int i = 0; i < 4; ++i)
+        {
+            if (singularValues[i] < tolerance)
+            {
+                return true; // Matrix is singular
+            }
+        }
+
+        return false; // Matrix is non-singular
+    }
+
+    __host__ __device__ Matrix4f operator+(Matrix4f const& a, Matrix4f const& b)
+    {
+        return fromGLMmat(toGLMmat(a) + toGLMmat(b));
+    }
+    __host__ __device__ Matrix4f operator-(Matrix4f const& a, Matrix4f const& b)
+    {
+        return fromGLMmat(toGLMmat(a) - toGLMmat(b));
+    }
+    __host__ __device__ Matrix4f operator*(Matrix4f const& a, Matrix4f const& b)
+    {
+        return fromGLMmat(toGLMmat(a) * toGLMmat(b));
+    }
+
+    __host__ __device__ Matrix4f& operator+=(Matrix4f& a, Matrix4f const& b)
+    {
+        toGLMmat(a) += toGLMmat(b);
+        return a;
+    }
+    __host__ __device__ Matrix4f& operator-=(Matrix4f& a, Matrix4f const& b)
+    {
+        toGLMmat(a) -= toGLMmat(b);
+        return a;
+    }
+    __host__ __device__ Matrix4f& operator*=(Matrix4f& a, Matrix4f const& b)
+    {
+        toGLMmat(a) *= toGLMmat(b);
+        return a;
+    }
+
+    __host__ __device__ Matrix4f fromDiag(Tuple4f v)
+    {
+        Matrix4f m{};
+        for (int32_t i = 0; i < 16; i += 5)
+        {
+            int32_t j = i >> 2;
+            m.m[i]    = v[j];
+        }
+        return m;
+    }
+
+    __host__ __device__ Matrix4f fromQuat(Quaternion q) { return fromGLMmat(glm::mat4_cast(toGLM(q))); }
+
+    __host__ __device__ bool near(Matrix4f const& a, Matrix4f const& b)
+    {
+        bool result = true;
+        for (uint32_t i = 0; i < 4; ++i)
+        {
+            result = near(a[i], b[i]);
+            if (!result)
+                return result;
+        }
+        return result;
+    }
+
+    __host__ __device__ float determinant(Matrix4f const& m) { return glm::determinant(toGLMmat(m)); }
+
+    __host__ __device__ Matrix4f inverse(Matrix4f const& m)
+    {
+        assert(!isSingular(m));
+        return fromGLMmat(glm::inverse(toGLMmat(m)));
+    }
+
+    __host__ __device__ Matrix4f transpose(Matrix4f const& m) { return fromGLMmat(glm::transpose(toGLMmat(m))); }
+
+    __host__ __device__ Vector4f mul(Matrix4f const& m, Vector4f v) { return {fromGLM(toGLMmat(m) * toGLM(v))}; }
+
+    __host__ __device__ Vector3f mul(Matrix4f const& m, Vector3f const& v)
+    {
+        glm::vec4 w{v.x, v.y, v.z, 0.f};
+        w = toGLMmat(m) * w;
+        assert(fl::nearZero(w.w));
+        return {{.x = w.x, .y = w.y, .z = w.y}};
+    }
+
+    __host__ __device__ Normal3f mul(Matrix4f const& m, Normal3f const& v)
+    {
+        glm::vec4 w{v.x, v.y, v.z, 0.f};
+        w = toGLMmat(m) * w;
+        assert(fl::nearZero(w.w));
+        w = glm::normalize(w);
+        return {{.x = w.x, .y = w.y, .z = w.y}};
+    }
+
+    __host__ __device__ Point3f mul(Matrix4f const& m, Point3f const& p)
+    {
+        glm::vec4 w{p.x, p.y, p.z, 1.f};
+        w = toGLMmat(m) * w;
+        w /= w.w;
+        return {{.x = w.x, .y = w.y, .z = w.y}};
+    }
+
+    // Ray and RayDifferentials ---------------------------------------------------------------------------------------
+    __host__ __device__ Ray::Ray(Point3f o, Vector3f d, float time, uintptr_t medium) :
+    medium(medium),
+    o(o),
+    d(d),
+    time(time)
+    {
+    }
+
+    __host__ __device__ bool Ray::hasNaN() const { return ::dmt::hasNaN(o) || ::dmt::hasNaN(d); }
+
+    __host__ __device__ uintptr_t Ray::getMedium() const { return medium & ~1; }
+
+    __host__ __device__ RayDifferential::RayDifferential(Point3f o, Vector3f d, float time, uintptr_t medium) :
+    Ray(o, d, time, medium)
+    {
+    }
+
+    __host__ __device__ RayDifferential::RayDifferential(Ray const& ray) : Ray(ray) {}
+
+    __host__ __device__ void RayDifferential::setDifferentials(
+        Point3f  _rxOrigin,
+        Vector3f _rxDirection,
+        Point3f  _ryOrigin,
+        Vector3f _ryDirection)
+    {
+        rxOrigin    = _rxOrigin;
+        ryOrigin    = _ryOrigin;
+        rxDirection = _rxDirection;
+        ryDirection = _ryDirection;
+        medium |= 1;
+    }
+
+    __host__ __device__ void RayDifferential::scaleDifferentials(float s)
+    {
+        rxOrigin    = o + (rxOrigin - o) * s;
+        ryOrigin    = o + (ryOrigin - o) * s;
+        rxDirection = d + (rxDirection - d) * s;
+        ryDirection = d + (ryDirection - d) * s;
+    }
+
+    __host__ __device__ bool RayDifferential::hasDifferentials() const { return medium & 1; }
+
+
+    // math utilities: vector -----------------------------------------------------------------------------------------
+    __host__ __device__ Transform::Transform() : m(Matrix4f::identity()), mInv(Matrix4f::identity()) {}
+    __host__ __device__ Transform::Transform(Matrix4f const& matrix) : m(matrix), mInv(inverse(matrix)) {}
+
+    __host__ __device__ void Transform::translate_(Vector3f const& translation)
+    {
+        m    = fromGLMmat(glm::translate(toGLMmat(m), toGLM(translation)));
+        mInv = fromGLMmat(glm::translate(toGLMmat(mInv), -toGLM(translation)));
+    }
+
+    // Apply scaling
+    __host__ __device__ void Transform::scale_(Vector3f const& scaling)
+    {
+        m    = fromGLMmat(glm::scale(toGLMmat(m), toGLM(scaling)));
+        mInv = fromGLMmat(glm::scale(toGLMmat(mInv), toGLM(bcast<Vector3f>(1.0f) / scaling)));
+    }
+
+    // Apply rotation (angle in degrees)
+    __host__ __device__ void Transform::rotate_(float angle, Vector3f const& axis)
+    {
+        m    = fromGLMmat(glm::rotate(toGLMmat(m), glm::radians(angle), toGLM(axis)));
+        mInv = fromGLMmat(glm::rotate(toGLMmat(mInv), -glm::radians(angle), toGLM(axis)));
+    }
+
+    // Combine with another transform
+    __host__ __device__ Transform Transform::combine(Transform const& other) const
+    {
+        Transform result;
+        result.m    = m * other.m;
+        result.mInv = other.mInv * mInv;
+        return result;
+    }
+
+    // Combine with another transform
+    __host__ __device__ void Transform::combine_(Transform const& other)
+    {
+        m    = m * other.m;
+        mInv = other.mInv * mInv;
+    }
+
+    __host__ __device__ void Transform::lookAt_(Vector3f pos, Vector3f look, Vector3f up)
+    {
+        Matrix4f worldFromCamera;
+        // Initialize fourth column of viewing matrix
+        worldFromCamera[{0, 3}] = pos.x;
+        worldFromCamera[{1, 3}] = pos.y;
+        worldFromCamera[{2, 3}] = pos.z;
+        worldFromCamera[{3, 3}] = 1;
+
+        // Initialize first three columns of viewing matrix
+        glm::vec3 nup     = glm::normalize(toGLM(up));
+        glm::vec3 dir     = glm::normalize(toGLM(look) - toGLM(pos));
+        glm::vec3 nupXdir = glm::cross(nup, dir);
+        assert(glm::length2(nupXdir) < std::numeric_limits<float>::epsilon());
+
+        glm::vec3 right         = glm::normalize(nupXdir);
+        glm::vec3 newUp         = glm::cross(dir, right);
+        worldFromCamera[{0, 0}] = right.x;
+        worldFromCamera[{1, 0}] = right.y;
+        worldFromCamera[{2, 0}] = right.z;
+        worldFromCamera[{3, 0}] = 0.f;
+        worldFromCamera[{0, 1}] = newUp.x;
+        worldFromCamera[{1, 1}] = newUp.y;
+        worldFromCamera[{2, 1}] = newUp.z;
+        worldFromCamera[{3, 1}] = 0.f;
+        worldFromCamera[{0, 2}] = dir.x;
+        worldFromCamera[{1, 2}] = dir.y;
+        worldFromCamera[{2, 2}] = dir.z;
+        worldFromCamera[{3, 2}] = 0.f;
+
+        m    = m * worldFromCamera;
+        mInv = inverse(worldFromCamera) * mInv;
+    }
+
+    // We expect a row major array, hence we transpose it
+    __host__ __device__ void Transform::concatTrasform_(std::array<float, 16> const& t)
+    {
+        Matrix4f mt{
+            {t[0], t[1], t[2], t[3], /**/ t[4], t[5], t[6], t[7], /**/ t[8], t[9], t[10], t[11], /**/ t[12], t[13], t[14], t[15]}};
+        Transform concatT{transpose(m)};
+        m    = m * concatT.m;
+        mInv = concatT.mInv * mInv;
+    }
+
+    __host__ __device__ void Transform::reset_()
+    {
+        m    = Matrix4f::identity();
+        mInv = Matrix4f::identity();
+    }
+
+    __host__ __device__ void Transform::inverse_()
+    {
+        Matrix4f tmp = m;
+        m            = mInv;
+        mInv         = tmp;
+    }
+
+
+    __host__ __device__ void Transform::decompose(Vector3f& outT, Quaternion& outR, Matrix4f& outS) const
+    {
+        // discarded components
+        glm::vec3 scale;
+        glm::vec3 skew;
+        glm::vec4 perspective;
+        glm::decompose(toGLMmat(m), scale, toGLM(outR), toGLM(outT), skew, perspective);
+        // decompose actually returs the conjugate quaternion
+        outR = fromGLMquat(glm::conjugate(toGLM(outR)));
+        // inglobe all the rest into a matrixc
+        // Start with an identity matrix
+        outS = Matrix4f::identity();
+
+        // Apply scaling
+        outS[{0, 0}] = scale.x;
+        outS[{1, 1}] = scale.y;
+        outS[{2, 2}] = scale.z;
+
+        // Apply skew (off-diagonal elements)
+        outS[{1, 0}] = skew.x; // Skew Y by X
+        outS[{2, 0}] = skew.y; // Skew Z by X
+        outS[{2, 1}] = skew.z; // Skew Z by Y
+
+        // Apply perspective (set the last row)
+        outS[3] = fromGLM(perspective);
+    }
+
+
+    // Equality comparison
+    __host__ __device__ bool Transform::operator==(Transform const& other) const
+    {
+        return near(m, other.m) && near(mInv, other.mInv);
+    }
+
+    // Inequality comparison
+    __host__ __device__ bool Transform::operator!=(Transform const& other) const {
+        return !(*this == other); }
+
+    __host__ __device__ bool Transform::hasScale(float tolerance) const
+    {
+        // compute the length of the three reference unit vectors after being transformed. if any of these has been
+        // scaled, then the transformation has a scaling component
+        Vector3f const scales{ {glm::length2(operator()(Vec3f{1.f, 0.f, 0.f}),
+                           glm::length2(operator()(Vec3f{0.f, 1.f, 0.f}),
+                           glm::length2(operator()(Vec3f{0.f, 0.f, 1.f})} };
+        bool res = !near(scales, Vec3f{{1.f, 1.f, 1.f}});
+        return res;
+    }
+
+    __host__ __device__ Vector3f Transform::applyInverse(Vector3f v) const {
+        return mul(mInv, v); }
+    __host__ __device__ Normal3f Transform::applyInverse(Point3f v) const {
+        return mul(mInv, v); }
+    __host__ __device__ Point3f  Transform::applyInverse(Normal3f v) const {
+        return mul(mInv, v); }
+    __host__ __device__ Vector3f Transform::operator()(Vector3f v) const {
+        return mul(m, v); }
+    __host__ __device__ Point3f  Transform::operator()(Point3f v) const {
+        return mul(m, v); }
+    __host__ __device__ Normal3f Transform::operator()(Normal3f v) const {
+        return mul(m, v); }
+
+    __host__ __device__ Bounds3f Transform::operator()(Bounds3f const& b) const
+    {
+        Bounds3f bRet;
+        for (int i = 0; i < 8 /*corners*/; ++i)
+        {
+            Point3f point = b.corner(static_cast<Bounds3f::EBoundsCorner>(i));
+            bRet       = bbUnion(bRet, operator()(point));
+        }
+        return bRet;
+    }
     AnimatedTransform::DerivativeTerm::DerivativeTerm() : kc(0.f), kx(0.f), ky(0.f), kz(0.f) {}
 
     // AnimatedTransform ----------------------------------------------------------------------------------------------
@@ -1131,7 +1334,7 @@ namespace dmt {
     endTransform(endTransform),
     startTime(startTime),
     endTime(endTime),
-    m_state(almostEqual(startTransform.m, endTransform.m) ? eAnimated : eNone)
+    m_state(near(startTransform.m, endTransform.m) ? eAnimated : eNone)
     {
         if ((m_state & eAnimated) == 0)
             return;
@@ -1615,30 +1818,86 @@ namespace dmt {
         }
     }
 
-    __host__ __device__ bool AnimatedTransform::isAnimated() const { return (m_state & eAnimated) != 0; }
+    __host__ __device__ bool AnimatedTransform::isAnimated() const {
+        return (m_state & eAnimated) != 0; }
 
-    __host__ __device__ Vec3f AnimatedTransform::applyInverse(Vec3f vpn, float time, EVecType32 type, bool normalize) const
+    __host__ __device__ Vector3f AnimatedTransform::applyInverse(Vector3f vpn, float time) const
     {
-        Vec3f ret; // NRVO
-        if (!isAnimated())
-            ret = startTransform.applyInverse(vpn, type, normalize);
+        Vector3f ret;
+        if (!isAnimated() || time <= startTime)
+            ret = startTransform.applyInverse(vpn);
+        else if (time >= endTime)
+            ret = endTransform.applyInverse(vpn);
         else
-            ret = interpolate(time).applyInverse(vpn, type, normalize);
+            ret = interpolate(time).applyInverse(vpn);
 
         return ret;
     }
-
-    __host__ __device__ Vec3f AnimatedTransform::operator()(Vec3f vpn, float time, EVecType32 type, bool normalize) const
+    __host__ __device__ Point3f AnimatedTransform::applyInverse(Point3f vpn, float time) const
     {
-        Vec3f ret; // NRVO
+        Point3f ret;
         if (!isAnimated() || time <= startTime)
-            ret = startTransform(vpn, type, normalize);
+            ret = startTransform.applyInverse(vpn);
         else if (time >= endTime)
-            ret = endTransform(vpn, type, normalize);
+            ret = endTransform.applyInverse(vpn);
+        else
+            ret = interpolate(time).applyInverse(vpn);
+
+        return ret;
+    }
+    __host__ __device__ Normal3f AnimatedTransform::applyInverse(Normal3f vpn, float time) const
+    {
+        Normal3f ret;
+        if (!isAnimated() || time <= startTime)
+            ret = startTransform.applyInverse(vpn);
+        else if (time >= endTime)
+            ret = endTransform.applyInverse(vpn);
+        else
+            ret = interpolate(time).applyInverse(vpn);
+
+        return ret;
+    }
+    __host__ __device__ Vector3f AnimatedTransform::operator()(Vector3f vpn, float time) const
+    {
+        Vector3f ret;
+        if (!isAnimated() || time <= startTime)
+            ret = startTransform(vpn);
+        else if (time >= endTime)
+            ret = endTransform(vpn);
         else
         {
             Transform t = interpolate(time);
-            ret         = t(vpn, type, normalize);
+            ret         = t(vpn);
+        }
+
+        return ret;
+    }
+    __host__ __device__ Point3f AnimatedTransform::operator()(Point3f vpn, float time) const
+    {
+        Point3f ret;
+        if (!isAnimated() || time <= startTime)
+            ret = startTransform(vpn);
+        else if (time >= endTime)
+            ret = endTransform(vpn);
+        else
+        {
+            Transform t = interpolate(time);
+            ret         = t(vpn);
+        }
+
+        return ret;
+    }
+    __host__ __device__ Normal3f AnimatedTransform::operator()(Normal3f vpn, float time) const
+    {
+        Normal3f ret;
+        if (!isAnimated() || time <= startTime)
+            ret = startTransform(vpn);
+        else if (time >= endTime)
+            ret = endTransform(vpn);
+        else
+        {
+            Transform t = interpolate(time);
+            ret         = t(vpn);
         }
 
         return ret;
@@ -1649,7 +1908,8 @@ namespace dmt {
         return startTransform.hasScale() || endTransform.hasScale();
     }
 
-    __host__ __device__ bool AnimatedTransform::hasRotation() const { return (m_state & eHasRotation) != 0; }
+    __host__ __device__ bool AnimatedTransform::hasRotation() const {
+        return (m_state & eHasRotation) != 0; }
 
     __host__ __device__ Transform AnimatedTransform::interpolate(float time) const
     {
@@ -1662,26 +1922,26 @@ namespace dmt {
         float dt = (time - startTime) / (endTime - startTime);
 
         // Interpolate translation at _dt_
-        Vec3f trans = (1 - dt) * m_t[0] + dt * m_t[1]; // typedef glm::vec3
+        Vector3f trans = (1 - dt) * m_t[0] + dt * m_t[1]; // typedef glm::vec3
 
         // Interpolate rotation at _dt_
-        Quat rotate = glm::slerp(m_r[0], m_r[1], dt); // glm::quat
+        Quaternion rotate = slerp(m_r[0], m_r[1], dt); // glm::quat
 
         // Interpolate scale at _dt_
-        Mat4f scale = (1 - dt) * m_s[0] + dt * m_s[1]; // glm::mat4
+        Matrix4f scale = (1 - dt) * m_s[0] + dt * m_s[1]; // glm::mat4
 
         // Construct the final transformation matrix
-        Mat4f transform = glm::mat4(1.0f); // Start with identity
+        Matrix4f transform = glm::mat4(1.0f); // Start with identity
 
         // Apply scale (scale matrix)
         transform = scale;
 
         // Apply rotation (rotation matrix)
-        Mat4f rotationMatrix = glm::mat4_cast(rotate); // Convert quaternion to rotation matrix
-        transform            = rotationMatrix * transform;
+        Matrix4f rotationMatrix = fromQuat(rotate); // Convert quaternion to rotation matrix
+        transform               = rotationMatrix * transform;
 
         // Apply translation (translation matrix)
-        transform[3] = glm::vec4(trans, 1.0f); // Set the translation column
+        transform[3] = {{trans.x, trans.y, trans.z, 1.0f}}; // Set the translation column
 
         return Transform(transform); // Assuming Transform wraps glm::mat4
     }
@@ -1703,13 +1963,12 @@ namespace dmt {
         return bounds;
     }
 
-    __host__ __device__ Bounds3f AnimatedTransform::boundsPointMotion(Pt3f p) const
+    __host__ __device__ Bounds3f AnimatedTransform::boundsPointMotion(Point3f p) const
     {
-        using enum EVecType32;
         if (!isAnimated())
-            return Bounds3f(startTransform(p, ePoint));
+            return Bounds3f(startTransform(p));
 
-        Bounds3f bounds(startTransform(p, ePoint), endTransform(p, ePoint));
+        Bounds3f bounds(startTransform(p), endTransform(p));
         float    cosTheta = glm::dot(m_r[0], m_r[1]);
         float    theta    = glm::acos(glm::clamp(cosTheta, -1.f, 1.f));
         for (int c = 0; c < 3; ++c)
@@ -1730,14 +1989,14 @@ namespace dmt {
             // Expand bounding box for any motion derivative zeros found
             for (int i = 0; i < nZeros; ++i)
             {
-                Pt3f pz = (*this)(p, glm::lerp(startTime, endTime, zeros[i]), ePoint);
-                bounds  = bbUnion(bounds, pz);
+                Point3f pz = (*this)(p, glm::lerp(startTime, endTime, zeros[i]));
+                bounds     = bbUnion(bounds, pz);
             }
         }
         return bounds;
     }
 
-    __host__ __device__ float AnimatedTransform::DerivativeTerm::eval(Pt3f p) const
+    __host__ __device__ float AnimatedTransform::DerivativeTerm::eval(Point3f p) const
     {
         return kc + kx * p.x + ky * p.y + kz * p.z;
     }
@@ -1835,6 +2094,5 @@ namespace dmt {
     }
 } // namespace dmt
 
-namespace dmt::soa {
-    using namespace dmt;
+namespace dmt {
 }

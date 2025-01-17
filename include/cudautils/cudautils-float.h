@@ -190,7 +190,7 @@ namespace dmt::fl {
     DMT_CPU_GPU inline float asinClamp(float x)
     {
 #if defined(__CUDA_ARCH__)
-        return ::asin(::clamp(x, -1.f, 1.f))
+        return ::asin(::min(::max(x, -1.f), 1.f));
 #else
         return std::asinf(std::clamp(x, -1.f, 1.f));
 #endif
@@ -199,13 +199,35 @@ namespace dmt::fl {
     DMT_CPU_GPU inline float acosClamp(float x)
     {
 #if defined(__CUDA_ARCH__)
-        return ::acos(::clamp(x, 0.f, 1.f))
+        return ::asin(::min(::max(x, 0.f), 1.f));
 #else
         return std::acosf(std::clamp(x, 0.f, 1.f));
 #endif
     }
 
+    DMT_CPU_GPU inline float copysign(float x, float y)
+    {
+#if defined(__CUDA_ARCH__)
+        return ::copysign(x, y);
+#else
+        return std::copysign(x, y);
+#endif
+    }
+
+    DMT_CPU_GPU inline float atan2(float y, float x)
+    {
+#if defined(__CUDA_ARCH__)
+        return ::atan2(y, x);
+#else
+        return std::atan2f(y, x);
+#endif
+    }
+
     DMT_CPU_GPU bool nearZero(float x);
+    DMT_CPU_GPU bool near(float x, float y);
+    // Helper to compute (a^2 + b^2)^1/2 without overflow or underflow
+    DMT_CPU_GPU float pythag(float a, float b);
+
 } // namespace dmt::fl
 
 namespace dmt {

@@ -446,6 +446,13 @@ function(dmt_add_compile_definitions target)
   if(DMT_OS_WINDOWS)
   target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   endif()
+
+  # <cassert>
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  endif() 
 endfunction()
 
 

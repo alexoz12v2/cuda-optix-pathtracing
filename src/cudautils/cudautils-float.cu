@@ -1,11 +1,28 @@
 #include "cudautils-float.h"
 
+#if defined(__NVCC__)
+#pragma nv_diag_suppress 20012
+#endif
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/common.hpp>
+#include <glm/exponential.hpp>
 #include <glm/gtc/epsilon.hpp>
+#if defined(__NVCC__)
+#pragma nv_diag_default 20012
+#endif
 
 namespace dmt::fl {
-    __host__ __device__ bool nearZero(float x) { return glm::epsilonEqual(x, 0.f, eqTol); }
+    __host__ __device__ bool  nearZero(float x) { return glm::epsilonEqual(x, 0.f, eqTol()); }
+    __host__ __device__ bool  near(float x, float y) { return glm::epsilonEqual(x, y, eqTol()); }
+    __host__ __device__ float pythag(float a, float b)
+    {
+        float absa = glm::abs(a);
+        float absb = glm::abs(b);
+        if (absa > absb)
+            return absa * glm::sqrt(1.0f + (absb / absa) * (absb / absa));
+        else
+            return (absb == 0.0f ? 0.0f : absb * glm::sqrt(1.0f + (absa / absb) * (absa / absb)));
+    }
 } // namespace dmt::fl
 
 namespace dmt {
@@ -21,12 +38,12 @@ namespace dmt {
     __host__ __device__ Intervalf Intervalf::fromValueAndError(float v, float err)
     {
         Intervalf i;
-        if (err = 0.f)
+        if (err == 0.f)
             i.low = i.high = v;
         else
         {
-            l.low  = fl::subRoundDown(v, err);
-            l.high = fl.addRoundUp(v, err);
+            i.low  = fl::subRoundDown(v, err);
+            i.high = fl::addRoundUp(v, err);
         }
         return i;
     }

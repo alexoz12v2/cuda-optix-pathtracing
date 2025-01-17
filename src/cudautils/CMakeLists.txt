@@ -10,5 +10,6 @@ target_sources(dmt-cudautils
 target_link_libraries(dmt-cudautils 
   PUBLIC 
     dmt-platform-mixed 
+  PRIVATE
     glm::glm
 )

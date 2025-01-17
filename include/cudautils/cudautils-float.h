@@ -2,7 +2,9 @@
 
 #include "dmtmacros.h"
 
+#include <algorithm>
 #include <bit>
+#include <numbers>
 
 #include <cmath>
 #include <cstdint>
@@ -13,11 +15,13 @@ namespace dmt::fl {
     using namespace dmt;
     DMT_CPU_GPU inline constexpr float eqTol() { return std::numeric_limits<float>::epsilon(); }
     DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
+    DMT_CPU_GPU inline constexpr float pi() { return std::numbers::pi_v<float>; }
+    DMT_CPU_GPU inline constexpr float twoPi() { return 2.f * std::numbers::pi_v<float>; }
 
     DMT_CPU_GPU inline bool isinf(float f)
     {
 #if defined(__CUDA_ARCH__)
-        return isinf(f); // the last f stands for float32
+        return __isinff(f); // the last f stands for float32
 #else
         return std::isinf(f);
 #endif
@@ -182,4 +186,52 @@ namespace dmt::fl {
         return nextFloatDown(std::fma(a, b, c));
 #endif
     }
+
+    DMT_CPU_GPU inline float asinClamp(float x)
+    {
+#if defined(__CUDA_ARCH__)
+        return ::asin(::clamp(x, -1.f, 1.f))
+#else
+        return std::asinf(std::clamp(x, -1.f, 1.f));
+#endif
+    }
+
+    DMT_CPU_GPU inline float acosClamp(float x)
+    {
+#if defined(__CUDA_ARCH__)
+        return ::acos(::clamp(x, 0.f, 1.f))
+#else
+        return std::acosf(std::clamp(x, 0.f, 1.f));
+#endif
+    }
+
+    DMT_CPU_GPU bool nearZero(float x);
 } // namespace dmt::fl
+
+namespace dmt {
+    // TODO SOA
+    struct Intervalf
+    {
+        struct SOA
+        {
+        };
+
+    public:
+        Intervalf() = default;
+        DMT_CPU_GPU explicit Intervalf(float v);
+        DMT_CPU_GPU                  Intervalf(float low, float high);
+        DMT_CPU_GPU static Intervalf fromValueAndError(float v, float err);
+
+    public:
+        DMT_CPU_GPU float midpoint() const;
+        DMT_CPU_GPU float width() const;
+
+    public:
+        float low  = 0.f;
+        float high = 0.f;
+    };
+    DMT_CPU_GPU Intervalf operator+(Intervalf a, Intervalf b);
+    DMT_CPU_GPU Intervalf operator-(Intervalf a, Intervalf b);
+    DMT_CPU_GPU Intervalf operator/(Intervalf a, Intervalf b);
+    DMT_CPU_GPU Intervalf operator*(Intervalf a, Intervalf b);
+} // namespace dmt

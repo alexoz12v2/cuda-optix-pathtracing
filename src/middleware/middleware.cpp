@@ -1,10 +1,6 @@
-#if !defined(DMT_NEEDS_MODULE)
-#define DMT_INTERFACE_AS_HEADER
 #include "middleware.h"
 
 #include "dmtmacros.h"
-
-#include <glm/vec3.hpp>
 
 #include <array>
 #include <atomic>
@@ -21,7 +17,6 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
-#endif
 
 namespace dmt {
 

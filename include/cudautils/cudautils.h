@@ -13,6 +13,7 @@
 
 namespace dmt {
     // Enums ----------------------------------------------------------------------------------------------------------
+    //I don't understand
     enum class ERenderCoordSys : uint8_t
     {
         eCameraWorld = 0,
@@ -528,18 +529,6 @@ namespace dmt {
     DMT_CPU_GPU float    cosDPhi(Vector3f wa, Vector3f wb);
     DMT_CPU_GPU bool     sameHemisphere(Vector3f w, Normal3f ap);
 
-    enum class EVecType32 : uint32_t
-    {
-        eVector = 0,
-        ePoint  = 0x3f80'0000, // 1.f
-    };
-    namespace fl {
-        DMT_CPU_GPU inline float bitsToFloat(EVecType32 e)
-        {
-            return bitsToFloat(static_cast<std::underlying_type_t<EVecType32>>(e));
-        }
-    } // namespace fl
-
     // Vector Types: Axis Aligned Bounding Boxes ----------------------------------------------------------------------
     enum EBoundsCorner : int32_t
     {
@@ -655,8 +644,8 @@ namespace dmt {
     // define a rotation in the plane defined by two axes
     DMT_CPU_GPU Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta);
     DMT_CPU_GPU QR       qr(Matrix4f const& m, int32_t numIter = 10);
-    DMT_CPU     SVD      svd(Matrix4f const& m);
-    DMT_CPU     bool     isSingular(Matrix4f const& m, float tolerance = 1e-6f);
+    DMT_CPU SVD          svd(Matrix4f const& m);
+    DMT_CPU bool         isSingular(Matrix4f const& m, float tolerance = 1e-6f);
 
     DMT_CPU_GPU Matrix4f operator+(Matrix4f const& a, Matrix4f const& b);
     DMT_CPU_GPU Matrix4f operator-(Matrix4f const& a, Matrix4f const& b);
@@ -836,7 +825,9 @@ namespace dmt {
     struct CameraTransform
     {
         // requires initialized context
-        DMT_CPU_GPU       CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys);
+        DMT_CPU_GPU           CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys);
+        DMT_CPU_GPU Transform renderFromWorld() const;
+
         AnimatedTransform renderFromCamera;
         Transform         worldFromRender;
     };

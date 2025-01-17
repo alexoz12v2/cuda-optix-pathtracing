@@ -4,6 +4,8 @@
 
 #include <middleware/middleware-utils.h>
 
+#include <cudautils/cudautils.h>
+
 #include <platform/platform.h>
 
 #include <array>
@@ -598,6 +600,7 @@ namespace dmt {
         sid_t type;
     };
 
+    //dictionary ------------------------------------------------------------------------------------------------
     using ParamMap = std::map<sid_t, ParamPair>;
 
     enum class DMT_MIDDLEWARE_API ETarget : uint8_t
@@ -615,7 +618,7 @@ namespace dmt {
         eSpectrum = 0,
         eFloat
     };
-
+    //Texture spec?
     enum class DMT_MIDDLEWARE_API ETextureClass : uint8_t
     {
         eBilerp = 0,
@@ -634,6 +637,7 @@ namespace dmt {
         eCount
     };
 
+    //spec material?
     enum class DMT_MIDDLEWARE_API EMaterialType : uint8_t
     {
         eCoateddiffuse = 0,
@@ -680,6 +684,16 @@ namespace dmt {
         ePlymesh,
         eCount
     };
+    //struct spec shape?
+    struct DMT_MIDDLEWARE_API shapeSpec
+    {
+        float                      alpha = 1;
+        std::pmr::vector<Point3i>  indices;
+        std::pmr::vector<Point3f>  P;
+        std::pmr::vector<Normal3f> N;
+        std::pmr::vector<Point3f>  S;
+        std::pmr::vector<Point2f>  uv;
+    };
 
     enum class DMT_MIDDLEWARE_API EActiveTransform : uint8_t
     {
@@ -689,6 +703,7 @@ namespace dmt {
         eCount
     };
 
+    //SceneEntity------------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API SceneEntity
     {
         SceneEntity() = default;
@@ -703,20 +718,13 @@ namespace dmt {
     {
         // CameraSceneEntity Public Methods
         CameraSceneEntity() = default;
-        CameraSceneEntity(sid_t const& name, CameraSpec parameters, CameraTransform const&, sid_t const& medium) :
-        name(name),
-        params(parameters),
-        cameraTransform(cameraTransform),
-        medium(medium)
-        {
-        }
+        CameraSceneEntity(CameraSpec parameters, CameraTransform const&, sid_t medium);
 
-        sid_t           name;
         sid_t           medium;
         CameraTransform cameraTransform;
-        CameraSpec      params;
+        CameraSpec      spec;
+        EColorSpaceType colorSpace;
     };
-
 
     // LightSource ----------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API LightSourceSpec
@@ -853,7 +861,7 @@ namespace dmt {
         {
             TransformSet tInv = ts;
             for (int i = 0; i < maxTransforms; ++i)
-                tInv.t[i].inverse();
+                tInv.t[i].inverse_();
             return tInv;
         }
 
@@ -952,20 +960,12 @@ namespace dmt {
         DMT_MIDDLEWARE_API void EndOfFiles() override;
         DMT_MIDDLEWARE_API void EndOfHeader(EndOfHeaderInfo const& info) override;
 
-    public:
-        CameraSpec      cameraSpec;
-        SamplerSpec     samplerSpec;
-        ColorSpaceSpec  colorSpaceSpec;
-        FilmSpec        filmSpec;
-        FilterSpec      filterSpec;
-        IntegratorSpec  integratorSpec;
-        AcceleratorSpec acceleratorSpec;
-
     private:
-        GraphicsState                 graphicsState;
-        CameraSceneEntity             camera;
+        Options                       m_options;
+        GraphicsState                 m_graphicsState;
+        CameraSceneEntity             m_camera;
         std::map<sid_t, TransformSet> m_namedCoordinateSystems;
-        dmt::Transform                renderFromWorld;
+        dmt::Transform                m_renderFromWorld;
     };
 
     enum class DMT_MIDDLEWARE_API EParsingStep : uint8_t

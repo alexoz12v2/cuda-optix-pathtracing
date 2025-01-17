@@ -7,16 +7,7 @@
 #include "middleware/middleware-parser.h"
 #include "middleware/middleware-model.h"
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <platform/platform.h>
-
-#include <glm/ext/matrix_clip_space.hpp> // glm::perspective
-#include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
-#include <glm/ext/scalar_constants.hpp>  // glm::pi
-#include <glm/geometric.hpp>
-#include <glm/mat4x4.hpp> // glm::mat4
-#include <glm/vec3.hpp>   // glm::vec3
-#include <glm/vec4.hpp>   // glm::vec4
 
 #include <array>
 #include <atomic>
@@ -33,7 +24,6 @@
 #include <cassert>
 #include <compare>
 #include <cstdint>
-#endif
 
 // TODO switch all structures with stack allocator
 // TODO remove default values from clases and leave them only in parsing functions

@@ -1,8 +1,4 @@
-#define DMT_INTERFACE_AS_HEADER
-#undef DMT_NEEDS_MODULE
 #include "middleware-parser.h"
-
-#include <glm/vec3.hpp>
 
 #include <array>
 #include <atomic>
@@ -934,6 +930,19 @@ namespace dmt {
         return true;
     }
 
+    static constexpr sid_t cameraSidFromType(ECameraType in)
+    {
+        switch (in)
+        {
+            case ECameraType::eOrthographic: return dict::camera::orthographic.sid;
+            case ECameraType::ePerspective: return dict::camera::perspective.sid;
+            case ECameraType::eRealistic: return dict::camera::realistic.sid;
+            case ECameraType::eSpherical: return dict::camera::spherical.sid;
+        }
+        [[unreachable]];
+        return 0;
+    }
+
     static constexpr bool sphericalMappingFromSid(sid_t type, ESphericalMapping& out)
     {
         switch (type)
@@ -1132,6 +1141,15 @@ namespace dmt {
             default: return false;
         }
         return true;
+    }
+
+    // Entity Definitions ---------------------------------------------------------------------------------------------
+    CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const&, sid_t medium) :
+    SceneEntity(cameraSidFromType(parameters.type), {/*we have no unparsed parameters at the moment*/}),
+    spec(parameters),
+    cameraTransform(cameraTransform),
+    medium(medium)
+    {
     }
 
     // Parsing Helpers ------------------------------------------------------------------------------------------------
@@ -2988,9 +3006,9 @@ namespace dmt {
     // SceneDescription -----------------------------------------------------------------------------------------------
     void SceneDescription::Scale(float sx, float sy, float sz)
     {
-        graphicsState.ForActiveTransforms(
+        m_graphicsState.ForActiveTransforms(
             [=](dmt::Transform t) { // takes a parameter by copy and returns it, NRVO should kick in (TODO check assembly)
-            t.scale_(glm::vec3(sx, sy, sz));
+            t.scale_(Vector3f{{sx, sy, sz}});
             return t;
         });
     }
@@ -3001,29 +3019,29 @@ namespace dmt {
 
     void SceneDescription::Identity()
     {
-        graphicsState.ForActiveTransforms([](dmt::Transform t) { return dmt::Transform{}; });
+        m_graphicsState.ForActiveTransforms([](dmt::Transform t) { return dmt::Transform{}; });
     }
 
     void SceneDescription::Translate(float dx, float dy, float dz)
     {
-        graphicsState.ForActiveTransforms([=](dmt::Transform t) {
-            t.translate_(glm::vec3{dx, dy, dz});
+        m_graphicsState.ForActiveTransforms([=](dmt::Transform t) {
+            t.translate_(Vector3f{{dx, dy, dz}});
             return t;
         });
     }
 
     void SceneDescription::Rotate(float angle, float ax, float ay, float az)
     {
-        graphicsState.ForActiveTransforms([=](dmt::Transform t) {
-            t.rotate_(angle, glm::vec3(ax, ay, az));
+        m_graphicsState.ForActiveTransforms([=](dmt::Transform t) {
+            t.rotate_(angle, Vector3f{{ax, ay, az}});
             return t;
         });
     }
 
     void SceneDescription::LookAt(float ex, float ey, float ez, float lx, float ly, float lz, float ux, float uy, float uz)
     {
-        graphicsState.ForActiveTransforms([=](dmt::Transform t) {
-            t.lookAt_(glm::vec3(ex, ey, ez), glm::vec3(lx, ly, lz), glm::vec3(ux, uy, uz));
+        m_graphicsState.ForActiveTransforms([=](dmt::Transform t) {
+            t.lookAt_(Vector3f{{ex, ey, ez}}, Vector3f{{lx, ly, lz}}, Vector3f{{ux, uy, uz}});
             return t;
         });
     }
@@ -3038,21 +3056,21 @@ namespace dmt {
 
     void SceneDescription::ActiveTransformAll()
     {
-        graphicsState.activeTransformBits = std::numeric_limits<uint32_t>::max();
+        m_graphicsState.activeTransformBits = std::numeric_limits<uint32_t>::max();
     }
 
-    void SceneDescription::ActiveTransformEndTime() { graphicsState.activeTransformBits = 1 << 1; }
+    void SceneDescription::ActiveTransformEndTime() { m_graphicsState.activeTransformBits = 1 << 1; }
 
-    void SceneDescription::ActiveTransformStartTime() { graphicsState.activeTransformBits = 1 << 0; }
+    void SceneDescription::ActiveTransformStartTime() { m_graphicsState.activeTransformBits = 1 << 0; }
 
     void SceneDescription::TransformTimes(float start, float end)
     {
         //verify option
-        graphicsState.transformStartTime = start;
-        graphicsState.transformEndTime   = end;
+        m_graphicsState.transformStartTime = start;
+        m_graphicsState.transformEndTime   = end;
     }
 
-    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) { graphicsState.colorSpace = colorSpace; }
+    void SceneDescription::ColorSpace(EColorSpaceType colorSpace) { m_graphicsState.colorSpace = colorSpace; }
 
     void SceneDescription::PixelFilter(FilterSpec const& spec) {}
 
@@ -3064,14 +3082,17 @@ namespace dmt {
 
     void SceneDescription::Camera(CameraSpec const& params)
     {
-        TransformSet cameraFormWorld                          = graphicsState.ctm;
-        TransformSet worldFromCamera                          = Inverse(graphicsState.ctm);
+        //association params and colorSpace
+        TransformSet cameraFormWorld                          = m_graphicsState.ctm;
+        TransformSet worldFromCamera                          = Inverse(m_graphicsState.ctm);
         m_namedCoordinateSystems[dict::directive::Camera.sid] = worldFromCamera;
-        CameraTransform cameraTransform;
-        renderFromWorld = cameraTransform.camera = CameraSceneEntity(dict::directive::Camera.sid,
-                                                                     params,
-                                                                     cameraTransform,
-                                                                     graphicsState.currentOutsideMedium);
+        CameraTransform cameraTransform(AnimatedTransform(worldFromCamera[0],
+                                                          m_graphicsState.transformStartTime,
+                                                          worldFromCamera[1],
+                                                          m_graphicsState.transformEndTime),
+                                        m_options.renderCoord);
+        m_renderFromWorld = cameraTransform.renderFromWorld();
+        m_camera          = CameraSceneEntity(params, cameraTransform, m_graphicsState.currentOutsideMedium);
     }
 
     void SceneDescription::MakeNamedMedium(sid_t name, ParamMap const& params) {}
@@ -3103,7 +3124,7 @@ namespace dmt {
     void SceneDescription::ReverseOrientation()
     {
         //verify_world
-        graphicsState.reverseOrientation = !graphicsState.reverseOrientation;
+        m_graphicsState.reverseOrientation = !m_graphicsState.reverseOrientation;
     }
 
     void SceneDescription::ObjectBegin(sid_t name) {}
@@ -3112,7 +3133,7 @@ namespace dmt {
 
     void SceneDescription::ObjectInstance(sid_t name) {}
 
-    void SceneDescription::EndOfOptions(Options const& options) {}
+    void SceneDescription::EndOfOptions(Options const& options) { m_options = options; }
 
     void SceneDescription::EndOfFiles() {}
 

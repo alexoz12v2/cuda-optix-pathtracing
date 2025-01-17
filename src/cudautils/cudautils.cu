@@ -1063,10 +1063,7 @@ namespace dmt {
 
     __host__ __device__ float determinant(Matrix4f const& m) { return glm::determinant(toGLMmat(m)); }
 
-    __host__ __device__ Matrix4f inverse(Matrix4f const& m)
-    {
-        return fromGLMmat(glm::inverse(toGLMmat(m)));
-    }
+    __host__ __device__ Matrix4f inverse(Matrix4f const& m) { return fromGLMmat(glm::inverse(toGLMmat(m))); }
 
     __host__ __device__ Matrix4f transpose(Matrix4f const& m) { return fromGLMmat(glm::transpose(toGLMmat(m))); }
 
@@ -2081,6 +2078,13 @@ namespace dmt {
 #endif
                 break;
         }
+    }
+
+    __host__ __device__ Transform dmt::CameraTransform::renderFromWorld() const
+    {
+        Transform t = worldFromRender;
+        t.inverse_();
+        return t;
     }
 } // namespace dmt
 

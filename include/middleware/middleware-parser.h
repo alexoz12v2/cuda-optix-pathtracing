@@ -138,6 +138,7 @@ namespace dmt {
     static_assert(std::is_trivially_destructible_v<Options> && std::is_standard_layout_v<Options>);
     static_assert(sizeof(Options) == 128 && alignof(Options) == 8);
 
+    extern Options *DMTOptions;
     inline bool wavefrontOrGPU(Options const& options)
     {
         return hasFlag(options.flags, EBoolOptions::ecUseGPU | EBoolOptions::ecWavefront);
@@ -621,8 +622,28 @@ namespace dmt {
     };
 
     //dictionary ------------------------------------------------------------------------------------------------
+    
+    
+    class ParameterDictionary {
+      public:
+        // ParameterDictionary Public Methods
+        ParameterDictionary() = default;
+        ParameterDictionary( params, const RGBColorSpace *colorSpace);
+
+
+      private:
+        // ParameterDictionary Private Members
+        std::vector<ParamMap> params;
+        const EColorSpaceType *colorSpace = nullptr;
+        int nOwnedParams;
+    }; 
+    
+    
     using ParamMap = std::map<sid_t, ParamPair>;
 
+
+
+    using ParameterDictionary = std::map<sid_t, >
     enum class DMT_MIDDLEWARE_API ETarget : uint8_t
     {
         eShape = 0,
@@ -921,7 +942,7 @@ namespace dmt {
         std::map<sid_t, TransformSet> namedCoordinateSystems;
         EColorSpaceType               colorSpace = EColorSpaceType::eSRGB;
     };
-
+    
     class SceneDescription : public IParserTarget
     {
     public:

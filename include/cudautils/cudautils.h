@@ -561,43 +561,43 @@ namespace dmt {
     namespace fl {
         DMT_CPU_GPU inline float bitsToFloat(EVecType32 e)
         {
-        DMT_CPU_GPU inline float bitsToFloat(EVecType32 e)
+            DMT_CPU_GPU inline float bitsToFloat(EVecType32 e)
+            {
+                return bitsToFloat(static_cast<std::underlying_type_t<EVecType32>>(e));
+            }
+        } // namespace fl
+
+        // TODO SOA
+        struct Intervalf
         {
-            return bitsToFloat(static_cast<std::underlying_type_t<EVecType32>>(e));
-        }
-    } // namespace fl
+        public:
+            Intervalf() = default;
+            DMT_CPU_GPU explicit Intervalf(float v);
+            DMT_CPU_GPU                  Intervalf(float low, float high);
+            DMT_CPU_GPU static Intervalf fromValueAndError(float v, float err);
 
-    // TODO SOA
-    struct Intervalf
-    {
-    public:
-        Intervalf() = default;
-        DMT_CPU_GPU explicit Intervalf(float v);
-        DMT_CPU_GPU                  Intervalf(float low, float high);
-        DMT_CPU_GPU static Intervalf fromValueAndError(float v, float err);
+        public:
+            DMT_CPU_GPU float midpoint() const;
+            DMT_CPU_GPU float width() const;
 
-    public:
-        DMT_CPU_GPU float midpoint() const;
-        DMT_CPU_GPU float width() const;
+        public:
+            float low  = 0.f;
+            float high = 0.f;
+        };
+        DMT_CPU_GPU Intervalf operator+(Intervalf a, Intervalf b);
+        DMT_CPU_GPU Intervalf operator-(Intervalf a, Intervalf b);
+        DMT_CPU_GPU Intervalf operator/(Intervalf a, Intervalf b);
+        DMT_CPU_GPU Intervalf operator*(Intervalf a, Intervalf b);
 
-    public:
-        float low  = 0.f;
-        float high = 0.f;
-    };
-    DMT_CPU_GPU Intervalf operator+(Intervalf a, Intervalf b);
-    DMT_CPU_GPU Intervalf operator-(Intervalf a, Intervalf b);
-    DMT_CPU_GPU Intervalf operator/(Intervalf a, Intervalf b);
-    DMT_CPU_GPU Intervalf operator*(Intervalf a, Intervalf b);
+        // vectors
 
-    // vectors
-
-    using Vec3f  = glm::vec3;
-    using Pt3f   = Vec3f;
-    using Norm3f = Vec3f; // how to make sure that it always have unit length? Store compressed?
-    using Vec4f  = glm::vec4;
-    using Mat4f  = glm::mat4;
-    using Quat   = glm::quat;
-    using Pt2f   = glm::vec2;
+        using Vec3f  = glm::vec3;
+        using Pt3f   = Vec3f;
+        using Norm3f = Vec3f; // how to make sure that it always have unit length? Store compressed?
+        using Vec4f  = glm::vec4;
+        using Mat4f  = glm::mat4;
+        using Quat   = glm::quat;
+        using Pt2f   = glm::vec2;
     } // namespace fl
 
 

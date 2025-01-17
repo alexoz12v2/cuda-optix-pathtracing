@@ -3073,7 +3073,7 @@ namespace dmt {
                                                           graphicsState.transformStartTime,
                                                           worldFromCamera[1],
                                                           graphicsState.transformEndTime), );
-        renderFromWorld = c
+        renderFromWorld = cameraTransform.RenderFromWorld();
     }
 
     void SceneDescription::MakeNamedMedium(sid_t name, ParamMap const& params) {}

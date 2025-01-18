@@ -1,5 +1,5 @@
 # cuda-optix-pathtracing
-Implementing a simple path tracer in C++ CUDA using Embree and OptiX
+Implementing a simple path tracer in C++ CUDA using OptiX
 
 ## Workflow
 - La repository \`e suddivisa in `src`, `examples`, `test`, `include`

@@ -22,7 +22,7 @@ namespace dmt::fl {
         ret = approx;
 #elif defined(DMT_ARCH_X86_64)
         __m128 data = _mm_set_ss(ret);
-        _mm_rcp_ss(data);
+        data        = _mm_rcp_ss(data);
         _mm_store_ss(&ret, data);
 #else
         ret = 1.f / x;

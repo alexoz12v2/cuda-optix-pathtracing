@@ -15,7 +15,7 @@ namespace dmt {
         static constexpr float _2hc        = 2.f * fl::c() * fl::c() * fl::planck();
         static constexpr float _hc_over_kb = fl::planck() * fl::c() / fl::kBoltz();
         float const            tmp         = lambdaNanometers * 1e-9f;
-        assert(glm::epsilonNotEqual(tmp, 0.f, 1e-6f));
+        assert(glm::epsilonNotEqual(tmp, 0.f, std::numeric_limits<float>::epsilon()));
         float lambdaMeters5 = lambdaNanometers * 1e-9f;
         lambdaMeters5 *= lambdaMeters5;
         lambdaMeters5 *= lambdaMeters5;
@@ -23,7 +23,7 @@ namespace dmt {
         float const lambdaT = tmp * TKelvin;
         float const expArg  = _hc_over_kb * fl::rcp(lambdaT);
         assert(expArg <= 700.f); // exp(700) is near float limit
-        Le = _2hc * fl::rcp(lambdaMeters5 * Eigen::numext::expm1(expArg));
+        Le = _2hc / (lambdaMeters5 * Eigen::numext::expm1(expArg));
         return Le;
     }
 

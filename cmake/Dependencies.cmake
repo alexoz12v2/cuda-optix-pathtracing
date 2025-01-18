@@ -27,6 +27,10 @@ macro(dmt_setup_dependencies)
     FetchContent_MakeAvailable(backward)
   endif()
 
+  if(NOT TARGET glad)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glad)
+  endif()
+
   if(NOT TARGET glm::glm)
     FetchContent_Declare(
 	    glm
@@ -35,14 +39,6 @@ macro(dmt_setup_dependencies)
     )
     FetchContent_MakeAvailable(glm)
     add_compile_definitions(GLM_FORCE_XYZW_ONLY)
-  endif()
-
-  if(NOT TARGET glad)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glad)
-  endif()
-
-  if(NOT TARGET imgui)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
   endif()
 
   if(NOT TARGET Eigen3::Eigen)
@@ -72,6 +68,14 @@ macro(dmt_setup_dependencies)
       GIT_TAG        3.3.4
     )
     FetchContent_MakeAvailable(glfw)
+  endif()
+
+  if(NOT TARGET imgui)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
+  endif()
+
+  if(NOT TARGET implot)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/implot)
   endif()
 
 endmacro()

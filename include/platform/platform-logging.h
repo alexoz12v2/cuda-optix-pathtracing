@@ -205,7 +205,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param fstr formatting string
          */
         template <std::floating_point F>
-        inline constexpr StrBuf(F f, char const* fstr = "%.3f")
+        inline constexpr StrBuf(F f, char const* fstr = "%.3g")
         {
             initialize(f, fstr);
         }

@@ -36,5 +36,6 @@ target_link_libraries(imgui
     OpenGL::GL
 )   
 
+target_compile_definitions(imgui PUBLIC "ImDrawIdx=unsigned int")
 add_library(imgui::imgui ALIAS imgui)
 install(TARGETS imgui FILE_SET imgui_headers)

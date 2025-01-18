@@ -1,7 +1,6 @@
 #include <platform/platform.h>
 #include <cudautils/cudautils-spectrum.h>
 
-#define ImDrawIdx unsigned int
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>

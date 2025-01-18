@@ -1,19 +1,34 @@
 #include "cudautils-float.h"
 
-#if defined(__NVCC__)
-#pragma nv_diag_suppress 20012 // both eigen and glm
-#pragma nv_diag_suppress 3012  // glm
-#endif
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/common.hpp>
-#include <glm/exponential.hpp>
-#include <glm/gtc/epsilon.hpp>
-#if defined(__NVCC__)
-#pragma nv_diag_default 20012
-#pragma nv_diag_default 3012
+#include "cudautils-vecconv.cuh"
+
+#if defined(DMT_ARCH_X86_64)
+#include <immintrin.h>
 #endif
 
 namespace dmt::fl {
+    __host__ __device__ float rcp(float x)
+    {
+        float ret = x;
+#if !defined(DMT_SKIP_FLOAT_TESTS)
+        if (glm::epsilonEqual(x, 0.f, eqTol()))
+            return std::numeric_limits<float>::infinity();
+#endif
+
+#if defined(__CUDA_ARCH__)
+        float approx;
+        asm("mov.f32 %0, %1;" : "=f"(approx) : "f"(x));             // Move x into a register
+        asm("rcp.approx.f32 %0, %0;" : "=f"(approx) : "f"(approx)); // Approximate reciprocal
+        ret = approx;
+#elif defined(DMT_ARCH_X86_64)
+        __m128 data = _mm_set_ss(ret);
+        _mm_rcp_ss(data);
+        _mm_store_ss(&ret, data);
+#else
+        ret = 1.f / x;
+#endif
+        return ret;
+    }
     __host__ __device__ bool  nearZero(float x) { return glm::epsilonEqual(x, 0.f, eqTol()); }
     __host__ __device__ bool  near(float x, float y) { return glm::epsilonEqual(x, y, eqTol()); }
     __host__ __device__ float pythag(float a, float b)

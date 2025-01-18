@@ -17,6 +17,12 @@ namespace dmt::fl {
     DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
     DMT_CPU_GPU inline constexpr float pi() { return std::numbers::pi_v<float>; }
     DMT_CPU_GPU inline constexpr float twoPi() { return 2.f * std::numbers::pi_v<float>; }
+    /** Light speed (vacuum) */
+    DMT_CPU_GPU inline constexpr float c() { return 299792458.f; };
+    /** Planck's constant */
+    DMT_CPU_GPU inline constexpr float planck() { return 6.62606957e-34f; }
+    /** Boltzmann's constant */
+    DMT_CPU_GPU inline constexpr float kBoltz() { return 1.3806488e-23f; }
 
     DMT_CPU_GPU inline bool isinf(float f)
     {
@@ -24,6 +30,24 @@ namespace dmt::fl {
         return __isinff(f); // the last f stands for float32
 #else
         return std::isinf(f);
+#endif
+    }
+
+    DMT_CPU_GPU inline bool isNaN(float f)
+    {
+#if defined(__CUDA_ARCH__)
+        return __isnanf(f);
+#else
+        return std::isnan(f);
+#endif
+    }
+
+    DMT_CPU_GPU inline bool isInfOrNaN(float f)
+    {
+#if defined(__CUDA_ARCH__)
+        return __isinff(f) || __isnanf(f);
+#else
+        return std::isinf(f) || std::isnan(f);
 #endif
     }
 
@@ -222,6 +246,8 @@ namespace dmt::fl {
         return std::atan2f(y, x);
 #endif
     }
+
+    DMT_CPU_GPU float rcp(float x);
 
     DMT_CPU_GPU bool nearZero(float x);
     DMT_CPU_GPU bool near(float x, float y);

@@ -2,35 +2,9 @@
 
 #include "cudautils-vecconv.cuh"
 
-// silence warnings __host__ __device__ on a defaulted copy control
-#if defined(__NVCC__)
-#pragma nv_diag_suppress 20012         // both glm and eigen
-#pragma nv_diag_suppress 3012          // glm
-#define diag_suppress nv_diag_suppress // eigen uses old syntax?
-#endif
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/mat4x4.hpp> // glm::mat4
-#include <glm/vec3.hpp>   // Vec3f
-#include <glm/vec4.hpp>   // Vec4f
-#include <glm/ext/quaternion_float.hpp>
-#include <glm/ext/matrix_clip_space.hpp> // glm::perspective
-#include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
-#include <glm/ext/scalar_constants.hpp>  // glm::pi
-#include <glm/geometric.hpp>
-#include <glm/trigonometric.hpp>
-#include <glm/gtx/compatibility.hpp>
-#include <glm/gtc/epsilon.hpp>
-#include <glm/gtx/matrix_decompose.hpp> // glm::decompose
-#include <glm/gtx/norm.hpp>             // glm::length2
-
-#include <Eigen/Dense>
-#if defined(__NVCC__)
-#pragma nv_diag_default 20012
-#pragma nv_diag_default 3012
-#endif
-#undef diag_suppress
-
+#if defined(DMT_ARCH_X86_64)
 #include <immintrin.h>
+#endif
 
 // TODO generated optimized assembly for x64 uses vectorized instructions for floating point types, like "[v]addps", but integer types
 // don't seem to use SSE2

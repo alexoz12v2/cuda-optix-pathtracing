@@ -36,3 +36,4 @@ target_link_libraries(dmt-cudautils
     glm::glm
     Eigen3::Eigen
 )
+source_group("Private Headers" FILES cudautils-vecconv.cuh)

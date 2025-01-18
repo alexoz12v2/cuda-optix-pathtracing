@@ -1,19 +1,44 @@
 #pragma once
 
+#include "cudautils-vecmath.h"
+
+// silence warnings __host__ __device__ on a defaulted copy control
 #if defined(__NVCC__)
-#pragma nv_diag_suppress 20012
+#pragma nv_diag_suppress 20012         // both eigen and glm
+#pragma nv_diag_suppress 3012          // glm
+#define diag_suppress nv_diag_suppress // eigen uses old syntax?
 #endif
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/mat4x4.hpp> // glm::mat4
 #include <glm/vec3.hpp>   // Vec3f
 #include <glm/vec4.hpp>   // Vec4f
 #include <glm/ext/quaternion_float.hpp>
+#include <glm/ext/matrix_clip_space.hpp> // glm::perspective
+#include <glm/ext/matrix_transform.hpp>  // glm::translate, glm::rotate, glm::scale
+#include <glm/ext/scalar_constants.hpp>  // glm::pi
+#include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
+#include <glm/gtx/compatibility.hpp>
+#include <glm/gtc/epsilon.hpp>
+#include <glm/gtx/matrix_decompose.hpp> // glm::decompose
+#include <glm/gtx/norm.hpp>             // glm::length2
+
+#include <Eigen/Dense>
 #if defined(__NVCC__)
 #pragma nv_diag_default 20012
+#pragma nv_diag_default 3012
 #endif
+#undef diag_suppress
 
 
 namespace dmt {
+    inline __host__ __device__ glm::vec4 glmZero() { return glm::vec4{0.f}; }
+    inline __host__ __device__ glm::vec4 glmOne() { return glm::vec4{1.f}; }
+    inline __host__ __device__ glm::vec4 glmLambdaMin() { return glm::vec4{360.f}; }
+    inline __host__ __device__ glm::vec4 glmLambdaMax() { return glm::vec4{830.f}; }
+
+    static_assert(alignof(Tuple4f) == alignof(glm::vec4));
+
     // Vector Types: Conversion to and from GLM ---------------------------------------------------------------------
     template <typename T, typename Enable = void>
     struct to_glm;

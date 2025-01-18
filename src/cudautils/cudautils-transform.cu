@@ -7,9 +7,10 @@
 
 // silence warnings __host__ __device__ on a defaulted copy control
 #if defined(__NVCC__)
-#pragma nv_diag_suppress 20012
+#pragma nv_diag_suppress 20012         // both eigen and glm
+#pragma nv_diag_suppress 3012          // glm
+#define diag_suppress nv_diag_suppress // eigen uses old syntax?
 #endif
-#define diag_suppress nv_diag_suppress
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/mat4x4.hpp> // glm::mat4
 #include <glm/vec3.hpp>   // Vec3f
@@ -28,10 +29,13 @@
 #include <Eigen/Dense>
 #if defined(__NVCC__)
 #pragma nv_diag_default 20012
+#pragma nv_diag_default 3012
 #endif
 #undef diag_suppress
 
 namespace dmt {
+    // Private stuff forward declarations -----------------------------------------------------------------------------
+    __host__ __device__ void adjustRangeToErrorBounds(Vector3f dir, Point3fi& o, float* optInOut_tMax);
 
     __host__ __device__ Transform::Transform() : m(Matrix4f::identity()), mInv(Matrix4f::identity()) {}
     __host__ __device__ Transform::Transform(Matrix4f const& matrix) : m(matrix), mInv(inverse(matrix)) {}
@@ -61,7 +65,7 @@ namespace dmt {
     {
         Transform result;
         result.m    = m * other.m;
-        result.mInv = other.mInv * mInv;
+        result.mInv = other.mInv * mInv; // (AB)^-! = B^-1 A^-1
         return result;
     }
 
@@ -182,13 +186,43 @@ namespace dmt {
 
     __host__ __device__ Vector3f Transform::applyInverse(Vector3f v) const { return mul(mInv, v); }
     __host__ __device__ Point3f  Transform::applyInverse(Point3f v) const { return mul(mInv, v); }
-    __host__ __device__ Normal3f Transform::applyInverse(Normal3f v) const { return mul(m, v); } // !!
+    // TODO method mulTranspose instead of storing the transpose directly
+    __host__ __device__ Normal3f Transform::applyInverse(Normal3f v) const { return mulTranspose(m, v); } // !!
     __host__ __device__ Point3fi Transform::applyInverse(Point3fi v) const { return mul(mInv, v); }
+
+    __host__ __device__ Ray Transform::applyInverse(Ray const& ray, float* optInOut_tMax) const
+    {
+        Ray      ret = ray; // NRVO
+        Point3fi o   = applyInverse(Point3fi{ray.o});
+        ret.d        = applyInverse(ray.d);
+        adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
+
+        ret.o = o.midpoint();
+        return ret;
+    }
+
+    __host__ __device__ RayDifferential Transform::applyInverse(RayDifferential const& ray, float* optInOut_tMax) const
+    {
+        RayDifferential ret = ray; // NRVO
+        Point3fi        o   = applyInverse(Point3fi{ray.o});
+        ret.d               = applyInverse(ret.d);
+        adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
+        ret.o = o.midpoint();
+        // TODO: if differentials are not here, is it correct to skip their transformation
+        if (ray.hasDifferentials())
+        {
+            ret.rxOrigin    = applyInverse(ray.rxOrigin);
+            ret.ryOrigin    = applyInverse(ray.ryOrigin);
+            ret.rxDirection = applyInverse(ray.rxDirection);
+            ret.ryDirection = applyInverse(ray.ryDirection);
+        }
+        return ret;
+    }
 
     __host__ __device__ Vector3f Transform::operator()(Vector3f v) const { return mul(m, v); }
     __host__ __device__ Point3f  Transform::operator()(Point3f v) const { return mul(m, v); }
     __host__ __device__ Point3fi Transform::operator()(Point3fi v) const { return mul(m, v); }
-    __host__ __device__ Normal3f Transform::operator()(Normal3f v) const { return mul(mInv, v); } // !!
+    __host__ __device__ Normal3f Transform::operator()(Normal3f v) const { return mulTranspose(mInv, v); } // !!
 
     __host__ __device__ Bounds3f Transform::operator()(Bounds3f const& b) const
     {
@@ -199,18 +233,6 @@ namespace dmt {
             bRet          = bbUnion(bRet, operator()(point));
         }
         return bRet;
-    }
-
-    static __host__ __device__ void adjustRangeToErrorBounds(Vector3f dir, Point3fi& o, float* optInOut_tMax)
-    {
-        // offset ray origin to the edge of the error bounds and adjust the `tMax`
-        if (float len2 = dotSelf(dir); len2 > 0.f)
-        {
-            float dt = dot(abs(dir), o.error()) / len2;
-            o        = o + Point3fi(dir * dt); // TODO: support for more operations with intervals
-            if (optInOut_tMax)
-                *optInOut_tMax -= dt;
-        }
     }
 
     __host__ __device__ Ray Transform::operator()(Ray const& ray, float* optInOut_tMax) const
@@ -240,6 +262,12 @@ namespace dmt {
             ret.ryDirection = operator()(ray.ryDirection);
         }
         return ret;
+    }
+
+    __host__ __device__ bool Transform::swapsHandedness() const
+    {
+        glm::mat3 const linearPart{toGLMmat(m)};
+        return glm::determinant(linearPart) < 0.f;
     }
 
     // AnimatedTransform ----------------------------------------------------------------------------------------------
@@ -830,6 +858,65 @@ namespace dmt {
         return ret;
     }
 
+    __host__ __device__ Ray AnimatedTransform::operator()(Ray const& ray, float* optInOut_tMax) const
+    {
+        Ray ret = ray;
+        if (!isAnimated() || ray.time <= startTime)
+            ret = startTransform(ray, optInOut_tMax);
+        else if (ray.time >= endTime)
+            ret = endTransform(ray, optInOut_tMax);
+        else
+        {
+            Transform t = interpolate(ray.time);
+            ret         = t(ray, optInOut_tMax);
+        }
+        return ret;
+    }
+    __host__ __device__ RayDifferential AnimatedTransform::operator()(RayDifferential const& ray, float* optInOut_tMax) const
+    {
+        RayDifferential ret = ray;
+        if (!isAnimated() || ray.time <= startTime)
+            ret = startTransform(ray, optInOut_tMax);
+        else if (ray.time >= endTime)
+            ret = endTransform(ray, optInOut_tMax);
+        else
+        {
+            Transform t = interpolate(ray.time);
+            ret         = t(ray, optInOut_tMax);
+        }
+        return ret;
+    }
+
+    __host__ __device__ Ray AnimatedTransform::applyInverse(Ray const& ray, float* optInOut_tMax) const
+    {
+        Ray ret = ray;
+        if (!isAnimated() || ray.time <= startTime)
+            ret = startTransform.applyInverse(ray, optInOut_tMax);
+        else if (ray.time >= endTime)
+            ret = endTransform.applyInverse(ray, optInOut_tMax);
+        else
+        {
+            Transform t = interpolate(ray.time);
+            ret         = t.applyInverse(ray, optInOut_tMax);
+        }
+        return ret;
+    }
+
+    __host__ __device__ RayDifferential AnimatedTransform::applyInverse(RayDifferential const& ray, float* optInOut_tMax) const
+    {
+        RayDifferential ret = ray;
+        if (!isAnimated() || ray.time <= startTime)
+            ret = startTransform.applyInverse(ray, optInOut_tMax);
+        else if (ray.time >= endTime)
+            ret = endTransform.applyInverse(ray, optInOut_tMax);
+        else
+        {
+            Transform t = interpolate(ray.time);
+            ret         = t.applyInverse(ray, optInOut_tMax);
+        }
+        return ret;
+    }
+
     __host__ __device__ bool AnimatedTransform::hasScale() const
     {
         return startTransform.hasScale() || endTransform.hasScale();
@@ -1024,5 +1111,18 @@ namespace dmt {
         Transform t = worldFromRender;
         t.inverse_();
         return t;
+    }
+
+    // Private Static Stuff -------------------------------------------------------------------------------------------
+    static __host__ __device__ void adjustRangeToErrorBounds(Vector3f dir, Point3fi& o, float* optInOut_tMax)
+    {
+        // offset ray origin to the edge of the error bounds and adjust the `tMax`
+        if (float len2 = dotSelf(dir); len2 > 0.f)
+        {
+            float dt = dot(abs(dir), o.error()) / len2;
+            o        = o + Point3fi(dir * dt); // TODO: support for more operations with intervals
+            if (optInOut_tMax)
+                *optInOut_tMax -= dt;
+        }
     }
 } // namespace dmt

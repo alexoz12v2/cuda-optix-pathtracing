@@ -73,6 +73,8 @@ namespace dmt {
     template <Scalar S>
     struct Tuple2
     {
+        DMT_CPU_GPU static constexpr Tuple2<S> zero() { return {.x = static_cast<S>(0), .y = static_cast<S>(0)}; }
+
         using value_type = S;
         static consteval int32_t numComponents() { return 2; }
         DMT_CPU_GPU S&           operator[](int32_t i)
@@ -91,6 +93,23 @@ namespace dmt {
     template <Scalar S>
     struct Tuple3
     {
+        DMT_CPU_GPU static constexpr Tuple3<S> zero()
+        {
+            return {.x = static_cast<S>(0), .y = static_cast<S>(0), .z = static_cast<S>(0)};
+        }
+        DMT_CPU_GPU static constexpr Tuple3<S> xAxis()
+        {
+            return {.x = static_cast<S>(1), .y = static_cast<S>(0), .z = static_cast<S>(0)};
+        }
+        DMT_CPU_GPU static constexpr Tuple3<S> yAxis()
+        {
+            return {.x = static_cast<S>(0), .y = static_cast<S>(1), .z = static_cast<S>(0)};
+        }
+        DMT_CPU_GPU static constexpr Tuple3<S> zAxis()
+        {
+            return {.x = static_cast<S>(0), .y = static_cast<S>(0), .z = static_cast<S>(1)};
+        }
+
         using value_type = S;
         static consteval int32_t numComponents() { return 3; }
         DMT_CPU_GPU S&           operator[](int32_t i)
@@ -109,6 +128,15 @@ namespace dmt {
     template <Scalar S>
     struct Tuple4
     {
+        DMT_CPU_GPU static constexpr Tuple4<S> zero()
+        {
+            return {.x = static_cast<S>(0), .y = static_cast<S>(0), .z = static_cast<S>(0), .w = static_cast<S>(0)};
+        }
+        DMT_CPU_GPU static constexpr Tuple4<S> quatIdentity()
+        {
+            return {.x = static_cast<S>(1), .y = static_cast<S>(0), .z = static_cast<S>(0), .w = static_cast<S>(0)};
+        }
+
         using value_type = S;
         static consteval int32_t numComponents() { return 4; }
         DMT_CPU_GPU S&           operator[](int32_t i)
@@ -148,13 +176,55 @@ namespace dmt {
     struct Point4i : public Tuple4i { Point4i() = default; DMT_CPU_GPU Point4i(Tuple4i t) : Tuple4i(t) {} explicit DMT_CPU_GPU operator Vector4i(); };
     struct Point4f : public Tuple4f { Point4f() = default; DMT_CPU_GPU Point4f(Tuple4f t) : Tuple4f(t) {} explicit DMT_CPU_GPU operator Vector4f(); };
 
-    struct Normal2f : public Tuple2f, public Normalized { Normal2f() = default; DMT_CPU_GPU Normal2f(Tuple2f t) : Tuple2f(t) {} };
-    struct Normal3f : public Tuple3f, public Normalized { Normal3f() = default; DMT_CPU_GPU Normal3f(Tuple3f t) : Tuple3f(t) {} };
-
+    // https://eater.net/quaternions
     struct Quaternion : public Tuple4f { Quaternion() = default; DMT_CPU_GPU Quaternion(Tuple4f t) : Tuple4f(t) {} };
-
-    struct Frame { Normal3f xAxis, yAxis, zAxis; };
     // clang-format on
+
+    struct Normal2f : public Tuple2f, public Normalized
+    {
+        Normal2f() = default;
+        DMT_CPU_GPU                        Normal2f(Tuple2f t) : Tuple2f(t) {}
+        DMT_CPU_GPU inline Vector2f&       asVec() { return *std::bit_cast<Vector2f*>(this); }
+        DMT_CPU_GPU inline Vector2f const& asVec() const { return *std::bit_cast<Vector2f const*>(this); }
+    };
+
+    struct Normal3f : public Tuple3f, public Normalized
+    {
+        Normal3f() = default;
+        DMT_CPU_GPU                        Normal3f(Tuple3f t) : Tuple3f(t) {}
+        DMT_CPU_GPU inline Vector3f&       asVec() { return *std::bit_cast<Vector3f*>(this); }
+        DMT_CPU_GPU inline Vector3f const& asVec() const { return *std::bit_cast<Vector3f const*>(this); }
+    };
+
+    DMT_CPU_GPU Normal2f normalFrom(Vector2f v);
+    DMT_CPU_GPU Normal3f normalFrom(Vector3f v);
+
+    /**
+     * Triplet of orthonormal vectors, representing a coordinate system
+     * Note: Because of their nature, the 3x3 Matrix representing the transformation from World Space to The Frame's Space
+     * is a orthonormal matrix, meaning its inverse is equal to its transpose. Since normals are applied the inverse transpose of a given matrix
+     * the staring orthonormal matrix is already its own inverse transpose
+     */
+    struct Frame
+    {
+        Frame() = default;
+        DMT_CPU_GPU              Frame(Normal3f x, Normal3f y, Normal3f z);
+        DMT_CPU_GPU static Frame fromXZ(Normal3f x, Normal3f z);
+        DMT_CPU_GPU static Frame fromXY(Normal3f x, Normal3f y);
+        DMT_CPU_GPU static Frame fromZ(Normal3f z);
+
+        DMT_CPU_GPU static inline Frame fromXZ(Vector3f x, Vector3f z) { return fromXZ(normalFrom(x), normalFrom(z)); }
+        DMT_CPU_GPU static inline Frame fromXY(Vector3f x, Vector3f y) { return fromXY(normalFrom(x), normalFrom(y)); }
+        DMT_CPU_GPU static inline Frame fromZ(Vector3f z) { return fromZ(normalFrom(z)); }
+
+        DMT_CPU_GPU Vector3f toLocal(Vector3f v) const;
+        DMT_CPU_GPU Normal3f toLocal(Normal3f n) const;
+
+        DMT_CPU_GPU Vector3f fromLocal(Vector3f v) const;
+        DMT_CPU_GPU Normal3f fromLocal(Normal3f n) const;
+
+        Normal3f xAxis{{1, 0, 0}}, yAxis{{0, 1, 0}}, zAxis{{0, 0, 1}};
+    };
     // TODO compressed normal, half floats
 
 
@@ -401,9 +471,6 @@ namespace dmt {
         }
         return true;
     }
-
-    DMT_CPU_GPU Normal2f normalFrom(Vector2f v);
-    DMT_CPU_GPU Normal3f normalFrom(Vector3f v);
 
     // Vector Types: Generic Tuple Operations -------------------------------------------------------------------------
     // If any of these are used to initialize a Normal, it has to be manually normalized
@@ -659,6 +726,7 @@ namespace dmt {
     DMT_CPU_GPU Vector4f mul(Matrix4f const& m, Vector4f v);
     DMT_CPU_GPU Vector3f mul(Matrix4f const& m, Vector3f const& v);
     DMT_CPU_GPU Normal3f mul(Matrix4f const& m, Normal3f const& v);
+    DMT_CPU_GPU Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v);
     DMT_CPU_GPU Point3f  mul(Matrix4f const& m, Point3f const& p);
 
     // Vector Types: Interval -----------------------------------------------------------------------------------------

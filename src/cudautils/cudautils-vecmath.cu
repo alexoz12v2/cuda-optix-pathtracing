@@ -4,9 +4,10 @@
 
 // silence warnings __host__ __device__ on a defaulted copy control
 #if defined(__NVCC__)
-#pragma nv_diag_suppress 20012
+#pragma nv_diag_suppress 20012         // both glm and eigen
+#pragma nv_diag_suppress 3012          // glm
+#define diag_suppress nv_diag_suppress // eigen uses old syntax?
 #endif
-#define diag_suppress nv_diag_suppress
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/mat4x4.hpp> // glm::mat4
 #include <glm/vec3.hpp>   // Vec3f
@@ -25,6 +26,7 @@
 #include <Eigen/Dense>
 #if defined(__NVCC__)
 #pragma nv_diag_default 20012
+#pragma nv_diag_default 3012
 #endif
 #undef diag_suppress
 
@@ -575,6 +577,39 @@ namespace dmt {
     }
     __host__ __device__ bool sameHemisphere(Vector3f w, Normal3f ap) { return w.z * ap.z > 0; }
 
+    // Vector Types: Frame --------------------------------------------------------------------------------------------
+    __host__ __device__ Frame::Frame(Normal3f x, Normal3f y, Normal3f z) : xAxis(x), yAxis(y), zAxis(z) {}
+
+    __host__ __device__ Frame    Frame::fromXZ(Normal3f x, Normal3f z) { return {x, cross(z, x), z}; }
+    __host__ __device__ Frame    Frame::fromXY(Normal3f x, Normal3f y) { return {x, y, cross(x, y)}; }
+    __host__ __device__ Frame    Frame::fromZ(Normal3f z) { return coordinateSystem(z); }
+    __host__ __device__ Vector3f Frame::toLocal(Vector3f v) const
+    {
+        return {{dot(v, xAxis), dot(v, yAxis), dot(v, zAxis)}};
+    }
+    __host__ __device__ Normal3f Frame::toLocal(Normal3f n) const
+    {
+        assert(glm::epsilonEqual(dotSelf(n), 1.f, 1e-6f));
+        // normalFrom = normalization. Mathematically, it's not needed
+        // but floating point errors can prove otherwise. Stick an assertion and see if it explodes
+        Normal3f ret{{dot(n, xAxis), dot(n, yAxis), dot(n, zAxis)}};
+        assert(glm::epsilonEqual(dotSelf(ret), 1.f, 1e-6f));
+        return ret;
+    }
+    __host__ __device__ Vector3f Frame::fromLocal(Vector3f v) const
+    {
+        return v.x * xAxis.asVec() + v.y * yAxis.asVec() + v.z * zAxis.asVec();
+    }
+    __host__ __device__ Normal3f Frame::fromLocal(Normal3f n) const
+    {
+        assert(glm::epsilonEqual(dotSelf(n), 1.f, 1e-6f));
+        // normalFrom = normalization. Mathematically, it's not needed
+        // but floating point errors can prove otherwise. Stick an assertion and see if it explodes
+        Normal3f ret = n.x * xAxis.asVec() + n.y * yAxis.asVec() + n.z * zAxis.asVec();
+        assert(glm::epsilonEqual(dotSelf(ret), 1.f, 1e-6f));
+        return ret;
+    }
+
     // Vector Types: Axis Aligned Bounding Boxes ----------------------------------------------------------------------
     // TODO: If more types of bounds are needed, refactor these into translation unit private templated functions called by the front facing ones
     __host__ __device__ bool inside(Point3f p, Bounds3f const& b)
@@ -953,6 +988,17 @@ namespace dmt {
         assert(fl::nearZero(w.w));
         w = glm::normalize(w);
         return {{.x = w.x, .y = w.y, .z = w.y}};
+    }
+
+    __host__ __device__ Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v)
+    {
+        Normal3f         ret;
+        glm::vec4        w{v.x, v.y, v.z, 0.f};
+        glm::mat4 const& glmMat = toGLMmat(m);
+        ret.x                   = glmMat[0][0] * w.x + glmMat[1][0] * w.y + glmMat[2][0] * w.z + glmMat[3][0] * w.w;
+        ret.y                   = glmMat[0][1] * w.x + glmMat[1][1] * w.y + glmMat[2][1] * w.z + glmMat[3][1] * w.w;
+        ret.z                   = glmMat[0][2] * w.x + glmMat[1][2] * w.y + glmMat[2][2] * w.z + glmMat[3][2] * w.w;
+        return ret;
     }
 
     __host__ __device__ Point3f mul(Matrix4f const& m, Point3f const& p)

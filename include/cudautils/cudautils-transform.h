@@ -57,6 +57,8 @@ namespace dmt {
         DMT_CPU_GPU Point3f         applyInverse(Point3f v) const;
         DMT_CPU_GPU Normal3f        applyInverse(Normal3f v) const;
         DMT_CPU_GPU Point3fi        applyInverse(Point3fi v) const;
+        DMT_CPU_GPU Ray             applyInverse(Ray const& ray, float* optInOut_tMax) const;
+        DMT_CPU_GPU RayDifferential applyInverse(RayDifferential const& ray, float* optInOut_tMax) const;
         DMT_CPU_GPU Vector3f        operator()(Vector3f v) const;
         DMT_CPU_GPU Point3f         operator()(Point3f v) const;
         DMT_CPU_GPU Point3fi        operator()(Point3fi v) const;
@@ -64,6 +66,8 @@ namespace dmt {
         DMT_CPU_GPU Bounds3f        operator()(Bounds3f const& b) const;
         DMT_CPU_GPU Ray             operator()(Ray const& ray, float* optInOut_tMax) const;
         DMT_CPU_GPU RayDifferential operator()(RayDifferential const& ray, float* optInOut_tMax) const;
+
+        DMT_CPU_GPU bool swapsHandedness() const;
     };
 
     class AnimatedTransform
@@ -79,6 +83,13 @@ namespace dmt {
         DMT_CPU_GPU Vector3f operator()(Vector3f vpn, float time) const;
         DMT_CPU_GPU Point3f  operator()(Point3f vpn, float time) const;
         DMT_CPU_GPU Normal3f operator()(Normal3f vpn, float time) const;
+
+
+        // ray encapsulates time
+        DMT_CPU_GPU Ray             operator()(Ray const& ray, float* optInOut_tMax) const;
+        DMT_CPU_GPU RayDifferential operator()(RayDifferential const& ray, float* optInOut_tMax) const;
+        DMT_CPU_GPU Ray             applyInverse(Ray const& ray, float* optInOut_tMax) const;
+        DMT_CPU_GPU RayDifferential applyInverse(RayDifferential const& ray, float* optInOut_tMax) const;
         // TODO: Interaction methods
 
         DMT_CPU_GPU bool      hasScale() const;
@@ -127,10 +138,10 @@ namespace dmt {
 
         // rigid transformations
         DerivativeTerm m_c1[3], m_c2[3], m_c3[3], m_c4[3], m_c5[3];
-        Matrix4f       m_s[2];
-        Quaternion     m_r[2];
-        Vector3f       m_t[2];
-        EState         m_state;
+        Matrix4f       m_s[2]{Matrix4f::identity()};
+        Quaternion     m_r[2]{Quaternion::quatIdentity()};
+        Vector3f       m_t[2]{Vector3f::zero()};
+        EState         m_state = eNone;
     };
 
     struct CameraTransform

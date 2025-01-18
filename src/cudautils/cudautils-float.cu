@@ -1,7 +1,8 @@
 #include "cudautils-float.h"
 
 #if defined(__NVCC__)
-#pragma nv_diag_suppress 20012
+#pragma nv_diag_suppress 20012 // both eigen and glm
+#pragma nv_diag_suppress 3012  // glm
 #endif
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/common.hpp>
@@ -9,6 +10,7 @@
 #include <glm/gtc/epsilon.hpp>
 #if defined(__NVCC__)
 #pragma nv_diag_default 20012
+#pragma nv_diag_default 3012
 #endif
 
 namespace dmt::fl {

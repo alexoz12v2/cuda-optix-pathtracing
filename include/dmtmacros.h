@@ -48,3 +48,13 @@
 #elif defined(DMT_COMPILER_GCC) || defined(DMT_COMPILER_CLANG)
 #define DMT_FORCEINLINE __attribute__((always_inline))
 #endif
+
+// Visual Studio doesn't seem to pick up that .cu files (tagged with Item Type CUDA C++)
+// should understand CUDA syntax
+#if !defined(__NVCC__) && defined(DMT_VS_STUPIDITY)
+#define __host__
+#define __device__
+#define __global__
+#define __constant__
+#define __managed__
+#endif

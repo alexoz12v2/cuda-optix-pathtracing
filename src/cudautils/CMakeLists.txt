@@ -20,12 +20,15 @@ target_sources(dmt-cudautils
             ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-spectrum.h
             ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-color.h
             ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-numbers.h
+  PRIVATE 
+    FILE_SET cudautils_private_headers TYPE HEADERS FILES cudautils-vecconv.cuh
   PRIVATE
     cudautils.cu cudautils-float.cu cudautils-vecmath.cu cudautils-light.cu
     cudautils-transform.cu cudautils-camera.cu cudautils-media.cu cudautils-lightsampler.cu
     cudautils-texture.cu cudautils-material.cu cudautils-sampler.cu cudautils-film.cu cudautils-filter.cu
     cudautils-bxdf.cu cudautils-spectrum.cu cudautils-color.cu cudautils-numbers.cu
 )
+target_include_directories(dmt-cudautils PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(dmt-cudautils 
   PUBLIC 
     dmt-platform-mixed 

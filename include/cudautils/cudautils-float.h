@@ -257,3 +257,13 @@ namespace dmt {
     DMT_CPU_GPU Intervalf operator/(Intervalf a, Intervalf b);
     DMT_CPU_GPU Intervalf operator*(Intervalf a, Intervalf b);
 } // namespace dmt
+
+inline constexpr DMT_CPU_GPU float arg(float f)
+{
+    if (f > 0 || dmt::fl::floatToBits(f) == 0u)
+        return 0;
+    if (f < 0 || dmt::fl::floatToBits(f) == 0x8000'0000u)
+        return dmt::fl::pi();
+    else
+        return std::numeric_limits<float>::quiet_NaN();
+}

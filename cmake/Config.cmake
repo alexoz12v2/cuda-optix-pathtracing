@@ -528,7 +528,7 @@ function(dmt_add_module_library name module_name)
 
   # add project include as include directory
   target_include_directories(${name}
-    PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/src/${target_path} ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/extern
   )
 

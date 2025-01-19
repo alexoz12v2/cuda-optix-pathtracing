@@ -205,7 +205,7 @@ DMT_MODULE_EXPORT namespace dmt {
          * @param fstr formatting string
          */
         template <std::floating_point F>
-        inline constexpr StrBuf(F f, char const* fstr = "%.3f")
+        inline constexpr StrBuf(F f, char const* fstr = "%.3g")
         {
             initialize(f, fstr);
         }
@@ -599,7 +599,7 @@ concept LogDisplay = requires(T t)
          * explicit constructor for the base logger starting from the desired level
          * @param level desired log level
          */
-        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
         /**
          * Setter for the `m_level`

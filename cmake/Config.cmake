@@ -444,20 +444,29 @@ function(dmt_add_compile_definitions target)
   endif()
   target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
   if(DMT_OS_WINDOWS)
-  target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(CMAKE_GENERATOR MATCHES "Visual Studio")
+      target_compile_definitions(${target} PRIVATE DMT_VS_STUPIDITY)
+    endif()
   endif()
+
+  # <cassert>
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  endif() 
 endfunction()
 
 
 function(dmt_set_target_compiler_versions name)
-  set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX)
-  # modules require C++20 support
-  if(DEFINED DMT_OS_WINDOWS AND DEFINED DMT_COMPILER_MSVC)
-    target_compile_features(${name} PUBLIC cuda_std_20)
-    target_compile_options(${name} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c++20> $<$<COMPILE_LANGUAGE:C>:/std:c17>)
-  else()
-    target_compile_features(${name} PUBLIC cxx_std_20 cuda_std_20)
+  #set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX) # this overrides CUDA's device linking step
+  get_target_property(LINK_LANGUAGE ${name} LINKER_LANGUAGE)
+  if (LINK_LANGUAGE STREQUAL "C")
+    message(FATAL_ERROR "Target ${name} somehow has C linking semantics. Fix it")
   endif()
+  # modules require C++20 support
+  target_compile_features(${name} PRIVATE cxx_std_20 cuda_std_20)
 
   if(MSVC)
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>)
@@ -521,7 +530,7 @@ function(dmt_add_module_library name module_name)
 
   # add project include as include directory
   target_include_directories(${name}
-    PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/src/${target_path} ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/extern
   )
 

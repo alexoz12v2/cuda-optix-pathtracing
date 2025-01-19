@@ -1,11 +1,45 @@
 #include "cudautils-float.h"
 
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/common.hpp>
-#include <glm/gtc/epsilon.hpp>
+#include "cudautils-vecconv.cuh"
+
+#if defined(DMT_ARCH_X86_64)
+#include <immintrin.h>
+#endif
 
 namespace dmt::fl {
-    __host__ __device__ bool nearZero(float x) { return glm::epsilonEqual(x, 0.f, eqTol); }
+    __host__ __device__ float rcp(float x)
+    {
+        float ret = x;
+#if !defined(DMT_SKIP_FLOAT_TESTS)
+        if (glm::epsilonEqual(x, 0.f, eqTol()))
+            return std::numeric_limits<float>::infinity();
+#endif
+
+#if defined(__CUDA_ARCH__)
+        float approx;
+        asm("mov.f32 %0, %1;" : "=f"(approx) : "f"(x));             // Move x into a register
+        asm("rcp.approx.f32 %0, %0;" : "=f"(approx) : "f"(approx)); // Approximate reciprocal
+        ret = approx;
+#elif defined(DMT_ARCH_X86_64)
+        __m128 data = _mm_set_ss(ret);
+        data        = _mm_rcp_ss(data);
+        _mm_store_ss(&ret, data);
+#else
+        ret = 1.f / x;
+#endif
+        return ret;
+    }
+    __host__ __device__ bool  nearZero(float x) { return glm::epsilonEqual(x, 0.f, eqTol()); }
+    __host__ __device__ bool  near(float x, float y) { return glm::epsilonEqual(x, y, eqTol()); }
+    __host__ __device__ float pythag(float a, float b)
+    {
+        float absa = glm::abs(a);
+        float absb = glm::abs(b);
+        if (absa > absb)
+            return absa * glm::sqrt(1.0f + (absb / absa) * (absb / absa));
+        else
+            return (absb == 0.0f ? 0.0f : absb * glm::sqrt(1.0f + (absa / absb) * (absa / absb)));
+    }
 } // namespace dmt::fl
 
 namespace dmt {
@@ -21,12 +55,12 @@ namespace dmt {
     __host__ __device__ Intervalf Intervalf::fromValueAndError(float v, float err)
     {
         Intervalf i;
-        if (err = 0.f)
+        if (err == 0.f)
             i.low = i.high = v;
         else
         {
-            l.low  = fl::subRoundDown(v, err);
-            l.high = fl.addRoundUp(v, err);
+            i.low  = fl::subRoundDown(v, err);
+            i.high = fl::addRoundUp(v, err);
         }
         return i;
     }

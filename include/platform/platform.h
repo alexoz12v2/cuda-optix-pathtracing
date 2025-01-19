@@ -11,7 +11,6 @@
 #include <platform/platform-threadPool.h>
 #include <platform/platform-display.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <array>
 #include <bit>
 #include <charconv>
@@ -27,7 +26,6 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
-#endif
 
 namespace dmt {
     class AppContext;
@@ -59,9 +57,9 @@ namespace dmt {
         friend DMT_PLATFORM_MIXED_API void ctx::unregister();
 
     public:
-        AppContext(uint32_t                                   pageTrackCapacity,
-                   uint32_t                                   allocTrackCapacity,
-                   std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
+        AppContext(uint32_t                                   pageTrackCapacity  = 512,
+                   uint32_t                                   allocTrackCapacity = 4096,
+                   std::array<uint32_t, numBlockSizes> const& numBlocksPerPool   = {4096, 4096, 4096, 4096});
         AppContext(AppContext const&);
         AppContext(AppContext&&) noexcept;
         AppContext& operator=(AppContext const&);

@@ -1,4 +1,4 @@
-dmt_add_module_library(dmt-middleware middleware SHARED)
+dmt_add_module_library(dmt-middleware middleware)# SHARED) cannot be shared if depends and exposes CUDA code (PUBLIC cuda dependendies)
 target_sources(dmt-middleware
   PUBLIC
     FILE_SET middleware_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/middleware
@@ -12,7 +12,6 @@ target_link_libraries(dmt-middleware
   PUBLIC
     dmt-platform-mixed
     dmt-cudautils
-    glm::glm
 )
 
 dmt_add_module_library(dmt-middleware-cuda middleware)

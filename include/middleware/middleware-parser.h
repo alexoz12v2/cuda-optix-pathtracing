@@ -138,8 +138,8 @@ namespace dmt {
     static_assert(std::is_trivially_destructible_v<Options> && std::is_standard_layout_v<Options>);
     static_assert(sizeof(Options) == 128 && alignof(Options) == 8);
 
-    extern Options *DMTOptions;
-    inline bool wavefrontOrGPU(Options const& options)
+    extern Options* DMTOptions;
+    inline bool     wavefrontOrGPU(Options const& options)
     {
         return hasFlag(options.flags, EBoolOptions::ecUseGPU | EBoolOptions::ecWavefront);
     }
@@ -622,29 +622,28 @@ namespace dmt {
     };
 
     //dictionary ------------------------------------------------------------------------------------------------
-    
-    
-    class ParameterDictionary {
-      public:
+
+
+    class ParameterDictionary
+    {
+    public:
         // ParameterDictionary Public Methods
         ParameterDictionary() = default;
-        ParameterDictionary( params, const RGBColorSpace *colorSpace);
+        ParameterDictionary(params, RGBColorSpace const* colorSpace);
 
 
-      private:
+    private:
         // ParameterDictionary Private Members
-        std::vector<ParamMap> params;
-        const EColorSpaceType *colorSpace = nullptr;
-        int nOwnedParams;
-    }; 
-    
-    
+        std::vector<ParamMap>  params;
+        EColorSpaceType const* colorSpace = nullptr;
+        int                    nOwnedParams;
+    };
+
+
     using ParamMap = std::map<sid_t, ParamPair>;
 
 
-
-    using ParameterDictionary = std::map<sid_t, >
-    enum class DMT_MIDDLEWARE_API ETarget : uint8_t
+    using ParameterDictionary = std::map<sid_t, > enum class DMT_MIDDLEWARE_API ETarget : uint8_t
     {
         eShape = 0,
         eLight,
@@ -942,7 +941,7 @@ namespace dmt {
         std::map<sid_t, TransformSet> namedCoordinateSystems;
         EColorSpaceType               colorSpace = EColorSpaceType::eSRGB;
     };
-    
+
     class SceneDescription : public IParserTarget
     {
     public:
@@ -966,7 +965,7 @@ namespace dmt {
         DMT_MIDDLEWARE_API void Film(FilmSpec const& spec) override;
         DMT_MIDDLEWARE_API void Accelerator(AcceleratorSpec const& spec) override;
         DMT_MIDDLEWARE_API void Integrator(IntegratorSpec const& spec) override;
-        DMT_MIDDLEWARE_API void Camera(CameraSpec const& params) override;
+        DMT_MIDDLEWARE_API void CamCameraTransformera(CameraSpec const& params) override;
         DMT_MIDDLEWARE_API void MakeNamedMedium(sid_t name, ParamMap const& params) override;
         DMT_MIDDLEWARE_API void MediumInterface(sid_t insideName, sid_t outsideName) override;
         DMT_MIDDLEWARE_API void Sampler(SamplerSpec const& spec) override;

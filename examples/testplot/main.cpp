@@ -123,7 +123,8 @@ int32_t main()
             glClear(GL_COLOR_BUFFER_BIT);
             glJanitor.start();
 
-            if (ImPlot::BeginPlot("BlackBody Emission"))
+            ImPlotStyle& style = ImPlot::GetStyle();
+            if (ImPlot::BeginPlot("BlackBody Emission", {0, 0}))
             {
                 ImPlot::PlotLine("T=673.15 K", xData, yData, numSamples);
                 ImPlot::EndPlot();

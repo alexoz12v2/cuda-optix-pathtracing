@@ -43,7 +43,9 @@
 #define DMT_API_EXPORT __attribute__((__visibility__("default")))
 #endif
 
-#if defined(DMT_COMPILER_MSVC)
+#if defined(__NVCC__)
+#define DMT_FORCEINLINE __forceinline__
+#elif defined(DMT_COMPILER_MSVC)
 #define DMT_FORCEINLINE __forceinline
 #elif defined(DMT_COMPILER_GCC) || defined(DMT_COMPILER_CLANG)
 #define DMT_FORCEINLINE __attribute__((always_inline))

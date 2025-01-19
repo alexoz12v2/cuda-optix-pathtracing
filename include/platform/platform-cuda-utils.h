@@ -360,6 +360,19 @@ namespace dmt {
         DMT_CPU_GPU void*       at(size_t index);
         DMT_CPU_GPU void const* atConst(size_t index) const;
 
+        template <typename T>
+            requires std::is_trivial_v<T>
+        inline DMT_CPU_GPU T& operator[](size_t index)
+        {
+            return *std::bit_cast<T*>(at(index));
+        }
+        template <typename T>
+            requires std::is_trivial_v<T>
+        inline DMT_CPU_GPU T const& operator[](size_t index) const
+        {
+            return *std::bit_cast<T const*>(atConst(index));
+        }
+
         DMT_CPU bool copyToHostSync(void* dest, bool lock = true) const;
 
         DMT_CPU_GPU size_t size(bool lock = true) const;

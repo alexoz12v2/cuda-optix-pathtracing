@@ -96,4 +96,12 @@ namespace dmt {
         float m_value;
     };
     static_assert(SpectrumType<ConstantSpectrum>);
+
+    /**
+     * Class holding a buffer whose floating point values represent samples of a spectral distribution over the
+     * specified range, taken at 1nm intervals
+     */
+    struct DenselySampledSpectrum
+    {
+    };
 } // namespace dmt

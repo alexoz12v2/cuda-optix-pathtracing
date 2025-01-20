@@ -31,20 +31,6 @@ namespace dmt {
         }
     }
 
-    template <typename T>
-    __global__ void initTable(T& self)
-    {
-        int32_t gid = globalThreadIndex();
-        if (gid == 0)
-        {
-            self.m_device.allocateBytes   = T::allocateBytes;
-            self.m_device.freeBytes       = T::freeBytes;
-            self.m_device.deviceHasAccess = T::deviceHasAccess;
-            self.m_device.hostHasAccess   = T::hostHasAccess;
-        }
-        __syncthreads();
-    }
-
     DMT_CPU_GPU inline constexpr cuda::stream_ref streamRefFromHandle(CudaStreamHandle handle)
     {
         return {std::bit_cast<::cudaStream_t>(handle)};
@@ -77,7 +63,8 @@ namespace dmt {
         friend constexpr void get_property(DeviceMemoryReosurce const&, cuda::mr::device_accessible) noexcept {}
 
     protected:
-        DeviceMemoryReosurce(EMemoryResourceType t) : BaseMemoryResource(makeMemResId(EMemoryResourceType::eDevice, t))
+        DeviceMemoryReosurce(EMemoryResourceType t, sid_t id) :
+        BaseMemoryResource(makeMemResId(EMemoryResourceType::eDevice, t), id)
         {
         }
     };
@@ -86,8 +73,8 @@ namespace dmt {
     class DMT_INTERFACE CudaAsyncMemoryReosurce : public BaseMemoryResource
     {
     protected:
-        CudaAsyncMemoryReosurce(EMemoryResourceType t) :
-        BaseMemoryResource(makeMemResId(EMemoryResourceType::eAsync, t))
+        CudaAsyncMemoryReosurce(EMemoryResourceType t, sid_t sid) :
+        BaseMemoryResource(makeMemResId(EMemoryResourceType::eAsync, t), sid)
         {
         }
 
@@ -102,7 +89,8 @@ namespace dmt {
         public cuda::forward_property<CudaMallocResource, DeviceMemoryReosurce>
     {
     public:
-        DMT_CPU CudaMallocResource();
+        static constexpr sid_t id = "CudaMallocResource"_side;
+        DMT_CPU                CudaMallocResource();
 
         DMT_CPU_GPU void* allocate(size_t sz, [[maybe_unused]] size_t align);
         DMT_CPU_GPU void  deallocate(void* ptr, size_t sz, size_t align);
@@ -130,7 +118,8 @@ namespace dmt {
         public cuda::forward_property<CudaMallocAsyncResource, CudaAsyncMemoryReosurce>
     {
     public:
-        DMT_CPU CudaMallocAsyncResource();
+        static constexpr sid_t id = "CudaMallocAsyncResource"_side;
+        DMT_CPU                CudaMallocAsyncResource();
 
         void*         allocate(size_t _Bytes, [[maybe_unused]] size_t _Align);
         void          deallocate(void* _Ptr, size_t _Bytes, [[maybe_unused]] size_t _Align);
@@ -160,6 +149,7 @@ namespace dmt {
         friend constexpr void get_property(BuddyMemoryResource const&, cuda::mr::device_accessible) noexcept {}
 
     public:
+        static constexpr sid_t       id = "BuddyMemoryResource"_side;
         DMT_CPU                      BuddyMemoryResource(BuddyResourceSpec const& input);
         DMT_CPU                      BuddyMemoryResource(BuddyMemoryResource const& other);
         DMT_CPU                      BuddyMemoryResource(BuddyMemoryResource&& other) noexcept;
@@ -247,6 +237,7 @@ namespace dmt {
         public cuda::forward_property<MemPoolAsyncMemoryResource, CudaAsyncMemoryReosurce>
     {
     public:
+        static constexpr sid_t              id = "MemPoolAsyncMemoryResource"_side;
         DMT_CPU                             MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input);
         DMT_CPU                             MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other);
         DMT_CPU                             MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept;

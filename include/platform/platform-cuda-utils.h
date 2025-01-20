@@ -3,6 +3,7 @@
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
 #include <platform/platform-utils.h>
+#include <platform/platform-memory.h>
 
 #include <array>
 #include <bit>
@@ -166,32 +167,10 @@ namespace dmt {
         DMT_CPU_GPU bool  hostHasAccess() const;
 
         EMemoryResourceType type;
+        sid_t               sid;
 
     protected:
-        BaseMemoryResource(EMemoryResourceType type) : type(type) {}
-
-    public:
-        struct VTableHost
-        {
-            void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align)       = nullptr;
-            void (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
-            void* (*allocateBytesAsync)(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
-            void (*freeBytesAsync)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
-            bool (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID) = nullptr;
-            bool (*hostHasAccess)(BaseMemoryResource const* pAlloc)                     = nullptr;
-        };
-        struct VTableDevice
-        {
-            void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align)       = nullptr;
-            void (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
-            bool (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID)       = nullptr;
-            bool (*hostHasAccess)(BaseMemoryResource const* pAlloc)                           = nullptr;
-        };
-        // you can either store it here or store a pointer
-        // storing inline means that every instance of the same derived class duplicates the table
-        // but avoids double indirection. Since it is likely that we have 1 instance per allocator type, store it inline
-        VTableHost   m_host;
-        VTableDevice m_device;
+        BaseMemoryResource(EMemoryResourceType type, sid_t sid) : type(type), sid(sid) {}
     };
 
     // Memory Resource Inputs and Types -------------------------------------------------------------------------------
@@ -203,6 +182,7 @@ namespace dmt {
     class UnifiedMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     public:
+        static constexpr sid_t                id = "UnifiedMemoryResource"_side;
         DMT_CPU static UnifiedMemoryResource* create();
         DMT_CPU static void                   destroy(UnifiedMemoryResource* ptr);
 

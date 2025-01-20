@@ -147,6 +147,7 @@ namespace dmt {
     struct CameraTransform
     {
         // requires initialized context
+        CameraTransform() = default;
         DMT_CPU_GPU           CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys);
         DMT_CPU_GPU Transform renderFromWorld() const;
 

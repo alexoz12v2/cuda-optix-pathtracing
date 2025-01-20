@@ -221,6 +221,46 @@ namespace dmt {
         return ret;
     }
 
+    __device__ int32_t globalBlockIndex()
+    {
+        // Current block's coordinates in the grid
+        int32_t const blockColumn = blockIdx.x;
+        int32_t const blockRow    = blockIdx.y;
+        int32_t const blockAisle  = blockIdx.z;
+
+        // Number of blocks in each dimension
+        int32_t const blocks_per_row   = gridDim.x;             // Blocks in the x-direction
+        int32_t const blocks_per_aisle = gridDim.x * gridDim.y; // Blocks in both x and y (per aisle in z)
+
+        // Calculate unique block index
+        int32_t const blockIndex = blockColumn                      // x-offset
+                                   + blockRow * blocks_per_row      // y-offset
+                                   + blockAisle * blocks_per_aisle; // z-offset
+
+        return blockIndex;
+    }
+
+    __device__ int32_t globalThreadCount()
+    {
+        // Number of threads per block
+        int32_t const threads_per_block = blockDim.x * blockDim.y * blockDim.z;
+
+        // Total number of blocks in the grid
+        int32_t const blocks_per_grid = gridDim.x * gridDim.y * gridDim.z;
+
+        // Total number of threads in the grid
+        int32_t const total_threads = threads_per_block * blocks_per_grid;
+
+        return total_threads;
+    }
+
+    __device__ int32_t blockThreadIndex()
+    {
+        return threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    }
+
+    __device__ int32_t blockThreadCount() { return blockDim.x * blockDim.y * blockDim.z; }
+
     __device__ int32_t globalThreadIndex()
     {
         int32_t const column          = threadIdx.x;
@@ -1615,97 +1655,115 @@ namespace dmt {
     __host__ __device__ DynaArray::DynaArray(DynaArray&& other) noexcept :
     BaseDeviceContainer(other.m_resource, other.stream)
     {
-        other.lockForWrite();
-        m_resource = std::exchange(other.m_resource, nullptr);
-        stream     = other.stream;
-        m_head     = std::exchange(other.m_head, nullptr);
-        m_size     = std::exchange(other.m_size, 0);
-        m_capacity = std::exchange(other.m_capacity, 0);
-        m_elemSize = other.m_elemSize;
-        other.unlockForWrite();
+        if (other.lockForWrite())
+        {
+            m_resource = std::exchange(other.m_resource, nullptr);
+            stream = other.stream;
+            m_head = std::exchange(other.m_head, nullptr);
+            m_size = std::exchange(other.m_size, 0);
+            m_capacity = std::exchange(other.m_capacity, 0);
+            m_elemSize = other.m_elemSize;
+            other.unlockForWrite();
+        }
     }
 
     __host__ __device__ void DynaArray::reserve(size_t newCapacity, bool lock)
     {
+        bool proceed = true;
         if (lock)
-            lockForWrite();
-        if (newCapacity <= m_capacity)
+            proceed = lockForWrite();
+        if (proceed) 
         {
+            if (newCapacity <= m_capacity)
+            {
+                if (lock)
+                    unlockForWrite();
+                return;
+            }
+
+            void* newHead = m_resource->tryAllocateAsync(newCapacity * m_elemSize, alignof(std::max_align_t), stream);
+            if (m_head)
+            {
+                std::memcpy(newHead, m_head, m_size * m_elemSize);
+                m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
+            }
+            m_head = newHead;
+            m_capacity = newCapacity;
             if (lock)
                 unlockForWrite();
-            return;
         }
-
-        void* newHead = m_resource->tryAllocateAsync(newCapacity * m_elemSize, alignof(std::max_align_t), stream);
-        if (m_head)
-        {
-            std::memcpy(newHead, m_head, m_size * m_elemSize);
-            m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
-        }
-        m_head     = newHead;
-        m_capacity = newCapacity;
-        if (lock)
-            unlockForWrite();
     }
 
     __host__ __device__ void DynaArray::clear(bool lock) noexcept
     {
+        bool proceed = true;
         if (lock)
-            lockForWrite();
-        if (m_head)
+            proceed = lockForWrite();
+        if (proceed) 
         {
-            m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
-            m_head = nullptr;
+            if (m_head)
+            {
+                m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
+                m_head = nullptr;
+            }
+            if (lock)
+                unlockForWrite();
         }
-        if (lock)
-            unlockForWrite();
     }
 
     __host__ __device__ bool DynaArray::push_back(void const* pValue, bool srcHost, bool lock)
     {
         bool ret = true;
+        bool proceed = true;
         if (lock)
-            lockForWrite();
+            proceed = lockForWrite();
 
-        if (m_size >= m_capacity)
-            reserve(m_capacity > 0 ? m_capacity >> 1 : 1, false);
+        if (proceed) 
+        {
+            if (m_size >= m_capacity)
+                reserve(m_capacity > 0 ? m_capacity >> 1 : 1, false);
 
-        void* dest = std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + m_size * m_elemSize);
+            void* dest = std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + m_size * m_elemSize);
 
 #if defined(__CUDA_ARCH__)
-        if (srcHost) // error!
-            ret = false;
-        else
-            std::memcpy(dest, pValue, m_elemSize);
+            if (srcHost) // error!
+                ret = false;
+            else
+                std::memcpy(dest, pValue, m_elemSize);
 #else
-        int32_t device;
-        auto    cudaret = cudaGetDevice(&device);
-        assert(cudaret == ::cudaSuccess);
-        cudaMemcpyKind kind = isDeviceAllocator(m_resource, device)
-                                  ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
-                                  : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
-        cudaret             = cudaMemcpy(dest, pValue, m_elemSize, kind);
-        if (cudaret != ::cudaSuccess)
-            ret = false;
+            int32_t device;
+            auto    cudaret = cudaGetDevice(&device);
+            assert(cudaret == ::cudaSuccess);
+            cudaMemcpyKind kind = isDeviceAllocator(m_resource, device)
+                ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
+                : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
+            cudaret = cudaMemcpy(dest, pValue, m_elemSize, kind);
+            if (cudaret != ::cudaSuccess)
+                ret = false;
 #endif
-        if (ret)
-            ++m_size;
+            if (ret)
+                ++m_size;
 
-        if (lock)
-            unlockForWrite();
+            if (lock)
+                unlockForWrite();
+        }
         return ret;
     }
 
     __host__ __device__ void DynaArray::pop_back(bool lock)
     {
+        bool proceed = true;
         if (lock)
-            lockForWrite();
+            proceed = lockForWrite();
 
-        if (m_size != 0)
-            --m_size;
+        if (proceed)
+        {
+            if (m_size != 0)
+                --m_size;
 
-        if (lock)
-            unlockForWrite();
+            if (lock)
+                unlockForWrite();
+        }
     }
 
     // assumes you already locked for read
@@ -1730,7 +1788,12 @@ namespace dmt {
     {
         if (other.m_size > 0)
         {
+#if defined(__CUDA_ARCH__)
             std::memcpy(m_head, other.m_head, other.m_size * other.m_elemSize);
+#else
+            cudaError_t err = cudaMemcpy(m_head, other.m_head, other.m_size * other.m_elemSize, ::cudaMemcpyDeviceToDevice);
+            assert(err == ::cudaSuccess);
+#endif
             m_size = other.m_size;
         }
     }
@@ -1762,17 +1825,22 @@ namespace dmt {
     {
         if (this != &other)
         {
-            lockForWrite();
-            other.lockForWrite();
-            assert(m_elemSize == other.m_elemSize);
+            if (lockForWrite())
+            {
+                other.lockForWrite();
+                assert(m_elemSize == other.m_elemSize);
 
-            clear();
-            reserve(other.m_size, false);
-            copyFrom(other);
+                clear();
+                reserve(other.m_size, false);
+                copyFrom(other);
 
-            other.unlockForWrite();
-            unlockForWrite();
+                other.unlockForWrite();
+                unlockForWrite();
+            }
         }
+#if defined(__CUDA_ARCH__)
+        __syncthreads();
+#endif
         return *this;
     }
 
@@ -1780,17 +1848,22 @@ namespace dmt {
     {
         if (this != &other)
         {
-            lockForWrite();
-            other.lockForWrite();
-            assert(m_elemSize == other.m_elemSize);
+            if (lockForWrite())
+            {
+                other.lockForWrite();
+                assert(m_elemSize == other.m_elemSize);
 
-            m_size     = std::exchange(other.m_size, 0);
-            m_capacity = std::exchange(other.m_capacity, 0);
-            m_head     = std::exchange(other.m_head, nullptr);
+                m_size = std::exchange(other.m_size, 0);
+                m_capacity = std::exchange(other.m_capacity, 0);
+                m_head = std::exchange(other.m_head, nullptr);
 
-            other.unlockForWrite();
-            unlockForWrite();
+                other.unlockForWrite();
+                unlockForWrite();
+            }
         }
+#if defined(__CUDA_ARCH__)
+        __syncthreads();
+#endif
         return *this;
     }
 
@@ -1818,6 +1891,32 @@ namespace dmt {
             unlockForRead();
 
         return ret;
+    }
+
+    __host__ bool DynaArray::copyFromHostAsync(void* src, size_t numBytes, bool lock)
+    {
+        assert(numBytes == m_size * m_elemSize);
+        bool proceed = true;
+        if (lock)
+            proceed = lockForWrite();
+
+        if (proceed) 
+        {
+            cudaStream_t _stream = stream == noStream ? 0 : streamRefFromHandle(stream).get();
+            cudaError_t  err = cudaMemcpyAsync(m_head, src, numBytes, ::cudaMemcpyHostToDevice, _stream);
+            assert(err == ::cudaSuccess);
+        }
+        return proceed;
+    }
+
+    __host__ void DynaArray::syncWithStream(bool lock) const
+    {
+        cudaStream_t _stream = stream == noStream ? 0 : streamRefFromHandle(stream).get();
+        cudaError_t  err     = cudaStreamSynchronize(_stream);
+        assert(err == ::cudaSuccess);
+
+        if (lock)
+            unlockForWrite();
     }
 
     __host__ __device__ size_t DynaArray::size(bool lock) const

@@ -1,12 +1,9 @@
-#if !defined(DMT_NEEDS_MODULE)
-#define DMT_INTERFACE_AS_HEADER
 #include "platform.h"
 
 #include <utility>
 
 #include <cstdint>
 #include <cstdlib>
-#endif
 
 namespace dmt {
     struct AppContextImpl

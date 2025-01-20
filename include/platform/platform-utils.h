@@ -3,7 +3,6 @@
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <bit>
 #include <charconv> // For std::from_chars
 #include <concepts>
@@ -19,7 +18,6 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
-#endif
 
 namespace dmt {
     using sid_t = uint64_t;
@@ -542,4 +540,63 @@ namespace dmt {
         T*       data;
         uint32_t length; // count of elements
     };
+
+    /**
+     * Simple class akin to Python3's <a href="https://docs.python.org/3.10/library/stdtypes.html#range">`range()`</a>
+     * Basically `std::views::iota`, but can also be used in Device code
+     * @warning device link might give headaches
+     */
+    template <typename T>
+        requires(std::integral<T> || std::floating_point<T>)
+    struct DMT_PLATFORM_API Range
+    {
+    public:
+        struct DMT_PLATFORM_API End
+        {
+            T end;
+        };
+        struct DMT_PLATFORM_API Iterator
+        {
+        public:
+            using difference_type = std::ptrdiff_t;
+            using value_type      = T;
+            DMT_CPU_GPU Iterator(T _current, T _step) : m_current(_current), m_step(_step)
+            {
+                assert(_step != static_cast<T>(0));
+            }
+
+            inline DMT_CPU_GPU value_type operator*() const { return m_current; }
+            inline DMT_CPU_GPU Iterator&  operator++()
+            {
+                m_current += m_step;
+                return *this;
+            }
+            inline void operator++(int) { ++*this; }
+
+            inline DMT_CPU_GPU bool operator==(End end) const
+            {
+                if (m_step < static_cast<T>(0))
+                    return m_current <= end.end;
+                else
+                    return m_current >= end.end;
+            }
+
+        private:
+            T m_current, m_step;
+        };
+
+    public:
+        DMT_CPU_GPU Range(T _start, T _end, T _step = static_cast<T>(1)) : m_start(_start), m_end(_end), m_step(_step)
+        {
+        }
+
+        inline DMT_CPU_GPU Iterator begin() const { return Iterator(m_start, m_step); }
+        inline DMT_CPU_GPU End      end() const { return {m_end}; }
+
+    private:
+        T m_start, m_end, m_step;
+    };
+    using Rangef = Range<float>;
+    using Rangei = Range<int32_t>;
+    static_assert(std::input_iterator<Range<int>::Iterator>, "Failed");
 } // namespace dmt

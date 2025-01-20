@@ -62,7 +62,13 @@ namespace dmt {
     // `cudaMalloc` and `cudaMallocManaged` say this about alignment: "The allocated memory is suitably aligned for any kind of variable"
     DMT_CPU CUDAHelloInfo cudaHello(MemoryContext* mctx);
 
+    DMT_GPU int32_t globalBlockIndex();
     DMT_GPU int32_t globalThreadIndex();
+    DMT_GPU int32_t blockThreadIndex();
+
+    DMT_GPU int32_t globalThreadCount();
+    DMT_GPU int32_t blockThreadCount();
+
     DMT_GPU int32_t warpWideThreadIndex();
 
     // https://committhis.github.io/2020/10/06/cuda-abstractions.html https://gist.github.com/CommitThis/1666517de32893e5dc4c441269f1029a
@@ -328,6 +334,22 @@ namespace dmt {
 
         DMT_CPU_GPU DynaArray& operator=(DynaArray&& other) noexcept;
 
+        inline DMT_CPU_GPU void resize(size_t newSize, bool lock = true)
+        {
+            if (newSize > m_capacity)
+                reserve(newSize, lock);
+            if (lock)
+            {
+                if (lockForWrite())
+                {
+                    m_size = newSize;
+                    unlockForWrite();
+                }
+            }
+            else
+                m_size = newSize;
+        }
+
         DMT_CPU_GPU void reserve(size_t newCapacity, bool lock = true);
 
         DMT_CPU_GPU void clear(bool lock = true) noexcept;
@@ -354,10 +376,17 @@ namespace dmt {
         }
 
         DMT_CPU bool copyToHostSync(void* dest, bool lock = true) const;
+        /** @warning doesn't release write lock */
+        DMT_CPU bool copyFromHostAsync(void* src, size_t numBytes, bool lock = true);
+        /** @warning doesn't acquire write lock */
+        DMT_CPU void syncWithStream(bool lock = true) const;
 
         DMT_CPU_GPU size_t size(bool lock = true) const;
 
         DMT_CPU_GPU size_t capacity(bool lock = true) const;
+
+        /** @warning supposes you already called `lockForRead` */
+        inline DMT_CPU_GPU void* data() const { return m_head; }
 
     private:
         // requires read locked other

@@ -60,3 +60,9 @@ target_link_libraries(dmt-platform-mixed
 )
 
 set_target_properties(dmt-platform-mixed dmt-platform dmt-platform-cuda PROPERTIES FOLDER "Modules/Platform")
+
+install(TARGETS dmt-platform dmt-platform-cuda dmt-platform-mixed
+  FILE_SET platform_headers 
+  FILE_SET platform_cuda_headers 
+  FILE_SET platform_mized_headers
+)

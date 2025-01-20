@@ -603,27 +603,25 @@ namespace dmt {
 
     //dictionary ------------------------------------------------------------------------------------------------
 
+    using ParamMap = std::map<sid_t, ParamPair>;
 
+    //using ParameterDictionary = std::map<sid_t, >
     class ParameterDictionary
     {
     public:
         // ParameterDictionary Public Methods
         ParameterDictionary() = default;
-        ParameterDictionary(params, RGBColorSpace const* colorSpace);
+        //ParameterDictionary(params, RGBColorSpace const* colorSpace);
 
 
     private:
         // ParameterDictionary Private Members
-        std::vector<ParamMap>  params;
-        EColorSpaceType const* colorSpace = nullptr;
+        std::vector<ParamMap>  params;               // ??
+        EColorSpaceType const* colorSpace = nullptr; // ??
         int                    nOwnedParams;
     };
 
-
-    using ParamMap = std::map<sid_t, ParamPair>;
-
-
-    using ParameterDictionary = std::map<sid_t, > enum class DMT_MIDDLEWARE_API ETarget : uint8_t
+    enum class DMT_MIDDLEWARE_API ETarget : uint8_t
     {
         eShape = 0,
         eLight,
@@ -958,7 +956,7 @@ namespace dmt {
         DMT_MIDDLEWARE_API void Film(FilmSpec const& spec) override;
         DMT_MIDDLEWARE_API void Accelerator(AcceleratorSpec const& spec) override;
         DMT_MIDDLEWARE_API void Integrator(IntegratorSpec const& spec) override;
-        DMT_MIDDLEWARE_API void CamCameraTransformera(CameraSpec const& params) override;
+        DMT_MIDDLEWARE_API void Camera(CameraSpec const& params) override;
         DMT_MIDDLEWARE_API void MakeNamedMedium(sid_t name, ParamMap const& params) override;
         DMT_MIDDLEWARE_API void MediumInterface(sid_t insideName, sid_t outsideName) override;
         DMT_MIDDLEWARE_API void Sampler(SamplerSpec const& spec) override;

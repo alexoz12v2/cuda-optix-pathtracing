@@ -1658,9 +1658,9 @@ namespace dmt {
         if (other.lockForWrite())
         {
             m_resource = std::exchange(other.m_resource, nullptr);
-            stream = other.stream;
-            m_head = std::exchange(other.m_head, nullptr);
-            m_size = std::exchange(other.m_size, 0);
+            stream     = other.stream;
+            m_head     = std::exchange(other.m_head, nullptr);
+            m_size     = std::exchange(other.m_size, 0);
             m_capacity = std::exchange(other.m_capacity, 0);
             m_elemSize = other.m_elemSize;
             other.unlockForWrite();
@@ -1672,7 +1672,7 @@ namespace dmt {
         bool proceed = true;
         if (lock)
             proceed = lockForWrite();
-        if (proceed) 
+        if (proceed)
         {
             if (newCapacity <= m_capacity)
             {
@@ -1687,7 +1687,7 @@ namespace dmt {
                 std::memcpy(newHead, m_head, m_size * m_elemSize);
                 m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
             }
-            m_head = newHead;
+            m_head     = newHead;
             m_capacity = newCapacity;
             if (lock)
                 unlockForWrite();
@@ -1699,7 +1699,7 @@ namespace dmt {
         bool proceed = true;
         if (lock)
             proceed = lockForWrite();
-        if (proceed) 
+        if (proceed)
         {
             if (m_head)
             {
@@ -1713,12 +1713,12 @@ namespace dmt {
 
     __host__ __device__ bool DynaArray::push_back(void const* pValue, bool srcHost, bool lock)
     {
-        bool ret = true;
+        bool ret     = true;
         bool proceed = true;
         if (lock)
             proceed = lockForWrite();
 
-        if (proceed) 
+        if (proceed)
         {
             if (m_size >= m_capacity)
                 reserve(m_capacity > 0 ? m_capacity >> 1 : 1, false);
@@ -1735,9 +1735,9 @@ namespace dmt {
             auto    cudaret = cudaGetDevice(&device);
             assert(cudaret == ::cudaSuccess);
             cudaMemcpyKind kind = isDeviceAllocator(m_resource, device)
-                ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
-                : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
-            cudaret = cudaMemcpy(dest, pValue, m_elemSize, kind);
+                                      ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
+                                      : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
+            cudaret             = cudaMemcpy(dest, pValue, m_elemSize, kind);
             if (cudaret != ::cudaSuccess)
                 ret = false;
 #endif
@@ -1853,9 +1853,9 @@ namespace dmt {
                 other.lockForWrite();
                 assert(m_elemSize == other.m_elemSize);
 
-                m_size = std::exchange(other.m_size, 0);
+                m_size     = std::exchange(other.m_size, 0);
                 m_capacity = std::exchange(other.m_capacity, 0);
-                m_head = std::exchange(other.m_head, nullptr);
+                m_head     = std::exchange(other.m_head, nullptr);
 
                 other.unlockForWrite();
                 unlockForWrite();
@@ -1900,10 +1900,10 @@ namespace dmt {
         if (lock)
             proceed = lockForWrite();
 
-        if (proceed) 
+        if (proceed)
         {
             cudaStream_t _stream = stream == noStream ? 0 : streamRefFromHandle(stream).get();
-            cudaError_t  err = cudaMemcpyAsync(m_head, src, numBytes, ::cudaMemcpyHostToDevice, _stream);
+            cudaError_t  err     = cudaMemcpyAsync(m_head, src, numBytes, ::cudaMemcpyHostToDevice, _stream);
             assert(err == ::cudaSuccess);
         }
         return proceed;

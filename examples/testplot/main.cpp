@@ -97,9 +97,9 @@ public:
 int32_t main()
 {
     dmt::AppContext ctx;
-    float           black    = dmt::blackbody(550.f, 673.15f);
-    float           expected = pbrt::Blackbody(550.f, 673.15f);
-    ctx.log("Blackbody radiation at 550 nm, ~400 *C is {} vs {} (W/(sr m^2))", {black, expected});
+    float           black    = dmt::blackbody(827.f, 673.f);
+    float           expected = pbrt::Blackbody(827.f, 673.f);
+    ctx.log("Blackbody radiation at 827 nm, 673 K is {} vs {} (W/(sr m^2))", {black, expected});
 
     static constexpr int32_t numSamples = 1000;
     float                    xData[numSamples];
@@ -107,7 +107,7 @@ int32_t main()
     float                    lambda = dmt::lambdaMin();
 
     float const delta = (dmt::lambdaMax() - dmt::lambdaMin()) / numSamples;
-    float const tempK = 673.15f;
+    float const tempK = 4896.f;
     for (int32_t i = 0; i < 1000; ++i, lambda += delta)
     {
         xData[i] = lambda;
@@ -123,7 +123,8 @@ int32_t main()
             glClear(GL_COLOR_BUFFER_BIT);
             glJanitor.start();
 
-            if (ImPlot::BeginPlot("BlackBody Emission"))
+            ImPlotStyle& style = ImPlot::GetStyle();
+            if (ImPlot::BeginPlot("BlackBody Emission", {0, 0}))
             {
                 ImPlot::PlotLine("T=673.15 K", xData, yData, numSamples);
                 ImPlot::EndPlot();

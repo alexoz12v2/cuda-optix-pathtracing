@@ -1,6 +1,3 @@
-#include(GenerateExportHeader)
-#include(GNUInstallDirs)
-
 add_library(imgui STATIC)
 target_sources(imgui
   PUBLIC FILE_SET imgui_headers TYPE HEADERS FILES 

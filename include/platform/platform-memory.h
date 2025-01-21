@@ -56,8 +56,6 @@ DMT_MODULE_EXPORT namespace dmt {
 
     DMT_PLATFORM_API char const* memoryTagStr(EMemoryTag tag);
 
-    using sid_t = uint64_t;
-
     /**
      * Compile time lookup table used to perform the CRC algorithm on a string_view to get an id
      */

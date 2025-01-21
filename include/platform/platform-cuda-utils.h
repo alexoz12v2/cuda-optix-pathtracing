@@ -3,6 +3,7 @@
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
 #include <platform/platform-utils.h>
+#include <platform/platform-memory.h>
 
 #include <array>
 #include <bit>
@@ -61,7 +62,13 @@ namespace dmt {
     // `cudaMalloc` and `cudaMallocManaged` say this about alignment: "The allocated memory is suitably aligned for any kind of variable"
     DMT_CPU CUDAHelloInfo cudaHello(MemoryContext* mctx);
 
+    DMT_GPU int32_t globalBlockIndex();
     DMT_GPU int32_t globalThreadIndex();
+    DMT_GPU int32_t blockThreadIndex();
+
+    DMT_GPU int32_t globalThreadCount();
+    DMT_GPU int32_t blockThreadCount();
+
     DMT_GPU int32_t warpWideThreadIndex();
 
     // https://committhis.github.io/2020/10/06/cuda-abstractions.html https://gist.github.com/CommitThis/1666517de32893e5dc4c441269f1029a
@@ -166,32 +173,10 @@ namespace dmt {
         DMT_CPU_GPU bool  hostHasAccess() const;
 
         EMemoryResourceType type;
+        sid_t               sid;
 
     protected:
-        BaseMemoryResource(EMemoryResourceType type) : type(type) {}
-
-    public:
-        struct VTableHost
-        {
-            void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align)       = nullptr;
-            void (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
-            void* (*allocateBytesAsync)(BaseMemoryResource* pAlloc, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
-            void (*freeBytesAsync)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align, CudaStreamHandle stream) = nullptr;
-            bool (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID) = nullptr;
-            bool (*hostHasAccess)(BaseMemoryResource const* pAlloc)                     = nullptr;
-        };
-        struct VTableDevice
-        {
-            void* (*allocateBytes)(BaseMemoryResource* pAlloc, size_t sz, size_t align)       = nullptr;
-            void (*freeBytes)(BaseMemoryResource* pAlloc, void* ptr, size_t sz, size_t align) = nullptr;
-            bool (*deviceHasAccess)(BaseMemoryResource const* pAlloc, int32_t deviceID)       = nullptr;
-            bool (*hostHasAccess)(BaseMemoryResource const* pAlloc)                           = nullptr;
-        };
-        // you can either store it here or store a pointer
-        // storing inline means that every instance of the same derived class duplicates the table
-        // but avoids double indirection. Since it is likely that we have 1 instance per allocator type, store it inline
-        VTableHost   m_host;
-        VTableDevice m_device;
+        BaseMemoryResource(EMemoryResourceType type, sid_t sid) : type(type), sid(sid) {}
     };
 
     // Memory Resource Inputs and Types -------------------------------------------------------------------------------
@@ -203,6 +188,7 @@ namespace dmt {
     class UnifiedMemoryResource : public BaseMemoryResource, public std::pmr::memory_resource
     {
     public:
+        static constexpr sid_t                id = "UnifiedMemoryResource"_side;
         DMT_CPU static UnifiedMemoryResource* create();
         DMT_CPU static void                   destroy(UnifiedMemoryResource* ptr);
 
@@ -348,6 +334,22 @@ namespace dmt {
 
         DMT_CPU_GPU DynaArray& operator=(DynaArray&& other) noexcept;
 
+        inline DMT_CPU_GPU void resize(size_t newSize, bool lock = true)
+        {
+            if (newSize > m_capacity)
+                reserve(newSize, lock);
+            if (lock)
+            {
+                if (lockForWrite())
+                {
+                    m_size = newSize;
+                    unlockForWrite();
+                }
+            }
+            else
+                m_size = newSize;
+        }
+
         DMT_CPU_GPU void reserve(size_t newCapacity, bool lock = true);
 
         DMT_CPU_GPU void clear(bool lock = true) noexcept;
@@ -360,11 +362,31 @@ namespace dmt {
         DMT_CPU_GPU void*       at(size_t index);
         DMT_CPU_GPU void const* atConst(size_t index) const;
 
+        template <typename T>
+            requires std::is_trivial_v<T>
+        inline DMT_CPU_GPU T& operator[](size_t index)
+        {
+            return *std::bit_cast<T*>(at(index));
+        }
+        template <typename T>
+            requires std::is_trivial_v<T>
+        inline DMT_CPU_GPU T const& operator[](size_t index) const
+        {
+            return *std::bit_cast<T const*>(atConst(index));
+        }
+
         DMT_CPU bool copyToHostSync(void* dest, bool lock = true) const;
+        /** @warning doesn't release write lock */
+        DMT_CPU bool copyFromHostAsync(void* src, size_t numBytes, bool lock = true);
+        /** @warning doesn't acquire write lock */
+        DMT_CPU void syncWithStream(bool lock = true) const;
 
         DMT_CPU_GPU size_t size(bool lock = true) const;
 
         DMT_CPU_GPU size_t capacity(bool lock = true) const;
+
+        /** @warning supposes you already called `lockForRead` */
+        inline DMT_CPU_GPU void* data() const { return m_head; }
 
     private:
         // requires read locked other

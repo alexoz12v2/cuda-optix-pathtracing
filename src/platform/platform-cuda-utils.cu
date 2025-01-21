@@ -1,5 +1,5 @@
-#include "platform-cuda-utils.cuh"
 #include "platform-cuda-utils.h"
+#include "platform-cuda-utils.cuh"
 #include "platform-memory.h"
 
 #define LIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE
@@ -221,6 +221,46 @@ namespace dmt {
         return ret;
     }
 
+    __device__ int32_t globalBlockIndex()
+    {
+        // Current block's coordinates in the grid
+        int32_t const blockColumn = blockIdx.x;
+        int32_t const blockRow    = blockIdx.y;
+        int32_t const blockAisle  = blockIdx.z;
+
+        // Number of blocks in each dimension
+        int32_t const blocks_per_row   = gridDim.x;             // Blocks in the x-direction
+        int32_t const blocks_per_aisle = gridDim.x * gridDim.y; // Blocks in both x and y (per aisle in z)
+
+        // Calculate unique block index
+        int32_t const blockIndex = blockColumn                      // x-offset
+                                   + blockRow * blocks_per_row      // y-offset
+                                   + blockAisle * blocks_per_aisle; // z-offset
+
+        return blockIndex;
+    }
+
+    __device__ int32_t globalThreadCount()
+    {
+        // Number of threads per block
+        int32_t const threads_per_block = blockDim.x * blockDim.y * blockDim.z;
+
+        // Total number of blocks in the grid
+        int32_t const blocks_per_grid = gridDim.x * gridDim.y * gridDim.z;
+
+        // Total number of threads in the grid
+        int32_t const total_threads = threads_per_block * blocks_per_grid;
+
+        return total_threads;
+    }
+
+    __device__ int32_t blockThreadIndex()
+    {
+        return threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    }
+
+    __device__ int32_t blockThreadCount() { return blockDim.x * blockDim.y * blockDim.z; }
+
     __device__ int32_t globalThreadIndex()
     {
         int32_t const column          = threadIdx.x;
@@ -291,20 +331,8 @@ namespace dmt {
     }
 
     __host__ UnifiedMemoryResource::UnifiedMemoryResource() :
-    BaseMemoryResource(makeMemResId(EMemoryResourceType::eUnified, EMemoryResourceType::eCudaMallocManaged))
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eUnified, EMemoryResourceType::eCudaMallocManaged), id)
     {
-        cudaError_t cudaStatus;
-        m_host.allocateBytes      = UnifiedMemoryResource::allocateBytes;
-        m_host.freeBytes          = UnifiedMemoryResource::freeBytes;
-        m_host.allocateBytesAsync = UnifiedMemoryResource::allocateBytesAsync;
-        m_host.freeBytesAsync     = UnifiedMemoryResource::freeBytesAsync;
-        m_host.deviceHasAccess    = UnifiedMemoryResource::deviceHasAccess;
-        m_host.hostHasAccess      = UnifiedMemoryResource::hostHasAccess;
-        initTable<<<1, 32>>>(*this);
-        cudaStatus = cudaGetLastError();
-        assert(cudaStatus == ::cudaSuccess);
-        cudaStatus = cudaDeviceSynchronize();
-        assert(cudaStatus == ::cudaSuccess);
     }
 
     __host__ void* UnifiedMemoryResource::do_allocate(size_t sz, size_t align)
@@ -387,58 +415,96 @@ namespace dmt {
 
     __host__ __device__ void* BaseMemoryResource::allocateBytes(size_t sz, size_t align)
     {
-#if defined(__CUDA_ARCH__)
-        assert(m_device.allocateBytes);
-        return m_device.allocateBytes(this, sz, align);
-#else
-        assert(m_host.allocateBytes);
-        return m_host.allocateBytes(this, sz, align);
-#endif
+        void* ret = nullptr;
+        switch (sid)
+        {
+            case UnifiedMemoryResource::id: ret = UnifiedMemoryResource::allocateBytes(this, sz, align); break;
+            case CudaMallocResource::id: ret = CudaMallocResource::allocateBytes(this, sz, align); break;
+            case CudaMallocAsyncResource::id: ret = CudaMallocAsyncResource::allocateBytes(this, sz, align); break;
+            case BuddyMemoryResource::id: ret = BuddyMemoryResource::allocateBytes(this, sz, align); break;
+            case MemPoolAsyncMemoryResource::id:
+                ret = MemPoolAsyncMemoryResource::allocateBytes(this, sz, align);
+                break;
+        }
+        return ret;
     }
 
     __host__ __device__ void BaseMemoryResource::freeBytes(void* ptr, size_t sz, size_t align)
     {
-#if defined(__CUDA_ARCH__)
-        assert(m_device.freeBytes);
-        m_device.freeBytes(this, ptr, sz, align);
-#else
-        assert(m_host.freeBytes);
-        m_host.freeBytes(this, ptr, sz, align);
-#endif
+        switch (sid)
+        {
+            case UnifiedMemoryResource::id: UnifiedMemoryResource::freeBytes(this, ptr, sz, align); break;
+            case CudaMallocResource::id: CudaMallocResource::freeBytes(this, ptr, sz, align); break;
+            case CudaMallocAsyncResource::id: CudaMallocAsyncResource::freeBytes(this, ptr, sz, align); break;
+            case BuddyMemoryResource::id: BuddyMemoryResource::freeBytes(this, ptr, sz, align); break;
+            case MemPoolAsyncMemoryResource::id: MemPoolAsyncMemoryResource::freeBytes(this, ptr, sz, align); break;
+        }
     }
 
     __host__ void* BaseMemoryResource::allocateBytesAsync(size_t sz, size_t align, CudaStreamHandle stream)
     {
-        assert(m_host.allocateBytesAsync);
-        return m_host.allocateBytesAsync(this, sz, align, stream);
+        void* ret = nullptr;
+        switch (sid)
+        {
+            case UnifiedMemoryResource::id:
+                ret = UnifiedMemoryResource::allocateBytesAsync(this, sz, align, stream);
+                break;
+            case CudaMallocResource::id: ret = CudaMallocResource::allocateBytesAsync(this, sz, align, stream); break;
+            case CudaMallocAsyncResource::id:
+                ret = CudaMallocAsyncResource::allocateBytesAsync(this, sz, align, stream);
+                break;
+            case BuddyMemoryResource::id: ret = BuddyMemoryResource::allocateBytesAsync(this, sz, align, stream); break;
+            case MemPoolAsyncMemoryResource::id:
+                ret = MemPoolAsyncMemoryResource::allocateBytesAsync(this, sz, align, stream);
+                break;
+        }
+        return ret;
     }
 
     __host__ void BaseMemoryResource::freeBytesAsync(void* ptr, size_t sz, size_t align, CudaStreamHandle stream)
     {
-        assert(m_host.freeBytesAsync);
-        m_host.freeBytesAsync(this, ptr, sz, align, stream);
+        switch (sid)
+        {
+            case UnifiedMemoryResource::id: UnifiedMemoryResource::freeBytesAsync(this, ptr, sz, align, stream); break;
+            case CudaMallocResource::id: CudaMallocResource::freeBytesAsync(this, ptr, sz, align, stream); break;
+            case CudaMallocAsyncResource::id:
+                CudaMallocAsyncResource::freeBytesAsync(this, ptr, sz, align, stream);
+                break;
+            case BuddyMemoryResource::id: BuddyMemoryResource::freeBytesAsync(this, ptr, sz, align, stream); break;
+            case MemPoolAsyncMemoryResource::id:
+                MemPoolAsyncMemoryResource::freeBytesAsync(this, ptr, sz, align, stream);
+                break;
+        }
     }
 
     __host__ __device__ bool BaseMemoryResource::deviceHasAccess(int32_t deviceID) const
     {
-#if defined(__CUDA_ARCH__)
-        assert(m_device.deviceHasAccess);
-        return m_device.deviceHasAccess(this, deviceID);
-#else
-        assert(m_host.deviceHasAccess);
-        return m_host.deviceHasAccess(this, deviceID);
-#endif
+        bool ret = false;
+        switch (sid)
+        {
+            case UnifiedMemoryResource::id: ret = UnifiedMemoryResource::deviceHasAccess(this, deviceID); break;
+            case CudaMallocResource::id: ret = CudaMallocResource::deviceHasAccess(this, deviceID); break;
+            case CudaMallocAsyncResource::id: ret = CudaMallocAsyncResource::deviceHasAccess(this, deviceID); break;
+            case BuddyMemoryResource::id: ret = BuddyMemoryResource::deviceHasAccess(this, deviceID); break;
+            case MemPoolAsyncMemoryResource::id:
+                ret = MemPoolAsyncMemoryResource::deviceHasAccess(this, deviceID);
+                break;
+        }
+        return ret;
     }
 
     __host__ __device__ bool BaseMemoryResource::hostHasAccess() const
     {
-#if defined(__CUDA_ARCH__)
-        assert(m_device.hostHasAccess);
-        return m_device.hostHasAccess(this);
-#else
-        assert(m_host.hostHasAccess);
-        return m_host.hostHasAccess(this);
-#endif
+        bool ret = false;
+        switch (sid)
+        {
+            case UnifiedMemoryResource::id: ret = UnifiedMemoryResource::hostHasAccess(this); break;
+            case CudaMallocResource::id: ret = CudaMallocResource::hostHasAccess(this); break;
+            case CudaMallocAsyncResource::id: ret = CudaMallocAsyncResource::hostHasAccess(this); break;
+            case BuddyMemoryResource::id: ret = BuddyMemoryResource::hostHasAccess(this); break;
+            case MemPoolAsyncMemoryResource::id: ret = MemPoolAsyncMemoryResource::hostHasAccess(this); break;
+        }
+        return ret;
     }
 
     // Memory Allocation Helpers --------------------------------------------------------------------------------------
@@ -511,21 +577,7 @@ namespace dmt {
         assert(false);
     }
 
-    __host__ CudaMallocResource::CudaMallocResource() : DeviceMemoryReosurce(EMemoryResourceType::eCudaMalloc)
-    {
-        cudaError_t cudaStatus;
-        m_host.allocateBytes      = CudaMallocResource::allocateBytes;
-        m_host.freeBytes          = CudaMallocResource::freeBytes;
-        m_host.allocateBytesAsync = CudaMallocResource::allocateBytesAsync;
-        m_host.freeBytesAsync     = CudaMallocResource::freeBytesAsync;
-        m_host.deviceHasAccess    = CudaMallocResource::deviceHasAccess;
-        m_host.hostHasAccess      = CudaMallocResource::hostHasAccess;
-        initTable<<<1, 32>>>(*this);
-        cudaStatus = cudaGetLastError();
-        assert(cudaStatus == ::cudaSuccess);
-        cudaStatus = cudaDeviceSynchronize();
-        assert(cudaStatus == ::cudaSuccess);
-    }
+    __host__ CudaMallocResource::CudaMallocResource() : DeviceMemoryReosurce(EMemoryResourceType::eCudaMalloc, id) {}
     __host__ __device__ void* CudaMallocResource::allocate(size_t sz, size_t align)
     {
         return CudaMallocResource::allocateBytes(this, sz, align);
@@ -563,20 +615,8 @@ namespace dmt {
     }
 
     __host__ CudaMallocAsyncResource::CudaMallocAsyncResource() :
-    CudaAsyncMemoryReosurce(EMemoryResourceType::eCudaMallocAsync)
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eCudaMallocAsync, id)
     {
-        cudaError_t cudaStatus;
-        m_host.allocateBytes      = CudaMallocAsyncResource::allocateBytes;
-        m_host.freeBytes          = CudaMallocAsyncResource::freeBytes;
-        m_host.allocateBytesAsync = CudaMallocAsyncResource::allocateBytesAsync;
-        m_host.freeBytesAsync     = CudaMallocAsyncResource::freeBytesAsync;
-        m_host.hostHasAccess      = CudaMallocAsyncResource::hostHasAccess;
-        m_host.deviceHasAccess    = CudaMallocAsyncResource::deviceHasAccess;
-        initTable<<<1, 32>>>(*this);
-        cudaStatus = cudaGetLastError();
-        assert(cudaStatus == ::cudaSuccess);
-        cudaStatus = cudaDeviceSynchronize();
-        assert(cudaStatus == ::cudaSuccess);
     }
 
     void* CudaMallocAsyncResource::allocate(size_t _Bytes, [[maybe_unused]] size_t _Align)
@@ -608,20 +648,11 @@ namespace dmt {
     }
 
     __host__ BuddyMemoryResource::BuddyMemoryResource(BuddyResourceSpec const& input) :
-    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap)),
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap), id),
     m_deviceId(input.deviceId),
     m_minBlockSize(static_cast<uint32_t>(nextPOT(input.minBlockSize)))
     {
-        m_host.allocateBytes      = BuddyMemoryResource::allocateBytes;
-        m_host.freeBytes          = BuddyMemoryResource::freeBytes;
-        m_host.allocateBytesAsync = BuddyMemoryResource::allocateBytesAsync;
-        m_host.freeBytesAsync     = BuddyMemoryResource::freeBytesAsync;
-        m_host.deviceHasAccess    = BuddyMemoryResource::deviceHasAccess;
-        m_host.hostHasAccess      = BuddyMemoryResource::hostHasAccess;
-        initTable<<<1, 32>>>(*this);
         cudaError_t cudaStatus = cudaGetLastError();
-        assert(cudaStatus == ::cudaSuccess);
-        cudaStatus = cudaDeviceSynchronize();
         assert(cudaStatus == ::cudaSuccess);
 
         // TODO better? allocation functions without class? global context map {pid, idx -> ctx}
@@ -722,7 +753,7 @@ namespace dmt {
     }
 
     __host__ BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource const& other) :
-    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap))
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap), id)
     {
         // shouldn't be necessary to lock `transactionInFlight`, cause no device allocation is needed here
         std::shared_lock slk{other.m_mtx};
@@ -739,7 +770,7 @@ namespace dmt {
     }
 
     __host__ BuddyMemoryResource::BuddyMemoryResource(BuddyMemoryResource&& other) noexcept :
-    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap))
+    BaseMemoryResource(makeMemResId(EMemoryResourceType::eHost, EMemoryResourceType::eHostToDevMemMap), id)
     {
         // shouldn't be necessary to lock `transactionInFlight`, cause no device allocation is needed here
         std::lock_guard lk{other.m_mtx};
@@ -1119,22 +1150,13 @@ namespace dmt {
     // MemPoolAsyncMemoryResource -------------------------------------------------------------------------------------
 
     __host__ MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResourceSpec const& input) :
-    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool),
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool, id),
     m_ctrlBlock(std::bit_cast<ControlBlock*>(input.pHostMemRes->allocate(sizeof(ControlBlock), alignof(ControlBlock)))),
     m_hostCtrlRes(input.pHostMemRes),
     m_poolSize(nextPOT(input.poolSize)),
     m_deviceId(input.deviceId)
     {
-        m_host.allocateBytes      = MemPoolAsyncMemoryResource::allocateBytes;
-        m_host.freeBytes          = MemPoolAsyncMemoryResource::freeBytes;
-        m_host.allocateBytesAsync = MemPoolAsyncMemoryResource::allocateBytesAsync;
-        m_host.freeBytesAsync     = MemPoolAsyncMemoryResource::freeBytesAsync;
-        m_host.deviceHasAccess    = MemPoolAsyncMemoryResource::deviceHasAccess;
-        m_host.hostHasAccess      = MemPoolAsyncMemoryResource::hostHasAccess;
-        initTable<<<1, 32>>>(*this);
         cudaError_t cudaStatus = cudaGetLastError();
-        assert(cudaStatus == ::cudaSuccess);
-        cudaStatus = cudaDeviceSynchronize();
         assert(cudaStatus == ::cudaSuccess);
 
         // check successful allocation of control block
@@ -1216,7 +1238,7 @@ namespace dmt {
     }
 
     __host__ MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource const& other) :
-    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool)
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool, id)
     {
         std::shared_lock slk{other.m_mtx};
         m_ctrlBlock   = other.m_ctrlBlock;
@@ -1229,7 +1251,7 @@ namespace dmt {
     }
 
     __host__ MemPoolAsyncMemoryResource::MemPoolAsyncMemoryResource(MemPoolAsyncMemoryResource&& other) noexcept :
-    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool)
+    CudaAsyncMemoryReosurce(EMemoryResourceType::eMemPool, id)
     {
         std::lock_guard lk{other.m_mtx};
         m_ctrlBlock   = std::exchange(other.m_ctrlBlock, nullptr);
@@ -1633,97 +1655,115 @@ namespace dmt {
     __host__ __device__ DynaArray::DynaArray(DynaArray&& other) noexcept :
     BaseDeviceContainer(other.m_resource, other.stream)
     {
-        other.lockForWrite();
-        m_resource = std::exchange(other.m_resource, nullptr);
-        stream     = other.stream;
-        m_head     = std::exchange(other.m_head, nullptr);
-        m_size     = std::exchange(other.m_size, 0);
-        m_capacity = std::exchange(other.m_capacity, 0);
-        m_elemSize = other.m_elemSize;
-        other.unlockForWrite();
+        if (other.lockForWrite())
+        {
+            m_resource = std::exchange(other.m_resource, nullptr);
+            stream = other.stream;
+            m_head = std::exchange(other.m_head, nullptr);
+            m_size = std::exchange(other.m_size, 0);
+            m_capacity = std::exchange(other.m_capacity, 0);
+            m_elemSize = other.m_elemSize;
+            other.unlockForWrite();
+        }
     }
 
     __host__ __device__ void DynaArray::reserve(size_t newCapacity, bool lock)
     {
+        bool proceed = true;
         if (lock)
-            lockForWrite();
-        if (newCapacity <= m_capacity)
+            proceed = lockForWrite();
+        if (proceed) 
         {
+            if (newCapacity <= m_capacity)
+            {
+                if (lock)
+                    unlockForWrite();
+                return;
+            }
+
+            void* newHead = m_resource->tryAllocateAsync(newCapacity * m_elemSize, alignof(std::max_align_t), stream);
+            if (m_head)
+            {
+                std::memcpy(newHead, m_head, m_size * m_elemSize);
+                m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
+            }
+            m_head = newHead;
+            m_capacity = newCapacity;
             if (lock)
                 unlockForWrite();
-            return;
         }
-
-        void* newHead = m_resource->tryAllocateAsync(newCapacity * m_elemSize, alignof(std::max_align_t), stream);
-        if (m_head)
-        {
-            std::memcpy(newHead, m_head, m_size * m_elemSize);
-            m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
-        }
-        m_head     = newHead;
-        m_capacity = newCapacity;
-        if (lock)
-            unlockForWrite();
     }
 
     __host__ __device__ void DynaArray::clear(bool lock) noexcept
     {
+        bool proceed = true;
         if (lock)
-            lockForWrite();
-        if (m_head)
+            proceed = lockForWrite();
+        if (proceed) 
         {
-            m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
-            m_head = nullptr;
+            if (m_head)
+            {
+                m_resource->tryFreeAsync(m_head, m_size * m_elemSize, alignof(std::max_align_t), stream);
+                m_head = nullptr;
+            }
+            if (lock)
+                unlockForWrite();
         }
-        if (lock)
-            unlockForWrite();
     }
 
     __host__ __device__ bool DynaArray::push_back(void const* pValue, bool srcHost, bool lock)
     {
         bool ret = true;
+        bool proceed = true;
         if (lock)
-            lockForWrite();
+            proceed = lockForWrite();
 
-        if (m_size >= m_capacity)
-            reserve(m_capacity > 0 ? m_capacity >> 1 : 1, false);
+        if (proceed) 
+        {
+            if (m_size >= m_capacity)
+                reserve(m_capacity > 0 ? m_capacity >> 1 : 1, false);
 
-        void* dest = std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + m_size * m_elemSize);
+            void* dest = std::bit_cast<void*>(std::bit_cast<uintptr_t>(m_head) + m_size * m_elemSize);
 
 #if defined(__CUDA_ARCH__)
-        if (srcHost) // error!
-            ret = false;
-        else
-            std::memcpy(dest, pValue, m_elemSize);
+            if (srcHost) // error!
+                ret = false;
+            else
+                std::memcpy(dest, pValue, m_elemSize);
 #else
-        int32_t device;
-        auto    cudaret = cudaGetDevice(&device);
-        assert(cudaret == ::cudaSuccess);
-        cudaMemcpyKind kind = isDeviceAllocator(m_resource, device)
-                                  ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
-                                  : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
-        cudaret             = cudaMemcpy(dest, pValue, m_elemSize, kind);
-        if (cudaret != ::cudaSuccess)
-            ret = false;
+            int32_t device;
+            auto    cudaret = cudaGetDevice(&device);
+            assert(cudaret == ::cudaSuccess);
+            cudaMemcpyKind kind = isDeviceAllocator(m_resource, device)
+                ? (srcHost ? ::cudaMemcpyHostToDevice : ::cudaMemcpyDeviceToDevice)
+                : (srcHost ? ::cudaMemcpyHostToHost : ::cudaMemcpyDeviceToHost);
+            cudaret = cudaMemcpy(dest, pValue, m_elemSize, kind);
+            if (cudaret != ::cudaSuccess)
+                ret = false;
 #endif
-        if (ret)
-            ++m_size;
+            if (ret)
+                ++m_size;
 
-        if (lock)
-            unlockForWrite();
+            if (lock)
+                unlockForWrite();
+        }
         return ret;
     }
 
     __host__ __device__ void DynaArray::pop_back(bool lock)
     {
+        bool proceed = true;
         if (lock)
-            lockForWrite();
+            proceed = lockForWrite();
 
-        if (m_size != 0)
-            --m_size;
+        if (proceed)
+        {
+            if (m_size != 0)
+                --m_size;
 
-        if (lock)
-            unlockForWrite();
+            if (lock)
+                unlockForWrite();
+        }
     }
 
     // assumes you already locked for read
@@ -1748,7 +1788,12 @@ namespace dmt {
     {
         if (other.m_size > 0)
         {
+#if defined(__CUDA_ARCH__)
             std::memcpy(m_head, other.m_head, other.m_size * other.m_elemSize);
+#else
+            cudaError_t err = cudaMemcpy(m_head, other.m_head, other.m_size * other.m_elemSize, ::cudaMemcpyDeviceToDevice);
+            assert(err == ::cudaSuccess);
+#endif
             m_size = other.m_size;
         }
     }
@@ -1780,17 +1825,22 @@ namespace dmt {
     {
         if (this != &other)
         {
-            lockForWrite();
-            other.lockForWrite();
-            assert(m_elemSize == other.m_elemSize);
+            if (lockForWrite())
+            {
+                other.lockForWrite();
+                assert(m_elemSize == other.m_elemSize);
 
-            clear();
-            reserve(other.m_size, false);
-            copyFrom(other);
+                clear();
+                reserve(other.m_size, false);
+                copyFrom(other);
 
-            other.unlockForWrite();
-            unlockForWrite();
+                other.unlockForWrite();
+                unlockForWrite();
+            }
         }
+#if defined(__CUDA_ARCH__)
+        __syncthreads();
+#endif
         return *this;
     }
 
@@ -1798,17 +1848,22 @@ namespace dmt {
     {
         if (this != &other)
         {
-            lockForWrite();
-            other.lockForWrite();
-            assert(m_elemSize == other.m_elemSize);
+            if (lockForWrite())
+            {
+                other.lockForWrite();
+                assert(m_elemSize == other.m_elemSize);
 
-            m_size     = std::exchange(other.m_size, 0);
-            m_capacity = std::exchange(other.m_capacity, 0);
-            m_head     = std::exchange(other.m_head, nullptr);
+                m_size = std::exchange(other.m_size, 0);
+                m_capacity = std::exchange(other.m_capacity, 0);
+                m_head = std::exchange(other.m_head, nullptr);
 
-            other.unlockForWrite();
-            unlockForWrite();
+                other.unlockForWrite();
+                unlockForWrite();
+            }
         }
+#if defined(__CUDA_ARCH__)
+        __syncthreads();
+#endif
         return *this;
     }
 
@@ -1836,6 +1891,32 @@ namespace dmt {
             unlockForRead();
 
         return ret;
+    }
+
+    __host__ bool DynaArray::copyFromHostAsync(void* src, size_t numBytes, bool lock)
+    {
+        assert(numBytes == m_size * m_elemSize);
+        bool proceed = true;
+        if (lock)
+            proceed = lockForWrite();
+
+        if (proceed) 
+        {
+            cudaStream_t _stream = stream == noStream ? 0 : streamRefFromHandle(stream).get();
+            cudaError_t  err = cudaMemcpyAsync(m_head, src, numBytes, ::cudaMemcpyHostToDevice, _stream);
+            assert(err == ::cudaSuccess);
+        }
+        return proceed;
+    }
+
+    __host__ void DynaArray::syncWithStream(bool lock) const
+    {
+        cudaStream_t _stream = stream == noStream ? 0 : streamRefFromHandle(stream).get();
+        cudaError_t  err     = cudaStreamSynchronize(_stream);
+        assert(err == ::cudaSuccess);
+
+        if (lock)
+            unlockForWrite();
     }
 
     __host__ __device__ size_t DynaArray::size(bool lock) const

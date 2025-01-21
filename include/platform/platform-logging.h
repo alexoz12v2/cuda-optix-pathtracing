@@ -599,7 +599,7 @@ concept LogDisplay = requires(T t)
          * explicit constructor for the base logger starting from the desired level
          * @param level desired log level
          */
-        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
+        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
 
         /**
          * Setter for the `m_level`

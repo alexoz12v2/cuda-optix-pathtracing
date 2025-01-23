@@ -66,7 +66,7 @@ namespace dmt {
         Common common;
         // implicit padding to make next address 8 byte aligned
         // followed by platform specific data
-        alignas(std::max_align_t) unsigned char platformSpecific[4096 - sizeof(Common)];
+        alignas(std::max_align_t) unsigned char platformSpecific[4096 - sizeof(Common)]{};
     };
     static_assert(std::is_standard_layout_v<ContextImpl>);
 

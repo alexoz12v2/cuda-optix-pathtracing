@@ -2,10 +2,8 @@
 
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
-
 #include <platform/platform-utils.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <array>
 #include <chrono>
 #include <concepts>
@@ -21,9 +19,279 @@
 #include <compare>
 #include <cstdint>
 #include <cstring>
-#endif
 
-DMT_MODULE_EXPORT namespace dmt {
+namespace dmt {
+    /**
+     * @defgroup UTF-8 byte query utils.
+     * @note In the following, consider a code point of type `U+uvwxyz`, in which all letters but `u` are 4 bits,
+     * while `u` is only 1 bit, as it can be either 0 or 1. * <a href="https://en.wikipedia.org/wiki/UTF-8#Description">Reference</a>
+     * @{
+     */
+    namespace utf8 {
+        enum class Direction : uint8_t
+        {
+            eNone = 0,
+            eForward,
+            eBackward
+        };
+
+        DMT_CPU_GPU inline constexpr bool isContinuationByte(char8_t c)
+        {
+            // byte of type 10--'----
+            constexpr char8_t first = 0x80;
+            constexpr char8_t last  = 0xBF;
+            return c >= first && c <= last;
+        }
+        DMT_CPU_GPU inline constexpr bool isStartOf2(char8_t c)
+        {
+            // code point inside [U+0080, U+07FF]
+            // 2 byte char = 110xxxyy | 10yyzzzz
+            constexpr char8_t mask  = 0xE0;
+            constexpr char8_t value = 0xC0;
+            return (c & mask) == value;
+        }
+        DMT_CPU_GPU inline constexpr bool isStartOf3(char8_t c)
+        {
+            // code point inside [U+0800, U+FFFF]
+            // 3 byte char = 1110wwww | 10xxxxyy | 10yyzzzz
+            constexpr char8_t mask  = 0xF0;
+            constexpr char8_t value = 0xE0;
+            return (c & mask) == value;
+        }
+        DMT_CPU_GPU inline constexpr bool isStartOf4(char8_t c)
+        {
+            // code point inside [U+010000, U+10FFFF]. U+10FFFF is the <a href="https://unicodebook.readthedocs.io/unicode.html">Last character</a>
+            // 4 byte char = 11110uvv | 10vvwwww | 10xxxxyy || 10yyzzzz
+            constexpr char8_t mask  = 0xF8;
+            constexpr char8_t value = 0xF0;
+            return (c & mask) == value;
+        }
+        DMT_CPU_GPU inline constexpr bool isInvalidByte(char8_t c)
+        {
+            return c == 0xC0 || c == 0xC1 || (c >= 0xF5 || c <= 0xFF);
+        }
+        DMT_CPU_GPU inline constexpr bool isValidUTF8(char8_t const ch[4])
+        {
+            if (isInvalidByte(ch[0]) || isInvalidByte(ch[1]) || isInvalidByte(ch[2]) || isInvalidByte(ch[3]))
+                return false;
+
+            if (isStartOf4(ch[0]))
+                return (ch[1] & 0xC0) == 0x80 && (ch[2] & 0xC0) == 0x80 &&
+                       (ch[3] & 0xC0) == 0x80; // 11110uvv | 10vvwwww | 10xxxxyy | 10yyzzzz (`U+uvwxyz`)
+            else if (isStartOf3(ch[0]))
+                return (ch[1] & 0xC0) == 0x80 && (ch[2] & 0xC0) == 0x80; // 1110wwww | 10xxxxyy | 10yyzzzz (`U+uvwxyz`)
+            else if (isStartOf2(ch[0]))
+                return (ch[1] & 0xC0) == 0x80;   // 110xxxyy | 10yyzzzz (`U+uvwxyz`)
+            else if (!isContinuationByte(ch[0])) // "Basic Latin" block [U+0000, U+007F]
+                return (ch[0] & 0x80) == 0x00;   // 0yyyzzzz (`U+uvwxyz`)
+            else
+                return false;
+        }
+        DMT_CPU_GPU inline constexpr bool equal(char8_t const a[4], char8_t const b[4])
+        {
+            return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
+        }
+
+        /** @warning doesn't perform bouds checking */
+        DMT_CPU_GPU inline constexpr uint32_t computeUTF8Length(char8_t const* str, uint32_t numBytes)
+        {
+            uint32_t length = 0; // Number of UTF-8 characters
+            uint32_t i      = 0; // Current byte position
+
+            while (i < numBytes)
+            {
+                char8_t currentByte = str[i];
+
+                if (isInvalidByte(currentByte))
+                    return 0; // Return 0 or throw an exception if you prefer error handling for invalid bytes
+
+                // Determine the number of bytes in the current UTF-8 character
+                if (isStartOf4(currentByte))
+                {
+                    if (i + 3 < numBytes && isContinuationByte(str[i + 1]) && isContinuationByte(str[i + 2]) &&
+                        isContinuationByte(str[i + 3]))
+                        i += 4;
+                    else
+                        return 0; // Invalid 4-byte sequence
+                }
+                else if (isStartOf3(currentByte))
+                {
+                    if (i + 2 < numBytes && isContinuationByte(str[i + 1]) && isContinuationByte(str[i + 2]))
+                        i += 3;
+                    else
+                        return 0; // Invalid 3-byte sequence
+                }
+                else if (isStartOf2(currentByte))
+                {
+                    if (i + 1 < numBytes && isContinuationByte(str[i + 1]))
+                        i += 2;
+                    else
+                        return 0; // Invalid 2-byte sequence
+                }
+                else if (!isContinuationByte(currentByte)) // Single-byte character (ASCII)
+                    i += 1;
+                else
+                    return 0; // Invalid sequence
+
+                ++length; // Increment character count
+            }
+
+            return length;
+        }
+        /** @}*/
+
+        /// returns true whenever you need to stop advancing
+        template <typename T>
+        concept PredicateC = std::is_invocable_r_v<Direction, T, char8_t[4]> && std::is_default_constructible_v<T> &&
+                             requires(T t) { t.escaped(); };
+    } // namespace utf8
+
+    struct DMT_PLATFORM_API DefaultPredicate
+    {
+        DMT_CPU_GPU constexpr utf8::Direction operator()(char8_t ch[4])
+        {
+            static_assert(u8'{' == 0x7B && u8'}' == 0x7D);
+            bool const result = [this](char8_t c) {
+                if (inside)
+                    return c == u8'}';
+                else
+                    return c == u8'{';
+            }(ch[0]);
+            if (result)
+                inside = !inside;
+            return result ? (inside ? utf8::Direction::eBackward : utf8::Direction::eForward) : utf8::Direction::eNone;
+        }
+        DMT_CPU_GPU constexpr void escaped() { inside = !inside; }
+
+        bool inside = false;
+    };
+
+    /** Definition of a string view to a UTF-8 encoded string */
+    struct DMT_PLATFORM_API CharRangeU8
+    {
+        char8_t const* data;
+        uint32_t       len;
+        uint32_t       numBytes;
+    };
+
+    template <utf8::PredicateC Pred = DefaultPredicate>
+    class DMT_PLATFORM_API FormatString
+    {
+    public:
+        using difference_type = std::ptrdiff_t;
+        using value_type      = CharRangeU8;
+
+        // TODO consteval
+        template <uint32_t N>
+        DMT_CPU_GPU constexpr FormatString(char8_t const (&_arr)[N]) :
+        m_start(&_arr[0]),
+        m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
+        {
+            ++*this;
+        }
+
+        DMT_CPU_GPU constexpr value_type operator*() const;
+        DMT_CPU_GPU constexpr void       operator++();
+        DMT_CPU_GPU consteval void       operator++(int) { ++*this; }
+        DMT_CPU_GPU constexpr bool       finished() { return m_numBytes == 0; }
+
+    private:
+        struct Pair
+        {
+            char8_t  ch[4];
+            uint32_t numBytes;
+        };
+
+    private:
+        char8_t const* m_start;
+        uint32_t       m_len       = 0;
+        uint32_t       m_lastBytes = 0;
+        uint32_t       m_numBytes;
+        Pred           stop;
+        bool           m_insideArg = false;
+    };
+
+    // it's not an iterator cause the ++ doesn't return a thing
+    static_assert(!std::input_iterator<FormatString<>>);
+
+    template <utf8::PredicateC Pred>
+    DMT_CPU_GPU constexpr FormatString<Pred>::value_type FormatString<Pred>::operator*() const
+    {
+        CharRangeU8 const ret{.data = m_start, .len = m_len, .numBytes = m_lastBytes};
+        return ret;
+    }
+
+    // Compilation should fail in the following cases
+    // - Bytes that never appear in UTF-8: 0xC0, 0xC1, 0xF5–0xFF
+    // - A "continuation byte" (0x80–0xBF) at the start of a character
+    // - A non-continuation byte (or the string ending) before the end of a character
+    // - An overlong encoding (0xE0 followed by less than 0xA0, or 0xF0 followed by less than 0x90)
+    // - A 4-byte sequence that decodes to a value greater than U+10FFFF (0xF4 followed by 0x90 or greater)
+    template <utf8::PredicateC Pred>
+    DMT_CPU_GPU constexpr void FormatString<Pred>::operator++()
+    {
+        // crashed if a character is recognized to have N bytes, but there aren't enough bytes
+#define acquireCharacter(pair)                                                                                            \
+    do                                                                                                                    \
+    {                                                                                                                     \
+        if (utf8::isStartOf4(m_start[m_lastBytes]))                                                                       \
+            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], m_start[m_lastBytes + 3]}, \
+                    4};                                                                                                   \
+        else if (utf8::isStartOf3(m_start[0]))                                                                            \
+            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], 0}, 3};                    \
+        else if (utf8::isStartOf2(m_start[0]))                                                                            \
+            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], 0, 0}, 2};                                           \
+        else                                                                                                              \
+            pair = {{m_start[m_lastBytes], 0, 0, 0}, 1};                                                                  \
+    } while (0)
+
+        // traverse the UTF-8 Multibyte string
+        m_start += m_lastBytes;
+        m_len         = 0;
+        m_lastBytes   = 0;
+        bool finished = false;
+        while (!finished && m_numBytes > 0)
+        {
+            uint32_t iterationBytes = 0;
+            ++m_len;
+            Pair pair;
+            acquireCharacter(pair);
+            //static_assert(utf8::isValidUTF8(pair.ch));
+            iterationBytes += pair.numBytes;
+
+            if (auto res = stop(pair.ch); res != utf8::Direction::eNone)
+            {
+                m_insideArg = !m_insideArg;
+                if (res == utf8::Direction::eBackward)
+                {
+                    --m_len;
+                    iterationBytes -= pair.numBytes;
+                    finished = true;
+                }
+                else // utf8::Direction::eForward
+                {
+                    Pair pair2;
+                    m_lastBytes += iterationBytes;
+                    acquireCharacter(pair2);
+                    m_lastBytes -= iterationBytes;
+                    // if character escaped (==duplicated), go past it
+                    if (utf8::equal(pair2.ch, pair.ch))
+                    {
+                        iterationBytes += pair2.numBytes;
+                        m_insideArg = !m_insideArg;
+                        ++m_len;
+                    }
+                    else
+                        finished = true;
+                }
+            }
+
+            m_numBytes = iterationBytes <= m_numBytes ? m_numBytes - iterationBytes : 0;
+            m_lastBytes += iterationBytes;
+        }
+#undef acquireCharacter
+    }
+
     /**
      * Log Level enum, to check whether we should print or not, and to determine the style of the output
      * @brief log levels for logger configuration
@@ -47,6 +315,95 @@ DMT_MODULE_EXPORT namespace dmt {
     {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    struct DMT_PLATFORM_API LogRecord
+    {
+        char8_t const* data;
+        ELogLevel      level;
+        uint32_t       len;
+        uint32_t       numBytes;
+    };
+
+    template <typename T>
+    struct UTF8Formatter;
+
+    template <typename... Ts>
+        requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
+    inline constexpr DMT_CPU_GPU LogRecord createRecord(
+        FormatString<>              fmt,
+        ELogLevel                   _level,
+        char8_t*                    _buffer,
+        uint32_t                    _bufferSize,
+        char8_t*                    _argBuffer,
+        uint32_t                    _argBufferSize,
+        std::tuple<Ts...> const&    _params,
+        std::source_location const& loc = std::source_location::current())
+    {
+        LogRecord record{};
+        record.level = _level;
+        record.data  = _buffer;
+
+        bool                 done            = false;
+        uint32_t const       totalArgBufSize = _argBufferSize;
+        char8_t const* const initialArgBuf   = _argBuffer;
+
+        // Process tuple of arguments using a fold expression
+        uint32_t           offset = 0;
+        auto /*constexpr*/ do_for = [&](auto&&... _args) {
+            (UTF8Formatter<std::remove_cvref_t<decltype(_args)>>{}(std::forward<decltype(_args)>(_args), _argBuffer, offset, _argBufferSize),
+             ...);
+        };
+
+        // Apply the formatters to the tuple
+        std::apply(do_for, _params);
+
+
+        uint32_t const       totalArgBytesWritten = totalArgBufSize - _argBufferSize;
+        char8_t const* const pastEndArgBuf        = initialArgBuf + totalArgBytesWritten;
+
+        // Format the log record
+        while (!done)
+        {
+            CharRangeU8 const portion = *fmt;
+            if (portion.data[0] == u8'{' && portion.data[1] != u8'{' && _argBuffer < pastEndArgBuf)
+            {
+                // Process argument from buffer
+                char8_t const* buf      = _argBuffer + 2 * sizeof(uint32_t);
+                uint32_t const numBytes = *std::bit_cast<uint32_t*>(_argBuffer);
+                uint32_t const len      = *std::bit_cast<uint32_t*>(_argBuffer + sizeof(uint32_t));
+                if (numBytes > 0)
+                {
+                    memcpy(_buffer, buf, numBytes);
+                    _buffer += numBytes;
+                    _bufferSize = _bufferSize >= numBytes ? _bufferSize - numBytes : 0;
+                    record.len += len;
+                    record.numBytes += numBytes;
+                    _argBuffer += numBytes + 2 * sizeof(uint32_t);
+                }
+            }
+            else
+            {
+                // Copy string literal to buffer
+                uint32_t bytesToCopy = fminf(_bufferSize, portion.numBytes);
+                memcpy(_buffer, portion.data, bytesToCopy);
+                _buffer += bytesToCopy;
+                _bufferSize = _bufferSize >= bytesToCopy ? _bufferSize - bytesToCopy : 0;
+                record.len += portion.len;
+                record.numBytes += bytesToCopy;
+            }
+
+            if (_bufferSize == 0 || fmt.finished())
+                done = true;
+            else
+                ++fmt;
+        }
+
+        return record;
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
 
     /**
      * Obtain from a `ELogLevel` its string representation (in read only memory) as a `std::string_view`

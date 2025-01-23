@@ -7,9 +7,11 @@ target_sources(dmt-platform
             ${CMAKE_SOURCE_DIR}/include/platform/platform-utils.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-memory.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-macros.h
+            ${CMAKE_SOURCE_DIR}/include/platform/platform-context.h
   PRIVATE 
     platform-os-utils.h  platform-utils.cpp platform-logging.cpp platform-threadPool.cpp platform-memory.cpp
     platform-os-utils.cpp  # inserted inside .cppm unity build style
+    platform-context.cpp
 )
 
 target_link_libraries(dmt-platform 

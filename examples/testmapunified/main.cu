@@ -195,6 +195,8 @@ int32_t main()
         };
         dmt::AllocBundle buddyBundle(resource, dmt::EMemoryResourceType::eHost, dmt::EMemoryResourceType::eHostToDevMemMap, &spec);
 
+        auto* p = resource->BaseMemoryResource::allocateBytes(sizeof(dmt::DynaArray), alignof(dmt::DynaArray));
+
         testSpectrum(resource, buddyBundle.pMemRes);
     }
 

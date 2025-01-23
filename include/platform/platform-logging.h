@@ -20,6 +20,10 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(__NVCC__)
+#include <cuda_runtime.h>
+#endif
+
 namespace dmt {
     /**
      * @defgroup UTF-8 byte query utils.
@@ -317,14 +321,67 @@ namespace dmt {
     }
 
     // ----------------------------------------------------------------------------------------------------------------
+    struct DMT_PLATFORM_API LogLocation
+    {
+        struct DMT_PLATFORM_API Device
+        {
+            int32_t blockX;
+            int32_t blockY;
+            int32_t blockZ;
+            int32_t threadX;
+            int32_t threadY;
+            int32_t threadZ;
+            int32_t lane;
+            int32_t warp;
+        };
+        struct DMT_PLATFORM_API Host
+        {
+            uint64_t pid;
+            uint64_t tid;
+        };
+        union DMT_PLATFORM_API U
+        {
+            Device dev;
+            Host   host;
+        };
+        static constexpr int32_t hostNum = std::numeric_limits<int32_t>::max();
+
+        U       loc;
+        int32_t where; // if dirrerent than how then this is device id
+    };
 
     struct DMT_PLATFORM_API LogRecord
     {
         char8_t const* data;
+        LogLocation    loc;
         ELogLevel      level;
         uint32_t       len;
         uint32_t       numBytes;
     };
+
+    // https://stackoverflow.com/questions/44337309/whats-the-most-efficient-way-to-calculate-the-warp-id-lane-id-in-a-1-d-grid
+    inline DMT_CPU_GPU LogLocation getPhysicalLocation()
+    {
+        LogLocation loc;
+#if defined(__CUDA_ARCH__)
+        int32_t     device  = -1;
+        cudaError_t err     = cudaGetDevice(&device);
+        loc.where           = device;
+        loc.loc.dev.blockX  = blockIdx.x;
+        loc.loc.dev.blockY  = blockIdx.y;
+        loc.loc.dev.blockZ  = blockIdx.z;
+        loc.loc.dev.threadX = threadIdx.x;
+        loc.loc.dev.threadY = threadIdx.y;
+        loc.loc.dev.threadZ = threadIdx.z;
+        loc.loc.dev.lane    = threadIdx.x % warpSize;
+        loc.loc.dev.warp    = threadIdx.x / warpSize;
+#else
+        loc.where        = LogLocation::hostNum;
+        loc.loc.host.pid = processId();
+        loc.loc.host.tid = threadId();
+#endif
+        return loc;
+    }
 
     template <typename T>
     struct UTF8Formatter;
@@ -339,10 +396,12 @@ namespace dmt {
         char8_t*                    _argBuffer,
         uint32_t                    _argBufferSize,
         std::tuple<Ts...> const&    _params,
-        std::source_location const& loc = std::source_location::current())
+        LogLocation const&          _pysLoc,
+        std::source_location const& loc)
     {
         LogRecord record{};
         record.level = _level;
+        record.loc   = _pysLoc;
         record.data  = _buffer;
 
         bool                 done            = false;

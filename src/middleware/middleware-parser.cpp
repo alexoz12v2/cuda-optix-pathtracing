@@ -3159,6 +3159,21 @@ namespace dmt {
     void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) {}
 
     // Spec Functions -------------------------------------------------------------------------------------------------
+    LightSourceSpec::LightSourceSpec(ELightType type, bool  illum, float powerOrIlluminance, float scale):
+    scale(scale),
+    type(type),
+    illum(illum)
+    {
+        if()
+    }
+        // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
+    LightSourceSpec::LightSourceSpec(LightSourceSpec const&);
+    LightSourceSpec::LightSourceSpec(LightSourceSpec&&) noexcept;
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const&);
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&&) noexcept;
+    LightSourceSpec::~LightSourceSpec() noexcept;
+    
+    
     CameraSpec::CameraSpec(CameraSpec const& other) :
     shutteropen(other.shutteropen),
     shutterclose(other.shutterclose),

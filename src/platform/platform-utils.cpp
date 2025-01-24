@@ -49,7 +49,7 @@ namespace dmt {
 #if defined(DMT_OS_WINDOWS)
         ret = static_cast<uint64_t>(GetCurrentThreadId());
 #elif defined(DMT_OS_LINUX)
-        ret = static_cast<uint64_t>(gettid());
+        ret             = static_cast<uint64_t>(gettid());
 #endif
         return ret;
     }

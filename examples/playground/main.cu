@@ -27,7 +27,7 @@ namespace dmt {
     template <std::floating_point T>
     struct UTF8Formatter<T>
     {
-        DMT_CPU_GPU constexpr inline void operator()(T const& value, char8_t* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
+        DMT_CPU_GPU inline constexpr void operator()(T const& value, char8_t* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
         {
             if (_bufferSize < _offset + 2 * sizeof(uint32_t))
                 return; // Not enough space for metadata
@@ -63,7 +63,7 @@ namespace dmt {
     template <std::integral T>
     struct UTF8Formatter<T>
     {
-        DMT_CPU_GPU constexpr inline void operator()(T const& value, char8_t* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
+        DMT_CPU_GPU inline constexpr void operator()(T const& value, char8_t* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
         {
             if (_bufferSize < _offset + 2 * sizeof(uint32_t))
                 return; // Not enough space for metadata
@@ -96,7 +96,7 @@ namespace dmt {
     template <std::convertible_to<std::string_view> T>
     struct UTF8Formatter<T>
     {
-        DMT_CPU_GPU constexpr inline void operator()(T const& value, char8_t* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
+        DMT_CPU_GPU inline constexpr void operator()(T const& value, char8_t* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
         {
             std::string_view strView = value;
 

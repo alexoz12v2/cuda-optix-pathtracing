@@ -87,6 +87,16 @@ __global__ void kSpectrumSample(dmt::DenselySampledSpectrum* spectrum,
         *result = spectrum->sample(wavelengths);
 }
 
+__global__ void kSpectrumMax(dmt::DenselySampledSpectrum* spectrum, float* result)
+{
+    int32_t  gid  = dmt::globalThreadIndex();
+    uint32_t mask = __activemask();
+    printf("CUDA Thread: %u", mask);
+    float max = spectrum->maxValue();
+    if (gid == 0)
+        *result = max;
+}
+
 static void testSpectrum(dmt::BaseMemoryResource* unified, dmt::BaseMemoryResource* mem)
 {
     dmt::AppContextJanitor j;
@@ -144,9 +154,16 @@ static void testSpectrum(dmt::BaseMemoryResource* unified, dmt::BaseMemoryResour
     assert(cudaStatus == ::cudaSuccess);
     cudaStatus = cudaDeviceSynchronize();
     assert(cudaStatus == ::cudaSuccess);
-    printSpectrumSamples(*managedSamples);
+    j.actx.log("{}", {printSpectrumSamples(*managedSamples)});
 
     j.actx.log("------------------- Testing __device__ Spectrum Max computation ------------------------------------");
+    kSpectrumMax<<<1, 32, 8 * sizeof(float)>>>(managedSpectrum, results + 1 + dmt::numSpectrumSamples());
+    cudaStatus = cudaGetLastError();
+    assert(cudaStatus == ::cudaSuccess);
+    cudaStatus = cudaDeviceSynchronize();
+    assert(cudaStatus == ::cudaSuccess);
+    j.actx.log("Maximum from Kernel: {}", {(results + 1 + dmt::numSpectrumSamples())});
+
     j.actx.log("------------------- Testing __device__ Spectrum Construction from function -------------------------");
 
     // cleanup

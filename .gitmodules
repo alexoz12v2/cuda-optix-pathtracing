@@ -3,4 +3,4 @@
 	url = https://github.com/mmp/pbrt-v4-scenes.git
 [submodule "extern/implot"]
 	path = extern/implot
-	url = https://github.com/epezent/implot.git
+	url = https://github.com/alexoz12v2/implot.git

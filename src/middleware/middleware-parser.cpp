@@ -1144,7 +1144,7 @@ namespace dmt {
     }
 
     // Entity Definitions ---------------------------------------------------------------------------------------------
-    CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const&, sid_t medium) :
+    CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const& cameraTransform, sid_t medium) :
     SceneEntity(cameraSidFromType(parameters.type), {/*we have no unparsed parameters at the moment*/}),
     spec(parameters),
     cameraTransform(cameraTransform),
@@ -2241,6 +2241,7 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
 
+        //check/get Arg and check/get params
         auto typeAndParamListParsing = [this]<typename Enum>
             requires(std::is_enum_v<Enum>)(AppContext & actx,
                                            SText const& directive,
@@ -2251,17 +2252,20 @@ namespace dmt {
                                            Enum& out)
         {
             currentStream.advance(actx);
+            //check number of Args and get enum
             if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(outArgs[0]), out))
             {
                 actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
                 std::abort();
             }
+            //check number of parameters and store them in outParams
             if (parseParams(actx, currentStream, outParams) == 0)
             {
                 actx.error("Expected at least a parameter for directive {}", {directive.str});
                 std::abort();
             }
         };
+
 
         auto typeHeaderDirectiveParsing =
             [this]<typename Spec, typename EnumType>
@@ -2282,9 +2286,11 @@ namespace dmt {
               void (*callback)(SceneParser& self, Spec const& spec) = nullptr)
         {
             Spec spec;
+            //check if you are out from world block
             if (!transitionToHeaderIfFirstHeaderDirective(actx, options, eDirective))
                 std::abort();
             currentStream.advance(actx);
+            //Check Arg
             if (uint32_t num = parseArgs(actx, currentStream, outArgs); num != 1)
             {
                 actx.error("Unexpected number of arguments for {} directive. Should be 1, got {}", {directive.str, num});
@@ -2296,7 +2302,9 @@ namespace dmt {
                            {directive.str, outArgs[0]});
                 std::abort();
             }
+            //check and get
             parseParams(actx, currentStream, outParams);
+
             if (setParams(spec, outParams, options) != 0)
             {
                 actx.error("Encountered error while parsing {} parameters", {directive.str});
@@ -2307,6 +2315,7 @@ namespace dmt {
                 callback(*this, spec);
         };
 
+        //usefull for the transforms fix leng of params
         auto parseArgumentFloats = [this]<size_t size> // TODO rework without template
             requires(size == 3 || size == 16 || size == 9 || size == 4 ||
                      size == 2)(AppContext & actx,
@@ -2328,6 +2337,7 @@ namespace dmt {
             }
         };
 
+        //directives that has only string arg
         auto parseArgumentNames =
             [this](AppContext&  actx,
                    SText const& directive,
@@ -2348,26 +2358,34 @@ namespace dmt {
                 pSids[i] = hashCRC64(dequoteString(outArgs[i]));
         };
 
+        //reads all file
         while (!m_fileStack.empty())
         {
             TokenStream& currentStream = topFile();
             currentStream.advance(actx);
+
+            //read file
             for (std::string token = currentStream.peek(); !token.empty(); token = currentStream.peek())
             { // token advancement handled by either parseArgs, parseParams, or by a switch case
                 ArgsDArray args;
                 ParamMap   params;
                 sid_t      tokenSid = hashCRC64(token);
+
+                //comment statement
                 if (token.starts_with('#'))
                 {
                     currentStream.advance(actx);
                     continue;
                 }
+
+
                 if (!isDirective(tokenSid))
                 {
                     actx.error("Invalid directive {}", {token});
                     std::abort();
                 }
 
+                //check directives
                 switch (tokenSid)
                 { // TODO args parsing type with error handling
                     case dict::directive::Option.sid:

@@ -113,7 +113,7 @@ function(findVisualStudio)
         OUTPUT_VARIABLE VSWHERE_OUTPUT
     )
 
-    message(VERBOSE "findVisualStudio: VSWHERE_OUTPUT = ${VSWHERE_OUTPUT}")
+    message(STATUS "findVisualStudio: VSWHERE_OUTPUT = ${VSWHERE_OUTPUT}")
 
     # Matches `VSWHERE_PROPERTY` in the `VSWHERE_OUTPUT` text in the format written by vswhere.
     # The matched value is assigned to the variable `VARIABLE_NAME` in the parent scope.

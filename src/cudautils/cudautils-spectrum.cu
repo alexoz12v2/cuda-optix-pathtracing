@@ -381,7 +381,7 @@ namespace dmt {
 
         int32_t threadId        = blockThreadIndex();    // Thread ID within the block
         int32_t threadsPerBlock = blockThreadCount();    // Total threads in the block
-        int32_t warpId          = threadId / 32;         // Warp ID within the block
+        int32_t warpId          = threadId / warpSize;   // Warp ID within the block
         int32_t laneId          = warpWideThreadIndex(); // Thread ID within the warp
 
         float localMax = -std::numeric_limits<float>::infinity();

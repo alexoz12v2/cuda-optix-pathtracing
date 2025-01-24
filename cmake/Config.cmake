@@ -548,8 +548,36 @@ function(dmt_add_example target)
   set(multivalue PUBLIC_SOURCES PRIVATE_SOURCES PUBLIC_DEPS PRIVATE_DEPS)
   cmake_parse_arguments(ARGS "" "" "${multivalue}" ${ARGN})
 
+  string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")
+  string(REGEX REPLACE "-" "_" v_target_name "${v_target_name}")
+
   # Create the target (assuming it's an executable)
-  add_executable(${target})
+  if(DEFINED DMT_OS_WINDOWS)
+    # use /SUBSYSTEM:WINDOWS (which doesn't allocate a console when launched by double click and detaches itself from the console 
+    # when launched from a `conhost` process)
+    add_executable(${target} WIN32)
+    # add the PE executable with .com extension, since command line prefers it when calling a program without suffix extension
+    # this will use /SUBSYSTEM:CONSOLE
+    add_executable(${target}-launcher)
+    target_sources(${target}-launcher PRIVATE ${PROJECT_SOURCE_DIR}/src/win32-launcher/launcher.cpp)
+    # set the same properties for the launcher as well
+    set_target_properties(${target}-launcher PROPERTIES 
+      RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      DEBUG_POSTFIX -d
+      FOLDER "Examples/${v_target_name}"
+      VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      OUTPUT_NAME "${target}"
+      SUFFIX .com
+    )
+    dmt_set_target_compiler_versions(${target}-launcher)
+    dmt_set_target_warnings(${target}-launcher)
+    dmt_set_target_optimization(${target}-launcher)
+    dmt_add_compile_definitions(${target}-launcher)
+    # force build system to rebuild the actual target when launcher is built
+    add_dependencies(${target}-launcher ${target})
+  else()
+    add_executable(${target})
+  endif()
 
   message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
   message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
@@ -585,7 +613,7 @@ function(dmt_add_example target)
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   set_target_properties(${target} PROPERTIES DEBUG_POSTFIX -d)
   # target folder (will show in visual studio)
-  set_target_properties(${target} PROPERTIES FOLDER "Examples")
+  set_target_properties(${target} PROPERTIES FOLDER "Examples/${v_target_name}")
   # visual studio startup path for debugging
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
 

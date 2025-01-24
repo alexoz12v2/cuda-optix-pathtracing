@@ -11,6 +11,10 @@
 #include <cstdint>
 #include <cmath>
 
+#if defined(DMT_OS_WINDOWS)
+#pragma push_macro("near")
+#undef near
+#endif
 
 namespace dmt {
     // Vector Types ---------------------------------------------------------------------------------------------------
@@ -813,3 +817,7 @@ namespace dmt {
  */
 namespace dmt {
 }
+
+#if defined(DMT_OS_WINDOWS)
+#pragma pop_macro("near")
+#endif

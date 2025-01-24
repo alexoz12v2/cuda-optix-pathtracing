@@ -4,6 +4,7 @@
 #include "dmtmacros.h"
 #include "platform/platform-macros.h"
 #include "platform/platform-mixed-macros.h"
+#include <platform/platform-launch.h> // must be included before all the rest
 
 #include <platform/platform-utils.h>
 #include <platform/platform-logging.h>

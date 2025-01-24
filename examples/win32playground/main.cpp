@@ -1,3 +1,6 @@
+#define DMT_ENTRY_POINT
+#include <platform/platform.h>
+
 #include <Windows.h>
 #include <io.h>
 #include <fcntl.h>
@@ -25,15 +28,15 @@ HMODULE GetCurrentModuleHandle()
     return 0;
 }
 
-#if 1
+#if 0
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
 #else
-int main()
+int guardedMain()
 {
     HINSTANCE hInstance = GetCurrentModuleHandle();
 #endif
-    std::wcout << L"HEllo Windwos Application\n";
+    std::wcout << L"HEllo Windwos Application\n" << std::flush;
 
     WNDCLASSEX wcex; /* Structure needed for creating Window */
     HWND       hWnd; /* Window Handle */
@@ -84,8 +87,11 @@ int main()
     ShowWindow(hWnd, SW_SHOW);
     UpdateWindow(hWnd);
 
+    uint32_t i = 1;
     while (FALSE == bDone)
     {
+        if (i++ % 1000 == 0)
+            std::wcout << L"sdfdsaf\n";
         if (PeekMessage(&msg, hWnd, 0, 0, PM_REMOVE))
         {
             TranslateMessage(&msg);

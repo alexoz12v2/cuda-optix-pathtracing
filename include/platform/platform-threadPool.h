@@ -5,7 +5,6 @@
 
 #include <platform/platform-memory.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 // Keep in sync with .cppm
 #include <array>
 #include <atomic>
@@ -24,7 +23,6 @@
 #include <vector>
 
 #include <cstdint>
-#endif
 
 DMT_MODULE_EXPORT namespace dmt {
     // https://rigtorp.se/spinlock/

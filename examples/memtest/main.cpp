@@ -1,3 +1,4 @@
+#define DMT_ENTRY_POINT
 #include <platform/platform.h>
 
 #include <bit>
@@ -211,7 +212,7 @@ void testThreadpool()
 // 64B  count: 4096
 // 128B count: 2048
 // 256B count: 1024
-int32_t main()
+int guardedMain()
 {
     using namespace std::string_view_literals;
     dmt::AppContext actx{512, 4096, {4096, 4096, 4096, 4096}};
@@ -253,4 +254,5 @@ int32_t main()
     }
 
     dmt::ctx::unregister();
+    return 0;
 }

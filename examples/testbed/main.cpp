@@ -1,3 +1,4 @@
+#define DMT_ENTRY_POINT
 #include <platform/platform.h>
 #include <platform/cudaTest.h>
 #include <platform/platform-cuda-utils.h>
@@ -332,7 +333,7 @@ namespace // all functions declared in an anonymous namespace (from the global n
 
 } // namespace
 
-int main()
+int guardedMain()
 {
     using namespace std::string_view_literals;
     dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
@@ -405,4 +406,5 @@ int main()
     }
 
     dmt::ctx::unregister();
+    return 0;
 }

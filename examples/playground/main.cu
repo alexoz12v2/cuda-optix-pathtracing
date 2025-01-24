@@ -1,6 +1,7 @@
 #include "printf.cuh"
 
-#include <platform/platform-logging.h>
+#define DMT_ENTRY_POINT
+#include <platform/platform.h>
 #include <platform/platform-cuda-utils.h>
 #include <platform/platform-context.h>
 
@@ -184,7 +185,7 @@ static void testNewContext()
     assert(err == ::cudaSuccess);
 }
 
-int main()
+int guardedMain()
 {
     std::unique_ptr<char8_t[]> ptr    = std::make_unique<char8_t[]>(2048);
     std::unique_ptr<char8_t[]> args   = std::make_unique<char8_t[]>(2048);
@@ -205,4 +206,5 @@ int main()
 
     testDevicePrint();
     testNewContext();
+    return 0;
 }

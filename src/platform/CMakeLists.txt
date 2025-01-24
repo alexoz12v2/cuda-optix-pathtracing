@@ -48,8 +48,10 @@ target_sources(dmt-platform-mixed
       FILES ${CMAKE_SOURCE_DIR}/include/platform/platform-display.h
             ${CMAKE_SOURCE_DIR}/include/platform/platform.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-mixed-macros.h
+            ${CMAKE_SOURCE_DIR}/include/platform/platform-launch.h
   PRIVATE
     platform-display.cpp platform.cpp
+    platform-launch.cpp
 )
 target_link_libraries(dmt-platform-mixed 
   PUBLIC 

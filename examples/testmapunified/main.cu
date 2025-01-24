@@ -1,3 +1,4 @@
+#define DMT_ENTRY_POINT
 #include "dmtmacros.h"
 #include <platform/platform.h>
 #include <platform/platform-cuda-utils.h>
@@ -175,7 +176,7 @@ static void testSpectrum(dmt::BaseMemoryResource* unified, dmt::BaseMemoryResour
     assert(cudaStatus == ::cudaSuccess);
 }
 
-int32_t main()
+int guardedMain()
 {
     printf("Adding elements in the map from the host\n");
     dmt::AppContext actx;
@@ -203,4 +204,5 @@ int32_t main()
     dmt::UnifiedMemoryResource::destroy(resource);
     dmt::ctx::unregister();
     getc(stdin);
+    return 0;
 }

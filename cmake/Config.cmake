@@ -567,6 +567,7 @@ function(dmt_add_example target)
       FOLDER "Examples/${v_target_name}"
       VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
       OUTPUT_NAME "${target}"
+      PDB_NAME "${target}-launcher"
       SUFFIX .com
     )
     dmt_set_target_compiler_versions(${target}-launcher)

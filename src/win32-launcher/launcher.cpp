@@ -9,6 +9,8 @@
 void ErrorExit(wchar_t const* lpszFunction);
 
 //#define USE_NAMED_PIPES
+// TODO: Switch from console API to pseudoconsole https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
+// https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
 
 #if !defined(USE_NAMED_PIPES)
 struct PipePair

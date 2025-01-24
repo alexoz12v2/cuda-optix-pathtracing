@@ -462,6 +462,25 @@ namespace dmt {
         return record;
     }
 
+    using LogHandlerAllocate   = void* (*)(size_t _numBytes, size_t _align);
+    using LogHandlerDeallocate = void (*)(void* _ptr, size_t _numBytes, size_t _align);
+    struct DMT_PLATFORM_API LogHandler
+    {
+        void* data;
+        void (*hostFlush)();
+        bool (*hostFilter)(void* _data, LogRecord const& record);
+        void (*hostCallback)(void* _data, LogRecord const& record);
+        void (*hostCleanup)(LogHandlerDeallocate _dealloc, void* _data);
+
+        // custom memory interface (internal usage only)
+        LogHandlerAllocate   hostAllocate;
+        LogHandlerDeallocate hostDeallocate;
+
+        ELogLevel minimumLevel;
+    };
+
+    DMT_PLATFORM_API LogHandler createConsoleHandler(LogHandlerAllocate _alloc, LogHandlerDeallocate _dealloc);
+
     // ----------------------------------------------------------------------------------------------------------------
 
     /**

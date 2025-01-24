@@ -153,18 +153,18 @@ static void testDevicePrint()
     assert(err == ::cudaSuccess);
 }
 
-static LogHandler stdoutHandler{
-    .minimumLevel = ELogLevel::TRACE,
-    .data         = nullptr,
-    .hostFilter   = [](void* _data, LogRecord const& record) { return true; },
-    .hostCallback =
-        [](void* _data, LogRecord const& record) {
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-    std::string                                            view{std::bit_cast<char*>(record.data), record.numBytes};
-    std::wstring                                           wstr = converter.from_bytes(view);
-    std::wcout << wstr << std::endl;
-},
-};
+static void stdoutHandler(LogHandler& outLogger)
+{
+    outLogger.minimumLevel = ELogLevel::TRACE;
+    outLogger.data         = nullptr;
+    outLogger.hostFilter   = [](void* _data, LogRecord const& record) { return true; };
+    outLogger.hostCallback = [](void* _data, LogRecord const& record) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        std::string                                            view{std::bit_cast<char*>(record.data), record.numBytes};
+        std::wstring                                           wstr = converter.from_bytes(view);
+        std::wcout << wstr << std::endl;
+    };
+}
 
 static void testNewContext()
 {
@@ -172,7 +172,7 @@ static void testNewContext()
     cudaError_t  err = cudaMallocManaged(&impl, sizeof(ContextImpl));
     assert(err == ::cudaSuccess);
     std::construct_at(impl);
-    impl->addHandler(stdoutHandler);
+    stdoutHandler(*impl->addHandler());
 
     // context is available here
     {

@@ -10,11 +10,11 @@ namespace dmt {
 
     ContextImpl::~ContextImpl() {}
 
-    bool ContextImpl::addHandler(LogHandler handler)
+    LogHandler* ContextImpl::addHandler()
     {
         if (common.numHandlers >= maxHandlers)
-            return false;
-        common.handlers[common.numHandlers++] = handler;
-        return true;
+            return nullptr;
+        common.handlers[common.numHandlers++] = {};
+        return &common.handlers[common.numHandlers - 1];
     }
 } // namespace dmt

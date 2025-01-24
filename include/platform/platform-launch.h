@@ -21,6 +21,10 @@ int guardedMain();
 #endif
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
+#if defined(DMT_DEBUG)
+    // Before resuming the process
+    MessageBox(nullptr, L"Attach debugger to child process now.", L"Debug Pause", MB_OK);
+#endif
     int returnCode = guardedMain();
     return returnCode;
 }

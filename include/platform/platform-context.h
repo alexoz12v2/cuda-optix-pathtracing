@@ -6,15 +6,6 @@
 #include "platform/platform-logging.h"
 
 namespace dmt {
-    // should reside in unified memory in CUDA path
-    struct DMT_PLATFORM_API LogHandler
-    {
-        ELogLevel minimumLevel;
-        void*     data;
-        bool (*hostFilter)(void* _data, LogRecord const& record);
-        void (*hostCallback)(void* _data, LogRecord const& record);
-    };
-
     // total size should be exactly 4KB in all platforms
     // should be allocated with `cudaMallocManaged` to make CUDA Path work properly
     struct DMT_PLATFORM_API ContextImpl
@@ -23,7 +14,7 @@ namespace dmt {
         DMT_CPU ContextImpl();
         DMT_CPU ~ContextImpl();
 
-        DMT_CPU bool addHandler(LogHandler handler);
+        DMT_CPU LogHandler* addHandler();
 
         inline DMT_CPU_GPU bool anyHandlerEnabledFor(ELogLevel _level) const
         {

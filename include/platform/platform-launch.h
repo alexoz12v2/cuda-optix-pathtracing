@@ -24,6 +24,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 #if defined(DMT_DEBUG)
     // Before resuming the process
     MessageBox(nullptr, L"Attach debugger to child process now.", L"Debug Pause", MB_OK);
+    //if (!SetEnvironmentVariableW(L"NSIGHT_CUDA_DEBUGGER", L"1")); // TODO error handling
 #endif
     int returnCode = guardedMain();
     return returnCode;

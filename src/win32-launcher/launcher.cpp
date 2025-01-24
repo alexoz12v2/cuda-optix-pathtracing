@@ -1,12 +1,13 @@
 #include <windows.h>
-#include <iostream>
 
 #include <algorithm>
+#include <iostream>
 #include <string>
+#include <vector>
 
 #include <strsafe.h>
 
-void ErrorExit(wchar_t const* lpszFunction);
+[[noreturn]] void ErrorExit(wchar_t const* lpszFunction);
 
 //#define USE_NAMED_PIPES
 // TODO: Switch from console API to pseudoconsole https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
@@ -284,6 +285,34 @@ DWORD WINAPI stdoutPipeThread(void* params)
 }
 #endif
 
+static std::unique_ptr<wchar_t[]> copyEnvironmentBlock()
+{
+    // String of variables of type L"name=value\0"
+    //  A Unicode environment block is terminated by four zero bytes:
+    //  two for the last string, two more to terminate the block.
+    wchar_t* localEnv = GetEnvironmentStringsW();
+    if (!localEnv)
+        ErrorExit(L"Coudn't get environement variables");
+
+    // Find the size of the environment block
+    wchar_t* ptr  = localEnv;
+    size_t   size = 0;
+    while (*ptr != L'\0' || *(ptr + 1) != L'\0')
+        ++ptr;
+    size = (ptr - localEnv) + 2; // Include the final L"\0\0"
+
+    // Allocate a unique_ptr to copy the environment block
+    std::unique_ptr<wchar_t[]> envCopy(new wchar_t[size]);
+
+    // Copy the environment block
+    memcpy(envCopy.get(), localEnv, size * sizeof(wchar_t));
+
+    // Free the original environment block
+    FreeEnvironmentStringsW(localEnv);
+
+    return envCopy;
+}
+
 int main()
 {
     static constexpr uint32_t BUFSIZE = 4096;
@@ -343,16 +372,20 @@ int main()
     startupInfo.hStdOutput  = j.data->hStdOut_Wr;
     startupInfo.hStdInput   = j.data->hStdIn_Rd;
 #endif
+    DWORD const creationFlags = CREATE_SUSPENDED              // use `ResumeThread` to manally start
+                                | CREATE_UNICODE_ENVIRONMENT; // lpEnvironment will use unicode characters
+
+    auto pEnv = copyEnvironmentBlock();
 
     // Create process in suspended state
     if (!CreateProcessW(nullptr,
                         const_cast<LPWSTR>(commandLine.c_str()),
-                        nullptr,
-                        nullptr,
-                        TRUE, // Inherit handles
-                        CREATE_SUSPENDED,
-                        nullptr,
-                        nullptr,
+                        nullptr, // process security attributes
+                        nullptr, // main thread security attributes
+                        true,    // Inherit handles
+                        creationFlags,
+                        pEnv.get(),
+                        nullptr, // same current directory as launcher
                         &startupInfo,
                         &processInfo))
         ErrorExit(L"ERROR: Failed to create process");
@@ -408,7 +441,7 @@ int main()
 
 // Format a readable error message, display a message box,
 // and exit from the application.
-void ErrorExit(wchar_t const* lpszFunction)
+[[noreturn]] void ErrorExit(wchar_t const* lpszFunction)
 {
     wchar_t* lpMsgBuf;
     wchar_t* lpDisplayBuf;

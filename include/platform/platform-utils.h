@@ -25,6 +25,7 @@ namespace dmt {
     using sid_t = uint64_t;
 
     DMT_PLATFORM_API uint64_t processId();
+    DMT_PLATFORM_API uint64_t threadId();
     DMT_PLATFORM_API void*    reserveVirtualAddressSpace(size_t size);
     DMT_PLATFORM_API size_t   systemAlignment();
     DMT_PLATFORM_API bool     commitPhysicalMemory(void* address, size_t size);

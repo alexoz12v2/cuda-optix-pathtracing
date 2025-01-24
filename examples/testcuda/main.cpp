@@ -1,3 +1,4 @@
+#define DMT_ENTRY_POINT
 #include <platform/platform.h>
 #include <platform/cudaTest.h>
 #include <cudashared/cudashared.h>
@@ -191,7 +192,7 @@ namespace {
     }
 } // namespace
 
-int main()
+int guardedMain()
 {
     static constexpr uint32_t             threshold = 10e-4;
     std::random_device                    seed;
@@ -265,4 +266,5 @@ int main()
 
     actx.log("Programm Finished!");
     dmt::ctx::unregister();
+    return 0;
 }

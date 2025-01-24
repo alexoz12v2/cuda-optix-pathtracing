@@ -1,3 +1,4 @@
+#define DMT_ENTRY_POINT
 #include <platform/platform.h>
 #include <cudautils/cudautils-spectrum.h>
 
@@ -94,7 +95,7 @@ public:
     ImPlotContext* plotCtx;
 };
 
-int32_t main()
+int guardedMain()
 {
     dmt::AppContext ctx;
     float           black    = dmt::blackbody(827.f, 673.f);
@@ -137,4 +138,5 @@ int32_t main()
 
     ctx.log("Press Anything to exit");
     std::cin.get();
+    return 0;
 }

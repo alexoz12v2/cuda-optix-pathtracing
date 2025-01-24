@@ -59,4 +59,5 @@
 #define __global__
 #define __constant__
 #define __managed__
+#define __noinline__
 #endif

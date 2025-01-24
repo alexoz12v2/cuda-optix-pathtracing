@@ -15,7 +15,7 @@
 #include <cstdint>
 
 // include cuda interface headers, not exported by C++20 modules
-
+#define DMT_ENTRY_POINT
 #include <platform/platform.h>
 #include <middleware/middleware.h>
 #include "platform/cudaTest.h"
@@ -181,7 +181,7 @@ AttributeEnd
 
 } // namespace
 
-int32_t main()
+int guardedMain()
 {
     dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
     dmt::ctx::init(actx);
@@ -250,4 +250,5 @@ int32_t main()
     std::cin.get();
     std::cout << "Goodbye!" << std::endl;
     dmt::ctx::unregister();
+    return 0;
 }

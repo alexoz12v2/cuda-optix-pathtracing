@@ -1,4 +1,33 @@
 dmt_add_module_library(dmt-platform platform SHARED)
+
+string(CONCAT platform_private_sources 
+    "platform-os-utils.h;"
+    "platform-utils.cpp;"
+    "platform-logging.cpp;"
+    "platform-threadPool.cpp;"
+    "platform-memory.cpp;"
+    "platform-os-utils.cpp;"
+    "platform-context.cpp"
+)
+string(CONCAT platform_win32_private_sources
+  "platform-memory.win32.cpp;"
+  "platform-logging.win32.cpp"
+)
+string(CONCAT platfrom_linux_private_sources
+  "platform-logging.linux.cpp;"
+  "platform-memory.linux.cpp"
+)
+
+# concat on private sources the ones for the current operating system
+set(platform_unused_private_source "")
+if(DEFINED DMT_OS_WINDOWS)
+  list(APPEND platform_private_sources ${platform_win32_private_sources})
+  list(APPEND platform_unused_private_source ${platfrom_linux_private_sources})
+elseif(DEFINED DMT_OS_LINUX)
+  list(APPEND platform_private_sources ${platfrom_linux_private_sources})
+  list(APPEND platform_unused_private_source ${platform_win32_private_sources})
+endif()
+
 target_sources(dmt-platform
   PUBLIC
     FILE_SET platform_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform
@@ -7,10 +36,18 @@ target_sources(dmt-platform
             ${CMAKE_SOURCE_DIR}/include/platform/platform-utils.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-memory.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-macros.h
+            ${CMAKE_SOURCE_DIR}/include/platform/platform-context.h
   PRIVATE 
-    platform-os-utils.h  platform-utils.cpp platform-logging.cpp platform-threadPool.cpp platform-memory.cpp
-    platform-os-utils.cpp  # inserted inside .cppm unity build style
+    ${platform_private_sources}
+  PRIVATE # display only files
+    ${platform_unused_private_source}
 )
+
+# display unused sources anyways
+foreach(unused_source ${platform_unused_private_source})
+  set_source_files_properties(${unused_source} PROPERTIES HEADER_FILE_ONLY TRUE)
+endforeach()
+source_group("Unused" FILES ${platform_unused_private_source})
 
 target_link_libraries(dmt-platform 
   PUBLIC
@@ -46,8 +83,10 @@ target_sources(dmt-platform-mixed
       FILES ${CMAKE_SOURCE_DIR}/include/platform/platform-display.h
             ${CMAKE_SOURCE_DIR}/include/platform/platform.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-mixed-macros.h
+            ${CMAKE_SOURCE_DIR}/include/platform/platform-launch.h
   PRIVATE
     platform-display.cpp platform.cpp
+    platform-launch.cpp
 )
 target_link_libraries(dmt-platform-mixed 
   PUBLIC 

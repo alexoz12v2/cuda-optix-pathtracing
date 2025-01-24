@@ -11,7 +11,6 @@
 
 #include <platform/platform-logging.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <array>
 #include <bit>
 #include <iterator>
@@ -23,9 +22,8 @@
 #include <cassert>
 #include <compare>
 #include <cstdint>
-#endif
 
-DMT_MODULE_EXPORT namespace dmt {
+namespace dmt {
     /**
      * Memory tags for meaningful object allocation tracking. Whenever you add something here, make sure to add a string representation
      * in the `memoryTagStr` function

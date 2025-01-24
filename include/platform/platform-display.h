@@ -3,7 +3,6 @@
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
 
-#if !defined(DMT_NEEDS_MODULE)
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <atomic>
@@ -18,7 +17,6 @@
 #include <vector>
 
 #include <cassert>
-#endif
 
 DMT_MODULE_EXPORT namespace dmt {
     struct DMTwindowGLFW

@@ -444,7 +444,7 @@ function(dmt_add_compile_definitions target)
   endif()
   target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
   if(DMT_OS_WINDOWS)
-    target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
     if(CMAKE_GENERATOR MATCHES "Visual Studio")
       target_compile_definitions(${target} PRIVATE DMT_VS_STUPIDITY)
     endif()
@@ -548,8 +548,37 @@ function(dmt_add_example target)
   set(multivalue PUBLIC_SOURCES PRIVATE_SOURCES PUBLIC_DEPS PRIVATE_DEPS)
   cmake_parse_arguments(ARGS "" "" "${multivalue}" ${ARGN})
 
+  string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")
+  string(REGEX REPLACE "-" "_" v_target_name "${v_target_name}")
+
   # Create the target (assuming it's an executable)
-  add_executable(${target})
+  if(DEFINED DMT_OS_WINDOWS)
+    # use /SUBSYSTEM:WINDOWS (which doesn't allocate a console when launched by double click and detaches itself from the console 
+    # when launched from a `conhost` process)
+    add_executable(${target} WIN32)
+    # add the PE executable with .com extension, since command line prefers it when calling a program without suffix extension
+    # this will use /SUBSYSTEM:CONSOLE
+    add_executable(${target}-launcher)
+    target_sources(${target}-launcher PRIVATE ${PROJECT_SOURCE_DIR}/src/win32-launcher/launcher.cpp)
+    # set the same properties for the launcher as well
+    set_target_properties(${target}-launcher PROPERTIES 
+      RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      DEBUG_POSTFIX -d
+      FOLDER "Examples/${v_target_name}"
+      VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      OUTPUT_NAME "${target}"
+      PDB_NAME "${target}-launcher"
+      SUFFIX .com
+    )
+    dmt_set_target_compiler_versions(${target}-launcher)
+    dmt_set_target_warnings(${target}-launcher)
+    dmt_set_target_optimization(${target}-launcher)
+    dmt_add_compile_definitions(${target}-launcher)
+    # force build system to rebuild the actual target when launcher is built
+    add_dependencies(${target}-launcher ${target})
+  else()
+    add_executable(${target})
+  endif()
 
   message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
   message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
@@ -579,13 +608,13 @@ function(dmt_add_example target)
   # possible todo: PCH
 
   # put the executable file in the right place
-  set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  # set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   set_target_properties(${target} PROPERTIES DEBUG_POSTFIX -d)
   # target folder (will show in visual studio)
-  set_target_properties(${target} PROPERTIES FOLDER "Examples")
+  set_target_properties(${target} PROPERTIES FOLDER "Examples/${v_target_name}")
   # visual studio startup path for debugging
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
 

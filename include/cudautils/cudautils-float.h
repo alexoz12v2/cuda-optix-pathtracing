@@ -10,6 +10,12 @@
 #include <cstdint>
 #include <limits>
 
+// a present from Windows.h
+#if defined(DMT_OS_WINDOWS)
+#pragma push_macro("near")
+#undef near
+#endif
+
 // TODO: If you want to rely to link time optimization, split definition and declaration and remove inline linkage
 namespace dmt::fl {
     using namespace dmt;
@@ -293,3 +299,7 @@ inline constexpr DMT_CPU_GPU float arg(float f)
     else
         return std::numeric_limits<float>::quiet_NaN();
 }
+
+#if defined(DMT_OS_WINDOWS)
+#pragma pop_macro("near")
+#endif

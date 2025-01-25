@@ -294,13 +294,10 @@ namespace // all functions declared in an anonymous namespace (from the global n
         }
 
         // Add a task with different arguments and return types
-        auto stringFuture = pool.AddTask(
-            [](std::string msg, int num) {
+        auto stringFuture = pool.AddTask([](std::string msg, int num) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200)); // Simulate work
             return msg + " " + std::to_string(num);
-            },
-            "Task completed:",
-            42);
+        }, "Task completed:", 42);
 
         // Wait for all tasks to finish and validate results
         std::cout << "Retrieving results from tasks..." << std::endl;
@@ -353,29 +350,29 @@ int guardedMain()
         uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
         if (counter++ % 50 == 0)
             ctx.log("Inside allocation hook!");
-        },
+    },
         .freeHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
         uint32_t& counter = *reinterpret_cast<uint32_t*>(data);
         if (counter++ % 50 == 0)
             ctx.log("inside deallocation Hook!");
-        },
+    },
         .data = &counter,
-        };
+    };
     dmt::PageAllocationsTracker tracker{actx.mctx().pctx, dmt::toUnderlying(dmt::EPageSize::e1GB), false};
     dmt::PageAllocatorHooks     testhooks{
             .allocHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
         auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
         tracker.track(ctx, alloc);
-        },
+    },
             .freeHook =
             [](void* data, dmt::LoggingContext& ctx, dmt::PageAllocation const& alloc) { //
         auto& tracker = *reinterpret_cast<dmt::PageAllocationsTracker*>(data);
         tracker.untrack(ctx, alloc);
-        },
+    },
             .data = &tracker,
-        };
+    };
     dmt::PageAllocator pageAllocator{actx.mctx().pctx, testhooks};
     auto               pageAlloc = pageAllocator.allocatePage(actx.mctx().pctx);
     if (pageAlloc.address)

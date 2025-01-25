@@ -247,7 +247,7 @@ namespace dmt {
         ECameraType type = ECameraType::ePerspective;
     };
     //LightSource
-    
+
 
     // Samplers -------------------------------------------------------------------------------------------------------
     enum class DMT_MIDDLEWARE_API ESamplerType : uint8_t
@@ -394,7 +394,7 @@ namespace dmt {
         eCount
     };
 
-    float                     defaultRadiusFromFilterType(EFilterType e);
+    float defaultRadiusFromFilterType(EFilterType e);
     struct DMT_MIDDLEWARE_API FilterSpec
     {
         struct DMT_MIDDLEWARE_API Gaussian
@@ -749,10 +749,10 @@ namespace dmt {
     // LightSource ----------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API LightSourceSpec
     {
-        DMT_MIDDLEWARE_API LightSourceSpec(ELightType type, bool  illum, float powerOrIlluminance, float scale);
+        DMT_MIDDLEWARE_API LightSourceSpec(ELightType type, bool illum, float powerOrIlluminance, float scale);
         // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
-        DMT_MIDDLEWARE_API             LightSourceSpec(LightSourceSpec const&);
-        DMT_MIDDLEWARE_API             LightSourceSpec(LightSourceSpec&&) noexcept;
+        DMT_MIDDLEWARE_API                  LightSourceSpec(LightSourceSpec const&);
+        DMT_MIDDLEWARE_API                  LightSourceSpec(LightSourceSpec&&) noexcept;
         DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec const&);
         DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec&&) noexcept;
         DMT_MIDDLEWARE_API ~LightSourceSpec() noexcept;
@@ -760,14 +760,14 @@ namespace dmt {
         struct DMT_MIDDLEWARE_API Distant
         {
             //TODO the default vale to specify
-            float* L;
-            Point3f from{{0,0,0}};
-            Point3f to{{0,0,1}};
+            float*  L;
+            Point3f from{{0, 0, 0}};
+            Point3f to{{0, 0, 1}};
         };
 
         struct DMT_MIDDLEWARE_API Goniometric
         {
-            //requiered-no default 
+            //requiered-no default
             std::u8string filename;
             //TODO insert code for radiant Intensity
             float* I;
@@ -778,48 +778,45 @@ namespace dmt {
             //if no filename uses same Intesity
             std::u8string filename;
             //default current color space
-            float* L;
+            float*  L;
             Point3f portal[4];
         };
 
         struct DMT_MIDDLEWARE_API Point
         {
             //default current color space
-            float* I;
+            float*  I;
             Point3f from{{0, 0, 0}};
         };
 
         struct DMT_MIDDLEWARE_API Projection
         {
             //default current color space
-            float* I;
-            float fov = 90.0f;
+            float*        I;
+            float         fov = 90.0f;
             std::u8string filename;
         };
 
         struct DMT_MIDDLEWARE_API Spotlight
         {
             //default current color space
-            float* I; 
+            float*  I;
             Point3f from{{0, 0, 0}};
             Point3f to{{0, 0, 1}};
-            float coneangle = 30;
-            float conedeltaangle = 5; 
-
+            float   coneangle      = 30;
+            float   conedeltaangle = 5;
         };
 
         union Params
-        { 
+        {
             Params() {}
             ~Params() {}
-            Spotlight spotlight;
-            Projection projection;
-            Point point;
-            Infinite infinite;
+            Spotlight   spotlight;
+            Projection  projection;
+            Point       point;
+            Infinite    infinite;
             Goniometric goniometric;
-            Distant distant;
-
-
+            Distant     distant;
         };
 
         // 4 byte aligned, coommon
@@ -829,14 +826,13 @@ namespace dmt {
             float power;
             // distant, infinite
             float illuminance;
-           
         };
-        
+
         PowerOrIlluminance po;
         float              scale = 1.f;
         // 1 byte aligned
         ELightType type;
-        bool  illum;
+        bool       illum;
     };
 
     // Parsing --------------------------------------------------------------------------------------------------------
@@ -886,7 +882,7 @@ namespace dmt {
 
         virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-        virtual ~IParserTarget(){};
+        virtual ~IParserTarget() {};
 
         virtual void Option(sid_t name, ParamPair const& value) = 0;
 

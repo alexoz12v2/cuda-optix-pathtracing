@@ -400,14 +400,14 @@ int main()
 #if !defined(USE_NAMED_PIPES)
     hThreads[0] = CreateThread(nullptr, 0, stdoutPipeThread, j.pipes, 0, &tids[0]);
 #else
-    hThreads[0]             = CreateThread(nullptr, 0, stdoutPipeThread, j.data, 0, &tids[0]);
+    hThreads[0] = CreateThread(nullptr, 0, stdoutPipeThread, j.data, 0, &tids[0]);
 #endif
     if (!hThreads[0])
         ErrorExit(L"Couldn't create stdout listener thread");
 #if !defined(USE_NAMED_PIPES)
     hThreads[1] = CreateThread(nullptr, 0, stdinPipeThread, j.pipes, 0, &tids[1]);
 #else
-    hThreads[1]             = CreateThread(nullptr, 0, stdinPipeThread, j.data, 0, &tids[1]);
+    hThreads[1] = CreateThread(nullptr, 0, stdinPipeThread, j.data, 0, &tids[1]);
 #endif
     if (!hThreads[1])
         ErrorExit(L"Couldn't create stdin listener thread");

@@ -1,4 +1,3 @@
-module;
 
 #include "dmtutils.h"
 
@@ -17,8 +16,7 @@ module;
 #elif defined(DMT_OS_WINDOWS)
 #include <windows.h>
 #endif
-
-module platform;
+#include <platform/platform.h>
 
 TEST_CASE("[platform-logging] General properties of logging utility")
 {

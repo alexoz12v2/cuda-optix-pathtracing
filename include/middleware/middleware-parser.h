@@ -16,6 +16,8 @@
 #include <memory_resource>
 #include <set>
 #include <stack>
+#include <initializer_list>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -246,8 +248,7 @@ namespace dmt {
         // 1 byte aligned
         ECameraType type = ECameraType::ePerspective;
     };
-    //LightSource
-    
+
 
     // Samplers -------------------------------------------------------------------------------------------------------
     enum class DMT_MIDDLEWARE_API ESamplerType : uint8_t
@@ -590,6 +591,7 @@ namespace dmt {
     {
         using ValueList = ArgsDArray;
         constexpr explicit ParamPair(sid_t type) : type(type) {}
+        ParamPair(sid_t type, std::initializer_list<std::string> const& strs) : type(type), values(strs) {}
 
         DMT_MIDDLEWARE_API void addParamValue(std::string_view value) { values.emplace_back(value); }
 
@@ -723,6 +725,98 @@ namespace dmt {
         eCount
     };
 
+    // LightSource ----------------------------------------------------------------------------------------------------
+    struct DMT_MIDDLEWARE_API LightSourceSpec
+    {
+        DMT_MIDDLEWARE_API LightSourceSpec(ELightType type, bool illum, float powerOrIlluminance, float scale);
+        // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
+        DMT_MIDDLEWARE_API                  LightSourceSpec(LightSourceSpec const&);
+        DMT_MIDDLEWARE_API                  LightSourceSpec(LightSourceSpec&&) noexcept;
+        DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec const&);
+        DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec&&) noexcept;
+        DMT_MIDDLEWARE_API ~LightSourceSpec() noexcept;
+
+        DMT_MIDDLEWARE_API void cleanup() noexcept;
+
+        struct Distant
+        {
+            //TODO the default vale to specify
+            float*  L;
+            Point3f from{{0, 0, 0}};
+            Point3f to{{0, 0, 1}};
+        };
+
+        struct Goniometric
+        {
+            //requiered-no default
+            std::u8string filename;
+            //TODO insert code for radiant Intensity
+            float* I;
+        };
+
+        struct Infinite
+        {
+            //if no filename uses same Intesity
+            std::u8string filename;
+            //default current color space
+            float*  L;
+            Point3f portal[4];
+        };
+
+        struct Point
+        {
+            //default current color space
+            float*  I;
+            Point3f from{{0, 0, 0}};
+        };
+
+        struct Projection
+        {
+            //default current color space
+            float*        I;
+            float         fov = 90.0f;
+            std::u8string filename;
+        };
+
+        struct Spotlight
+        {
+            //default current color space
+            float*  I;
+            Point3f from{{0, 0, 0}};
+            Point3f to{{0, 0, 1}};
+            float   coneangle      = 30;
+            float   conedeltaangle = 5;
+        };
+
+        union Params
+        {
+            Params() {}
+            ~Params() {}
+            Spotlight   spotlight;
+            Projection  projection;
+            Point       point;
+            Infinite    infinite;
+            Goniometric goniometric;
+            Distant     distant;
+        };
+
+        // 4 byte aligned, coommon
+        union DMT_MIDDLEWARE_API PowerOrIlluminance
+        { // there is no default, one of these must be present
+            // all except distant and infinite
+            float power;
+            // distant, infinite
+            float illuminance;
+        };
+
+        Params             params;
+        PowerOrIlluminance po;
+        float              scale = 1.f;
+        // 1 byte aligned
+        ELightType type;
+        bool       illum;
+    };
+
     //SceneEntity------------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API SceneEntity
     {
@@ -746,97 +840,26 @@ namespace dmt {
         EColorSpaceType colorSpace;
     };
 
-    // LightSource ----------------------------------------------------------------------------------------------------
-    struct DMT_MIDDLEWARE_API LightSourceSpec
+    struct DMT_MIDDLEWARE_API TransformedSceneEntity : public SceneEntity
     {
-        DMT_MIDDLEWARE_API LightSourceSpec(ELightType type, bool  illum, float powerOrIlluminance, float scale);
-        // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
-        DMT_MIDDLEWARE_API             LightSourceSpec(LightSourceSpec const&);
-        DMT_MIDDLEWARE_API             LightSourceSpec(LightSourceSpec&&) noexcept;
-        DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec const&);
-        DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec&&) noexcept;
-        DMT_MIDDLEWARE_API ~LightSourceSpec() noexcept;
+        TransformedSceneEntity() = default;
+        TransformedSceneEntity(sid_t name, AnimatedTransform const& t, ParamMap parameters = {});
 
-        struct DMT_MIDDLEWARE_API Distant
-        {
-            //TODO the default vale to specify
-            float* L;
-            Point3f from{{0,0,0}};
-            Point3f to{{0,0,1}};
-        };
+        AnimatedTransform transform;
+    };
 
-        struct DMT_MIDDLEWARE_API Goniometric
-        {
-            //requiered-no default 
-            std::u8string filename;
-            //TODO insert code for radiant Intensity
-            float* I;
-        };
+    struct DMT_MIDDLEWARE_API LightEntity : public TransformedSceneEntity
+    {
+        LightEntity() = default;
+        LightEntity(ELightType               type,
+                    AnimatedTransform const& t,
+                    sid_t                    _medium,
+                    EColorSpaceType          _colorSpace,
+                    ParamMap const&          _params);
 
-        struct DMT_MIDDLEWARE_API Infinite
-        {
-            //if no filename uses same Intesity
-            std::u8string filename;
-            //default current color space
-            float* L;
-            Point3f portal[4];
-        };
-
-        struct DMT_MIDDLEWARE_API Point
-        {
-            //default current color space
-            float* I;
-            Point3f from{{0, 0, 0}};
-        };
-
-        struct DMT_MIDDLEWARE_API Projection
-        {
-            //default current color space
-            float* I;
-            float fov = 90.0f;
-            std::u8string filename;
-        };
-
-        struct DMT_MIDDLEWARE_API Spotlight
-        {
-            //default current color space
-            float* I; 
-            Point3f from{{0, 0, 0}};
-            Point3f to{{0, 0, 1}};
-            float coneangle = 30;
-            float conedeltaangle = 5; 
-
-        };
-
-        union Params
-        { 
-            Params() {}
-            ~Params() {}
-            Spotlight spotlight;
-            Projection projection;
-            Point point;
-            Infinite infinite;
-            Goniometric goniometric;
-            Distant distant;
-
-
-        };
-
-        // 4 byte aligned, coommon
-        union DMT_MIDDLEWARE_API PowerOrIlluminance
-        { // there is no default, one of these must be present
-            // all except distant and infinite
-            float power;
-            // distant, infinite
-            float illuminance;
-           
-        };
-        
-        PowerOrIlluminance po;
-        float              scale = 1.f;
-        // 1 byte aligned
-        ELightType type;
-        bool  illum;
+        LightSourceSpec spec;
+        sid_t           medium;
+        EColorSpaceType colorSpace;
     };
 
     // Parsing --------------------------------------------------------------------------------------------------------
@@ -1059,6 +1082,7 @@ namespace dmt {
         Options                       m_options;
         GraphicsState                 m_graphicsState;
         CameraSceneEntity             m_camera;
+        std::vector<LightEntity>      m_lights;
         std::map<sid_t, TransformSet> m_namedCoordinateSystems;
         dmt::Transform                m_renderFromWorld;
     };

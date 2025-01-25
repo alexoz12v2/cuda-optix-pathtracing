@@ -1143,13 +1143,432 @@ namespace dmt {
         return true;
     }
 
+    static constexpr sid_t lightSidFromType(ELightType type)
+    {
+        using enum ELightType;
+        switch (type)
+        {
+            case eDistant: return dict::light::distant.sid;
+            case eGoniometric: return dict::light::goniometric.sid;
+            case eInfinite: return dict::light::infinite.sid;
+            case ePoint: return dict::light::point.sid;
+            case eProjection: return dict::light::projection.sid;
+            case eSpot: return dict::light::spot.sid;
+        }
+        return 0;
+    }
+
+    // Parse and set a float value
+    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            float value = defaultValue;
+            if (!parseFloat(values.valueAt(0), value))
+            {
+                return false; // Parsing failed
+            }
+            target = value;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set a std::string_view value
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            target = values.valueAt(0);
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, char* target, uint32_t& outLength, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            std::memcpy(target, values.valueAt(0).data(), values.valueAt(0).size());
+            outLength = static_cast<uint32_t>(values.valueAt(0).size());
+        }
+        else
+        {
+            std::memcpy(target, defaultValue.data(), defaultValue.size()); // Use default value if parameter is not found
+            outLength = static_cast<uint32_t>(defaultValue.size());
+        }
+        return true;
+    }
+
+    template <typename CharT, typename Traits, typename Allocator>
+    static bool parseAndSetString2(ParamMap const&                              params,
+                                   sid_t                                        paramSid,
+                                   std::basic_string<CharT, Traits, Allocator>& target,
+                                   std::basic_string_view<CharT, Traits>        defaultValue,
+                                   bool                                         required = false)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+
+            // Extract the value and set it into the target string
+            const std::basic_string_view<CharT, Traits> valueView{reinterpret_cast<CharT const*>(values.valueAt(0).data()),
+                                                                  values.valueAt(0).size() / sizeof(CharT)};
+
+            target.assign(valueView);
+            return true;
+        }
+        else if (!required)
+        {
+            // Assign the default value to the target
+            target.assign(defaultValue);
+            return true;
+        }
+        else
+            return false;
+    }
+
+    // Parse and set a boolean value
+    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
+    {
+        using namespace std::string_view_literals;
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            if (values.valueAt(0) == "true"sv)
+                target = true;
+            else if (values.valueAt(0) == "false"sv)
+                target = false;
+            else
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetFloat4(ParamMap const&             params,
+                           sid_t                       paramSid,
+                           std::array<float, 4>&       target,
+                           std::array<float, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
+            {
+                return false; // Invalid type or incorrect number of parameters
+            }
+
+            std::array<float, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseFloat(values.valueAt(i), parsedValues[i]))
+                {
+                    return false; // Parsing failed for an element
+                }
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an int32_t value
+    template <std::integral I>
+    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
+                return false; // Invalid type or number of parameters
+            if (!parseInt(values.valueAt(0), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetInt4(ParamMap const&               params,
+                         sid_t                         paramSid,
+                         std::array<int32_t, 4>&       target,
+                         std::array<int32_t, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
+                return false; // Invalid type or incorrect number of parameters
+
+            std::array<int32_t, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseInt(values.valueAt(i), parsedValues[i]))
+                    return false; // Parsing failed for an element
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an enum value using a conversion function
+    template <typename EnumType>
+    static bool parseAndSetEnum(ParamMap const& params,
+                                sid_t           paramSid,
+                                EnumType&       target,
+                                EnumType        defaultValue,
+                                bool (*converter)(sid_t, EnumType&))
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            if (!converter(hashCRC64(values.valueAt(0)), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    static size_t parseAndSetFloatArray(
+        ParamMap const&           params,
+        sid_t                     paramSid,
+        size_t                    targetSz,
+        float* DMT_RESTRICT       target,
+        float const* DMT_RESTRICT defaultVals,
+        sid_t                     ttype = dict::types::tFloat.sid)
+    {
+        size_t ret = 0;
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != ttype || values.numParams() != targetSz)
+                return 0;
+
+            for (/**/; ret < values.numParams(); ++ret)
+            {
+                if (!parseFloat(values.valueAt(ret), target[ret]))
+                    return ret;
+            }
+        }
+        else
+        {
+            std::memcpy(target, defaultVals, targetSz * sizeof(float));
+            ret = targetSz;
+        }
+
+        return ret;
+    }
+
+    template <std::size_t NTTPSize>
+    static std::size_t parseFloatArray(ArgsDArray const& args, std::array<float, NTTPSize>& outArray)
+    {
+        // Check if the size of the input vector matches the expected size
+        if (args.size() != NTTPSize)
+        {
+            return 0; // Mismatch in expected and actual size
+        }
+
+        std::size_t parsedCount = 0;
+
+        for (std::size_t i = 0; i < NTTPSize; ++i)
+        {
+            // Parse each string into a float
+            float value = 0.0f;
+            if (!parseFloat(std::string_view(args[i]), value))
+            {
+                return parsedCount; // Stop and return the count parsed so far if there's an error
+            }
+            outArray[i] = value;
+            ++parsedCount;
+        }
+
+        return parsedCount; // Should be NTTPSize upon success
+    }
+
+    template <Vector V>
+    static bool parseAndSetVector(ParamMap const& _params, sid_t sid, V& target, V defaultV)
+    {
+        if (auto it = _params.find(sid); it != _params.end())
+        {
+            ParamPair const& values = it->second;
+            // TODO map dict type constant to a type
+            if (values.type != dict::types::tFloat.sid)
+                return false;
+
+            for (uint32_t i = 0; i < V::numComponents(); ++i)
+            {
+                float value = 0.f;
+                if (!parseFloat(values.valueAt(i), value))
+                    return false;
+                target[i] = value;
+            }
+            return true;
+        }
+        else
+        {
+            target = defaultV;
+            return true;
+        }
+    }
+
     // Entity Definitions ---------------------------------------------------------------------------------------------
+
     CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const& cameraTransform, sid_t medium) :
     SceneEntity(cameraSidFromType(parameters.type), {/*we have no unparsed parameters at the moment*/}),
     spec(parameters),
     cameraTransform(cameraTransform),
     medium(medium)
     {
+    }
+
+    TransformedSceneEntity::TransformedSceneEntity(sid_t name, AnimatedTransform const& t, ParamMap parameters) :
+    SceneEntity(name, parameters),
+    transform(t)
+    {
+    }
+
+    LightEntity::LightEntity(ELightType               type,
+                             AnimatedTransform const& t,
+                             sid_t                    _medium,
+                             EColorSpaceType          _colorSpace,
+                             ParamMap const&          _params) :
+    TransformedSceneEntity(lightSidFromType(type), t, _params),
+    spec(type, _params.contains(dict::light::illuminance.sid), 0.f /*see insdie*/, 1.f /*see inside*/),
+    medium(_medium),
+    colorSpace(_colorSpace)
+    { // TODO Error handling
+        using namespace std::string_view_literals;
+        if (spec.illum)
+            parseAndSetFloat(parameters, dict::light::illuminance.sid, spec.po.illuminance, /*never*/ 1.f);
+        else
+            parseAndSetFloat(parameters, dict::light::power.sid, spec.po.power, 1.f);
+        parseAndSetFloat(parameters, dict::light::scale.sid, spec.scale, 1.f);
+
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                auto& param = spec.params.distant;
+                //dict::light::distant_params::L.sid
+                if (!parseAndSetVector(parameters, dict::light::distant_params::from.sid, param.from, {{0, 0, 0}}))
+                    std::abort();
+                if (!parseAndSetVector(parameters, dict::light::distant_params::to.sid, param.to, {{0, 0, 1}}))
+                    std::abort();
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                auto& param = spec.params.goniometric;
+                if (!parseAndSetString2(parameters,
+                                        dict::light::goniometric_params::filename.sid,
+                                        param.filename,
+                                        u8""sv,
+                                        true))
+                    std::abort(); // TODO better
+
+                //dict::light::goniometric_params::I.sid
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                auto& param = spec.params.infinite;
+                if (!parseAndSetString2(parameters, dict::light::infinite_params::filename.sid, param.filename, u8""sv))
+                    std::abort(); // TODO better
+                std::array<float, 12> def{};
+                if (!parseAndSetFloatArray(parameters,
+                                           dict::light::infinite_params::portal.sid,
+                                           12,
+                                           std::bit_cast<float*>(&param.portal[0][0]),
+                                           &def[0],
+                                           dict::types::tPoint3.sid))
+                    std::abort(); // TODO better
+                //dict::light::infinite_params::L.sid
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                auto& param = spec.params.point;
+                //dict::light::point_params::I.sid
+                if (!parseAndSetVector(parameters, dict::light::point_params::from.sid, param.from, {{0, 0, 0}}))
+                    std::abort();
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                auto& param = spec.params.projection;
+                //dict::light::projection_params::I.sid
+                if (!parseAndSetFloat(parameters, dict::light::projection_params::fov.sid, param.fov, 90.f))
+                    std::abort(); // TODO better
+                if (!parseAndSetString2(parameters, dict::light::projection_params::filename.sid, param.filename, u8""sv, true))
+                    std::abort(); // TODO better
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                auto& param = spec.params.spotlight;
+                //dict::light::spotlight_params::I
+                if (!parseAndSetVector(parameters, dict::light::spotlight_params::from.sid, param.from, {{0, 0, 0}}))
+                    std::abort(); // TODO better
+                if (!parseAndSetVector(parameters, dict::light::spotlight_params::to.sid, param.to, {{0, 0, 1}}))
+                    std::abort(); // TODO better
+                if (!parseAndSetFloat(parameters, dict::light::spotlight_params::coneangle.sid, param.coneangle, 30.f))
+                    std::abort();
+                if (!parseAndSetFloat(parameters, dict::light::spotlight_params::conedeltaangle.sid, param.conedeltaangle, 5.f))
+                    std::abort();
+                break;
+            }
+        }
     }
 
     // Parsing Helpers ------------------------------------------------------------------------------------------------
@@ -1308,250 +1727,6 @@ namespace dmt {
         }
 
         return false;
-    }
-
-    // Parse and set a float value
-    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            float value = defaultValue;
-            if (!parseFloat(values.valueAt(0), value))
-            {
-                return false; // Parsing failed
-            }
-            target = value;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set a std::string_view value
-    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            target = values.valueAt(0);
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, char* target, uint32_t& outLength, std::string_view defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            std::memcpy(target, values.valueAt(0).data(), values.valueAt(0).size());
-            outLength = static_cast<uint32_t>(values.valueAt(0).size());
-        }
-        else
-        {
-            std::memcpy(target, defaultValue.data(), defaultValue.size()); // Use default value if parameter is not found
-            outLength = static_cast<uint32_t>(defaultValue.size());
-        }
-        return true;
-    }
-
-    // Parse and set a boolean value
-    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
-    {
-        using namespace std::string_view_literals;
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            if (values.valueAt(0) == "true"sv)
-                target = true;
-            else if (values.valueAt(0) == "false"sv)
-                target = false;
-            else
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    bool parseAndSetFloat4(ParamMap const&             params,
-                           sid_t                       paramSid,
-                           std::array<float, 4>&       target,
-                           std::array<float, 4> const& defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
-            {
-                return false; // Invalid type or incorrect number of parameters
-            }
-
-            std::array<float, 4> parsedValues = defaultValue;
-            for (size_t i = 0; i < 4; ++i)
-            {
-                if (!parseFloat(values.valueAt(i), parsedValues[i]))
-                {
-                    return false; // Parsing failed for an element
-                }
-            }
-
-            target = parsedValues;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set an int32_t value
-    template <std::integral I>
-    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
-                return false; // Invalid type or number of parameters
-            if (!parseInt(values.valueAt(0), target))
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    bool parseAndSetInt4(ParamMap const&               params,
-                         sid_t                         paramSid,
-                         std::array<int32_t, 4>&       target,
-                         std::array<int32_t, 4> const& defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
-                return false; // Invalid type or incorrect number of parameters
-
-            std::array<int32_t, 4> parsedValues = defaultValue;
-            for (size_t i = 0; i < 4; ++i)
-            {
-                if (!parseInt(values.valueAt(i), parsedValues[i]))
-                    return false; // Parsing failed for an element
-            }
-
-            target = parsedValues;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set an enum value using a conversion function
-    template <typename EnumType>
-    static bool parseAndSetEnum(ParamMap const& params,
-                                sid_t           paramSid,
-                                EnumType&       target,
-                                EnumType        defaultValue,
-                                bool (*converter)(sid_t, EnumType&))
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            if (!converter(hashCRC64(values.valueAt(0)), target))
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    static size_t parseAndSetFloatArray(ParamMap const&           params,
-                                        sid_t                     paramSid,
-                                        size_t                    targetSz,
-                                        float* DMT_RESTRICT       target,
-                                        float const* DMT_RESTRICT defaultVals)
-    {
-        size_t ret = 0;
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != targetSz)
-                return 0;
-
-            for (/**/; ret < values.numParams(); ++ret)
-            {
-                if (!parseFloat(values.valueAt(ret), target[ret]))
-                    return ret;
-            }
-        }
-        else
-        {
-            std::memcpy(target, defaultVals, targetSz * sizeof(float));
-            ret = targetSz;
-        }
-
-        return ret;
-    }
-
-    template <std::size_t NTTPSize>
-    static std::size_t parseFloatArray(ArgsDArray const& args, std::array<float, NTTPSize>& outArray)
-    {
-        // Check if the size of the input vector matches the expected size
-        if (args.size() != NTTPSize)
-        {
-            return 0; // Mismatch in expected and actual size
-        }
-
-        std::size_t parsedCount = 0;
-
-        for (std::size_t i = 0; i < NTTPSize; ++i)
-        {
-            // Parse each string into a float
-            float value = 0.0f;
-            if (!parseFloat(std::string_view(args[i]), value))
-            {
-                return parsedCount; // Stop and return the count parsed so far if there's an error
-            }
-            outArray[i] = value;
-            ++parsedCount;
-        }
-
-        return parsedCount; // Should be NTTPSize upon success
     }
 
     static sid_t setCameraParams(CameraSpec& cameraSpec, ParamMap const& params, Options const& cmdOptions)
@@ -3136,7 +3311,14 @@ namespace dmt {
 
     void SceneDescription::NamedMaterial(sid_t name) {}
 
-    void SceneDescription::LightSource(ELightType type, ParamMap const& params) {}
+    void SceneDescription::LightSource(ELightType type, ParamMap const& params)
+    {
+        AnimatedTransform const t(m_graphicsState.ctm[0],
+                                  m_graphicsState.transformStartTime,
+                                  m_graphicsState.ctm[1],
+                                  m_graphicsState.transformEndTime);
+        m_lights.emplace_back(type, t, m_graphicsState.currentOutsideMedium, m_graphicsState.colorSpace, params);
+    }
 
     void SceneDescription::AreaLightSource(EAreaLightType type, ParamMap const& params) {}
 
@@ -3159,21 +3341,285 @@ namespace dmt {
     void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) {}
 
     // Spec Functions -------------------------------------------------------------------------------------------------
-    LightSourceSpec::LightSourceSpec(ELightType type, bool  illum, float powerOrIlluminance, float scale):
+    LightSourceSpec::LightSourceSpec(ELightType type, bool illum, float powerOrIlluminance, float scale) :
     scale(scale),
     type(type),
     illum(illum)
     {
-        if()
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                params.distant = {};
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                params.goniometric = {};
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                params.infinite = {};
+                break;
+            }
+            case ELightType::ePoint:
+            {
+
+                params.point = {};
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                params.projection = {};
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                params.spotlight = {};
+                break;
+            }
+        }
+        if (illum)
+        {
+            po.illuminance = powerOrIlluminance;
+        }
+        else
+            po.power = powerOrIlluminance;
     }
-        // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
-    LightSourceSpec::LightSourceSpec(LightSourceSpec const&);
-    LightSourceSpec::LightSourceSpec(LightSourceSpec&&) noexcept;
-    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const&);
-    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&&) noexcept;
-    LightSourceSpec::~LightSourceSpec() noexcept;
-    
-    
+    // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
+    LightSourceSpec::LightSourceSpec(LightSourceSpec const& other) :
+    scale(other.scale),
+    type(other.type),
+    illum(other.illum)
+    {
+        if (other.illum)
+            po.illuminance = other.po.illuminance;
+        else
+            po.power = other.po.power;
+
+        switch (other.type)
+        {
+            case ELightType::eDistant:
+            {
+                params.distant = other.params.distant;
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                params.goniometric = other.params.goniometric;
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                params.infinite = other.params.infinite;
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                params.point = other.params.point;
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                params.projection = other.params.projection;
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                params.spotlight = other.params.spotlight;
+                break;
+            }
+        }
+    }
+
+    LightSourceSpec::LightSourceSpec(LightSourceSpec&& _that) noexcept :
+    scale(std::exchange(_that.scale, 1.f)),
+    type(std::exchange(_that.type, ELightType::eCount)),
+    illum(std::exchange(_that.illum, false))
+    {
+        if (illum)
+            po.illuminance = _that.po.illuminance;
+        else
+            po.power = _that.po.power;
+
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                params.distant = std::move(_that.params.distant);
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                params.goniometric = std::move(_that.params.goniometric);
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                params.infinite = std::move(_that.params.infinite);
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                params.point = std::move(_that.params.point);
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                params.projection = std::move(_that.params.projection);
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                params.spotlight = std::move(_that.params.spotlight);
+                break;
+            }
+        }
+    }
+
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const& _that)
+    {
+        if (this != &_that)
+        {
+            // destroy preexisting object first
+            cleanup();
+
+            // then assign the new object
+            scale = _that.scale;
+            type  = _that.type;
+            illum = _that.illum;
+
+            switch (type)
+            {
+                case ELightType::eDistant:
+                {
+                    params.distant = _that.params.distant;
+                    break;
+                }
+                case ELightType::eGoniometric:
+                {
+                    params.goniometric = _that.params.goniometric;
+                    break;
+                }
+                case ELightType::eInfinite:
+                {
+                    params.infinite = _that.params.infinite;
+                    break;
+                }
+                case ELightType::ePoint:
+                {
+                    params.point = _that.params.point;
+                    break;
+                }
+                case ELightType::eProjection:
+                {
+                    params.projection = _that.params.projection;
+                    break;
+                }
+                case ELightType::eSpot:
+                {
+                    params.spotlight = _that.params.spotlight;
+                    break;
+                }
+            }
+        }
+        return *this;
+    }
+
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&& _that) noexcept
+    {
+        if (this != &_that)
+        {
+            // destroy preexisting object first
+            cleanup();
+
+            // then assign the new object
+            scale = std::exchange(_that.scale, 1.f);
+            type  = std::exchange(_that.type, ELightType::eCount);
+            illum = std::exchange(_that.illum, false);
+
+            switch (type)
+            {
+                case ELightType::eDistant:
+                {
+                    params.distant = std::move(_that.params.distant);
+                    break;
+                }
+                case ELightType::eGoniometric:
+                {
+                    params.goniometric = std::move(_that.params.goniometric);
+                    break;
+                }
+                case ELightType::eInfinite:
+                {
+                    params.infinite = std::move(_that.params.infinite);
+                    break;
+                }
+                case ELightType::ePoint:
+                {
+                    params.point = std::move(_that.params.point);
+                    break;
+                }
+                case ELightType::eProjection:
+                {
+                    params.projection = std::move(_that.params.projection);
+                    break;
+                }
+                case ELightType::eSpot:
+                {
+                    params.spotlight = std::move(_that.params.spotlight);
+                    break;
+                }
+            }
+
+            // then destroy the moved from object
+            _that.cleanup();
+        }
+        return *this;
+    }
+
+    LightSourceSpec::~LightSourceSpec() noexcept { cleanup(); }
+
+    void LightSourceSpec::cleanup() noexcept
+    {
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                std::destroy_at(&params.distant);
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                std::destroy_at(&params.goniometric);
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                std::destroy_at(&params.infinite);
+                break;
+            }
+            case ELightType::ePoint:
+            {
+
+                std::destroy_at(&params.point);
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                std::destroy_at(&params.projection);
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                std::destroy_at(&params.spotlight);
+                break;
+            }
+        }
+    }
+
+
     CameraSpec::CameraSpec(CameraSpec const& other) :
     shutteropen(other.shutteropen),
     shutterclose(other.shutterclose),

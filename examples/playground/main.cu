@@ -204,6 +204,8 @@ int guardedMain()
     std::wstring                                           wstr = converter.from_bytes(view);
     std::wcout << wstr << std::endl;
 
+    auto v = getEnv();
+
     testDevicePrint();
     testNewContext();
     return 0;

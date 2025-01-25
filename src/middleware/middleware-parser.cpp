@@ -10,6 +10,7 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include <span>
 
 #include <cassert>
 #include <cctype>
@@ -789,7 +790,9 @@ namespace dmt {
                 static constexpr SText filename          = "filename"sv;          // string
             }                                                                     // namespace nanovdb_params
         }                                                                         // namespace media
-    }                                                                             // namespace dict
+    }  // namespace dict
+
+    static constexpr std::array<sid_t, 2> pointTypes{dict::types::tPoint.sid, dict::types::tPoint3.sid};
 
     static constexpr bool activeTransformFromSid(sid_t type, EActiveTransform& out)
     {
@@ -1158,6 +1161,7 @@ namespace dmt {
         return 0;
     }
 
+
     // Parse and set a float value
     static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
     {
@@ -1437,13 +1441,13 @@ namespace dmt {
     }
 
     template <Vector V>
-    static bool parseAndSetVector(ParamMap const& _params, sid_t sid, V& target, V defaultV)
+    static bool parseAndSetVector(ParamMap const& _params, sid_t sid, V& target, V defaultV, std::span<const sid_t> allowedTypes)
     {
         if (auto it = _params.find(sid); it != _params.end())
         {
             ParamPair const& values = it->second;
-            // TODO map dict type constant to a type
-            if (values.type != dict::types::tFloat.sid)
+
+            if (std::find(allowedTypes.begin(), allowedTypes.end(), values.type) == allowedTypes.end())
                 return false;
 
             for (uint32_t i = 0; i < V::numComponents(); ++i)
@@ -1501,9 +1505,9 @@ namespace dmt {
             {
                 auto& param = spec.params.distant;
                 //dict::light::distant_params::L.sid
-                if (!parseAndSetVector(parameters, dict::light::distant_params::from.sid, param.from, {{0, 0, 0}}))
+                if (!parseAndSetVector(parameters, dict::light::distant_params::from.sid, param.from, {{0, 0, 0}}, pointTypes))
                     std::abort();
-                if (!parseAndSetVector(parameters, dict::light::distant_params::to.sid, param.to, {{0, 0, 1}}))
+                if (!parseAndSetVector(parameters, dict::light::distant_params::to.sid, param.to, {{0, 0, 1}}, pointTypes))
                     std::abort();
                 break;
             }
@@ -1540,7 +1544,7 @@ namespace dmt {
             {
                 auto& param = spec.params.point;
                 //dict::light::point_params::I.sid
-                if (!parseAndSetVector(parameters, dict::light::point_params::from.sid, param.from, {{0, 0, 0}}))
+                if (!parseAndSetVector(parameters, dict::light::point_params::from.sid, param.from, {{0, 0, 0}}, pointTypes))
                     std::abort();
                 break;
             }
@@ -1558,9 +1562,9 @@ namespace dmt {
             {
                 auto& param = spec.params.spotlight;
                 //dict::light::spotlight_params::I
-                if (!parseAndSetVector(parameters, dict::light::spotlight_params::from.sid, param.from, {{0, 0, 0}}))
+                if (!parseAndSetVector(parameters, dict::light::spotlight_params::from.sid, param.from, {{0, 0, 0}}, pointTypes))
                     std::abort(); // TODO better
-                if (!parseAndSetVector(parameters, dict::light::spotlight_params::to.sid, param.to, {{0, 0, 1}}))
+                if (!parseAndSetVector(parameters, dict::light::spotlight_params::to.sid, param.to, {{0, 0, 1}}, pointTypes))
                     std::abort(); // TODO better
                 if (!parseAndSetFloat(parameters, dict::light::spotlight_params::coneangle.sid, param.coneangle, 30.f))
                     std::abort();
@@ -2427,8 +2431,9 @@ namespace dmt {
                                            Enum& out)
         {
             currentStream.advance(actx);
+
             //check number of Args and get enum
-            if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(outArgs[0]), out))
+            if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(dequoteString(outArgs[0])), out))
             {
                 actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
                 std::abort();
@@ -2556,8 +2561,10 @@ namespace dmt {
 
                 if (!isDirective(tokenSid))
                 {
-                    actx.error("Invalid directive {}", {token});
-                    std::abort();
+                    //actx.error("Invalid directive {}", {token});
+                    //std::abort();
+                    currentStream.advance(actx);
+                    continue;
                 }
 
                 //check directives
@@ -2578,7 +2585,9 @@ namespace dmt {
                     }
                     case dict::directive::Identity.sid:
                     {
+                        //to verify
                         m_pTarget->Identity();
+                        //currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Camera.sid:
@@ -2758,10 +2767,16 @@ namespace dmt {
                     }
                     case dict::directive::Include.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Import.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::LookAt.sid:
@@ -2860,6 +2875,9 @@ namespace dmt {
                     }
                     case dict::directive::Shape.sid:
                     { // TODO create file
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::ObjectBegin.sid:
@@ -2896,34 +2914,58 @@ namespace dmt {
                     }
                     case dict::directive::LightSource.sid:
                     {
+                        ELightType out;
+                        typeAndParamListParsing(actx, dict::directive::LightSource, currentStream, args, params, lightTypeFromSid, out);
+                        m_pTarget->LightSource(out, params);
                         break;
                     }
                     case dict::directive::AreaLightSource.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Material.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::MakeNamedMaterial.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::NamedMaterial.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Texture.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::MakeNamedMedium.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::MediumInterface.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     default:
@@ -3317,7 +3359,9 @@ namespace dmt {
                                   m_graphicsState.transformStartTime,
                                   m_graphicsState.ctm[1],
                                   m_graphicsState.transformEndTime);
-        m_lights.emplace_back(type, t, m_graphicsState.currentOutsideMedium, m_graphicsState.colorSpace, params);
+        LightEntity entity{type, t, m_graphicsState.currentOutsideMedium, m_graphicsState.colorSpace, params};
+        m_lights.push_back(entity);
+        //m_lights.emplace_back(type, t, m_graphicsState.currentOutsideMedium, m_graphicsState.colorSpace, params);
     }
 
     void SceneDescription::AreaLightSource(EAreaLightType type, ParamMap const& params) {}
@@ -3338,7 +3382,13 @@ namespace dmt {
 
     void SceneDescription::EndOfFiles() {}
 
-    void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) {}
+    void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) 
+    {
+        if(m_camera.spec.type == ECameraType::eOrthographic || m_camera.spec.type == ECameraType::ePerspective)
+        {
+            m_camera.spec.params.p.screenWindow.arr = info.cameraSpec.params.p.screenWindow.arr;
+        }
+    }
 
     // Spec Functions -------------------------------------------------------------------------------------------------
     LightSourceSpec::LightSourceSpec(ELightType type, bool illum, float powerOrIlluminance, float scale) :
@@ -3350,33 +3400,32 @@ namespace dmt {
         {
             case ELightType::eDistant:
             {
-                params.distant = {};
+                std::construct_at(&params.distant);
                 break;
             }
             case ELightType::eGoniometric:
             {
-                params.goniometric = {};
+                std::construct_at(&params.goniometric);
                 break;
             }
             case ELightType::eInfinite:
             {
-                params.infinite = {};
+                std::construct_at(&params.infinite);
                 break;
             }
             case ELightType::ePoint:
             {
-
-                params.point = {};
+                std::construct_at(&params.point);
                 break;
             }
             case ELightType::eProjection:
             {
-                params.projection = {};
+                std::construct_at(&params.projection);
                 break;
             }
             case ELightType::eSpot:
             {
-                params.spotlight = {};
+                std::construct_at(&params.spotlight);
                 break;
             }
         }
@@ -3402,21 +3451,25 @@ namespace dmt {
         {
             case ELightType::eDistant:
             {
+                std::construct_at(&params.distant);
                 params.distant = other.params.distant;
                 break;
             }
             case ELightType::eGoniometric:
             {
+                std::construct_at(&params.goniometric);
                 params.goniometric = other.params.goniometric;
                 break;
             }
             case ELightType::eInfinite:
             {
+                std::construct_at(&params.infinite);
                 params.infinite = other.params.infinite;
                 break;
             }
             case ELightType::ePoint:
             {
+                std::construct_at(&params.point);
                 params.point = other.params.point;
                 break;
             }
@@ -3427,6 +3480,7 @@ namespace dmt {
             }
             case ELightType::eSpot:
             {
+                std::construct_at(&params.spotlight);
                 params.spotlight = other.params.spotlight;
                 break;
             }
@@ -3447,31 +3501,37 @@ namespace dmt {
         {
             case ELightType::eDistant:
             {
+                std::construct_at(&params.distant);
                 params.distant = std::move(_that.params.distant);
                 break;
             }
             case ELightType::eGoniometric:
             {
+                std::construct_at(&params.goniometric);
                 params.goniometric = std::move(_that.params.goniometric);
                 break;
             }
             case ELightType::eInfinite:
             {
+                std::construct_at(&params.infinite);
                 params.infinite = std::move(_that.params.infinite);
                 break;
             }
             case ELightType::ePoint:
             {
+                std::construct_at(&params.point);
                 params.point = std::move(_that.params.point);
                 break;
             }
             case ELightType::eProjection:
             {
+                std::construct_at(&params.projection);
                 params.projection = std::move(_that.params.projection);
                 break;
             }
             case ELightType::eSpot:
             {
+                std::construct_at(&params.spotlight);
                 params.spotlight = std::move(_that.params.spotlight);
                 break;
             }

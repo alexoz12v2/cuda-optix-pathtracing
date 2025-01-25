@@ -741,7 +741,7 @@ namespace dmt {
         struct Distant
         {
             //TODO the default vale to specify
-            float*  L;
+            float*  L = nullptr;
             Point3f from{{0, 0, 0}};
             Point3f to{{0, 0, 1}};
         };
@@ -749,39 +749,39 @@ namespace dmt {
         struct Goniometric
         {
             //requiered-no default
-            std::u8string filename;
+            std::u8string filename = u8"";
             //TODO insert code for radiant Intensity
-            float* I;
+            float* I = nullptr;
         };
 
         struct Infinite
         {
             //if no filename uses same Intesity
-            std::u8string filename;
+            std::u8string filename = u8"";
             //default current color space
-            float*  L;
+            float*  L = nullptr;
             Point3f portal[4];
         };
 
         struct Point
         {
             //default current color space
-            float*  I;
+            float*  I = nullptr;
             Point3f from{{0, 0, 0}};
         };
 
         struct Projection
         {
             //default current color space
-            float*        I;
+            float*        I = nullptr;
             float         fov = 90.0f;
-            std::u8string filename;
+            std::u8string filename = u8"";
         };
 
         struct Spotlight
         {
             //default current color space
-            float*  I;
+            float*  I = nullptr;
             Point3f from{{0, 0, 0}};
             Point3f to{{0, 0, 1}};
             float   coneangle      = 30;

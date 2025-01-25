@@ -166,6 +166,7 @@ AttributeEnd
         dmt::SceneParser      parser{actx, &desc, filePath};
 
         parser.parse(actx, opt);
+        std::cin.get();
     }
 
     void testBuddy(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemResBuddy)
@@ -212,11 +213,11 @@ AttributeEnd
         {
             auto& p = entity.spec.params.infinite;
             entityStr += "( ";
-            entityStr += p.portal[0].x;
+            entityStr += std::to_string(p.portal[0].x);
             entityStr += ", ";
-            entityStr += p.portal[0].y;
+            entityStr += std::to_string(p.portal[0].y);
             entityStr += ", ";
-            entityStr += p.portal[0].z;
+            entityStr += std::to_string(p.portal[0].z);
             entityStr += ") ";
         }
         entityStr += "}} }";
@@ -231,19 +232,18 @@ int guardedMain()
     dmt::ctx::init(actx);
     auto env = dmt::getEnv();
 
-    testLightEntity();
-    std::cin.get();
-    return 0;
+    //testLightEntity();
+    //std::cin.get();
 
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
-    dmt::model::test(actx);
+    //dmt::model::test(actx);
     //testCTrie(actx);
     //testWordTokenization(actx);
     //testJob(actx);
-    //textParsing(actx);
+    textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx());
     actx.log("CUDA Initialized");
-
+    /*
     std::vector<float> v3;
     v3.resize(32);
     {
@@ -294,9 +294,10 @@ int guardedMain()
     }
 
     dmt::UnifiedMemoryResource::destroy(unified);
+    std::cout << "Goodbye!" << std::endl;
+    */
     std::cout << "Press Any key to exit" << std::endl;
     std::cin.get();
-    std::cout << "Goodbye!" << std::endl;
     dmt::ctx::unregister();
     return 0;
 }

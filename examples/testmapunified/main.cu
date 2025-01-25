@@ -104,8 +104,8 @@ static void testSpectrum(dmt::BaseMemoryResource* unified, dmt::BaseMemoryResour
     dmt::ConstantSpectrum  constantSpectrum(3.f);
     cudaError_t            cudaStatus = ::cudaSuccess;
     dmt::FloatFunction2    blackbody673K{673.15f, 0.f, [](float _t, float _param0, float _param1) {
-        return dmt::blackbody(_t, _param0);
-    }};
+                                          return dmt::blackbody(_t, _param0);
+                                      }};
 
     j.actx.log("------------------- Testing __host__ Spectrum Creation from another spectrum -----------------------");
     dmt::DenselySampledSpectrum fromConstant{constantSpectrum, mem};

@@ -337,7 +337,7 @@ namespace dmt::detail {
 
         static __device__ double power_of_10(int e)
         {
-            static __constant__ const double powers_of_10[18] =
+            static __constant__ double const powers_of_10[18] =
                 {1e00, 1e01, 1e02, 1e03, 1e04, 1e05, 1e06, 1e07, 1e08, 1e09, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17};
             return (e >= 0 && e <= 17) ? powers_of_10[e] : 1.0;
         }

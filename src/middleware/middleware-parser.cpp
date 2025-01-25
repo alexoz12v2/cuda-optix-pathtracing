@@ -122,12 +122,12 @@ namespace dmt {
                 static constexpr SText cameraworld = "cameraworld"sv; // default
                 static constexpr SText camera      = "camera"sv;
                 static constexpr SText world       = "world"sv;
-            } // namespace rendercoordsys_literals
+            }                                                       // namespace rendercoordsys_literals
             static constexpr SText seed         = "seed"sv;         // integer 0
             static constexpr SText forcediffuse = "forcediffuse"sv; // bool false
             static constexpr SText pixelstats   = "pixelstats"sv;   // bool false (images encode per pixel statistics)
             static constexpr SText wavefront    = "wavefront"sv;    //bool false
-        } // namespace opts
+        }                                                           // namespace opts
 
         // acene wide rendering options: cameras
         namespace camera {
@@ -164,7 +164,7 @@ namespace dmt {
                 static constexpr SText pentagon = "pentagon"sv;
                 static constexpr SText star     = "star"sv;
             } // namespace aperture_builtin
-        } // namespace camera
+        }     // namespace camera
 
         // scene wide rendering optinos: samplers
         namespace sampler {
@@ -191,7 +191,7 @@ namespace dmt {
             static constexpr SText jitter   = "jitter"sv;   // bool true
             static constexpr SText xsamples = "xsamples"sv; // integer 4
             static constexpr SText ysamples = "ysamples"sv; // integer 4
-        } // namespace sampler
+        }                                                   // namespace sampler
 
         // scene wide rendering optinos: color spaces
         namespace colorspace {
@@ -238,7 +238,7 @@ namespace dmt {
                 static constexpr SText sony_ilce_7m3       = "sony_ilce_7m3"sv;
                 static constexpr SText sony_ilce_7rm3      = "sony_ilce_7rm3"sv;
                 static constexpr SText sony_ilce_9         = "sony_ilce_9"sv;
-            } // namespace sensor_literals
+            }                                                                 // namespace sensor_literals
             static constexpr SText maxcomponentvalue = "maxcomponentvalue"sv; // float std::numeric_limits<float>::infinity()
             // gbuffer
             static constexpr SText coordinatesystem = "coordinatesystem"sv;
@@ -250,7 +250,7 @@ namespace dmt {
             static constexpr SText nbuckets  = "nbuckets"sv;  // integer 16
             static constexpr SText lambdamin = "lambdamin"sv; // float 360.f
             static constexpr SText lambdamax = "lambdamax"sv; // float 830.f
-        } // namespace film
+        }                                                     // namespace film
 
         // scene wide rendering optinos: filters
         namespace filter {
@@ -270,7 +270,7 @@ namespace dmt {
             static constexpr SText C = "C"sv; // float 1/3
             // sinc
             static constexpr SText tau = "tau"sv; // float 3
-        } // namespace filter
+        }                                         // namespace filter
 
         // scene wide rendering optinos: integrators
         namespace integrator {
@@ -292,7 +292,7 @@ namespace dmt {
                 static constexpr SText bvh     = "bvh"sv;
                 static constexpr SText uniform = "uniform"sv;
                 static constexpr SText power   = "power"sv;
-            } // namespace lightsampler_literals
+            }                                                   // namespace lightsampler_literals
             static constexpr SText regularize = "regularize"sv; // bool false (bdpt, mlt, path, volpath, wavefront)
             // ambientocclusion
             static constexpr SText cossample   = "cossample"sv;   // bool ture
@@ -313,7 +313,7 @@ namespace dmt {
             static constexpr SText photonsperiteration = "photonsperiteration"sv; // integer -1 (== equal to num pixels)
             static constexpr SText radius              = "radius"sv;              // float 1
             static constexpr SText seed                = "seed"sv;                // integer 0
-        } // namespace integrator
+        }                                                                         // namespace integrator
 
         // scene wide rendering optinos: accelerators
         namespace accelerator {
@@ -335,7 +335,7 @@ namespace dmt {
             static constexpr SText emptybonus    = "emptybonus"sv;    // float 0.5f
             static constexpr SText maxprims      = "maxprims"sv;      // integer 1
             static constexpr SText maxdepth      = "maxdepth"sv;      // integer -1
-        } // namespace accelerator
+        }                                                             // namespace accelerator
 
         // scene wide rendering optinos: pertecipation media (see below)
         // MakeNamedMedium are allowed even before the World Block, and a single call to MediumInterface is also allowed,
@@ -361,38 +361,38 @@ namespace dmt {
                 namespace basis_literals {
                     static constexpr SText bezier  = "bezier"sv;  // 2D
                     static constexpr SText bspline = "bspline"sv; // 3D
-                } // namespace basis_literals
-                static constexpr SText degree = "degree"sv; // integer 3 (default) or 2
+                }                                                 // namespace basis_literals
+                static constexpr SText degree = "degree"sv;       // integer 3 (default) or 2
                 static constexpr SText type   = "type"sv;
                 namespace type_literals {
                     static constexpr SText flat = "flat"sv; // face the incident ray
                     static constexpr SText cylinder = "cylinder"sv; // includes a shading normal, hence expects 3 number after it??
-                    static constexpr SText ribbon = "ribbon"sv; // curve has a fixed orientation, specified by N
-                } // namespace type_literals
+                    static constexpr SText ribbon = "ribbon"sv;     // curve has a fixed orientation, specified by N
+                }                                                   // namespace type_literals
                 static constexpr SText N          = "N"sv;          // only for "ribbon" curve types
                 static constexpr SText width      = "width"sv;      // float 1
                 static constexpr SText width0     = "width0"sv;     // float 1
                 static constexpr SText width1     = "width1"sv;     // float 1
                 static constexpr SText splitdepth = "splitdepth"sv; // integer 3
-            } // namespace curve_params
+            }                                                       // namespace curve_params
             namespace cylinder_params {
                 static constexpr SText radius = "radius"sv; // float 1
                 static constexpr SText zmin   = "zmin"sv;   // float -1
                 static constexpr SText zmax   = "zmax"sv;   // float 1
                 static constexpr SText phimax = "phimax"sv; // float 360
-            } // namespace cylinder_params
+            }                                               // namespace cylinder_params
             namespace disk_params {
                 static constexpr SText height      = "height"sv;      // float 0
                 static constexpr SText radius      = "radius"sv;      // radius 1
                 static constexpr SText innerradius = "innerradius"sv; // float 0
                 static constexpr SText phimax      = "phimax"sv;      // float 360
-            } // namespace disk_params
+            }                                                         // namespace disk_params
             namespace sphere_params {
                 static constexpr SText radius = "radius"sv; // float 1
                 static constexpr SText zmin   = "zmin"sv;   // float -radius
                 static constexpr SText zmax   = "zmax"sv;   // float radius
                 static constexpr SText phimax = "phimax"sv; // float 360
-            } // namespace sphere_params
+            }                                               // namespace sphere_params
             namespace trianglemesh_params {
                 // P N S uv must be same size. only P is required
                 static constexpr SText indices = "indices"sv; // required unless there are only 3 vertices, integer[]
@@ -400,18 +400,18 @@ namespace dmt {
                 static constexpr SText N  = "N"sv;  // normal[], if present, shading normals are computed using these
                 static constexpr SText S  = "S"sv;  // vector3[], per-vertex tangents
                 static constexpr SText uv = "uv"sv; // point2[]
-            } // namespace trianglemesh_params
+            }                                       // namespace trianglemesh_params
             namespace plymesh_params {
                 static constexpr SText filename = "filename"sv; // relative path of .ply or .ply.gz (gzip compressed)
                 static constexpr SText displacement = "displacement"sv; // displacement texture
                 static constexpr SText edgelength = "edgelength"sv; // edges of a triangle are split until this is met, def. 1.f
-            } // namespace plymesh_params
-            namespace loopsubdiv_params {                     // mesh which is subdivided
+            }                                                       // namespace plymesh_params
+            namespace loopsubdiv_params {                           // mesh which is subdivided
                 static constexpr SText levels  = "levels"sv;  // integer 3
                 static constexpr SText indices = "indices"sv; // integer[]
                 static constexpr SText P       = "P"sv;       // point[]
-            } // namespace loopsubdiv_params
-        } // namespace shape
+            }                                                 // namespace loopsubdiv_params
+        }                                                     // namespace shape
 
         // describing the scene: lights
         namespace light {
@@ -430,34 +430,34 @@ namespace dmt {
                 static constexpr SText L = "L"sv; // spectrum, spectral radiance, default = current color space illuminant
                 static constexpr SText from = "from"sv; // point, 0 0 0
                 static constexpr SText to   = "to"sv;   // point, 0 0 1
-            } // namespace distant_params
+            }                                           // namespace distant_params
             namespace goniometric_params {
                 static constexpr SText filename = "filename"sv; // string, no default, required
                 static constexpr SText I        = "I"sv;        // current color space's illuminant
-            } // namespace goniometric_params
+            }                                                   // namespace goniometric_params
             namespace infinite_params {
                 // either filename or L
                 static constexpr SText filename = "filename"sv;
                 static constexpr SText portal   = "portal"sv; // point3[4], window through which the light is visible
                 static constexpr SText L        = "L"sv;      // radiance intensity = L * scale * power
-            } // namespace infinite_params
+            }                                                 // namespace infinite_params
             namespace point_params {
                 static constexpr SText I = "I"sv; // spectrum, default = current color space illuminant. spectrad dist of light emitted radiant intensity
                 static constexpr SText from = "from"sv; // point, 0 0 0, light location
-            } // namespace point_params
+            }                                           // namespace point_params
             namespace projection_params {
                 static constexpr SText I        = "I"sv;        // spectrum
                 static constexpr SText fov      = "fov"sv;      // float, 90
                 static constexpr SText filename = "filename"sv; // string, required
-            } // namespace projection_params
+            }                                                   // namespace projection_params
             namespace spotlight_params {
                 static constexpr SText I              = "I"sv;              // spectrum, spectral intensity
                 static constexpr SText from           = "from"sv;           // point, 0 0 0
                 static constexpr SText to             = "to"sv;             // point, 0 0 1
                 static constexpr SText coneangle      = "coneangle"sv;      // float, 30
                 static constexpr SText conedeltaangle = "conedeltaangle"sv; // float, 5
-            } // namespace spotlight_params
-        } // namespace light
+            }                                                               // namespace spotlight_params
+        }                                                                   // namespace light
 
         // describing the scene: area light
         namespace arealight {
@@ -468,8 +468,8 @@ namespace dmt {
                 static constexpr SText filename = "filename"sv; // string required no default
                 static constexpr SText L        = "L"sv;        // spectrum, emitted spectral radiance distribution
                 static constexpr SText twosided = "twosided"sv; // bool, false = emit light only in halfspace pointed by normal of shape
-            } // namespace diffuse_params
-        } // namespace arealight
+            }                                                   // namespace diffuse_params
+        }                                                       // namespace arealight
 
         // describing the scene: material
         namespace material {
@@ -507,8 +507,8 @@ namespace dmt {
                     static constexpr SText conductor_eta = "conductor.eta"sv; // spectrum
                     static constexpr SText conductor_k   = "conductor.k"sv;   // spectrum
                     static constexpr SText reflectance   = "reflectance"sv;   // spectrum (NOT texture)
-                } // namespace conductor_params
-            } // namespace coated_params
+                }                                                             // namespace conductor_params
+            }                                                                 // namespace coated_params
             namespace conductor_params {
                 namespace builtin_spectrum {
                     static constexpr SText glass_BK7    = "glass-BK7"sv;    // Index of refraction for BK7 glass
@@ -548,11 +548,11 @@ namespace dmt {
                     static constexpr SText stdillum_F11  = "stdillum-F11"sv;  // CIE standard illuminants F11
                     static constexpr SText stdillum_F12  = "stdillum-F12"sv;  // CIE standard illuminants F12
                     static constexpr SText illum_acesD60 = "illum-acesD60"sv; // D60 illuminant from ACES.
-                } // namespace builtin_spectrum
+                }                                                             // namespace builtin_spectrum
                 static constexpr SText eta = "eta"sv; // spectrum texture (or built ix name), default = metal_Cu_eta
                 static constexpr SText k   = "k"sv;   // spectrum texture (or built in name), default = metal_Cu_k
                 static constexpr SText reflectance = "reflectance"sv; // spectrum texture (computed if absent?)
-            } // namespace conductor_params
+            }                                                         // namespace conductor_params
             namespace dielectric_params {
                 static constexpr SText eta = "eta"sv; // float texture or spectrum texture. default float texture 1.5 constant
             }
@@ -563,7 +563,7 @@ namespace dmt {
                 static constexpr SText reflectance   = "reflectance"sv;   // spectrum texture, def 0.25
                 static constexpr SText transmittance = "transmittance"sv; // spectrum texture, def 0.25
                 static constexpr SText scale         = "scale"sv;         // float texture, def 1
-            } // namespace diffusetransmission_params
+            }                                                             // namespace diffusetransmission_params
             namespace hair_params {
                 // Color related: if sigma_a specified, everything else is ignored. if reflectance specified (and sigma_a is not), then ignore everything else. if nothing
                 // is specified, use eumelanin 1.3 and pheomelanin 0
@@ -576,14 +576,14 @@ namespace dmt {
                 static constexpr SText beta_m = "beta_m"sv; // float texture, def 0.3, [0,1]
                 static constexpr SText beta_n = "beta_n"sv; // float texture, def 0.3, [0,1]
                 static constexpr SText alpha  = "alpha"sv;  // float texture, def 2 degrees
-            } // namespace hair_params
+            }                                               // namespace hair_params
             namespace measured_params {
                 static constexpr SText filename = "filename"sv; // string filename
             }
             namespace mix_params {
                 static constexpr SText materials = "materials"sv; // string[2], material names
                 static constexpr SText amount    = "amount"sv;    // texture float, def 0.5,
-            } // namespace mix_params
+            }                                                     // namespace mix_params
             namespace subsurface_params {
                 // specified in one of 3 ways (+ common parameter eta + g)
                 // 1. sigma_a + sigma_s (+ scale)
@@ -598,7 +598,7 @@ namespace dmt {
                 static constexpr SText sigma_s = "sigma_s"sv; // spectrum texture, default = RGB(2.55, 3.12, 3.77)
                 static constexpr SText scale   = "scale"sv;
             } // namespace subsurface_params
-        } // namespace material
+        }     // namespace material
 
         // describing the scene: texture
         namespace texture {
@@ -641,19 +641,19 @@ namespace dmt {
                 static constexpr SText sRGB   = "sRGB"sv;
                 static constexpr SText linear = "linear"sv;
                 static constexpr SText gamma  = "gamma"sv; // expects a float following it
-            } // namespace encoding_literals
+            }                                              // namespace encoding_literals
 
             namespace bilerp_params {
                 static constexpr SText v00 = "v00"sv; // spectrum texture or float texture. def = float, 0
                 static constexpr SText v01 = "v01"sv; // spectrum texture or float texture. def = float, 1
                 static constexpr SText v10 = "v10"sv; // spectrum texture or float texture. def = float, 0
                 static constexpr SText v11 = "v11"sv; // spectrum texture or float texture. def = float, 1
-            } // namespace bilerp_params
+            }                                         // namespace bilerp_params
             namespace checkerboard_params {
                 static constexpr SText dimension = "dimension"sv; // integer, def = 2 (can be either 2 or 3)
                 static constexpr SText tex1      = "tex1"sv;      // spectrum texture or float texture, def = float 1
                 static constexpr SText tex2      = "tex2"sv;      // spectrum texture or float texture, def = float 0
-            } // namespace checkerboard_params
+            }                                                     // namespace checkerboard_params
             namespace constant_params {
                 static constexpr SText value = "value"sv; // nbuckets values or rgb if spectrum, 1 value if float
             }
@@ -661,28 +661,28 @@ namespace dmt {
                 static constexpr SText tex1 = "tex1"sv; // spectrum texture or float texture, def = float 0
                 static constexpr SText tex2 = "tex2"sv; // spectrum texture or float texture, def = float 1
                 static constexpr SText dir  = "dir"sv;  // vector, def = 0 1 0
-            } // namespace directionmix_params
+            }                                           // namespace directionmix_params
             namespace dots_params {
-                static constexpr SText inside  = "inside"sv;  // spectrum texture or float texture, def = float 1
-                static constexpr SText outside = "outside"sv; // spectrum texture or float texture, def = float 0
-            } // namespace dots_params
+                static constexpr SText inside  = "inside"sv;      // spectrum texture or float texture, def = float 1
+                static constexpr SText outside = "outside"sv;     // spectrum texture or float texture, def = float 0
+            }                                                     // namespace dots_params
             namespace perlin_params {                             // fbm, wrinkled, windy
                 static constexpr SText octaves   = "octaves"sv;   // integer, def = 8
                 static constexpr SText roughness = "roughness"sv; // float, def = 0.5
-            } // namespace perlin_params
+            }                                                     // namespace perlin_params
             namespace imagemap_params {
                 static constexpr SText filename = "filename"sv; // string, required, no def, has to end with ".tga", ".pfm", ".exr"
                 namespace filename_extensions {
                     static constexpr SText _tga = ".tga"sv;
                     static constexpr SText _pfm = ".pfm"sv;
                     static constexpr SText _exr = ".exr"sv;
-                } // namespace filename_extensions
+                }                                       // namespace filename_extensions
                 static constexpr SText wrap = "wrap"sv; // enum, def = repeat
                 namespace wrap_literals {
                     static constexpr SText repeat = "repeat"sv;
                     static constexpr SText black  = "black"sv;
                     static constexpr SText clamp  = "clamp"sv;
-                } // namespace wrap_literals
+                }                                                         // namespace wrap_literals
                 static constexpr SText maxanisotropy = "maxanisotropy"sv; // float, def = 8, max elliptical eccentricity for EWA
                 static constexpr SText filter = "filter"sv; // enum, def = bilinear, filter used to sample from the mipmapped texture
                 namespace filter_literals {
@@ -690,22 +690,22 @@ namespace dmt {
                     static constexpr SText ewa       = "ewa"sv;
                     static constexpr SText trilinear = "trilinear"sv;
                     static constexpr SText point     = "point"sv;
-                } // namespace filter_literals
+                }                                               // namespace filter_literals
                 static constexpr SText encoding = "encoding"sv; // enum, def = sRGB, how to convert a 8bit color to float
                 static constexpr SText scale = "scale"sv;       // float, def = 1, scale to apply to the looked up value
                 static constexpr SText invert = "invert"sv; // bool, def = false. If true, each value is converted with f(x) = 1 - x
-            } // namespace imagemap_params
-            namespace marble_params {                             // still perlin
+            }                                               // namespace imagemap_params
+            namespace marble_params {                       // still perlin
                 static constexpr SText octaves   = "octaves"sv;   // integer, def = 8
                 static constexpr SText roughness = "roughness"sv; // float, def = 0.5
                 static constexpr SText scale     = "scale"sv;     // float, def = 1, scaling factor for inpouts
                 static constexpr SText variation = "variation"sv; // float, def = 0.2, scaling factor for output
-            } // namespace marble_params
+            }                                                     // namespace marble_params
             namespace mix_params {
                 static constexpr SText tex1   = "tex1"sv;   // spectrum texture or float texture, def = float, 0
                 static constexpr SText tex2   = "tex2"sv;   // spectrum texture or float texture, def = float, 1
                 static constexpr SText amount = "amount"sv; // float texture, def = float 0.5
-            } // namespace mix_params
+            }                                               // namespace mix_params
             namespace ptex_params {
                 static constexpr SText encoding = "encoding"sv; // enum, def = gamma 2.2
                 static constexpr SText filename = "filename"sv; // stringfilename, end with ptex, required no def
@@ -713,12 +713,12 @@ namespace dmt {
                     static constexpr SText _ptex = ".ptex"sv;
                 }
                 static constexpr SText scale = "scale"sv; // float, def = 1
-            } // namespace ptex_params
+            }                                             // namespace ptex_params
             namespace scale_params {
                 static constexpr SText tex   = "tex"sv;   // spectrum texture or float texture to be scaled, def float 1
                 static constexpr SText scale = "scale"sv; // float texture, def float 1
-            } // namespace scale_params
-        } // namespace texture
+            }                                             // namespace scale_params
+        }                                                 // namespace texture
 
         // describing the scene: participating media
         namespace media {
@@ -739,7 +739,7 @@ namespace dmt {
                 static constexpr SText sigma_a = "sigma_a"sv; // spectrum, absorption cross section, def 1
                 static constexpr SText sigma_s = "sigma_s"sv; // spectrum, scattering cross section, def 1
                 static constexpr SText scale   = "scale"sv;   // float, scale factor of sigma_a and sigma_s, def = 1
-            } // namespace homogeneous_params
+            }                                                 // namespace homogeneous_params
             namespace uniformgrid_params { // generalization of homogeneous, so it takes all its parameters plus the following
                 static constexpr SText g       = "g"sv;       // Henyey Greenstein asymmetry, float, def 0, [-1,1]
                 static constexpr SText Le      = "Le"sv;      // spectrum, def 0, distribution of emitted radiance
@@ -757,7 +757,7 @@ namespace dmt {
                 static constexpr SText temperature = "temperature"sv; // float[], nx*ny*nz kelvin values, row-major order, optional, then converted to blackbody emission spectra
                 static constexpr SText temperatureoffset = "temperatureoffset"sv; // float, def = 0
                 static constexpr SText temperaturescale  = "temperaturescale"sv;  // float, def = 1
-            } // namespace uniformgrid_params
+            }                                                                     // namespace uniformgrid_params
             namespace rgbgrid_params { // alternative to uniformgrid, so takes all parameters of homogeneous EXCEPT preset
                 static constexpr SText g       = "g"sv;       // Henyey Greenstein asymmetry, float, def 0, [-1,1]
                 static constexpr SText Le      = "Le"sv;      // spectrum, def 0, distribution of emitted radiance
@@ -767,7 +767,7 @@ namespace dmt {
                 static constexpr SText scale   = "scale"sv;   // float, scale factor of sigma_a and sigma_s, def = 1
                 static constexpr SText p0 = "p0"sv; // point3, def 0 0 0, min bound of the density grid in medium space
                 static constexpr SText p1 = "p1"sv; // point3, def 1 1 1, max bound of the density grid in medium space
-            } // namespace rgbgrid_params
+            }                                       // namespace rgbgrid_params
             namespace cloud_params {                // perlin
                 static constexpr SText p0 = "p0"sv; // point3, def 0 0 0, min bound of the density grid in medium space
                 static constexpr SText p1 = "p1"sv; // point3, def 1 1 1, max bound of the density grid in medium space
@@ -777,7 +777,7 @@ namespace dmt {
                 static constexpr SText sigma_a   = "sigma_a"sv;  // spectrum, absorption cross section, def 1
                 static constexpr SText sigma_s   = "sigma_s"sv;  // spectrum, scattering cross section, def 1
                 static constexpr SText wispness  = "wispness"sv; // float, def 1
-            } // namespace cloud_params
+            }                                                    // namespace cloud_params
             namespace nanovdb_params {
                 static constexpr SText g       = "g"sv; // Henyey Greenstein asymmetry parameter, float, def 0, [-1,1]
                 static constexpr SText sigma_a = "sigma_a"sv; // spectrum, absorption cross section, def 1
@@ -787,9 +787,9 @@ namespace dmt {
                 static constexpr SText temperatureoffset = "temperatureoffset"sv; // float, def = 0
                 static constexpr SText temperaturescale  = "temperaturescale"sv;  // float, def = 1
                 static constexpr SText filename          = "filename"sv;          // string
-            } // namespace nanovdb_params
-        } // namespace media
-    } // namespace dict
+            }                                                                     // namespace nanovdb_params
+        }                                                                         // namespace media
+    }                                                                             // namespace dict
 
     static constexpr bool activeTransformFromSid(sid_t type, EActiveTransform& out)
     {
@@ -1144,7 +1144,7 @@ namespace dmt {
     }
 
     // Entity Definitions ---------------------------------------------------------------------------------------------
-    CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const&, sid_t medium) :
+    CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const& cameraTransform, sid_t medium) :
     SceneEntity(cameraSidFromType(parameters.type), {/*we have no unparsed parameters at the moment*/}),
     spec(parameters),
     cameraTransform(cameraTransform),
@@ -2072,7 +2072,7 @@ namespace dmt {
                         return catResult({m_escapedBuffer, escIdx}, start, i);
                     }
                 }
-            } // end parse string
+            }                              // end parse string
             else if (c == '[' || c == ']') // parse begin/end array
             {
                 m_needsContinuation = false;
@@ -2241,27 +2241,31 @@ namespace dmt {
     {
         using namespace std::string_view_literals;
 
+        //check/get Arg and check/get params
         auto typeAndParamListParsing = [this]<typename Enum>
-            requires(std::is_enum_v<Enum>)
-        (AppContext & actx,
-         SText const& directive,
-         TokenStream& currentStream,
-         ArgsDArray&  outArgs,
-         ParamMap&    outParams,
-         bool (*fromSidFunc)(sid_t, Enum&),
-         Enum& out) {
+            requires(std::is_enum_v<Enum>)(AppContext & actx,
+                                           SText const& directive,
+                                           TokenStream& currentStream,
+                                           ArgsDArray&  outArgs,
+                                           ParamMap&    outParams,
+                                           bool (*fromSidFunc)(sid_t, Enum&),
+                                           Enum& out)
+        {
             currentStream.advance(actx);
+            //check number of Args and get enum
             if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(outArgs[0]), out))
             {
                 actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
                 std::abort();
             }
+            //check number of parameters and store them in outParams
             if (parseParams(actx, currentStream, outParams) == 0)
             {
                 actx.error("Expected at least a parameter for directive {}", {directive.str});
                 std::abort();
             }
         };
+
 
         auto typeHeaderDirectiveParsing =
             [this]<typename Spec, typename EnumType>
@@ -2282,9 +2286,11 @@ namespace dmt {
               void (*callback)(SceneParser& self, Spec const& spec) = nullptr)
         {
             Spec spec;
+            //check if you are out from world block
             if (!transitionToHeaderIfFirstHeaderDirective(actx, options, eDirective))
                 std::abort();
             currentStream.advance(actx);
+            //Check Arg
             if (uint32_t num = parseArgs(actx, currentStream, outArgs); num != 1)
             {
                 actx.error("Unexpected number of arguments for {} directive. Should be 1, got {}", {directive.str, num});
@@ -2296,7 +2302,9 @@ namespace dmt {
                            {directive.str, outArgs[0]});
                 std::abort();
             }
+            //check and get
             parseParams(actx, currentStream, outParams);
+
             if (setParams(spec, outParams, options) != 0)
             {
                 actx.error("Encountered error while parsing {} parameters", {directive.str});
@@ -2307,13 +2315,15 @@ namespace dmt {
                 callback(*this, spec);
         };
 
+        //usefull for the transforms fix leng of params
         auto parseArgumentFloats = [this]<size_t size> // TODO rework without template
-            requires(size == 3 || size == 16 || size == 9 || size == 4 || size == 2)
-        (AppContext & actx,
-         SText const&             directive,
-         TokenStream&             currentStream,
-         ArgsDArray&              outArgs,
-         std::array<float, size>& outArray) {
+            requires(size == 3 || size == 16 || size == 9 || size == 4 ||
+                     size == 2)(AppContext & actx,
+                                SText const&             directive,
+                                TokenStream&             currentStream,
+                                ArgsDArray&              outArgs,
+                                std::array<float, size>& outArray)
+        {
             currentStream.advance(actx);
             if (parseArgs(actx, currentStream, outArgs) != size)
             {
@@ -2327,6 +2337,7 @@ namespace dmt {
             }
         };
 
+        //directives that has only string arg
         auto parseArgumentNames =
             [this](AppContext&  actx,
                    SText const& directive,
@@ -2337,8 +2348,8 @@ namespace dmt {
             currentStream.advance(actx);
             if (parseArgs(actx, currentStream, outArgs) != num ||
                 std::reduce(outArgs.begin(), outArgs.begin() + num, false, [](bool curr, std::string const& elem) {
-                return curr || !startsWithEndsWith(elem, '"', '"');
-            }))
+                    return curr || !startsWithEndsWith(elem, '"', '"');
+                }))
             {
                 actx.error("Directive {} expects {} quoted string argument(s)", {directive.str, num});
                 std::abort();
@@ -2347,26 +2358,34 @@ namespace dmt {
                 pSids[i] = hashCRC64(dequoteString(outArgs[i]));
         };
 
+        //reads all file
         while (!m_fileStack.empty())
         {
             TokenStream& currentStream = topFile();
             currentStream.advance(actx);
+
+            //read file
             for (std::string token = currentStream.peek(); !token.empty(); token = currentStream.peek())
             { // token advancement handled by either parseArgs, parseParams, or by a switch case
                 ArgsDArray args;
                 ParamMap   params;
                 sid_t      tokenSid = hashCRC64(token);
+
+                //comment statement
                 if (token.starts_with('#'))
                 {
                     currentStream.advance(actx);
                     continue;
                 }
+
+
                 if (!isDirective(tokenSid))
                 {
                     actx.error("Invalid directive {}", {token});
                     std::abort();
                 }
 
+                //check directives
                 switch (tokenSid)
                 { // TODO args parsing type with error handling
                     case dict::directive::Option.sid:
@@ -3140,6 +3159,21 @@ namespace dmt {
     void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) {}
 
     // Spec Functions -------------------------------------------------------------------------------------------------
+    LightSourceSpec::LightSourceSpec(ELightType type, bool  illum, float powerOrIlluminance, float scale):
+    scale(scale),
+    type(type),
+    illum(illum)
+    {
+        if()
+    }
+        // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
+    LightSourceSpec::LightSourceSpec(LightSourceSpec const&);
+    LightSourceSpec::LightSourceSpec(LightSourceSpec&&) noexcept;
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const&);
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&&) noexcept;
+    LightSourceSpec::~LightSourceSpec() noexcept;
+    
+    
     CameraSpec::CameraSpec(CameraSpec const& other) :
     shutteropen(other.shutteropen),
     shutterclose(other.shutterclose),

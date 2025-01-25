@@ -287,6 +287,7 @@ namespace dmt {
         handler.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {
             auto* data = std::bit_cast<LoggerData*>(_data);
             std::destroy_at(data);
+            _dealloc(data, sizeof(LoggerData), alignof(LoggerData));
         };
 
         return handler;

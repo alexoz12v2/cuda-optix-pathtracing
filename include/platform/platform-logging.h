@@ -185,9 +185,17 @@ namespace dmt {
         using difference_type = std::ptrdiff_t;
         using value_type      = CharRangeU8;
 
+
+        /**
+         * @note Uses `char` and not `char8_t` cause `char8_t` doesn't seem to interpret
+         * correctly hex sequences. "\xF0\x9F\x98\x8A" is printed correctly as smiling face emoji,
+         * while u8"\xF0\x9F\x98\x8A" is garbage
+         * @note apparently, `std::bit_cast` doesn't work with `consteval`. I don't want to rewrite
+         * everything using `char` instead of `char8_t`
+         */
         template <uint32_t N>
-        DMT_CPU_GPU consteval FormatString(char8_t const (&_arr)[N]) :
-        m_start(&_arr[0]),
+        DMT_CPU_GPU constexpr FormatString(char const (&_arr)[N]) :
+        m_start(std::bit_cast<decltype(m_start)>(&_arr[0])),
         m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
         {
             ++*this;
@@ -298,6 +306,7 @@ namespace dmt {
     /**
      * Log Level enum, to check whether we should print or not, and to determine the style of the output
      * @brief log levels for logger configuration
+     * @warning do not change the numbers. the implementation details depends on these exact numbers
      */
     enum class ELogLevel : uint8_t
     {
@@ -306,6 +315,11 @@ namespace dmt {
         WARNING = 2, /** <Warning log level> */
         ERR     = 3, /** <Error log level> */
         NONE    = 4, /** <Log disabled> */
+        eTrace  = TRACE,
+        eLog    = LOG,
+        eWarn   = WARNING,
+        eError  = ERR,
+        eCount  = NONE,
     };
 
     /**
@@ -351,11 +365,12 @@ namespace dmt {
 
     struct DMT_PLATFORM_API LogRecord
     {
-        char8_t const* data;
-        LogLocation    loc;
-        ELogLevel      level;
-        uint32_t       len;
-        uint32_t       numBytes;
+        char8_t const*       data;
+        LogLocation          phyLoc;
+        std::source_location srcLoc;
+        ELogLevel            level;
+        uint32_t             len;
+        uint32_t             numBytes;
     };
 
     // https://stackoverflow.com/questions/44337309/whats-the-most-efficient-way-to-calculate-the-warp-id-lane-id-in-a-1-d-grid
@@ -396,12 +411,13 @@ namespace dmt {
         uint32_t                    _argBufferSize,
         std::tuple<Ts...> const&    _params,
         LogLocation const&          _pysLoc,
-        std::source_location const& loc)
+        std::source_location const& _loc)
     {
         LogRecord record{};
-        record.level = _level;
-        record.loc   = _pysLoc;
-        record.data  = _buffer;
+        record.level  = _level;
+        record.phyLoc = _pysLoc;
+        record.srcLoc = _loc;
+        record.data   = _buffer;
 
         bool                 done            = false;
         uint32_t const       totalArgBufSize = _argBufferSize;

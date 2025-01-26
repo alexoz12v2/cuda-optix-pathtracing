@@ -96,27 +96,27 @@ namespace dmt {
 
         template <typename... Ts>
         DMT_CPU_GPU void trace(FormatString<>              _fmt,
-                             std::tuple<Ts...> const&    _params,
-                             LogLocation const&          _pysLoc = getPhysicalLocation(),
-                             std::source_location const& loc     = std::source_location::current())
+                               std::tuple<Ts...> const&    _params,
+                               LogLocation const&          _pysLoc = getPhysicalLocation(),
+                               std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::TRACE, _params, _pysLoc, loc);
         }
 
         template <typename... Ts>
         DMT_CPU_GPU void warn(FormatString<>              _fmt,
-                             std::tuple<Ts...> const&    _params,
-                             LogLocation const&          _pysLoc = getPhysicalLocation(),
-                             std::source_location const& loc     = std::source_location::current())
+                              std::tuple<Ts...> const&    _params,
+                              LogLocation const&          _pysLoc = getPhysicalLocation(),
+                              std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::WARNING, _params, _pysLoc, loc);
         }
 
         template <typename... Ts>
         DMT_CPU_GPU void error(FormatString<>              _fmt,
-                             std::tuple<Ts...> const&    _params,
-                             LogLocation const&          _pysLoc = getPhysicalLocation(),
-                             std::source_location const& loc     = std::source_location::current())
+                               std::tuple<Ts...> const&    _params,
+                               LogLocation const&          _pysLoc = getPhysicalLocation(),
+                               std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::ERR, _params, _pysLoc, loc);
         }

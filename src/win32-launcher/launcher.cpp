@@ -488,7 +488,8 @@ DWORD WINAPI stdoutPipeThread(void* params)
             // estimate message length by finding L'\0'
             DWORD const numCharsCurrent = static_cast<DWORD>(wcsnlen_s(buf, numBytes));
 
-            WriteFile(hStdOut, buf, numCharsCurrent << 1, nullptr, nullptr);
+            WriteConsoleW(hStdOut, buf, numCharsCurrent, nullptr, nullptr);
+            //WriteFile(hStdOut, buf, numCharsCurrent << 1, nullptr, nullptr);
             buf += numCharsCurrent + 1;
 
             // fetch next message
@@ -507,9 +508,11 @@ DWORD WINAPI stdoutPipeThread(void* params)
 #endif
 
 // Helper function to get child processes of a parent process
+// https://learn.microsoft.com/en-us/windows/win32/procthread/process-enumeration
 std::vector<DWORD> GetChildProcesses(DWORD parentPID)
 {
     std::vector<DWORD> childPIDs;
+    childPIDs.reserve(32);
 
     // Take a snapshot of all processes
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -625,6 +628,21 @@ static std::unique_ptr<wchar_t[]> copyEnvironmentBlock()
 
 int main()
 {
+    if (!SetConsoleCP(CP_UTF8))
+        ErrorExit(L"SetConsoleCP");
+    if (!SetConsoleOutputCP(CP_UTF8))
+        ErrorExit(L"SetConsoleOutputCP");
+//#define test_UNICODE_PRINT
+#if defined(test_UNICODE_PRINT)
+    // apparently, write file uses the current code point of the console (UTF-8), while write console uses the usual UTF-16 LE
+    // the code is already written to convert to UTF-16, so I don't care
+    wchar_t const emoji[2] = {0xD83D, 0xDE0A};
+    char8_t const utf8[4]  = {0xF0, 0x9F, 0x98, 0x8A};
+    WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), &emoji[0], 2, nullptr, nullptr);
+    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), &utf8[0], 4, nullptr, nullptr);
+#endif
+
+
     static constexpr uint32_t BUFSIZE = 4096;
     TCHAR                     moduleName[MAX_PATH];
     GetModuleFileName(nullptr, moduleName, MAX_PATH);

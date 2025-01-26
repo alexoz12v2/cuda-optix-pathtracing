@@ -164,10 +164,12 @@ static void testNewContext()
     // context is available here
     {
         Context ctx{impl};
-        ctx.warn(u8"fdsafdsaf {}", std::make_tuple(3.f));
-        ctx.error(u8"fdsafdsaf {}", std::make_tuple(3.f));
-        ctx.log(u8"fdsafdsaf {}", std::make_tuple(3.f));
-        ctx.trace(u8"fdsafdsaf {}", std::make_tuple(3.f));
+        // this is equivalent to "fdsafdaaf\xf0\x9f\x98\x8a {}", but NOT u8"fdsafdaaf\xf0\x9f\x98\x8a {}"
+        //static constexpr char8_t fmtstr[] = {u8'f', u8'd', u8's', u8'a', u8'f', u8'd', u8's', u8'a', u8'f', 0xF0, 0x9F, 0x98, 0x8A, u8'{', u8'}'};
+        ctx.warn("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
+        ctx.error("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
+        ctx.log("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
+        ctx.trace("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
         ctx.flush();
         while (true) // hang
         {

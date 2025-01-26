@@ -153,31 +153,25 @@ static void testDevicePrint()
     assert(err == ::cudaSuccess);
 }
 
-static void stdoutHandler(LogHandler& outLogger)
-{
-    outLogger.minimumLevel = ELogLevel::TRACE;
-    outLogger.data         = nullptr;
-    outLogger.hostFilter   = [](void* _data, LogRecord const& record) { return true; };
-    outLogger.hostCallback = [](void* _data, LogRecord const& record) {
-        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-        std::string                                            view{std::bit_cast<char*>(record.data), record.numBytes};
-        std::wstring                                           wstr = converter.from_bytes(view);
-        std::wcout << wstr << std::endl;
-    };
-}
-
 static void testNewContext()
 {
     ContextImpl* impl;
     cudaError_t  err = cudaMallocManaged(&impl, sizeof(ContextImpl));
     assert(err == ::cudaSuccess);
     std::construct_at(impl);
-    stdoutHandler(*impl->addHandler());
+    impl->addHandler([](LogHandler& _out) { createConsoleHandler(_out); });
 
     // context is available here
     {
         Context ctx{impl};
+        ctx.warn(u8"fdsafdsaf {}", std::make_tuple(3.f));
+        ctx.error(u8"fdsafdsaf {}", std::make_tuple(3.f));
         ctx.log(u8"fdsafdsaf {}", std::make_tuple(3.f));
+        ctx.trace(u8"fdsafdsaf {}", std::make_tuple(3.f));
+        ctx.flush();
+        while (true) // hang
+        {
+        }
     }
 
     std::destroy_at(impl);
@@ -187,26 +181,26 @@ static void testNewContext()
 
 int guardedMain()
 {
-    std::unique_ptr<char8_t[]> ptr    = std::make_unique<char8_t[]>(2048);
-    std::unique_ptr<char8_t[]> args   = std::make_unique<char8_t[]>(2048);
-    auto                       record = createRecord(u8"afdsf {} {}",
-                               ELogLevel::LOG,
-                               ptr.get(),
-                               2048,
-                               args.get(),
-                               2048,
-                               std::make_tuple(3u, 3.f),
-                               getPhysicalLocation(),
-                               std::source_location::current());
+    //std::unique_ptr<char8_t[]> ptr    = std::make_unique<char8_t[]>(2048);
+    //std::unique_ptr<char8_t[]> args   = std::make_unique<char8_t[]>(2048);
+    //auto                       record = createRecord(u8"afdsf {} {}",
+    //                           ELogLevel::LOG,
+    //                           ptr.get(),
+    //                           2048,
+    //                           args.get(),
+    //                           2048,
+    //                           std::make_tuple(3u, 3.f),
+    //                           getPhysicalLocation(),
+    //                           std::source_location::current());
 
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-    std::string                                            view{std::bit_cast<char*>(record.data), record.numBytes};
-    std::wstring                                           wstr = converter.from_bytes(view);
-    std::wcout << wstr << std::endl;
+    //std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    //std::string                                            view{std::bit_cast<char*>(record.data), record.numBytes};
+    //std::wstring                                           wstr = converter.from_bytes(view);
+    //std::wcout << wstr << std::endl;
 
     auto v = getEnv();
 
-    testDevicePrint();
+    //testDevicePrint();
     testNewContext();
     return 0;
 }

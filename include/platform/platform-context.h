@@ -6,6 +6,10 @@
 #include "platform/platform-logging.h"
 
 namespace dmt {
+    /**
+     * @warning `Context` and `ContextImpl` are *not* thread safe classes. Instead, the services provided by the context,
+     * namely, *logging*, *memory allocation and tracking*, *threadpool* have their services synchronized
+     */
     // total size should be exactly 4KB in all platforms
     // should be allocated with `cudaMallocManaged` to make CUDA Path work properly
     struct DMT_PLATFORM_API ContextImpl
@@ -14,7 +18,20 @@ namespace dmt {
         DMT_CPU ContextImpl();
         DMT_CPU ~ContextImpl();
 
-        DMT_CPU LogHandler* addHandler();
+        template <typename F>
+            requires std::is_invocable_v<F, LogHandler&>
+        inline DMT_CPU void addHandler(F&& f)
+        {
+            if (common.numHandlers >= maxHandlers)
+                return;
+            auto& ref = common.handlers[common.numHandlers++] = {};
+            f(ref);
+        }
+
+        inline DMT_CPU_GPU bool handlerEnabled(uint32_t i) const
+        {
+            return common.handlers[i].minimumLevel < ELogLevel::NONE;
+        }
 
         inline DMT_CPU_GPU bool anyHandlerEnabledFor(ELogLevel _level) const
         {
@@ -78,6 +95,33 @@ namespace dmt {
         }
 
         template <typename... Ts>
+        DMT_CPU_GPU void trace(FormatString<>              _fmt,
+                             std::tuple<Ts...> const&    _params,
+                             LogLocation const&          _pysLoc = getPhysicalLocation(),
+                             std::source_location const& loc     = std::source_location::current())
+        {
+            write(_fmt, ELogLevel::TRACE, _params, _pysLoc, loc);
+        }
+
+        template <typename... Ts>
+        DMT_CPU_GPU void warn(FormatString<>              _fmt,
+                             std::tuple<Ts...> const&    _params,
+                             LogLocation const&          _pysLoc = getPhysicalLocation(),
+                             std::source_location const& loc     = std::source_location::current())
+        {
+            write(_fmt, ELogLevel::WARNING, _params, _pysLoc, loc);
+        }
+
+        template <typename... Ts>
+        DMT_CPU_GPU void error(FormatString<>              _fmt,
+                             std::tuple<Ts...> const&    _params,
+                             LogLocation const&          _pysLoc = getPhysicalLocation(),
+                             std::source_location const& loc     = std::source_location::current())
+        {
+            write(_fmt, ELogLevel::ERR, _params, _pysLoc, loc);
+        }
+
+        template <typename... Ts>
         DMT_CPU_GPU void write(FormatString<>              _fmt,
                                ELogLevel                   _level,
                                std::tuple<Ts...> const&    _params,
@@ -108,6 +152,7 @@ namespace dmt {
             }
 #endif
         }
+        void flush();
 
     private:
         ContextImpl* m_pimpl;

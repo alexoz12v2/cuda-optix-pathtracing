@@ -1,20 +1,21 @@
 #include "platform-context.h"
 
-// TODO rename this platfom-context.win32.cpp
-#if !defined(DMT_OS_WINDOWS)
-#error "What"
-#endif
-
 namespace dmt {
     ContextImpl::ContextImpl() {}
 
-    ContextImpl::~ContextImpl() {}
-
-    LogHandler* ContextImpl::addHandler()
+    ContextImpl::~ContextImpl()
     {
-        if (common.numHandlers >= maxHandlers)
-            return nullptr;
-        common.handlers[common.numHandlers++] = {};
-        return &common.handlers[common.numHandlers - 1];
+        for (uint32_t i = 0; i < common.numHandlers; ++i)
+            common.handlers[i].hostCleanup(common.handlers[i].hostDeallocate, common.handlers[i].data);
     }
+
+    void Context::flush()
+    {
+        for (uint32_t i = 0; i < m_pimpl->common.numHandlers; ++i)
+        {
+            if (m_pimpl->handlerEnabled(i))
+                m_pimpl->common.handlers[i].hostFlush(m_pimpl->common.handlers[i].data);
+        }
+    }
+
 } // namespace dmt

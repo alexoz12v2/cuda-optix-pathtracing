@@ -1,5 +1,10 @@
 #include "platform-logging.h"
 
+#include "platform-os-utils.h"
+
+// TODO remove
+#include <iostream>
+
 #include <windows.h> // should be included exactly once in every translation unit in which you need definitions
 
 namespace dmt {
@@ -185,18 +190,90 @@ namespace dmt {
 
     // LOGGING 2.0 ----------------------------------------------------------------------------------------------------
 
-    void uft16le_From_utf8(char8_t const* DMT_RESTRICT _u8str,
-                           uint32_t                    _u8NumBytes,
-                           wchar_t* DMT_RESTRICT       _mediaBuf,
-                           uint32_t                    _mediaMaxBytes,
-                           wchar_t* DMT_RESTRICT       _outBuf,
-                           uint32_t                    _maxBytes,
-                           uint32_t*                   _outBytesWritten);
+    void              uft16le_From_utf8(char8_t const* DMT_RESTRICT _u8str,
+                                        uint32_t                    _u8NumBytes,
+                                        wchar_t* DMT_RESTRICT       _mediaBuf,
+                                        uint32_t                    _mediaMaxBytes,
+                                        wchar_t* DMT_RESTRICT       _outBuf,
+                                        uint32_t                    _maxBytes,
+                                        uint32_t*                   _outBytesWritten);
+    static std::mutex s_consoleLock;
+
+    // https://en.cppreference.com/w/cpp/named_req/BasicLockable
+    class Win32Mutex
+    {
+    public:
+        Win32Mutex(wchar_t const* mutexName)
+        {
+            m_mutex = OpenMutexW(MUTEX_ALL_ACCESS, false, mutexName);
+            if (!m_mutex)
+                std::abort(); // TOOD better
+        }
+        Win32Mutex(Win32Mutex const&)                = delete;
+        Win32Mutex(Win32Mutex&&) noexcept            = delete;
+        Win32Mutex& operator=(Win32Mutex const&)     = delete;
+        Win32Mutex& operator=(Win32Mutex&&) noexcept = delete;
+        ~Win32Mutex() { CloseHandle(m_mutex); }
+
+        void lock()
+        {
+            DWORD const waitResult = WaitForSingleObject(m_mutex, INFINITE);
+            if (waitResult == WAIT_OBJECT_0)
+                return;
+            std::abort(); // TODO do something else
+        }
+
+        void unlock()
+        {
+            if (!ReleaseMutex(m_mutex))
+                std::abort(); // TODO better
+        }
+
+    private:
+        HANDLE m_mutex;
+    };
+
     struct LoggerData
     {
-        LoggerData() :
-        hStdOut(CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr))
+        static WORD constexpr colorMask = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY;
+        LoggerData()
         {
+            std::unique_ptr<wchar_t[]> name       = std::make_unique<wchar_t[]>(256);
+            uint32_t                   nameLength = GetEnvironmentVariableW(L"CHILD_CONOUT", name.get(), 256);
+            if (nameLength == 0)
+            {
+                if (GetLastError() != ERROR_NOT_FOUND)
+                    std::abort(); // TODO better
+                else
+                {
+                    hStdOut = CreateFileW(L"CONOUT$",
+                                          GENERIC_WRITE,
+                                          FILE_SHARE_WRITE,
+                                          nullptr,
+                                          OPEN_EXISTING,
+                                          FILE_FLAG_OVERLAPPED,
+                                          nullptr);
+                    if (hStdOut == INVALID_HANDLE_VALUE)
+                    { // TODO BETTER
+                        std::unique_ptr<char[]> buf = std::make_unique<char[]>(2048);
+                        uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
+                        std::cout << std::string_view(buf.get(), len) << std::endl;
+                        DebugBreak();
+                    }
+                }
+            }
+            else
+            {
+                hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (hStdOut == INVALID_HANDLE_VALUE)
+                { // TODO BETTER
+                    std::unique_ptr<char[]> buf = std::make_unique<char[]>(2048);
+                    uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
+                    std::cout << std::string_view(buf.get(), len) << std::endl;
+                    DebugBreak();
+                }
+            }
+
             // TODO Check result
             // write at the end ?
             //overlapped.Offset     = 0xFFFF'FFFF;
@@ -205,7 +282,42 @@ namespace dmt {
                                              true,     // manual reset
                                              true,     // start signaled
                                              nullptr); // unnamed event
-            // TODO if overlapped.hEvent is null
+
+            // if we are launched from a parent in /CONSOLE:SUBSYSTEM, then it should provide to us a mailbox
+            // to signal whenever an IO operation ended
+            nameLength = GetEnvironmentVariableW(L"CHILD_MAILBOX", name.get(), 256);
+            if (nameLength == 0)
+            {
+                if (GetLastError() != ERROR_NOT_FOUND)
+                    std::abort(); // TODO better
+                // leave as INVALID_HANDLE_VALUE hMailbox
+            }
+            else
+            {
+                hMailbox = CreateFileW(name.get(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (hMailbox == INVALID_HANDLE_VALUE)
+                { // TODO BETTER
+                    std::unique_ptr<char[]> buf = std::make_unique<char[]>(2048);
+                    uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
+                    std::cout << std::string_view(buf.get(), len) << std::endl;
+                    DebugBreak();
+                }
+            }
+
+            nameLength = GetEnvironmentVariableW(L"CHILD_MUTEX", name.get(), 256);
+            if (nameLength == 0)
+            {
+                if (GetLastError() != ERROR_NOT_FOUND)
+                    std::abort(); // TODO better
+                // leave as INVALID_HANDLE_VALUE hMailbox
+            }
+            else
+            {
+                pMutex = reinterpret_cast<Win32Mutex*>(HeapAlloc(GetProcessHeap(), 0, sizeof(Win32Mutex)));
+                if (!pMutex)
+                    std::abort(); // TODO better
+                std::construct_at(pMutex, name.get());
+            }
         }
         LoggerData(LoggerData const&)                = delete;
         LoggerData(LoggerData&&) noexcept            = delete;
@@ -213,28 +325,79 @@ namespace dmt {
         LoggerData& operator=(LoggerData&&) noexcept = delete;
         ~LoggerData() noexcept
         {
-            // TODO if failed crash
+            std::lock_guard lk{s_consoleLock};
             WaitForSingleObject(overlapped.hEvent, INFINITE);
             CloseHandle(overlapped.hEvent);
-            CloseHandle(hStdOut);
+            std::unique_ptr<wchar_t[]> name       = std::make_unique<wchar_t[]>(256);
+            uint32_t                   nameLength = GetEnvironmentVariableW(L"CHILD_CONOUT", name.get(), 256);
+            if (nameLength == 0)
+            {
+                CloseHandle(hStdOut);
+            }
+            nameLength = GetEnvironmentVariableW(L"CHILD_MUTEX", name.get(), 256);
+            if (nameLength != 0)
+            {
+                std::destroy_at(pMutex);
+                HeapFree(GetProcessHeap(), 0, pMutex);
+            }
         }
 
-        void writeAsync(char8_t const* _str, DWORD _numBytes)
-        { // if wait failed crash or abandon logging
+        void waitEmptyMailbox()
+        {
+            DWORD numBytesNextMsg = 0, numMessages = 0;
+            if (!GetMailslotInfo(hMailbox, nullptr, &numBytesNextMsg, &numMessages, nullptr))
+                std::abort(); // TODO better
+            while (numBytesNextMsg != MAILSLOT_NO_MESSAGE)
+            {
+                if (!GetMailslotInfo(hMailbox, nullptr, &numBytesNextMsg, &numMessages, nullptr))
+                    std::abort(); // TODO better
+            }
+        }
+
+        void waitReadyForNext()
+        {
             DWORD query = WaitForSingleObject(overlapped.hEvent, 0);
             if (query == WAIT_TIMEOUT)
                 query = WaitForSingleObject(overlapped.hEvent, INFINITE);
-            // convert UTF-8 to UTF-16 LE
-            uint32_t bytes = 0;
-            uft16le_From_utf8(_str, _numBytes, buffer, 2048, normalizedBuffer, 2048, &bytes);
-            // TODO if fails, crash?
-            WriteFileEx(hStdOut, normalizedBuffer, bytes, &overlapped, nullptr);
+
+            // wait for the mailbox to be empty
+            waitEmptyMailbox();
         }
 
-        OVERLAPPED overlapped{};
-        HANDLE     hStdOut = INVALID_HANDLE_VALUE;
-        wchar_t    buffer[2048]{};
-        wchar_t    normalizedBuffer[2048]{};
+        void writeAsync(LogRecord const& record)
+        { // if wait failed crash or abandon logging
+            std::lock_guard lk{s_consoleLock};
+            std::lock_guard wlk{*pMutex};
+            waitReadyForNext();
+
+            // convert UTF-8 to UTF-16 LE
+            uint32_t bytes = 0;
+
+            // set console output color depending on the log level
+            // The call to `SetTextAttribute` is done by the parent `/SUBSYSTEM:CONSOLE` process
+            assert(record.level != ELogLevel::NONE);
+            uint8_t const rawLevel = static_cast<std::underlying_type_t<ELogLevel>>(record.level);
+            if (!WriteFile(hMailbox, &rawLevel, sizeof(uint8_t), nullptr, nullptr))
+                std::abort();
+
+            // write prefix to buffer: [<timestamp> | <phyloc> | <srcloc>] <LogLevel> <> <record>
+            uft16le_From_utf8(record.data, record.numBytes, buffer, 2048, normalizedBuffer, 2046, &bytes);
+            uint32_t const lastChar    = bytes < maxBytes ? (bytes / 2) : maxChars - 1;
+            normalizedBuffer[lastChar] = L'\0';
+            bytes += 2;
+            // todo `StringCbCatW`
+            if (!WriteFile(hStdOut, normalizedBuffer, bytes, nullptr, &overlapped))
+                ; // what now
+        }
+
+        static constexpr uint32_t maxChars = 2048;
+        static constexpr uint32_t maxBytes = maxChars >> 1;
+        OVERLAPPED                overlapped{};
+        HANDLE                    hStdOut  = INVALID_HANDLE_VALUE;
+        HANDLE                    hMailbox = INVALID_HANDLE_VALUE;
+        Win32Mutex*               pMutex   = nullptr;
+        wchar_t                   buffer[2048]{};
+        wchar_t                   normalizedBuffer[maxChars]{};
     };
 
     // TODO move to OS specific utils
@@ -266,30 +429,31 @@ namespace dmt {
             *_outBytesWritten *= actualLength;
     }
 
-    LogHandler createConsoleHandler(LogHandlerAllocate _alloc, LogHandlerDeallocate _dealloc)
+    bool createConsoleHandler(LogHandler& _out, LogHandlerAllocate _alloc, LogHandlerDeallocate _dealloc)
     {
-        LogHandler handler{};
-        handler.hostAllocate   = _alloc;
-        handler.hostDeallocate = _dealloc;
-        handler.data           = handler.hostAllocate(sizeof(LoggerData), alignof(LoggerData));
-        if (!handler.data)
-            ;
-        // TOOD
-        std::construct_at(std::bit_cast<LoggerData*>(handler.data));
+        _out.hostAllocate   = _alloc;
+        _out.hostDeallocate = _dealloc;
+        _out.data           = _out.hostAllocate(sizeof(LoggerData), alignof(LoggerData));
+        if (!_out.data)
+            return false;
+        std::construct_at(std::bit_cast<LoggerData*>(_out.data));
 
-        handler.hostFlush    = []() {};
-        handler.hostFilter   = [](void* _data, LogRecord const& record) -> bool { return true; };
-        handler.hostCallback = [](void* _data, LogRecord const& record) {
+        _out.hostFlush = [](void* _data) {
             auto* data = std::bit_cast<LoggerData*>(_data);
-            data->writeAsync(record.data, record.numBytes);
+            data->waitReadyForNext();
+        };
+        _out.hostFilter   = [](void* _data, LogRecord const& record) -> bool { return true; };
+        _out.hostCallback = [](void* _data, LogRecord const& record) {
+            auto* data = std::bit_cast<LoggerData*>(_data);
+            data->writeAsync(record);
         };
 
-        handler.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {
+        _out.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {
             auto* data = std::bit_cast<LoggerData*>(_data);
             std::destroy_at(data);
             _dealloc(data, sizeof(LoggerData), alignof(LoggerData));
         };
 
-        return handler;
+        return true;
     }
 } // namespace dmt

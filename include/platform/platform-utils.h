@@ -32,6 +32,10 @@ namespace dmt {
     DMT_PLATFORM_API bool     freeVirtualAddressSpace(void* address, size_t size);
     DMT_PLATFORM_API void     decommitPage(void* pageAddress, size_t pageSize);
 
+    // use C runtime standard allocation functions
+    DMT_PLATFORM_API void* allocate(size_t _bytes, size_t _align);
+    DMT_PLATFORM_API void  deallocate(void* ptr, [[maybe_unused]] size_t _bytes, [[maybe_unused]] size_t _align);
+
     // for debugging purposes only, so we don't care about memory
     DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
 

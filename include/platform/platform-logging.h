@@ -185,9 +185,8 @@ namespace dmt {
         using difference_type = std::ptrdiff_t;
         using value_type      = CharRangeU8;
 
-        // TODO consteval
         template <uint32_t N>
-        DMT_CPU_GPU constexpr FormatString(char8_t const (&_arr)[N]) :
+        DMT_CPU_GPU consteval FormatString(char8_t const (&_arr)[N]) :
         m_start(&_arr[0]),
         m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
         {
@@ -344,7 +343,7 @@ namespace dmt {
             Device dev;
             Host   host;
         };
-        static constexpr int32_t hostNum = std::numeric_limits<int32_t>::max();
+        static constexpr int32_t hostNum = -1;
 
         U       loc;
         int32_t where; // if dirrerent than how then this is device id
@@ -388,7 +387,7 @@ namespace dmt {
 
     template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
-    inline constexpr DMT_CPU_GPU LogRecord createRecord(
+    inline constexpr /* DMT_CPU_GPU*/ LogRecord createRecord(
         FormatString<>              fmt,
         ELogLevel                   _level,
         char8_t*                    _buffer,
@@ -406,6 +405,7 @@ namespace dmt {
 
         bool                 done            = false;
         uint32_t const       totalArgBufSize = _argBufferSize;
+        uint32_t const       totalBufSize    = _bufferSize;
         char8_t const* const initialArgBuf   = _argBuffer;
 
         // Process tuple of arguments using a fold expression
@@ -458,6 +458,11 @@ namespace dmt {
             else
                 ++fmt;
         }
+        // final newline
+        int32_t off = record.numBytes >= totalBufSize ? -1 : 0;
+        ++record.len;
+        ++record.numBytes;
+        _buffer[off] = u8'\n';
 
         return record;
     }
@@ -467,7 +472,7 @@ namespace dmt {
     struct DMT_PLATFORM_API LogHandler
     {
         void* data;
-        void (*hostFlush)();
+        void (*hostFlush)(void* _data);
         bool (*hostFilter)(void* _data, LogRecord const& record);
         void (*hostCallback)(void* _data, LogRecord const& record);
         void (*hostCleanup)(LogHandlerDeallocate _dealloc, void* _data);
@@ -479,7 +484,9 @@ namespace dmt {
         ELogLevel minimumLevel;
     };
 
-    DMT_PLATFORM_API LogHandler createConsoleHandler(LogHandlerAllocate _alloc, LogHandlerDeallocate _dealloc);
+    DMT_PLATFORM_API bool createConsoleHandler(LogHandler&          _out,
+                                               LogHandlerAllocate   _alloc   = ::dmt::allocate,
+                                               LogHandlerDeallocate _dealloc = ::dmt::deallocate);
 
     // ----------------------------------------------------------------------------------------------------------------
 

@@ -112,6 +112,24 @@ namespace dmt {
 #endif
     }
 
+    void* allocate(size_t _bytes, size_t _align)
+    {
+#if defined(DMT_OS_WINDOWS)
+        return _aligned_malloc(_bytes, _align);
+#elif defined(DMT_OS_LINUX)
+        return std::aligned_alloc(_bytes, _align);
+#endif
+    }
+
+    void deallocate(void* ptr, [[maybe_unused]] size_t _bytes, [[maybe_unused]] size_t _align)
+    {
+#if defined(DMT_OS_WINDOWS)
+        _aligned_free(ptr);
+#elif defined(DMT_OS_LINUX)
+        std::free(ptr);
+#endif
+    }
+
     std::vector<std::pair<std::u8string, std::u8string>> getEnv()
     {
         std::vector<std::pair<std::u8string, std::u8string>> vec;

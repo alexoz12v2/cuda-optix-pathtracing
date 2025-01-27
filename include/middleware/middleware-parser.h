@@ -679,6 +679,15 @@ namespace dmt {
 
     struct DMT_MIDDLEWARE_API MaterialSpec
     {
+        DMT_MIDDLEWARE_API MaterialSpec(EMaterialType type);
+        //stores filenames as strings, we cannot use memcpy for copy semantics
+        DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec const&);
+        DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec&&) noexcept;
+        DMT_MIDDLEWARE_API MaterialSpec& operator=(MaterialSpec const&);
+        DMT_MIDDLEWARE_API MaterialSpec& operator=(MaterialSpec&&) noexcept;
+        DMT_MIDDLEWARE_API ~MaterialSpec() noexcept;
+
+        DMT_MIDDLEWARE_API void cleanup() noexcept;
         struct CoatedDiffuseMaterial
         {
             float         displacement;

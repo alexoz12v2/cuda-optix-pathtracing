@@ -815,13 +815,17 @@ namespace dmt {
             bool          remparoughness = true;
         };
 
+        struct InterfaceMaterial
+        {
+        };
+
         union Params
         {
             Params() {}
             ~Params() {}
 
             CoatedDiffuseMaterial       coateddiffuse;
-            CoatedConductorMaterial     Coatedconductor;
+            CoatedConductorMaterial     coatedconductor;
             ConductorMaterial           conductor;
             DielectricMaterial          dielectric;
             DiffuseMaterial             diffuse;
@@ -831,6 +835,7 @@ namespace dmt {
             MixMaterial                 mix;
             SubsurfaceMaterial          subsurface;
             ThinDielectricMaterial      thindielectric;
+            InterfaceMaterial interface;
         };
 
         Params params;

@@ -400,6 +400,8 @@ namespace dmt {
     template <typename T>
     struct UTF8Formatter;
 
+    /** Shortcut to write `std::make_tuple` */
+
     template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
     inline constexpr /* DMT_CPU_GPU*/ LogRecord createRecord(

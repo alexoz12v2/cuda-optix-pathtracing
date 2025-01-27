@@ -24,20 +24,7 @@
 
 #include <cstdint>
 
-DMT_MODULE_EXPORT namespace dmt {
-    // https://rigtorp.se/spinlock/
-    // should be usable with lock_guard
-    // TODO move implememntation to cpp
-    // implements the NamedRequireemnt BasicLockable https://en.cppreference.com/w/cpp/named_req/BasicLockable
-    struct SpinLock
-    {
-        std::atomic<bool> lock_ = {0};
-
-        DMT_PLATFORM_API void lock() noexcept;
-        DMT_PLATFORM_API bool try_lock() noexcept;
-        DMT_PLATFORM_API void unlock() noexcept;
-    };
-
+namespace dmt {
     using JobSignature = void (*)(uintptr_t data);
 
     /**

@@ -155,15 +155,15 @@ static void testDevicePrint()
 
 static void testNewContext()
 {
-    ContextImpl* impl;
-    cudaError_t  err = cudaMallocManaged(&impl, sizeof(ContextImpl));
-    assert(err == ::cudaSuccess);
-    std::construct_at(impl);
-    impl->addHandler([](LogHandler& _out) { createConsoleHandler(_out); });
+    auto res = ctx::addContext();
+    if (res != ctx::ECtxReturn::eCreatedOnManaged)
+        std::abort();
+    ctx::cs->setActive(0);
 
     // context is available here
     {
-        Context ctx{impl};
+        Context ctx;
+        ctx.impl()->addHandler([](LogHandler& _out) { createConsoleHandler(_out); });
         // this is equivalent to "fdsafdaaf\xf0\x9f\x98\x8a {}", but NOT u8"fdsafdaaf\xf0\x9f\x98\x8a {}"
         //static constexpr char8_t fmtstr[] = {u8'f', u8'd', u8's', u8'a', u8'f', u8'd', u8's', u8'a', u8'f', 0xF0, 0x9F, 0x98, 0x8A, u8'{', u8'}'};
         ctx.warn("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
@@ -175,10 +175,6 @@ static void testNewContext()
         {
         }
     }
-
-    std::destroy_at(impl);
-    err = cudaFree(impl);
-    assert(err == ::cudaSuccess);
 }
 
 int guardedMain()

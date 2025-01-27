@@ -12,12 +12,15 @@ namespace dmt {
      */
     // total size should be exactly 4KB in all platforms
     // should be allocated with `cudaMallocManaged` to make CUDA Path work properly
-    struct DMT_PLATFORM_API ContextImpl
+    struct ContextImpl
     {
     public:
         DMT_CPU ContextImpl();
         DMT_CPU ~ContextImpl();
 
+        /**
+         * @warning Thread unsafe, should be done when the process has a single thread owning the ContextImpl
+         */
         template <typename F>
             requires std::is_invocable_v<F, LogHandler&>
         inline DMT_CPU void addHandler(F&& f)
@@ -58,7 +61,7 @@ namespace dmt {
         static constexpr uint32_t maxHandlers          = 4;
         static constexpr uint32_t logBufferNumBytes    = 2048;
         static constexpr uint32_t argLogBufferNumBytes = 1024;
-        struct DMT_PLATFORM_API Common
+        struct Common
         {
             // 8 byte aligned
             LogHandler handlers[maxHandlers]{};
@@ -78,10 +81,80 @@ namespace dmt {
     };
     static_assert(std::is_standard_layout_v<ContextImpl>);
 
-    class DMT_PLATFORM_API Context
+    // global context management functions
+    namespace ctx {
+        enum class ECtxReturn
+        {
+            eCreatedOnManaged,
+            eCreatedOnHost,
+            eMaxReached,
+            eMemoryError,
+            eGenericError
+        };
+        inline constexpr uint32_t maxNumCtxs = 4;
+        class Contexts
+        {
+        public:
+            Contexts()                               = default;
+            Contexts(Contexts const&)                = delete;
+            Contexts(Contexts&&) noexcept            = delete;
+            Contexts& operator=(Contexts const&)     = delete;
+            Contexts& operator=(Contexts&&) noexcept = delete;
+            DMT_CPU ~Contexts();
+
+        public:
+            DMT_CPU ECtxReturn addContext(int32_t* outIdx = nullptr);
+
+            DMT_CPU bool setActive(int32_t index);
+
+            DMT_CPU_GPU ContextImpl* acquireActive();
+
+            DMT_CPU_GPU void releaseActive(ContextImpl** pCtx);
+
+        private:
+            DMT_CPU void waitActiveUnused();
+
+        private:
+            struct Wrapper
+            {
+                ContextImpl* pctx      = nullptr;
+                int32_t      readCount = 0;
+                bool         gpu       = false;
+            };
+
+        private:
+            Wrapper         ctxs[maxNumCtxs];
+            int32_t         count       = 0;
+            int32_t         activeIndex = -1; // managed with atomic_ref
+            CudaSharedMutex lock;
+        };
+        extern DMT_MANAGED Contexts* cs;
+
+        /**
+         * @warning thread unsafe
+         * @warning memory leak is on purpose
+         */
+        DMT_CPU ECtxReturn addContext(bool managed = false, int32_t* outIdx = nullptr);
+    } // namespace ctx
+
+    /**
+     * It's meant to be reacquired, so no copy control
+     * @warning all `DMT_CPU_GPU` methods must be implemented as `inline` here cause this is not a CUDA translation unit
+     */
+    class Context
     {
     public:
-        DMT_CPU_GPU Context(ContextImpl* ptr) : m_pimpl(ptr) {}
+        DMT_CPU_GPU          Context() : m_pimpl(ctx::cs->acquireActive()) {}
+        DMT_CPU_GPU          Context(Context const&)       = delete;
+        DMT_CPU_GPU          Context(Context&&) noexcept   = delete;
+        DMT_CPU_GPU Context& operator=(Context const&)     = delete;
+        DMT_CPU_GPU Context& operator=(Context&&) noexcept = delete;
+        DMT_CPU_GPU ~Context()
+        { //
+            ctx::cs->releaseActive(&m_pimpl);
+        }
+
+        inline ContextImpl* impl() { return m_pimpl; }
 
     public:
         // Logging ----------------------------------------------------------------------------------------------------

@@ -403,84 +403,62 @@ namespace dmt {
             std::unique_lock wlk{*pMutex};
             waitReadyForNext(wlk);
 
-            // convert UTF-8 to UTF-16 LE
-            uint32_t bytes = 0;
-
-            // set console output color depending on the log level
-            // The call to `SetTextAttribute` is done by the parent `/SUBSYSTEM:CONSOLE` process
+            // Set log level for console output
             assert(record.level != ELogLevel::NONE);
             uint8_t const rawLevel = static_cast<std::underlying_type_t<ELogLevel>>(record.level);
             if (!WriteFile(hMailbox, &rawLevel, sizeof(uint8_t), nullptr, nullptr))
                 std::abort();
 
-            // write prefix to buffer: [<timestamp> | <phyloc> | <srcloc>] <LogLevel> <> <record>
-            uint32_t totalBytes = 0;
             wchar_t* buf        = normalizedBuffer;
-            buf[0]              = L'[';
+            uint32_t totalBytes = 0;
+
+            // Helper to add content to the buffer
+            auto appendToBuffer = [&](auto&& appendFunc, wchar_t* buf, uint32_t& totalBytes) {
+                uint32_t bytesAdded = appendFunc(buf, maxBytes - totalBytes);
+                buf += bytesAdded;
+                totalBytes += bytesAdded << 1;
+                assert(maxBytes - totalBytes <= maxBytes);
+                return buf;
+            };
+
+            // Add components to the buffer
+            buf[0] = L'[';
+            buf[1] = L'\0';
             totalBytes += 2;
             ++buf;
-            uint32_t const timestampNumChars = appendLocalTime(buf, maxBytes - totalBytes);
-            buf += timestampNumChars;
-            totalBytes += timestampNumChars << 1;
-            assert(maxBytes - totalBytes <= maxBytes);
 
-            uint32_t sepChars = printSeparator(buf, maxBytes - totalBytes);
-            buf += sepChars;
-            totalBytes += sepChars << 1;
-            assert(maxBytes - totalBytes <= maxBytes);
-
-            uint32_t const phyLocNumChars = appendPhyLoc(buf, maxBytes - totalBytes, record.phyLoc);
-            buf += phyLocNumChars;
-            totalBytes += phyLocNumChars << 1;
-            assert(maxBytes - totalBytes <= maxBytes);
-
-            sepChars = printSeparator(buf, maxBytes - totalBytes);
-            buf += sepChars;
-            totalBytes += sepChars << 1;
-            assert(maxBytes - totalBytes <= maxBytes);
-
-            uint32_t const srcLocNumChars = appendSrcLoc(buf,
-                                                         maxBytes - totalBytes,
-                                                         srcLocMem.midBuf,
-                                                         srcLocMem.numBytes,
-                                                         srcLocMem.wMidBuf,
-                                                         srcLocMem.wNumBytes,
-                                                         srcLocMem.wNormBuf,
-                                                         srcLocMem.wNumBytes,
-                                                         record.srcLoc);
-            buf += srcLocNumChars;
-            totalBytes += srcLocNumChars << 1;
-            assert(maxBytes - totalBytes - 1 <= maxBytes);
+            // clang-format off
+            buf = appendToBuffer([&](wchar_t* buf, uint32_t maxBytes) { return appendLocalTime(buf, maxBytes); }, buf, totalBytes);
+            buf = appendToBuffer([&](wchar_t* buf, uint32_t maxBytes) { return printSeparator(buf, maxBytes); }, buf, totalBytes);
+            buf = appendToBuffer([&](wchar_t* buf, uint32_t maxBytes) { return appendPhyLoc(buf, maxBytes, record.phyLoc); }, buf, totalBytes);
+            buf = appendToBuffer([&](wchar_t* buf, uint32_t maxBytes) { return printSeparator(buf, maxBytes); }, buf, totalBytes);
+            buf = appendToBuffer([&](wchar_t* buf, uint32_t maxBytes) { return appendSrcLoc(buf, maxBytes, srcLocMem.midBuf, srcLocMem.numBytes, srcLocMem.wMidBuf, srcLocMem.wNumBytes, srcLocMem.wNormBuf, srcLocMem.wNumBytes, record.srcLoc); }, buf, totalBytes);
 
             buf[0] = L']';
             buf[1] = L' ';
             totalBytes += 4;
             buf += 2;
-            assert(maxBytes - totalBytes - 5 <= maxBytes);
 
-            uint32_t const five = appendLogLevelString(buf, maxBytes - totalBytes, record.level);
-            buf += five;
-            totalBytes += five << 1;
-            assert(maxBytes - totalBytes - 3 <= maxBytes);
+            buf = appendToBuffer([&](wchar_t* buf, uint32_t maxBytes) { return appendLogLevelString(buf, maxBytes, record.level); }, buf, totalBytes);
+            // clang-format on
 
             buf[0] = L' ';
             buf[1] = L'-';
             buf[2] = L' ';
             totalBytes += 6;
             buf += 3;
-            assert(maxBytes - totalBytes <= maxBytes);
 
-            // convert UTF-8 string into UTF-16 LE into a middleman buffer, then transform it into C Normalized Form
+            // Convert and append log record data
+            uint32_t bytes = 0;
             utf16le_From_utf8(record.data, record.numBytes, buffer, maxArgChars, buf, maxChars - (totalBytes >> 1), &bytes);
             buf += bytes >> 1;
             totalBytes += bytes;
             buf[0] = L'\0';
             ++buf;
             totalBytes += 2;
-            assert(maxBytes - totalBytes <= maxBytes);
 
             if (!WriteFile(hStdOut, normalizedBuffer, totalBytes, nullptr, &overlapped))
-                ; // what now
+                ; // Handle error
         }
 
         static constexpr uint32_t maxChars    = 2048;

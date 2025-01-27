@@ -7,7 +7,6 @@ string(CONCAT platform_private_sources
     "platform-threadPool.cpp;"
     "platform-memory.cpp;"
     "platform-os-utils.cpp;"
-    "platform-context.cpp"
 )
 string(CONCAT platform_win32_private_sources
   "platform-memory.win32.cpp;"
@@ -67,8 +66,9 @@ target_sources(dmt-platform-cuda
       FILES ${CMAKE_SOURCE_DIR}/include/platform/platform-cuda-utils.h 
             ${CMAKE_SOURCE_DIR}/include/platform/platform-cuda-utils.cuh
             ${CMAKE_SOURCE_DIR}/include/platform/cudaTest.h
+			${CMAKE_SOURCE_DIR}/include/platform/platform-context.h
   PRIVATE
-    platform-cuda-utils.cu cudaTest.cu
+    platform-cuda-utils.cu cudaTest.cu platform-context.cu
 )
 target_link_libraries(dmt-platform-cuda 
   PUBLIC 

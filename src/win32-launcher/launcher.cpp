@@ -1,12 +1,12 @@
-#include <windows.h>
-
 #include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include <windows.h>
 #include <strsafe.h>
 #include <tlhelp32.h>
+#include <shellapi.h>
 
 #include <atomic>
 #include <cassert>
@@ -542,20 +542,23 @@ std::vector<DWORD> GetChildProcesses(DWORD parentPID)
 // Function to terminate all child processes
 void TerminateChildProcesses(DWORD parentPID)
 {
-    std::vector<DWORD> childPIDs = GetChildProcesses(parentPID);
+    std::vector<DWORD>         childPIDs = GetChildProcesses(parentPID);
+    std::unique_ptr<wchar_t[]> buffer    = std::make_unique<wchar_t[]>(256);
 
     for (DWORD pid : childPIDs)
     {
         HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
         if (hProcess != NULL)
         {
-            std::wcout << L"Terminating child process with PID: " << pid << L"\n";
+            int32_t const cc = _snwprintf(buffer.get(), 256, L"Terminating child process with PID: %5X\n", pid);
+            WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer.get(), cc, nullptr, nullptr);
             TerminateProcess(hProcess, 1); // Terminate the child process
             CloseHandle(hProcess);
         }
         else
         {
-            std::wcerr << L"Failed to open process with PID: " << pid << L"\n";
+            int32_t const cc = _snwprintf(buffer.get(), 256, L"Failed to open process with PID: %5X", pid);
+            WriteConsoleW(GetStdHandle(STD_ERROR_HANDLE), buffer.get(), cc, nullptr, nullptr);
         }
     }
 }
@@ -663,7 +666,13 @@ int main()
 
     // Prepare command line
     std::wstring commandLine = L"\"" + modulePath + L"\" ";
-    commandLine += GetCommandLine(); // Append all arguments
+    int32_t      numArgs     = 0;
+    wchar_t**    args        = CommandLineToArgvW(GetCommandLineW(), &numArgs); // Append all arguments
+    for (int32_t i = 1; i < numArgs; ++i)
+    {
+        commandLine += L' ';
+        commandLine += args[i];
+    }
 
     PROCESS_INFORMATION processInfo = {0};
     SECURITY_ATTRIBUTES saAttr;
@@ -722,6 +731,7 @@ int main()
                         &startupInfo,
                         &processInfo))
         ErrorExit(L"ERROR: Failed to create process");
+    atexit([]() { TerminateChildProcesses(GetCurrentProcessId()); });
 
 #if defined(USE_NAMED_PIPES)
     j.data->pipes.connectPipes();

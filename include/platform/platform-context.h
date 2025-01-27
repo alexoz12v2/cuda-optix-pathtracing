@@ -103,7 +103,7 @@ namespace dmt {
             DMT_CPU ~Contexts();
 
         public:
-            DMT_CPU ECtxReturn addContext(int32_t* outIdx = nullptr);
+            DMT_CPU ECtxReturn addContext(bool managed = false, int32_t* outIdx = nullptr);
 
             DMT_CPU bool setActive(int32_t index);
 

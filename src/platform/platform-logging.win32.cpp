@@ -264,24 +264,10 @@ namespace dmt {
             uint32_t                   nameLength = GetEnvironmentVariableW(L"CHILD_CONOUT", name.get(), 256);
             if (nameLength == 0)
             {
-                if (GetLastError() != ERROR_NOT_FOUND)
+                if (auto err = GetLastError(); err != ERROR_ENVVAR_NOT_FOUND)
                     std::abort(); // TODO better
                 else
-                {
-                    hStdOut = CreateFileW(L"CONOUT$",
-                                          GENERIC_WRITE,
-                                          FILE_SHARE_WRITE,
-                                          nullptr,
-                                          OPEN_EXISTING,
-                                          FILE_FLAG_OVERLAPPED,
-                                          nullptr);
-                    if (hStdOut == INVALID_HANDLE_VALUE)
-                    { // TODO BETTER
-                        std::unique_ptr<char[]> buf = std::make_unique<char[]>(2048);
-                        uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
-                        DebugBreak();
-                    }
-                }
+                    return; // leave hStdOut to `INVALID_HANDLE_VALUE` to signal that console logging won't be performed
             }
             else
             {
@@ -292,28 +278,22 @@ namespace dmt {
                     uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
                     DebugBreak();
                 }
-            }
 
-            // TODO Check result
-            // write at the end ?
-            //overlapped.Offset     = 0xFFFF'FFFF;
-            //overlapped.OffsetHigh = 0xFFFF'FFFF;
-            overlapped.hEvent = CreateEventW(nullptr,  // default security attributes
-                                             true,     // manual reset
-                                             true,     // start signaled
-                                             nullptr); // unnamed event
+                // TODO Check result
+                // write at the end ?
+                //overlapped.Offset     = 0xFFFF'FFFF;
+                //overlapped.OffsetHigh = 0xFFFF'FFFF;
+                overlapped.hEvent = CreateEventW(nullptr,  // default security attributes
+                                                 true,     // manual reset
+                                                 true,     // start signaled
+                                                 nullptr); // unnamed event
 
-            // if we are launched from a parent in /CONSOLE:SUBSYSTEM, then it should provide to us a mailbox
-            // to signal whenever an IO operation ended
-            nameLength = GetEnvironmentVariableW(L"CHILD_MAILBOX", name.get(), 256);
-            if (nameLength == 0)
-            {
-                if (GetLastError() != ERROR_NOT_FOUND)
+                // if we are launched from a parent in /CONSOLE:SUBSYSTEM, then it should provide to us a mailbox
+                // to signal whenever an IO operation ended
+                nameLength = GetEnvironmentVariableW(L"CHILD_MAILBOX", name.get(), 256);
+                if (nameLength == 0)
                     std::abort(); // TODO better
-                // leave as INVALID_HANDLE_VALUE hMailbox
-            }
-            else
-            {
+
                 hMailbox = CreateFileW(name.get(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
                 if (hMailbox == INVALID_HANDLE_VALUE)
                 { // TODO BETTER
@@ -321,17 +301,11 @@ namespace dmt {
                     uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
                     DebugBreak();
                 }
-            }
 
-            nameLength = GetEnvironmentVariableW(L"CHILD_MUTEX", name.get(), 256);
-            if (nameLength == 0)
-            {
-                if (GetLastError() != ERROR_NOT_FOUND)
+                nameLength = GetEnvironmentVariableW(L"CHILD_MUTEX", name.get(), 256);
+                if (nameLength == 0)
                     std::abort(); // TODO better
-                // leave as INVALID_HANDLE_VALUE hMailbox
-            }
-            else
-            {
+
                 pMutex = reinterpret_cast<Win32Mutex*>(HeapAlloc(GetProcessHeap(), 0, sizeof(Win32Mutex)));
                 if (!pMutex)
                     std::abort(); // TODO better
@@ -345,17 +319,11 @@ namespace dmt {
         ~LoggerData() noexcept
         {
             std::lock_guard lk{s_consoleLock};
-            WaitForSingleObject(overlapped.hEvent, INFINITE);
-            CloseHandle(overlapped.hEvent);
-            std::unique_ptr<wchar_t[]> name       = std::make_unique<wchar_t[]>(256);
-            uint32_t                   nameLength = GetEnvironmentVariableW(L"CHILD_CONOUT", name.get(), 256);
-            if (nameLength == 0)
+            if (hStdOut != INVALID_HANDLE_VALUE)
             {
+                WaitForSingleObject(overlapped.hEvent, INFINITE);
+                CloseHandle(overlapped.hEvent);
                 CloseHandle(hStdOut);
-            }
-            nameLength = GetEnvironmentVariableW(L"CHILD_MUTEX", name.get(), 256);
-            if (nameLength != 0)
-            {
                 std::destroy_at(pMutex);
                 HeapFree(GetProcessHeap(), 0, pMutex);
             }
@@ -623,14 +591,20 @@ namespace dmt {
         std::construct_at(std::bit_cast<LoggerData*>(_out.data));
 
         _out.hostFlush = [](void* _data) {
-            auto*            data = std::bit_cast<LoggerData*>(_data);
-            std::unique_lock wlk{*data->pMutex};
-            data->waitReadyForNext(wlk);
+            auto* data = std::bit_cast<LoggerData*>(_data);
+            if (data->hStdOut != INVALID_HANDLE_VALUE)
+            {
+                std::unique_lock wlk{*data->pMutex};
+                data->waitReadyForNext(wlk);
+            }
         };
         _out.hostFilter   = [](void* _data, LogRecord const& record) -> bool { return true; };
         _out.hostCallback = [](void* _data, LogRecord const& record) {
             auto* data = std::bit_cast<LoggerData*>(_data);
-            data->writeAsync(record);
+            if (data->hStdOut != INVALID_HANDLE_VALUE)
+            {
+                data->writeAsync(record);
+            }
         };
 
         _out.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {

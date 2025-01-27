@@ -36,14 +36,17 @@ namespace dmt {
             }
         }
 
-        __host__ ECtxReturn Contexts::addContext(int32_t* outIdx)
+        __host__ ECtxReturn Contexts::addContext(bool managed, int32_t* outIdx)
         {
             std::lock_guard lk{lock};
-            cudaError_t err = cudaMallocManaged(&ctxs[count].pctx, sizeof(ContextImpl));
-            if (err != ::cudaSuccess)
-                ctxs[count].pctx = nullptr;
-            else
-                ctxs[count].gpu = true;
+            if (managed)
+            {
+                cudaError_t err = cudaMallocManaged(&ctxs[count].pctx, sizeof(ContextImpl));
+                if (err != ::cudaSuccess)
+                    ctxs[count].pctx = nullptr;
+                else
+                    ctxs[count].gpu = true;
+            }
 
             if (!ctxs[count].pctx)
             {
@@ -148,8 +151,9 @@ namespace dmt {
                     if (!cs)
                         std::abort();
                 }
+                std::construct_at(cs);
             }
-            return cs->addContext(outIdx);
+            return cs->addContext(managed, outIdx);
         }
     } // namespace ctx
 } // namespace dmt

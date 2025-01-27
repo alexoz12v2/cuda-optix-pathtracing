@@ -153,9 +153,16 @@ static void testDevicePrint()
     assert(err == ::cudaSuccess);
 }
 
+static __global__ void kContext()
+{
+    int32_t gid = globalThreadIndex();
+    Context ctx;
+    ctx.warn("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
+}
+
 static void testNewContext()
 {
-    auto res = ctx::addContext();
+    auto res = ctx::addContext(true);
     if (res != ctx::ECtxReturn::eCreatedOnManaged)
         std::abort();
     ctx::cs->setActive(0);
@@ -171,6 +178,10 @@ static void testNewContext()
         ctx.log("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
         ctx.trace("fdsafdaaf\xf0\x9f\x98\x8a {}", std::make_tuple(3.f));
         ctx.flush();
+        kContext<<<1, 32>>>();
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != ::cudaSuccess)
+            ctx.error("Failed context kernel execution	\xF0\x9F\x99\x81", std::make_tuple());
         while (true) // hang
         {
         }

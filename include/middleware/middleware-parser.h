@@ -681,108 +681,129 @@ namespace dmt {
     {
         struct CoatedDiffuseMaterial
         {
-            float displacement;
-            std::u8string normalmap = u8"";
-            float albedo = 0;
-            float g = 0;
-            uint32_t maxdepth = 10; 
-            uint32_t nsamples = 1;
-            float thickness = 0.01;
-            float reflectance = 0.5;
-            float roughness = 0; 
-            float uroughness = 0;
-            float vroughness = 0;
-            bool remparoughness = true;
-
+            float         displacement;
+            std::u8string normalmap      = u8"";
+            float         albedo         = 0;
+            float         g              = 0;
+            uint32_t      maxdepth       = 10;
+            uint32_t      nsamples       = 1;
+            float         thickness      = 0.01;
+            float         reflectance    = 0.5;
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
         };
 
         struct ConductorMaterial
         {
-            float displacement;
-            std::u8string normalmap = u8"";
-            float* eta = nullptr;
-            float* k = nullptr;
-            float* reflectance = nullptr;
-            float roughness = 0; 
-            float uroughness = 0;
-            float vroughness = 0;
-            bool remparoughness = true;
+            float         displacement;
+            std::u8string normalmap      = u8"";
+            float*        eta            = nullptr;
+            float*        k              = nullptr;
+            float*        reflectance    = nullptr;
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
         };
 
         struct CoatedConductorMaterial
         {
             ConductorMaterial conductor;
-            float displacement;
-            std::u8string normalmap = u8"";
-            float albedo = 0;
-            float g = 0;
-            uint32_t maxdepth = 10; 
-            uint32_t nsamples = 1;
-            float thickness = 0.01;
-            float* reflectance = nulptr;
-            float roughness = 0; 
-            float uroughness = 0;
-            float vroughness = 0;
-            bool remparoughness = true;
+            float             displacement;
+            std::u8string     normalmap      = u8"";
+            float             albedo         = 0;
+            float             g              = 0;
+            uint32_t          maxdepth       = 10;
+            uint32_t          nsamples       = 1;
+            float             thickness      = 0.01;
+            float*            reflectance    = nulptr;
+            float             roughness      = 0;
+            float             uroughness     = 0;
+            float             vroughness     = 0;
+            bool              remparoughness = true;
         };
 
-        
 
         struct DielectricMaterial
         {
-            float displacement;
-            std::u8string normalmap = u8"";
-            float etaText = 1.5;
-            float* etaSpectrum = nullptr;
-            float thickness = 0.01;
-            float* reflectance = nulptr;
-            float roughness = 0; 
-            float uroughness = 0;
-            float vroughness = 0;
-            bool remparoughness = true;
-            
+            float         displacement;
+            std::u8string normalmap      = u8"";
+            float         etaText        = 1.5;
+            float*        etaSpectrum    = nullptr;
+            float         thickness      = 0.01;
+            float*        reflectance    = nulptr;
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
         };
 
         struct DiffuseMaterial
         {
-            float displacement;
-            std::u8string normalmap = u8"";
-            float reflectance = 0.5;
+            float         displacement;
+            std::u8string normalmap   = u8"";
+            float         reflectance = 0.5;
         };
 
         struct DiffuseTransmissionMaterial
         {
-            float displacement;
+            float         displacement;
             std::u8string normalmap = u8"";
+            float reflectance = 0.25;
+            float transmittance = 0.25;
+            float scale = 1;
         };
 
         struct HairMaterial
         {
-            float displacement;
+            float         displacement;
             std::u8string normalmap = u8"";
+            float* sigma_a = nullptr;
+            float* reflectance = nullptr;
+            float eumelanin = 1.3;
+            float pheomalanin;
+            float eta = 1.55;
+            float beta_m = 0.3;
+            float alpha = 2;
         };
-
+        
         struct MeasuredMaterial
         {
-            float displacement;
+            float         displacement;
             std::u8string normalmap = u8"";
+            std::u8string filename = u8"";
         };
 
         struct MixMaterial
         {
-
+            std::u8string materials[2]; 
+            float amount = 0.5;
         };
 
         struct SubsurfaceMaterial
         {
-            float displacement;
+            float         displacement;
             std::u8string normalmap = u8"";
+            float eta = 1.33;
+            float g = 0;
+            float mfp;
+            std::u8string name = u8"";
+            float* reflectance = nullptr;
+            float* sigma_a = nullptr;
+            float* sigma_s = nullptr;
+            float scale = 1;
         };
 
         struct ThinDielectricMaterial
         {
-            float displacement;
+            float         displacement;
             std::u8string normalmap = u8"";
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
         };
 
         union Params
@@ -790,24 +811,21 @@ namespace dmt {
             Params() {}
             ~Params() {}
 
-            CoatedDiffuseMaterial coateddiffuse;
-            CoatedConductorMaterial Coatedconductor;
-            ConductorMaterial conductor;
-            DielectricMaterial dielectric;
-            DiffuseMaterial     diffuse;
+            CoatedDiffuseMaterial       coateddiffuse;
+            CoatedConductorMaterial     Coatedconductor;
+            ConductorMaterial           conductor;
+            DielectricMaterial          dielectric;
+            DiffuseMaterial             diffuse;
             DiffuseTransmissionMaterial diffuseTransmission;
-            HairMaterial hair;
-            MeasuredMaterial mesured; 
-            MixMaterial mix;
-            SubsurfaceMaterial subsurface;
-            ThinDielectricMaterial thindielectric;
+            HairMaterial                hair;
+            MeasuredMaterial            mesured;
+            MixMaterial                 mix;
+            SubsurfaceMaterial          subsurface;
+            ThinDielectricMaterial      thindielectric;
         };
 
         Params params;
-        
-
         EMaterialType type;
-
     };
 
 
@@ -999,11 +1017,9 @@ namespace dmt {
     struct DMT_MIDDLEWARE_API MaterialEntity : public SceneEntity
     {
         MaterialEntity() = default;
-        MaterialEntity(EMaterialType               type,
-                    EColorSpaceType          _colorSpace,
-                    ParamMap const&          _params);
+        MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params);
 
-        MaterialSpec spec;
+        MaterialSpec    spec;
         EColorSpaceType colorSpace;
     };
 

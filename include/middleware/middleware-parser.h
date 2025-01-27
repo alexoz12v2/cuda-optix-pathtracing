@@ -659,7 +659,7 @@ namespace dmt {
         eCount
     };
 
-    //spec material?
+    //Maretial ------------------------------------------------------------------------
     enum class DMT_MIDDLEWARE_API EMaterialType : uint8_t
     {
         eCoateddiffuse = 0,
@@ -676,6 +676,140 @@ namespace dmt {
         eThindielectric,
         eCount
     };
+
+    struct DMT_MIDDLEWARE_API MaterialSpec
+    {
+        struct CoatedDiffuseMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+            float albedo = 0;
+            float g = 0;
+            uint32_t maxdepth = 10; 
+            uint32_t nsamples = 1;
+            float thickness = 0.01;
+            float reflectance = 0.5;
+            float roughness = 0; 
+            float uroughness = 0;
+            float vroughness = 0;
+            bool remparoughness = true;
+
+        };
+
+        struct ConductorMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+            float* eta = nullptr;
+            float* k = nullptr;
+            float* reflectance = nullptr;
+            float roughness = 0; 
+            float uroughness = 0;
+            float vroughness = 0;
+            bool remparoughness = true;
+        };
+
+        struct CoatedConductorMaterial
+        {
+            ConductorMaterial conductor;
+            float displacement;
+            std::u8string normalmap = u8"";
+            float albedo = 0;
+            float g = 0;
+            uint32_t maxdepth = 10; 
+            uint32_t nsamples = 1;
+            float thickness = 0.01;
+            float* reflectance = nulptr;
+            float roughness = 0; 
+            float uroughness = 0;
+            float vroughness = 0;
+            bool remparoughness = true;
+        };
+
+        
+
+        struct DielectricMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+            float etaText = 1.5;
+            float* etaSpectrum = nullptr;
+            float thickness = 0.01;
+            float* reflectance = nulptr;
+            float roughness = 0; 
+            float uroughness = 0;
+            float vroughness = 0;
+            bool remparoughness = true;
+            
+        };
+
+        struct DiffuseMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+            float reflectance = 0.5;
+        };
+
+        struct DiffuseTransmissionMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+        };
+
+        struct HairMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+        };
+
+        struct MeasuredMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+        };
+
+        struct MixMaterial
+        {
+
+        };
+
+        struct SubsurfaceMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+        };
+
+        struct ThinDielectricMaterial
+        {
+            float displacement;
+            std::u8string normalmap = u8"";
+        };
+
+        union Params
+        {
+            Params() {}
+            ~Params() {}
+
+            CoatedDiffuseMaterial coateddiffuse;
+            CoatedConductorMaterial Coatedconductor;
+            ConductorMaterial conductor;
+            DielectricMaterial dielectric;
+            DiffuseMaterial     diffuse;
+            DiffuseTransmissionMaterial diffuseTransmission;
+            HairMaterial hair;
+            MeasuredMaterial mesured; 
+            MixMaterial mix;
+            SubsurfaceMaterial subsurface;
+            ThinDielectricMaterial thindielectric;
+        };
+
+        Params params;
+        
+
+        EMaterialType type;
+
+    };
+
 
     enum class DMT_MIDDLEWARE_API ELightType : uint8_t
     {
@@ -773,8 +907,8 @@ namespace dmt {
         struct Projection
         {
             //default current color space
-            float*        I = nullptr;
-            float         fov = 90.0f;
+            float*        I        = nullptr;
+            float         fov      = 90.0f;
             std::u8string filename = u8"";
         };
 
@@ -859,6 +993,17 @@ namespace dmt {
 
         LightSourceSpec spec;
         sid_t           medium;
+        EColorSpaceType colorSpace;
+    };
+    // Material -------------------------------------------------------------------------------------------------------
+    struct DMT_MIDDLEWARE_API MaterialEntity : public SceneEntity
+    {
+        MaterialEntity() = default;
+        MaterialEntity(EMaterialType               type,
+                    EColorSpaceType          _colorSpace,
+                    ParamMap const&          _params);
+
+        MaterialSpec spec;
         EColorSpaceType colorSpace;
     };
 
@@ -1083,6 +1228,7 @@ namespace dmt {
         GraphicsState                 m_graphicsState;
         CameraSceneEntity             m_camera;
         std::vector<LightEntity>      m_lights;
+        std::vector<SceneEntity>      m_materials;
         std::map<sid_t, TransformSet> m_namedCoordinateSystems;
         dmt::Transform                m_renderFromWorld;
     };
@@ -1165,7 +1311,7 @@ namespace dmt {
     private:
         struct ParsingState
         {
-            // populated once the Camera directive is encountered (or left default constructed)
+            // populated once Scne Camera directive is encountered (or left default constructed)
             CameraSpec cameraSpec;
             // populated once the Film directive is encountered
             int32_t xResolution = -1;

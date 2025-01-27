@@ -790,7 +790,7 @@ namespace dmt {
                 static constexpr SText filename          = "filename"sv;          // string
             }                                                                     // namespace nanovdb_params
         }                                                                         // namespace media
-    }  // namespace dict
+    }                                                                             // namespace dict
 
     static constexpr std::array<sid_t, 2> pointTypes{dict::types::tPoint.sid, dict::types::tPoint3.sid};
 
@@ -1441,7 +1441,7 @@ namespace dmt {
     }
 
     template <Vector V>
-    static bool parseAndSetVector(ParamMap const& _params, sid_t sid, V& target, V defaultV, std::span<const sid_t> allowedTypes)
+    static bool parseAndSetVector(ParamMap const& _params, sid_t sid, V& target, V defaultV, std::span<sid_t const> allowedTypes)
     {
         if (auto it = _params.find(sid); it != _params.end())
         {
@@ -3349,7 +3349,10 @@ namespace dmt {
 
     void SceneDescription::Material(EMaterialType type, ParamMap const& params) {}
 
-    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params) {}
+    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params) {
+        SceneEntity material{name, params};
+        m_materials.push_back(material);
+    }
 
     void SceneDescription::NamedMaterial(sid_t name) {}
 
@@ -3382,9 +3385,9 @@ namespace dmt {
 
     void SceneDescription::EndOfFiles() {}
 
-    void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) 
+    void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info)
     {
-        if(m_camera.spec.type == ECameraType::eOrthographic || m_camera.spec.type == ECameraType::ePerspective)
+        if (m_camera.spec.type == ECameraType::eOrthographic || m_camera.spec.type == ECameraType::ePerspective)
         {
             m_camera.spec.params.p.screenWindow.arr = info.cameraSpec.params.p.screenWindow.arr;
         }

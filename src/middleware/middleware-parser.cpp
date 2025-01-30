@@ -1575,10 +1575,8 @@ namespace dmt {
         }
     }
     // MaterialEntity ----------------------------------------------------------------------------------------------------
-    MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params):
-
+    MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params)
     {
-
     }
 
     // Parsing Helpers ------------------------------------------------------------------------------------------------

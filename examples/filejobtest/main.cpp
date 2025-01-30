@@ -230,7 +230,7 @@ int guardedMain()
 {
     dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
     dmt::ctx::init(actx);
-    auto env = dmt::getEnv();
+    auto env = dmt::os::getEnv();
 
     //testLightEntity();
     //std::cin.get();

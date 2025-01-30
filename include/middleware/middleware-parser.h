@@ -679,6 +679,8 @@ namespace dmt {
 
     struct DMT_MIDDLEWARE_API MaterialSpec
     {
+        // TODO maybe remove
+        MaterialSpec() = default;
         DMT_MIDDLEWARE_API MaterialSpec(EMaterialType type);
         //stores filenames as strings, we cannot use memcpy for copy semantics
         DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec const&);
@@ -727,7 +729,7 @@ namespace dmt {
             uint32_t          maxdepth       = 10;
             uint32_t          nsamples       = 1;
             float             thickness      = 0.01;
-            float*            reflectance    = nulptr;
+            float*            reflectance    = nullptr;
             float             roughness      = 0;
             float             uroughness     = 0;
             float             vroughness     = 0;
@@ -742,7 +744,7 @@ namespace dmt {
             float         etaText        = 1.5;
             float*        etaSpectrum    = nullptr;
             float         thickness      = 0.01;
-            float*        reflectance    = nulptr;
+            float*        reflectance    = nullptr;
             float         roughness      = 0;
             float         uroughness     = 0;
             float         vroughness     = 0;

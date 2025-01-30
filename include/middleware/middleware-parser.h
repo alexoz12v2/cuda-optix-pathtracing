@@ -6,7 +6,7 @@
 
 #include <cudautils/cudautils.h>
 
-#include <platform/platform.h>
+#include "platform/platform.h"
 
 #include <array>
 #include <atomic>
@@ -858,7 +858,7 @@ namespace dmt {
             U() {}
             ~U() {}
 
-            ChunkedFileReader reader;
+            os::ChunkedFileReader reader;
         };
         U                m_delayedCtor;
         WordParser*      m_tokenizer = nullptr;

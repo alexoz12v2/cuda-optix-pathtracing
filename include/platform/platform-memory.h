@@ -986,7 +986,7 @@ namespace dmt {
             }
 
             // Commit additional memory
-            if (!commitPhysicalMemory(newBuffer, newNodes * sizeof(NodeType)))
+            if (!os::commitPhysicalMemory(newBuffer, newNodes * sizeof(NodeType)))
             {
                 ctx.error("Failed to commit additional memory for {} nodes.", {newNodes});
                 std::abort();

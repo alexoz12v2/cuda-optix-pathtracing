@@ -268,7 +268,7 @@ namespace dmt::ctx {
     using namespace dmt;
     void init(AppContext& ctx)
     {
-        uint64_t        pid = processId();
+        uint64_t        pid = os::processId();
         std::lock_guard lk{detail::g_slk};
         auto            it = detail::g_ctxMap.find(pid);
         if (it == detail::g_ctxMap.end())
@@ -292,7 +292,7 @@ namespace dmt::ctx {
 
     AppContext* acquireCurrent()
     {
-        uint64_t pid = processId();
+        uint64_t pid = os::processId();
         auto     it  = detail::g_ctxMap.find(pid);
         if (it == detail::g_ctxMap.end())
         {
@@ -307,9 +307,9 @@ namespace dmt::ctx {
         return ptr;
     }
 
-    DMT_PLATFORM_MIXED_API void releaseCurrent()
+    void releaseCurrent()
     {
-        uint64_t pid = processId();
+        uint64_t pid = os::processId();
         auto     it  = detail::g_ctxMap.find(pid);
         if (it == detail::g_ctxMap.end())
         {
@@ -324,7 +324,7 @@ namespace dmt::ctx {
 
     void unregister()
     {
-        uint64_t pid = processId();
+        uint64_t pid = os::processId();
         auto     it  = detail::g_ctxMap.find(pid);
         if (it == detail::g_ctxMap.end())
         {

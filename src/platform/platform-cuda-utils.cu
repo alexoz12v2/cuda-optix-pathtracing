@@ -683,7 +683,7 @@ namespace dmt {
         m_maxPoolSize                = roundUpToNextMultipleOf(input.maxPoolSize, granularity);
         m_ctrlBlockReservedVMemBytes = sizeof(UnifiedControlBlock) +
                                        ceilDiv(m_maxPoolSize, sizeof(CUmemGenericAllocationHandle));
-        void* reservedHostSpace = reserveVirtualAddressSpace(m_ctrlBlockReservedVMemBytes);
+        void* reservedHostSpace = os::reserveVirtualAddressSpace(m_ctrlBlockReservedVMemBytes);
         if (!reservedHostSpace)
         {
             if (input.pmctx)
@@ -692,7 +692,7 @@ namespace dmt {
             std::abort();
         }
         // commit first page, construct control block, compute initial capacity
-        if (!commitPhysicalMemory(reservedHostSpace, toUnderlying(EPageSize::e4KB)))
+        if (!os::commitPhysicalMemory(reservedHostSpace, toUnderlying(EPageSize::e4KB)))
         {
             if (input.pmctx)
                 input.pmctx->pctx.error("Couldn't commit first 4KB physical memory page for allocater metadata");
@@ -871,12 +871,12 @@ namespace dmt {
         uintptr_t address = std::bit_cast<uintptr_t>(m_ctrlBlock);
         for (size_t i = 0; i < pageCount; ++i)
         { // first iteration will deallocate the lock, so no need to unlock it
-            decommitPage(std::bit_cast<void*>(address), pageSz);
+            os::decommitPage(std::bit_cast<void*>(address), pageSz);
             address += pageSz;
         }
 
         // free host virtual address space reservation
-        freeVirtualAddressSpace(std::bit_cast<void*>(m_ctrlBlock), m_ctrlBlockReservedVMemBytes);
+        os::freeVirtualAddressSpace(std::bit_cast<void*>(m_ctrlBlock), m_ctrlBlockReservedVMemBytes);
         m_ctrlBlock = nullptr;
     }
 
@@ -901,7 +901,7 @@ namespace dmt {
                                                  sizeof(CUmemGenericAllocationHandle) * m_ctrlBlock->capacity);
             size_t pageSz  = static_cast<size_t>(toUnderlying(EPageSize::e4KB));
             assert(pageSz % sizeof(CUmemGenericAllocationHandle) == 0);
-            if (!commitPhysicalMemory(address, pageSz))
+            if (!os::commitPhysicalMemory(address, pageSz))
                 return false;
 
             m_ctrlBlock->capacity += pageSz / sizeof(CUmemGenericAllocationHandle);

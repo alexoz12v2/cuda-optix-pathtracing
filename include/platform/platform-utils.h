@@ -21,9 +21,7 @@
 #include <cctype>
 #include <cstdint>
 
-namespace dmt {
-    using sid_t = uint64_t;
-
+namespace dmt::os {
     DMT_PLATFORM_API uint64_t processId();
     DMT_PLATFORM_API uint64_t threadId();
     DMT_PLATFORM_API void*    reserveVirtualAddressSpace(size_t size);
@@ -38,7 +36,10 @@ namespace dmt {
 
     // for debugging purposes only, so we don't care about memory
     DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
+} // namespace dmt::os
 
+namespace dmt {
+    using sid_t = uint64_t;
     template <typename T>
     struct PmrDeleter
     {

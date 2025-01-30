@@ -138,6 +138,40 @@ namespace dmt {
     } // namespace ctx
 
     /**
+     * Buffer to facilitate GPU side logging
+     * Requirements:
+     * - call "LogBuffer" = activeMask + sizeof(LogRecord) + UTF-8 character buffer for the format string
+     * - there should be N * warpSize LogBuffers allocated in managed memory
+     * - when
+     * @warning should be constructed in `__managed__` memory
+     */
+    class WarpBuffers
+    {
+    public:
+        struct Buffer
+        {
+            LogRecord record[32];
+            char      arg[1024][32];
+            char      buf[1024][32];
+            bool      used[32];
+        };
+
+    public:
+        DMT_CPU WarpBuffers();
+        WarpBuffers(WarpBuffers const&)                = delete;
+        WarpBuffers(WarpBuffers&&) noexcept            = delete;
+        WarpBuffers& operator=(WarpBuffers const&)     = delete;
+        WarpBuffers& operator=(WarpBuffers&&) noexcept = delete;
+        DMT_CPU ~WarpBuffers();
+
+    public:
+
+    private:
+
+    private:
+    };
+
+    /**
      * It's meant to be reacquired, so no copy control
      * @warning all `DMT_CPU_GPU` methods must be implemented as `inline` here cause this is not a CUDA translation unit
      */
@@ -204,8 +238,10 @@ namespace dmt {
             if (!m_pimpl->anyHandlerEnabledFor(_level))
                 return;
 
+
 #if defined(__CUDA_ARCH__)
-                // TODO: Dump everything on a buffer
+                // on the GPU, take a free buffer from common.gpuLogBuffers, if not nullptr,
+                // create a record using those buffers, (each buffer contains 2 char buffers, a log record, and a bool to say whether it is being used)
 #else
             auto record = createRecord(_fmt,
                                        _level,
@@ -216,6 +252,7 @@ namespace dmt {
                                        _params,
                                        _pysLoc,
                                        loc);
+
             for (uint32_t i = 0; i < m_pimpl->common.numHandlers; ++i)
             {
                 if (m_pimpl->common.handlers[i].minimumLevel <= _level && m_pimpl->logFilterPassesFor(i, record))

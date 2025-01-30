@@ -391,8 +391,8 @@ namespace dmt {
         loc.loc.dev.warp    = threadIdx.x / warpSize;
 #else
         loc.where        = LogLocation::hostNum;
-        loc.loc.host.pid = processId();
-        loc.loc.host.tid = threadId();
+        loc.loc.host.pid = os::processId();
+        loc.loc.host.tid = os::threadId();
 #endif
         return loc;
     }
@@ -404,7 +404,7 @@ namespace dmt {
 
     template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
-    inline constexpr /* DMT_CPU_GPU*/ LogRecord createRecord(
+    inline constexpr DMT_CPU_GPU LogRecord createRecord(
         FormatString<>              fmt,
         ELogLevel                   _level,
         char8_t*                    _buffer,
@@ -503,8 +503,8 @@ namespace dmt {
     };
 
     DMT_PLATFORM_API bool createConsoleHandler(LogHandler&          _out,
-                                               LogHandlerAllocate   _alloc   = ::dmt::allocate,
-                                               LogHandlerDeallocate _dealloc = ::dmt::deallocate);
+                                               LogHandlerAllocate   _alloc   = ::dmt::os::allocate,
+                                               LogHandlerDeallocate _dealloc = ::dmt::os::deallocate);
 
     // ----------------------------------------------------------------------------------------------------------------
 

@@ -6,6 +6,7 @@ Implementing a simple path tracer in C++ CUDA using OptiX
 - Le cartelle `include` e `src` contengono una sottocartella per ogni modulo C++20, al quale corrisponde un
   CMake target. Si definiscono nelle due cartelle rispettivamente Module Interface Units e Module Implementation 
   Units relative al modulo
+- (WIndows) usare powershell 7 (che non e' [bundled con windows by default](https://powershellexplained.com/2017-12-29-Powershell-what-is-pwsh/)) `winget install microsoft.powershell`
 ### CMake Configuration
 Dalla directory della repository
 ```

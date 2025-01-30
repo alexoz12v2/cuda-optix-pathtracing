@@ -32,7 +32,7 @@ namespace dmt {
                 if (ctxs[i].gpu)
                     cudaFree(ctxs[i].pctx);
                 else
-                    ::dmt::deallocate(ctxs[i].pctx, sizeof(ContextImpl), alignof(ContextImpl));
+                    ::dmt::os::deallocate(ctxs[i].pctx, sizeof(ContextImpl), alignof(ContextImpl));
             }
         }
 
@@ -51,7 +51,7 @@ namespace dmt {
             if (!ctxs[count].pctx)
             {
                 ctxs[count].pctx = reinterpret_cast<ContextImpl*>(
-                    ::dmt::allocate(sizeof(ContextImpl), alignof(ContextImpl)));
+                    ::dmt::os::allocate(sizeof(ContextImpl), alignof(ContextImpl)));
                 if (!ctxs[count].pctx)
                     return ECtxReturn::eMemoryError;
                 ctxs[count].gpu = false;
@@ -156,4 +156,11 @@ namespace dmt {
             return cs->addContext(managed, outIdx);
         }
     } // namespace ctx
+
+    // WarpBuffers ----------------------------------------------------------------------------------------------------
+
+    WarpBuffers::WarpBuffers() {}
+
+    WarpBuffers::~WarpBuffers() {}
+
 } // namespace dmt

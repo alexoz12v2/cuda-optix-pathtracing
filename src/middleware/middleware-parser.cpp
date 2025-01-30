@@ -3163,14 +3163,13 @@ namespace dmt {
     type(type),
     illum(illum)
     {
-        if ()
     }
     // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
-    LightSourceSpec::LightSourceSpec(LightSourceSpec const&);
-    LightSourceSpec::LightSourceSpec(LightSourceSpec&&) noexcept;
-    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const&);
-    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&&) noexcept;
-    LightSourceSpec::~LightSourceSpec() noexcept;
+    LightSourceSpec::LightSourceSpec(LightSourceSpec const&) {}
+    LightSourceSpec::LightSourceSpec(LightSourceSpec&&) noexcept {}
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const&) { return *this; }
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&&) noexcept { return *this; }
+    LightSourceSpec::~LightSourceSpec() noexcept {}
 
 
     CameraSpec::CameraSpec(CameraSpec const& other) :

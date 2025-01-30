@@ -1,6 +1,6 @@
 #include "platform-logging.h"
 
-#include "platform-os-utils.h"
+#include "platform-os-utils.win32.h"
 
 #include <charconv>
 
@@ -189,13 +189,6 @@ namespace dmt {
 
     // LOGGING 2.0 ----------------------------------------------------------------------------------------------------
 
-    uint32_t utf16le_From_utf8(char8_t const* DMT_RESTRICT _u8str,
-                               uint32_t                    _u8NumBytes,
-                               wchar_t* DMT_RESTRICT       _mediaBuf,
-                               uint32_t                    _mediaMaxBytes,
-                               wchar_t* DMT_RESTRICT       _outBuf,
-                               uint32_t                    _maxBytes,
-                               uint32_t*                   _outBytesWritten);
     uint32_t appendLocalTime(wchar_t* DMT_RESTRICT _buf, uint32_t _maxBytes);
     uint32_t appendPhyLoc(wchar_t* DMT_RESTRICT _buf, uint32_t _maxBytes, LogLocation const& _phyLoc);
     uint32_t appendSrcLoc(wchar_t* DMT_RESTRICT       _buf,
@@ -275,7 +268,7 @@ namespace dmt {
                 if (hStdOut == INVALID_HANDLE_VALUE)
                 { // TODO BETTER
                     std::unique_ptr<char[]> buf = std::make_unique<char[]>(2048);
-                    uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
+                    uint32_t                len = ::dmt::os::win32::getLastErrorAsString(buf.get(), 2048);
                     DebugBreak();
                 }
 
@@ -298,7 +291,7 @@ namespace dmt {
                 if (hMailbox == INVALID_HANDLE_VALUE)
                 { // TODO BETTER
                     std::unique_ptr<char[]> buf = std::make_unique<char[]>(2048);
-                    uint32_t                len = win32::getLastErrorAsString(buf.get(), 2048);
+                    uint32_t                len = ::dmt::os::win32::getLastErrorAsString(buf.get(), 2048);
                     DebugBreak();
                 }
 
@@ -418,7 +411,13 @@ namespace dmt {
 
             // Convert and append log record data
             uint32_t bytes = 0;
-            utf16le_From_utf8(record.data, record.numBytes, buffer, maxArgChars, buf, maxChars - (totalBytes >> 1), &bytes);
+            ::dmt::os::win32::utf16le_From_utf8(record.data,
+                                                record.numBytes,
+                                                buffer,
+                                                maxArgChars,
+                                                buf,
+                                                maxChars - (totalBytes >> 1),
+                                                &bytes);
             buf += bytes >> 1;
             totalBytes += bytes;
             buf[0] = L'\0';
@@ -440,36 +439,6 @@ namespace dmt {
         wchar_t                   buffer[maxArgChars]{};
         wchar_t                   normalizedBuffer[maxChars]{};
     };
-
-    // TODO move to OS specific utils
-    uint32_t utf16le_From_utf8(char8_t const* DMT_RESTRICT _u8str,
-                               uint32_t                    _u8NumBytes,
-                               wchar_t* DMT_RESTRICT       _mediaBuf,
-                               uint32_t                    _mediaMaxBytes,
-                               wchar_t* DMT_RESTRICT       _outBuf,
-                               uint32_t                    _maxBytes,
-                               uint32_t*                   _outBytesWritten)
-    {
-        if (_outBytesWritten)
-            *_outBytesWritten = static_cast<uint32_t>(sizeof(wchar_t));
-        int res = MultiByteToWideChar(CP_UTF8,
-                                      MB_ERR_INVALID_CHARS,
-                                      std::bit_cast<char const*>(_u8str),
-                                      static_cast<int>(_u8NumBytes),
-                                      _mediaBuf,
-                                      _mediaMaxBytes / sizeof(wchar_t));
-        // TODO if (res == 0) errror, else number is positive
-        assert(res >= 0);
-
-        int estimatedSize = NormalizeString(::NormalizationC, _mediaBuf, res, nullptr, 0);
-        if (estimatedSize > (_maxBytes >> 1)) // means divided by sizeof(wchar_t)
-            assert(false);                    // TODO better
-        int actualLength = NormalizeString(::NormalizationC, _mediaBuf, res, _outBuf, _maxBytes >> 1);
-
-        if (_outBytesWritten)
-            *_outBytesWritten *= actualLength;
-        return actualLength;
-    }
 
     uint32_t appendLogLevelString(wchar_t* DMT_RESTRICT _buf, uint32_t _maxBytes, ELogLevel _level)
     {
@@ -524,13 +493,13 @@ namespace dmt {
         strncpy(_midBuf, _srcLoc.file_name() + srcLocFileOffset, _midBytes);
         _midBuf[_midBytes - 1] = '\0';
         uint32_t len           = strlen(_midBuf);
-        uint32_t numChars      = utf16le_From_utf8(std::bit_cast<char8_t const*>(_midBuf),
-                                              len,
-                                              _wMidBuf,
-                                              _wNumBytes,
-                                              _wNormBuf,
-                                              _wNormBytes,
-                                              nullptr);
+        uint32_t numChars      = ::dmt::os::win32::utf16le_From_utf8(std::bit_cast<char8_t const*>(_midBuf),
+                                                                len,
+                                                                _wMidBuf,
+                                                                _wNumBytes,
+                                                                _wNormBuf,
+                                                                _wNormBytes,
+                                                                nullptr);
         _wNormBuf[numChars]    = L'\0';
         uint32_t maxChars      = _maxBytes >> 1;
         uint32_t written       = _snwprintf(_buf, maxChars, L"%s:", _wNormBuf);
@@ -541,9 +510,15 @@ namespace dmt {
 
         // function name
         strncpy(_midBuf, _srcLoc.function_name(), _midBytes);
-        _midBuf[_midBytes - 1] = '\0';
-        len                    = strlen(_midBuf);
-        numChars = utf16le_From_utf8(std::bit_cast<char8_t const*>(_midBuf), len, _wMidBuf, _wNumBytes, _wNormBuf, _wNormBytes, nullptr);
+        _midBuf[_midBytes - 1]  = '\0';
+        len                     = strlen(_midBuf);
+        numChars                = ::dmt::os::win32::utf16le_From_utf8(std::bit_cast<char8_t const*>(_midBuf),
+                                                       len,
+                                                       _wMidBuf,
+                                                       _wNumBytes,
+                                                       _wNormBuf,
+                                                       _wNormBytes,
+                                                       nullptr);
         _wNormBuf[numChars]     = L'\0';
         uint32_t const written1 = _snwprintf(_buf, maxChars, L"%s:", _wNormBuf);
         written += written1;

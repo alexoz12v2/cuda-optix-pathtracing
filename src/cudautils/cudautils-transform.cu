@@ -60,7 +60,7 @@ namespace dmt {
         glm::vec3 nup     = glm::normalize(toGLM(up));
         glm::vec3 dir     = glm::normalize(toGLM(look) - toGLM(pos));
         glm::vec3 nupXdir = glm::cross(nup, dir);
-        assert(glm::length2(nupXdir) < std::numeric_limits<float>::epsilon());
+        assert(glm::length2(nupXdir) > std::numeric_limits<float>::epsilon());
 
         glm::vec3 right         = glm::normalize(nupXdir);
         glm::vec3 newUp         = glm::cross(dir, right);

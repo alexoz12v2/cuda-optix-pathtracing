@@ -16,6 +16,8 @@
 #include <memory_resource>
 #include <set>
 #include <stack>
+#include <initializer_list>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -246,7 +248,6 @@ namespace dmt {
         // 1 byte aligned
         ECameraType type = ECameraType::ePerspective;
     };
-    //LightSource
 
 
     // Samplers -------------------------------------------------------------------------------------------------------
@@ -590,6 +591,7 @@ namespace dmt {
     {
         using ValueList = ArgsDArray;
         constexpr explicit ParamPair(sid_t type) : type(type) {}
+        ParamPair(sid_t type, std::initializer_list<std::string> const& strs) : type(type), values(strs) {}
 
         DMT_MIDDLEWARE_API void addParamValue(std::string_view value) { values.emplace_back(value); }
 
@@ -657,7 +659,7 @@ namespace dmt {
         eCount
     };
 
-    //spec material?
+    //Maretial ------------------------------------------------------------------------
     enum class DMT_MIDDLEWARE_API EMaterialType : uint8_t
     {
         eCoateddiffuse = 0,
@@ -674,6 +676,172 @@ namespace dmt {
         eThindielectric,
         eCount
     };
+
+    struct DMT_MIDDLEWARE_API MaterialSpec
+    {
+        DMT_MIDDLEWARE_API MaterialSpec(EMaterialType type);
+        //stores filenames as strings, we cannot use memcpy for copy semantics
+        DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec const&);
+        DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec&&) noexcept;
+        DMT_MIDDLEWARE_API MaterialSpec& operator=(MaterialSpec const&);
+        DMT_MIDDLEWARE_API MaterialSpec& operator=(MaterialSpec&&) noexcept;
+        DMT_MIDDLEWARE_API ~MaterialSpec() noexcept;
+
+        DMT_MIDDLEWARE_API void cleanup() noexcept;
+        struct CoatedDiffuseMaterial
+        {
+            float         displacement;
+            std::u8string normalmap      = u8"";
+            float         albedo         = 0;
+            float         g              = 0;
+            uint32_t      maxdepth       = 10;
+            uint32_t      nsamples       = 1;
+            float         thickness      = 0.01;
+            float         reflectance    = 0.5;
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
+        };
+
+        struct ConductorMaterial
+        {
+            float         displacement;
+            std::u8string normalmap      = u8"";
+            float*        eta            = nullptr;
+            float*        k              = nullptr;
+            float*        reflectance    = nullptr;
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
+        };
+
+        struct CoatedConductorMaterial
+        {
+            ConductorMaterial conductor;
+            float             displacement;
+            std::u8string     normalmap      = u8"";
+            float             albedo         = 0;
+            float             g              = 0;
+            uint32_t          maxdepth       = 10;
+            uint32_t          nsamples       = 1;
+            float             thickness      = 0.01;
+            float*            reflectance    = nulptr;
+            float             roughness      = 0;
+            float             uroughness     = 0;
+            float             vroughness     = 0;
+            bool              remparoughness = true;
+        };
+
+
+        struct DielectricMaterial
+        {
+            float         displacement;
+            std::u8string normalmap      = u8"";
+            float         etaText        = 1.5;
+            float*        etaSpectrum    = nullptr;
+            float         thickness      = 0.01;
+            float*        reflectance    = nulptr;
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
+        };
+
+        struct DiffuseMaterial
+        {
+            float         displacement;
+            std::u8string normalmap   = u8"";
+            float         reflectance = 0.5;
+        };
+
+        struct DiffuseTransmissionMaterial
+        {
+            float         displacement;
+            std::u8string normalmap = u8"";
+            float reflectance = 0.25;
+            float transmittance = 0.25;
+            float scale = 1;
+        };
+
+        struct HairMaterial
+        {
+            float         displacement;
+            std::u8string normalmap = u8"";
+            float* sigma_a = nullptr;
+            float* reflectance = nullptr;
+            float eumelanin = 1.3;
+            float pheomalanin;
+            float eta = 1.55;
+            float beta_m = 0.3;
+            float alpha = 2;
+        };
+        
+        struct MeasuredMaterial
+        {
+            float         displacement;
+            std::u8string normalmap = u8"";
+            std::u8string filename = u8"";
+        };
+
+        struct MixMaterial
+        {
+            std::u8string materials[2]; 
+            float amount = 0.5;
+        };
+
+        struct SubsurfaceMaterial
+        {
+            float         displacement;
+            std::u8string normalmap = u8"";
+            float eta = 1.33;
+            float g = 0;
+            float mfp;
+            std::u8string name = u8"";
+            float* reflectance = nullptr;
+            float* sigma_a = nullptr;
+            float* sigma_s = nullptr;
+            float scale = 1;
+        };
+
+        struct ThinDielectricMaterial
+        {
+            float         displacement;
+            std::u8string normalmap = u8"";
+            float         roughness      = 0;
+            float         uroughness     = 0;
+            float         vroughness     = 0;
+            bool          remparoughness = true;
+        };
+
+        struct InterfaceMaterial
+        {
+        };
+
+        union Params
+        {
+            Params() {}
+            ~Params() {}
+
+            CoatedDiffuseMaterial       coateddiffuse;
+            CoatedConductorMaterial     coatedconductor;
+            ConductorMaterial           conductor;
+            DielectricMaterial          dielectric;
+            DiffuseMaterial             diffuse;
+            DiffuseTransmissionMaterial diffuseTransmission;
+            HairMaterial                hair;
+            MeasuredMaterial            mesured;
+            MixMaterial                 mix;
+            SubsurfaceMaterial          subsurface;
+            ThinDielectricMaterial      thindielectric;
+            InterfaceMaterial interface;
+        };
+
+        Params params;
+        EMaterialType type;
+    };
+
 
     enum class DMT_MIDDLEWARE_API ELightType : uint8_t
     {
@@ -723,29 +891,6 @@ namespace dmt {
         eCount
     };
 
-    //SceneEntity------------------------------------------------------------------------------------------------------
-    struct DMT_MIDDLEWARE_API SceneEntity
-    {
-        SceneEntity() = default;
-        SceneEntity(sid_t name, ParamMap parameters) : name(name), parameters(parameters) {}
-
-        sid_t    name = 0;
-        ParamMap parameters;
-    };
-
-    // CameraSceneEntity Definition
-    struct DMT_MIDDLEWARE_API CameraSceneEntity : public SceneEntity
-    {
-        // CameraSceneEntity Public Methods
-        CameraSceneEntity() = default;
-        CameraSceneEntity(CameraSpec parameters, CameraTransform const&, sid_t medium);
-
-        sid_t           medium;
-        CameraTransform cameraTransform;
-        CameraSpec      spec;
-        EColorSpaceType colorSpace;
-    };
-
     // LightSource ----------------------------------------------------------------------------------------------------
     struct DMT_MIDDLEWARE_API LightSourceSpec
     {
@@ -757,50 +902,52 @@ namespace dmt {
         DMT_MIDDLEWARE_API LightSourceSpec& operator=(LightSourceSpec&&) noexcept;
         DMT_MIDDLEWARE_API ~LightSourceSpec() noexcept;
 
-        struct DMT_MIDDLEWARE_API Distant
+        DMT_MIDDLEWARE_API void cleanup() noexcept;
+
+        struct Distant
         {
             //TODO the default vale to specify
-            float*  L;
+            float*  L = nullptr;
             Point3f from{{0, 0, 0}};
             Point3f to{{0, 0, 1}};
         };
 
-        struct DMT_MIDDLEWARE_API Goniometric
+        struct Goniometric
         {
             //requiered-no default
-            std::u8string filename;
+            std::u8string filename = u8"";
             //TODO insert code for radiant Intensity
-            float* I;
+            float* I = nullptr;
         };
 
-        struct DMT_MIDDLEWARE_API Infinite
+        struct Infinite
         {
             //if no filename uses same Intesity
-            std::u8string filename;
+            std::u8string filename = u8"";
             //default current color space
-            float*  L;
+            float*  L = nullptr;
             Point3f portal[4];
         };
 
-        struct DMT_MIDDLEWARE_API Point
+        struct Point
         {
             //default current color space
-            float*  I;
+            float*  I = nullptr;
             Point3f from{{0, 0, 0}};
         };
 
-        struct DMT_MIDDLEWARE_API Projection
+        struct Projection
         {
             //default current color space
-            float*        I;
-            float         fov = 90.0f;
-            std::u8string filename;
+            float*        I        = nullptr;
+            float         fov      = 90.0f;
+            std::u8string filename = u8"";
         };
 
-        struct DMT_MIDDLEWARE_API Spotlight
+        struct Spotlight
         {
             //default current color space
-            float*  I;
+            float*  I = nullptr;
             Point3f from{{0, 0, 0}};
             Point3f to{{0, 0, 1}};
             float   coneangle      = 30;
@@ -828,11 +975,66 @@ namespace dmt {
             float illuminance;
         };
 
+        Params             params;
         PowerOrIlluminance po;
         float              scale = 1.f;
         // 1 byte aligned
         ELightType type;
         bool       illum;
+    };
+
+    //SceneEntity------------------------------------------------------------------------------------------------------
+    struct DMT_MIDDLEWARE_API SceneEntity
+    {
+        SceneEntity() = default;
+        SceneEntity(sid_t name, ParamMap parameters) : name(name), parameters(parameters) {}
+
+        sid_t    name = 0;
+        ParamMap parameters;
+    };
+
+    // CameraSceneEntity Definition
+    struct DMT_MIDDLEWARE_API CameraSceneEntity : public SceneEntity
+    {
+        // CameraSceneEntity Public Methods
+        CameraSceneEntity() = default;
+        CameraSceneEntity(CameraSpec parameters, CameraTransform const&, sid_t medium);
+
+        sid_t           medium;
+        CameraTransform cameraTransform;
+        CameraSpec      spec;
+        EColorSpaceType colorSpace;
+    };
+
+    struct DMT_MIDDLEWARE_API TransformedSceneEntity : public SceneEntity
+    {
+        TransformedSceneEntity() = default;
+        TransformedSceneEntity(sid_t name, AnimatedTransform const& t, ParamMap parameters = {});
+
+        AnimatedTransform transform;
+    };
+
+    struct DMT_MIDDLEWARE_API LightEntity : public TransformedSceneEntity
+    {
+        LightEntity() = default;
+        LightEntity(ELightType               type,
+                    AnimatedTransform const& t,
+                    sid_t                    _medium,
+                    EColorSpaceType          _colorSpace,
+                    ParamMap const&          _params);
+
+        LightSourceSpec spec;
+        sid_t           medium;
+        EColorSpaceType colorSpace;
+    };
+    // Material -------------------------------------------------------------------------------------------------------
+    struct DMT_MIDDLEWARE_API MaterialEntity : public SceneEntity
+    {
+        MaterialEntity() = default;
+        MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params);
+
+        MaterialSpec    spec;
+        EColorSpaceType colorSpace;
     };
 
     // Parsing --------------------------------------------------------------------------------------------------------
@@ -1055,6 +1257,8 @@ namespace dmt {
         Options                       m_options;
         GraphicsState                 m_graphicsState;
         CameraSceneEntity             m_camera;
+        std::vector<LightEntity>      m_lights;
+        std::vector<SceneEntity>      m_materials;
         std::map<sid_t, TransformSet> m_namedCoordinateSystems;
         dmt::Transform                m_renderFromWorld;
     };
@@ -1137,7 +1341,7 @@ namespace dmt {
     private:
         struct ParsingState
         {
-            // populated once the Camera directive is encountered (or left default constructed)
+            // populated once Scne Camera directive is encountered (or left default constructed)
             CameraSpec cameraSpec;
             // populated once the Film directive is encountered
             int32_t xResolution = -1;

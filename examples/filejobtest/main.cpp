@@ -166,6 +166,7 @@ AttributeEnd
         dmt::SceneParser      parser{actx, &desc, filePath};
 
         parser.parse(actx, opt);
+        std::cin.get();
     }
 
     void testBuddy(dmt::AppContext& actx, dmt::BaseMemoryResource* pMemResBuddy)
@@ -178,6 +179,50 @@ AttributeEnd
         testMemPoolAsyncDirectly(actx, pMemResPool);
     }
 
+    void testLightEntity()
+    {
+        using namespace dmt;
+        AppContextJanitor j;
+        j.actx.log("testLightEntity");
+        std::cin.get();
+        ParamMap          infiniteParams;
+        ELightType        lightType = ELightType::eInfinite;
+        AnimatedTransform t{Transform(), 0.f, Transform(), 1.f};
+        sid_t             medium = "air"_side; // empty = void, `MakeNamedMedium`
+        j.actx.log("Created shared objects");
+        std::cin.get();
+        infiniteParams.try_emplace("filename"_side, ParamPair{"string"_side, {"textures/spruit_sunrise_4k-clamp10.exr"}});
+        infiniteParams.try_emplace("scale"_side, ParamPair{"float"_side, {"10"}});
+        infiniteParams
+            .try_emplace("portal"_side,
+                         ParamPair{"point3"_side,
+                                   {"96", "280", "-523", "96", "280", "-269", "96", "9", "-269", "96", "9", "-523"}});
+        infiniteParams.try_emplace("L"_side, ParamPair{"blackbody"_side, {"6500"}});
+        EColorSpaceType colorSpace = EColorSpaceType::eSRGB;
+        j.actx.log("Created param map");
+        std::cin.get();
+
+        LightEntity entity{lightType, t, medium, colorSpace, infiniteParams};
+
+        j.actx.log("Created entity");
+        std::cin.get();
+        std::string entityStr = "Entity (Infinite Light) {{ ";
+        entityStr += *reinterpret_cast<std::string*>(&entity.spec.params.infinite.filename);
+        entityStr += " portal {{ ";
+        for (uint32_t i = 0; i < 4; ++i)
+        {
+            auto& p = entity.spec.params.infinite;
+            entityStr += "( ";
+            entityStr += std::to_string(p.portal[0].x);
+            entityStr += ", ";
+            entityStr += std::to_string(p.portal[0].y);
+            entityStr += ", ";
+            entityStr += std::to_string(p.portal[0].z);
+            entityStr += ") ";
+        }
+        entityStr += "}} }";
+        j.actx.log("{}", {entityStr});
+    }
 
 } // namespace
 
@@ -187,15 +232,18 @@ int guardedMain()
     dmt::ctx::init(actx);
     auto env = dmt::getEnv();
 
+    //testLightEntity();
+    //std::cin.get();
+
     actx.log("Hello darkness my old friend, {}", {sizeof(dmt::Options)});
-    dmt::model::test(actx);
+    //dmt::model::test(actx);
     //testCTrie(actx);
     //testWordTokenization(actx);
     //testJob(actx);
-    //textParsing(actx);
+    textParsing(actx);
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx());
     actx.log("CUDA Initialized");
-
+    /*
     std::vector<float> v3;
     v3.resize(32);
     {
@@ -246,9 +294,10 @@ int guardedMain()
     }
 
     dmt::UnifiedMemoryResource::destroy(unified);
+    std::cout << "Goodbye!" << std::endl;
+    */
     std::cout << "Press Any key to exit" << std::endl;
     std::cin.get();
-    std::cout << "Goodbye!" << std::endl;
     dmt::ctx::unregister();
     return 0;
 }

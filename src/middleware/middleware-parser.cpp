@@ -10,6 +10,7 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include <span>
 
 #include <cassert>
 #include <cctype>
@@ -787,9 +788,11 @@ namespace dmt {
                 static constexpr SText temperatureoffset = "temperatureoffset"sv; // float, def = 0
                 static constexpr SText temperaturescale  = "temperaturescale"sv;  // float, def = 1
                 static constexpr SText filename          = "filename"sv;          // string
-            } // namespace nanovdb_params
-        } // namespace media
-    } // namespace dict
+            }                                                                     // namespace nanovdb_params
+        }                                                                         // namespace media
+    }                                                                             // namespace dict
+
+    static constexpr std::array<sid_t, 2> pointTypes{dict::types::tPoint.sid, dict::types::tPoint3.sid};
 
     static constexpr bool activeTransformFromSid(sid_t type, EActiveTransform& out)
     {
@@ -1143,13 +1146,439 @@ namespace dmt {
         return true;
     }
 
+    static constexpr sid_t lightSidFromType(ELightType type)
+    {
+        using enum ELightType;
+        switch (type)
+        {
+            case eDistant: return dict::light::distant.sid;
+            case eGoniometric: return dict::light::goniometric.sid;
+            case eInfinite: return dict::light::infinite.sid;
+            case ePoint: return dict::light::point.sid;
+            case eProjection: return dict::light::projection.sid;
+            case eSpot: return dict::light::spot.sid;
+        }
+        return 0;
+    }
+
+
+    // Parse and set a float value
+    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            float value = defaultValue;
+            if (!parseFloat(values.valueAt(0), value))
+            {
+                return false; // Parsing failed
+            }
+            target = value;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set a std::string_view value
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            target = values.valueAt(0);
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, char* target, uint32_t& outLength, std::string_view defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            std::memcpy(target, values.valueAt(0).data(), values.valueAt(0).size());
+            outLength = static_cast<uint32_t>(values.valueAt(0).size());
+        }
+        else
+        {
+            std::memcpy(target, defaultValue.data(), defaultValue.size()); // Use default value if parameter is not found
+            outLength = static_cast<uint32_t>(defaultValue.size());
+        }
+        return true;
+    }
+
+    template <typename CharT, typename Traits, typename Allocator>
+    static bool parseAndSetString2(ParamMap const&                              params,
+                                   sid_t                                        paramSid,
+                                   std::basic_string<CharT, Traits, Allocator>& target,
+                                   std::basic_string_view<CharT, Traits>        defaultValue,
+                                   bool                                         required = false)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+
+            // Extract the value and set it into the target string
+            const std::basic_string_view<CharT, Traits> valueView{reinterpret_cast<CharT const*>(values.valueAt(0).data()),
+                                                                  values.valueAt(0).size() / sizeof(CharT)};
+
+            target.assign(valueView);
+            return true;
+        }
+        else if (!required)
+        {
+            // Assign the default value to the target
+            target.assign(defaultValue);
+            return true;
+        }
+        else
+            return false;
+    }
+
+    // Parse and set a boolean value
+    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
+    {
+        using namespace std::string_view_literals;
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            if (values.valueAt(0) == "true"sv)
+                target = true;
+            else if (values.valueAt(0) == "false"sv)
+                target = false;
+            else
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetFloat4(ParamMap const&             params,
+                           sid_t                       paramSid,
+                           std::array<float, 4>&       target,
+                           std::array<float, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
+            {
+                return false; // Invalid type or incorrect number of parameters
+            }
+
+            std::array<float, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseFloat(values.valueAt(i), parsedValues[i]))
+                {
+                    return false; // Parsing failed for an element
+                }
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an int32_t value
+    template <std::integral I>
+    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
+                return false; // Invalid type or number of parameters
+            if (!parseInt(values.valueAt(0), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    bool parseAndSetInt4(ParamMap const&               params,
+                         sid_t                         paramSid,
+                         std::array<int32_t, 4>&       target,
+                         std::array<int32_t, 4> const& defaultValue)
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
+                return false; // Invalid type or incorrect number of parameters
+
+            std::array<int32_t, 4> parsedValues = defaultValue;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (!parseInt(values.valueAt(i), parsedValues[i]))
+                    return false; // Parsing failed for an element
+            }
+
+            target = parsedValues;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    // Parse and set an enum value using a conversion function
+    template <typename EnumType>
+    static bool parseAndSetEnum(ParamMap const& params,
+                                sid_t           paramSid,
+                                EnumType&       target,
+                                EnumType        defaultValue,
+                                bool (*converter)(sid_t, EnumType&))
+    {
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != dict::types::tString.sid || values.numParams() != 1)
+            {
+                return false; // Invalid type or number of parameters
+            }
+            if (!converter(hashCRC64(values.valueAt(0)), target))
+                return false;
+        }
+        else
+        {
+            target = defaultValue; // Use default value if parameter is not found
+        }
+        return true;
+    }
+
+    static size_t parseAndSetFloatArray(
+        ParamMap const&           params,
+        sid_t                     paramSid,
+        size_t                    targetSz,
+        float* DMT_RESTRICT       target,
+        float const* DMT_RESTRICT defaultVals,
+        sid_t                     ttype = dict::types::tFloat.sid)
+    {
+        size_t ret = 0;
+        if (auto it = params.find(paramSid); it != params.end())
+        {
+            ParamPair const& values = it->second;
+            if (values.type != ttype || values.numParams() != targetSz)
+                return 0;
+
+            for (/**/; ret < values.numParams(); ++ret)
+            {
+                if (!parseFloat(values.valueAt(ret), target[ret]))
+                    return ret;
+            }
+        }
+        else
+        {
+            std::memcpy(target, defaultVals, targetSz * sizeof(float));
+            ret = targetSz;
+        }
+
+        return ret;
+    }
+
+    template <std::size_t NTTPSize>
+    static std::size_t parseFloatArray(ArgsDArray const& args, std::array<float, NTTPSize>& outArray)
+    {
+        // Check if the size of the input vector matches the expected size
+        if (args.size() != NTTPSize)
+        {
+            return 0; // Mismatch in expected and actual size
+        }
+
+        std::size_t parsedCount = 0;
+
+        for (std::size_t i = 0; i < NTTPSize; ++i)
+        {
+            // Parse each string into a float
+            float value = 0.0f;
+            if (!parseFloat(std::string_view(args[i]), value))
+            {
+                return parsedCount; // Stop and return the count parsed so far if there's an error
+            }
+            outArray[i] = value;
+            ++parsedCount;
+        }
+
+        return parsedCount; // Should be NTTPSize upon success
+    }
+
+    template <Vector V>
+    static bool parseAndSetVector(ParamMap const& _params, sid_t sid, V& target, V defaultV, std::span<sid_t const> allowedTypes)
+    {
+        if (auto it = _params.find(sid); it != _params.end())
+        {
+            ParamPair const& values = it->second;
+
+            if (std::find(allowedTypes.begin(), allowedTypes.end(), values.type) == allowedTypes.end())
+                return false;
+
+            for (uint32_t i = 0; i < V::numComponents(); ++i)
+            {
+                float value = 0.f;
+                if (!parseFloat(values.valueAt(i), value))
+                    return false;
+                target[i] = value;
+            }
+            return true;
+        }
+        else
+        {
+            target = defaultV;
+            return true;
+        }
+    }
+
     // Entity Definitions ---------------------------------------------------------------------------------------------
+
     CameraSceneEntity::CameraSceneEntity(CameraSpec parameters, CameraTransform const& cameraTransform, sid_t medium) :
     SceneEntity(cameraSidFromType(parameters.type), {/*we have no unparsed parameters at the moment*/}),
     spec(parameters),
     cameraTransform(cameraTransform),
     medium(medium)
     {
+    }
+
+    TransformedSceneEntity::TransformedSceneEntity(sid_t name, AnimatedTransform const& t, ParamMap parameters) :
+    SceneEntity(name, parameters),
+    transform(t)
+    {
+    }
+
+    LightEntity::LightEntity(ELightType               type,
+                             AnimatedTransform const& t,
+                             sid_t                    _medium,
+                             EColorSpaceType          _colorSpace,
+                             ParamMap const&          _params) :
+    TransformedSceneEntity(lightSidFromType(type), t, _params),
+    spec(type, _params.contains(dict::light::illuminance.sid), 0.f /*see insdie*/, 1.f /*see inside*/),
+    medium(_medium),
+    colorSpace(_colorSpace)
+    { // TODO Error handling
+        using namespace std::string_view_literals;
+        if (spec.illum)
+            parseAndSetFloat(parameters, dict::light::illuminance.sid, spec.po.illuminance, /*never*/ 1.f);
+        else
+            parseAndSetFloat(parameters, dict::light::power.sid, spec.po.power, 1.f);
+        parseAndSetFloat(parameters, dict::light::scale.sid, spec.scale, 1.f);
+
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                auto& param = spec.params.distant;
+                //dict::light::distant_params::L.sid
+                if (!parseAndSetVector(parameters, dict::light::distant_params::from.sid, param.from, {{0, 0, 0}}, pointTypes))
+                    std::abort();
+                if (!parseAndSetVector(parameters, dict::light::distant_params::to.sid, param.to, {{0, 0, 1}}, pointTypes))
+                    std::abort();
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                auto& param = spec.params.goniometric;
+                if (!parseAndSetString2(parameters,
+                                        dict::light::goniometric_params::filename.sid,
+                                        param.filename,
+                                        u8""sv,
+                                        true))
+                    std::abort(); // TODO better
+
+                //dict::light::goniometric_params::I.sid
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                auto& param = spec.params.infinite;
+                if (!parseAndSetString2(parameters, dict::light::infinite_params::filename.sid, param.filename, u8""sv))
+                    std::abort(); // TODO better
+                std::array<float, 12> def{};
+                if (!parseAndSetFloatArray(parameters,
+                                           dict::light::infinite_params::portal.sid,
+                                           12,
+                                           std::bit_cast<float*>(&param.portal[0][0]),
+                                           &def[0],
+                                           dict::types::tPoint3.sid))
+                    std::abort(); // TODO better
+                //dict::light::infinite_params::L.sid
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                auto& param = spec.params.point;
+                //dict::light::point_params::I.sid
+                if (!parseAndSetVector(parameters, dict::light::point_params::from.sid, param.from, {{0, 0, 0}}, pointTypes))
+                    std::abort();
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                auto& param = spec.params.projection;
+                //dict::light::projection_params::I.sid
+                if (!parseAndSetFloat(parameters, dict::light::projection_params::fov.sid, param.fov, 90.f))
+                    std::abort(); // TODO better
+                if (!parseAndSetString2(parameters, dict::light::projection_params::filename.sid, param.filename, u8""sv, true))
+                    std::abort(); // TODO better
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                auto& param = spec.params.spotlight;
+                //dict::light::spotlight_params::I
+                if (!parseAndSetVector(parameters, dict::light::spotlight_params::from.sid, param.from, {{0, 0, 0}}, pointTypes))
+                    std::abort(); // TODO better
+                if (!parseAndSetVector(parameters, dict::light::spotlight_params::to.sid, param.to, {{0, 0, 1}}, pointTypes))
+                    std::abort(); // TODO better
+                if (!parseAndSetFloat(parameters, dict::light::spotlight_params::coneangle.sid, param.coneangle, 30.f))
+                    std::abort();
+                if (!parseAndSetFloat(parameters, dict::light::spotlight_params::conedeltaangle.sid, param.conedeltaangle, 5.f))
+                    std::abort();
+                break;
+            }
+        }
+    }
+    // MaterialEntity ----------------------------------------------------------------------------------------------------
+    MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params):
+
+    {
+
     }
 
     // Parsing Helpers ------------------------------------------------------------------------------------------------
@@ -1308,250 +1737,6 @@ namespace dmt {
         }
 
         return false;
-    }
-
-    // Parse and set a float value
-    static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            float value = defaultValue;
-            if (!parseFloat(values.valueAt(0), value))
-            {
-                return false; // Parsing failed
-            }
-            target = value;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set a std::string_view value
-    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, std::string& target, std::string_view defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            target = values.valueAt(0);
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    static bool parseAndSetString(ParamMap const& params, sid_t paramSid, char* target, uint32_t& outLength, std::string_view defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            std::memcpy(target, values.valueAt(0).data(), values.valueAt(0).size());
-            outLength = static_cast<uint32_t>(values.valueAt(0).size());
-        }
-        else
-        {
-            std::memcpy(target, defaultValue.data(), defaultValue.size()); // Use default value if parameter is not found
-            outLength = static_cast<uint32_t>(defaultValue.size());
-        }
-        return true;
-    }
-
-    // Parse and set a boolean value
-    static bool parseAndSetBool(ParamMap const& params, sid_t paramSid, bool& target, bool defaultValue)
-    {
-        using namespace std::string_view_literals;
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tBool.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            if (values.valueAt(0) == "true"sv)
-                target = true;
-            else if (values.valueAt(0) == "false"sv)
-                target = false;
-            else
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    bool parseAndSetFloat4(ParamMap const&             params,
-                           sid_t                       paramSid,
-                           std::array<float, 4>&       target,
-                           std::array<float, 4> const& defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != 4)
-            {
-                return false; // Invalid type or incorrect number of parameters
-            }
-
-            std::array<float, 4> parsedValues = defaultValue;
-            for (size_t i = 0; i < 4; ++i)
-            {
-                if (!parseFloat(values.valueAt(i), parsedValues[i]))
-                {
-                    return false; // Parsing failed for an element
-                }
-            }
-
-            target = parsedValues;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set an int32_t value
-    template <std::integral I>
-    static bool parseAndSetInt(ParamMap const& params, sid_t paramSid, I& target, I defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tInteger.sid || values.numParams() != 1)
-                return false; // Invalid type or number of parameters
-            if (!parseInt(values.valueAt(0), target))
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    bool parseAndSetInt4(ParamMap const&               params,
-                         sid_t                         paramSid,
-                         std::array<int32_t, 4>&       target,
-                         std::array<int32_t, 4> const& defaultValue)
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tInteger.sid || values.numParams() != 4)
-                return false; // Invalid type or incorrect number of parameters
-
-            std::array<int32_t, 4> parsedValues = defaultValue;
-            for (size_t i = 0; i < 4; ++i)
-            {
-                if (!parseInt(values.valueAt(i), parsedValues[i]))
-                    return false; // Parsing failed for an element
-            }
-
-            target = parsedValues;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    // Parse and set an enum value using a conversion function
-    template <typename EnumType>
-    static bool parseAndSetEnum(ParamMap const& params,
-                                sid_t           paramSid,
-                                EnumType&       target,
-                                EnumType        defaultValue,
-                                bool (*converter)(sid_t, EnumType&))
-    {
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tString.sid || values.numParams() != 1)
-            {
-                return false; // Invalid type or number of parameters
-            }
-            if (!converter(hashCRC64(values.valueAt(0)), target))
-                return false;
-        }
-        else
-        {
-            target = defaultValue; // Use default value if parameter is not found
-        }
-        return true;
-    }
-
-    static size_t parseAndSetFloatArray(ParamMap const&           params,
-                                        sid_t                     paramSid,
-                                        size_t                    targetSz,
-                                        float* DMT_RESTRICT       target,
-                                        float const* DMT_RESTRICT defaultVals)
-    {
-        size_t ret = 0;
-        if (auto it = params.find(paramSid); it != params.end())
-        {
-            ParamPair const& values = it->second;
-            if (values.type != dict::types::tFloat.sid || values.numParams() != targetSz)
-                return 0;
-
-            for (/**/; ret < values.numParams(); ++ret)
-            {
-                if (!parseFloat(values.valueAt(ret), target[ret]))
-                    return ret;
-            }
-        }
-        else
-        {
-            std::memcpy(target, defaultVals, targetSz * sizeof(float));
-            ret = targetSz;
-        }
-
-        return ret;
-    }
-
-    template <std::size_t NTTPSize>
-    static std::size_t parseFloatArray(ArgsDArray const& args, std::array<float, NTTPSize>& outArray)
-    {
-        // Check if the size of the input vector matches the expected size
-        if (args.size() != NTTPSize)
-        {
-            return 0; // Mismatch in expected and actual size
-        }
-
-        std::size_t parsedCount = 0;
-
-        for (std::size_t i = 0; i < NTTPSize; ++i)
-        {
-            // Parse each string into a float
-            float value = 0.0f;
-            if (!parseFloat(std::string_view(args[i]), value))
-            {
-                return parsedCount; // Stop and return the count parsed so far if there's an error
-            }
-            outArray[i] = value;
-            ++parsedCount;
-        }
-
-        return parsedCount; // Should be NTTPSize upon success
     }
 
     static sid_t setCameraParams(CameraSpec& cameraSpec, ParamMap const& params, Options const& cmdOptions)
@@ -2252,8 +2437,9 @@ namespace dmt {
          bool (*fromSidFunc)(sid_t, Enum&),
          Enum& out) {
             currentStream.advance(actx);
+
             //check number of Args and get enum
-            if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(outArgs[0]), out))
+            if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(dequoteString(outArgs[0])), out))
             {
                 actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
                 std::abort();
@@ -2380,8 +2566,10 @@ namespace dmt {
 
                 if (!isDirective(tokenSid))
                 {
-                    actx.error("Invalid directive {}", {token});
-                    std::abort();
+                    //actx.error("Invalid directive {}", {token});
+                    //std::abort();
+                    currentStream.advance(actx);
+                    continue;
                 }
 
                 //check directives
@@ -2402,7 +2590,9 @@ namespace dmt {
                     }
                     case dict::directive::Identity.sid:
                     {
+                        //to verify
                         m_pTarget->Identity();
+                        //currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Camera.sid:
@@ -2582,10 +2772,16 @@ namespace dmt {
                     }
                     case dict::directive::Include.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Import.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::LookAt.sid:
@@ -2684,6 +2880,9 @@ namespace dmt {
                     }
                     case dict::directive::Shape.sid:
                     { // TODO create file
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::ObjectBegin.sid:
@@ -2720,34 +2919,58 @@ namespace dmt {
                     }
                     case dict::directive::LightSource.sid:
                     {
+                        ELightType out;
+                        typeAndParamListParsing(actx, dict::directive::LightSource, currentStream, args, params, lightTypeFromSid, out);
+                        m_pTarget->LightSource(out, params);
                         break;
                     }
                     case dict::directive::AreaLightSource.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Material.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::MakeNamedMaterial.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::NamedMaterial.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::Texture.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::MakeNamedMedium.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     case dict::directive::MediumInterface.sid:
                     {
+                        //to remove
+                        if (!isZeroArgsDirective(tokenSid))
+                            currentStream.advance(actx);
                         break;
                     }
                     default:
@@ -3131,11 +3354,23 @@ namespace dmt {
 
     void SceneDescription::Material(EMaterialType type, ParamMap const& params) {}
 
-    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params) {}
+    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params) {
+        SceneEntity material{name, params};
+        m_materials.push_back(material);
+    }
 
     void SceneDescription::NamedMaterial(sid_t name) {}
 
-    void SceneDescription::LightSource(ELightType type, ParamMap const& params) {}
+    void SceneDescription::LightSource(ELightType type, ParamMap const& params)
+    {
+        AnimatedTransform const t(m_graphicsState.ctm[0],
+                                  m_graphicsState.transformStartTime,
+                                  m_graphicsState.ctm[1],
+                                  m_graphicsState.transformEndTime);
+        LightEntity entity{type, t, m_graphicsState.currentOutsideMedium, m_graphicsState.colorSpace, params};
+        m_lights.push_back(entity);
+        //m_lights.emplace_back(type, t, m_graphicsState.currentOutsideMedium, m_graphicsState.colorSpace, params);
+    }
 
     void SceneDescription::AreaLightSource(EAreaLightType type, ParamMap const& params) {}
 
@@ -3155,7 +3390,13 @@ namespace dmt {
 
     void SceneDescription::EndOfFiles() {}
 
-    void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info) {}
+    void SceneDescription::EndOfHeader(EndOfHeaderInfo const& info)
+    {
+        if (m_camera.spec.type == ECameraType::eOrthographic || m_camera.spec.type == ECameraType::ePerspective)
+        {
+            m_camera.spec.params.p.screenWindow.arr = info.cameraSpec.params.p.screenWindow.arr;
+        }
+    }
 
     // Spec Functions -------------------------------------------------------------------------------------------------
     LightSourceSpec::LightSourceSpec(ELightType type, bool illum, float powerOrIlluminance, float scale) :
@@ -3163,15 +3404,711 @@ namespace dmt {
     type(type),
     illum(illum)
     {
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                std::construct_at(&params.distant);
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                std::construct_at(&params.goniometric);
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                std::construct_at(&params.infinite);
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                std::construct_at(&params.point);
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                std::construct_at(&params.projection);
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                std::construct_at(&params.spotlight);
+                break;
+            }
+        }
+        if (illum)
+        {
+            po.illuminance = powerOrIlluminance;
+        }
+        else
+            po.power = powerOrIlluminance;
     }
     // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
-    LightSourceSpec::LightSourceSpec(LightSourceSpec const&) {}
-    LightSourceSpec::LightSourceSpec(LightSourceSpec&&) noexcept {}
-    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const&) { return *this; }
-    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&&) noexcept { return *this; }
-    LightSourceSpec::~LightSourceSpec() noexcept {}
+    LightSourceSpec::LightSourceSpec(LightSourceSpec const& other) :
+    scale(other.scale),
+    type(other.type),
+    illum(other.illum)
+    {
+        if (other.illum)
+            po.illuminance = other.po.illuminance;
+        else
+            po.power = other.po.power;
 
+        switch (other.type)
+        {
+            case ELightType::eDistant:
+            {
+                std::construct_at(&params.distant);
+                params.distant = other.params.distant;
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                std::construct_at(&params.goniometric);
+                params.goniometric = other.params.goniometric;
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                std::construct_at(&params.infinite);
+                params.infinite = other.params.infinite;
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                std::construct_at(&params.point);
+                params.point = other.params.point;
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                params.projection = other.params.projection;
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                std::construct_at(&params.spotlight);
+                params.spotlight = other.params.spotlight;
+                break;
+            }
+        }
+    }
 
+    LightSourceSpec::LightSourceSpec(LightSourceSpec&& _that) noexcept :
+    scale(std::exchange(_that.scale, 1.f)),
+    type(std::exchange(_that.type, ELightType::eCount)),
+    illum(std::exchange(_that.illum, false))
+    {
+        if (illum)
+            po.illuminance = _that.po.illuminance;
+        else
+            po.power = _that.po.power;
+
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                std::construct_at(&params.distant);
+                params.distant = std::move(_that.params.distant);
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                std::construct_at(&params.goniometric);
+                params.goniometric = std::move(_that.params.goniometric);
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                std::construct_at(&params.infinite);
+                params.infinite = std::move(_that.params.infinite);
+                break;
+            }
+            case ELightType::ePoint:
+            {
+                std::construct_at(&params.point);
+                params.point = std::move(_that.params.point);
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                std::construct_at(&params.projection);
+                params.projection = std::move(_that.params.projection);
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                std::construct_at(&params.spotlight);
+                params.spotlight = std::move(_that.params.spotlight);
+                break;
+            }
+        }
+    }
+
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec const& _that)
+    {
+        if (this != &_that)
+        {
+            // destroy preexisting object first
+            cleanup();
+
+            // then assign the new object
+            scale = _that.scale;
+            type  = _that.type;
+            illum = _that.illum;
+
+            switch (type)
+            {
+                case ELightType::eDistant:
+                {
+                    params.distant = _that.params.distant;
+                    break;
+                }
+                case ELightType::eGoniometric:
+                {
+                    params.goniometric = _that.params.goniometric;
+                    break;
+                }
+                case ELightType::eInfinite:
+                {
+                    params.infinite = _that.params.infinite;
+                    break;
+                }
+                case ELightType::ePoint:
+                {
+                    params.point = _that.params.point;
+                    break;
+                }
+                case ELightType::eProjection:
+                {
+                    params.projection = _that.params.projection;
+                    break;
+                }
+                case ELightType::eSpot:
+                {
+                    params.spotlight = _that.params.spotlight;
+                    break;
+                }
+            }
+        }
+        return *this;
+    }
+
+    LightSourceSpec& LightSourceSpec::operator=(LightSourceSpec&& _that) noexcept
+    {
+        if (this != &_that)
+        {
+            // destroy preexisting object first
+            cleanup();
+
+            // then assign the new object
+            scale = std::exchange(_that.scale, 1.f);
+            type  = std::exchange(_that.type, ELightType::eCount);
+            illum = std::exchange(_that.illum, false);
+
+            switch (type)
+            {
+                case ELightType::eDistant:
+                {
+                    params.distant = std::move(_that.params.distant);
+                    break;
+                }
+                case ELightType::eGoniometric:
+                {
+                    params.goniometric = std::move(_that.params.goniometric);
+                    break;
+                }
+                case ELightType::eInfinite:
+                {
+                    params.infinite = std::move(_that.params.infinite);
+                    break;
+                }
+                case ELightType::ePoint:
+                {
+                    params.point = std::move(_that.params.point);
+                    break;
+                }
+                case ELightType::eProjection:
+                {
+                    params.projection = std::move(_that.params.projection);
+                    break;
+                }
+                case ELightType::eSpot:
+                {
+                    params.spotlight = std::move(_that.params.spotlight);
+                    break;
+                }
+            }
+
+            // then destroy the moved from object
+            _that.cleanup();
+        }
+        return *this;
+    }
+
+    LightSourceSpec::~LightSourceSpec() noexcept { cleanup(); }
+
+    void LightSourceSpec::cleanup() noexcept
+    {
+        switch (type)
+        {
+            case ELightType::eDistant:
+            {
+                std::destroy_at(&params.distant);
+                break;
+            }
+            case ELightType::eGoniometric:
+            {
+                std::destroy_at(&params.goniometric);
+                break;
+            }
+            case ELightType::eInfinite:
+            {
+                std::destroy_at(&params.infinite);
+                break;
+            }
+            case ELightType::ePoint:
+            {
+
+                std::destroy_at(&params.point);
+                break;
+            }
+            case ELightType::eProjection:
+            {
+                std::destroy_at(&params.projection);
+                break;
+            }
+            case ELightType::eSpot:
+            {
+                std::destroy_at(&params.spotlight);
+                break;
+            }
+        }
+    }
+//MaterialSpec
+    MaterialSpec::MaterialSpec(EMaterialType type) :
+    type(type)
+    {
+        switch (type)
+        {
+            case EMaterialType::eCoateddiffuse:
+            {
+                std::construct_at(&params.coateddiffuse);
+                break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                std::construct_at(&params.coatedconductor);
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                std::construct_at(&params.conductor);
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                std::construct_at(&params.dielectric);
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                std::construct_at(&params.diffuseTransmission);
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                std::construct_at(&params.hair);
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                std::construct_at(&params.interface);
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                std::construct_at(&params.mesured);
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                std::construct_at(&params.mix);
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                std::construct_at(&params.subsurface);
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                std::construct_at(&params.thindielectric);
+                break;
+            }
+        }
+    }
+    // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
+    MaterialSpec::MaterialSpec(MaterialSpec const& other) :
+    type(other.type)
+    {
+        switch (other.type)
+        {
+            case EMaterialType::eCoateddiffuse:
+            {
+                std::construct_at(&params.coateddiffuse);
+                params.coateddiffuse = other.params.coateddiffuse;
+                break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                std::construct_at(&params.coatedconductor);
+                params.coatedconductor = other.params.coatedconductor;
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                std::construct_at(&params.conductor);
+                params.conductor = other.params.conductor;
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                std::construct_at(&params.dielectric);
+                params.dielectric = other.params.dielectric;
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                std::construct_at(&params.diffuseTransmission);
+                params.diffuseTransmission = other.params.diffuseTransmission;
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                std::construct_at(&params.hair);
+                params.hair = other.params.hair;
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                std::construct_at(&params.interface);
+                params.interface = other.params.interface;
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                std::construct_at(&params.mesured);
+                params.mesured = other.params.mesured;
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                std::construct_at(&params.mix);
+                params.mix = other.params.mix;
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                std::construct_at(&params.subsurface);
+                params.subsurface= other.params.subsurface;
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                std::construct_at(&params.thindielectric);
+                params.thindielectric = other.params.thindielectric;
+                break;
+            }
+        }
+    }
+
+    MaterialSpec::MaterialSpec(MaterialSpec&& _that) noexcept :
+    type(std::exchange(_that.type, EMaterialType::eCount))
+    {
+        switch (type)
+        {
+            case EMaterialType::eCoateddiffuse:
+            {
+                std::construct_at(&params.coateddiffuse);
+                params.coateddiffuse = std::move(_that.params.coateddiffuse);
+                break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                std::construct_at(&params.coatedconductor);
+                params.coatedconductor = std::move(_that.params.coatedconductor);
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                std::construct_at(&params.conductor);
+                params.conductor = std::move(_that.params.conductor);
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                std::construct_at(&params.dielectric);
+                params.dielectric = std::move(_that.params.dielectric);
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                std::construct_at(&params.diffuseTransmission);
+                params.diffuseTransmission = std::move(_that.params.diffuseTransmission);
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                std::construct_at(&params.hair);
+                params.hair = std::move(_that.params.hair);
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                std::construct_at(&params.interface);
+                params.interface = std::move(_that.params.interface);
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                std::construct_at(&params.mesured);
+                params.mesured = std::move(_that.params.mesured);
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                std::construct_at(&params.mix);
+                params.mix = std::move(_that.params.mix);
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                std::construct_at(&params.subsurface);
+                params.subsurface = std::move(_that.params.subsurface);
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                std::construct_at(&params.thindielectric);
+                params.thindielectric = std::move(_that.params.thindielectric);
+                break;
+            }
+        }
+    }
+
+    MaterialSpec& MaterialSpec::operator=(MaterialSpec const& _that)
+    {
+        if (this != &_that)
+        {
+            // destroy preexisting object first
+            cleanup();
+
+            // then assign the new object
+            type  = _that.type;
+
+            switch (type)
+            {
+                case EMaterialType::eCoateddiffuse:
+            {
+                params.coateddiffuse = _that.params.coateddiffuse;
+                break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                params.coatedconductor = _that.params.coatedconductor;
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                params.conductor = _that.params.conductor;
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                params.dielectric = _that.params.dielectric;
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                params.diffuseTransmission = _that.params.diffuseTransmission;
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                params.hair = _that.params.hair;
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                params.interface = _that.params.interface;
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                params.mesured = _that.params.mesured;
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                params.mix = _that.params.mix;
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                params.subsurface = _that.params.subsurface;
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                params.thindielectric = _that.params.thindielectric;
+                break;
+            }
+            }
+        }
+        return *this;
+    }
+
+    MaterialSpec& MaterialSpec::operator=(MaterialSpec&& _that) noexcept
+    {
+        if (this != &_that)
+        {
+            // destroy preexisting object first
+            cleanup();
+
+            // then assign the new object
+            type  = std::exchange(_that.type, EMaterialType::eCount);
+
+            switch (type)
+            {
+                case EMaterialType::eCoateddiffuse:
+            {
+                params.coateddiffuse = std::move(_that.params.coateddiffuse);
+                break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                params.coatedconductor = std::move(_that.params.coatedconductor);
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                params.conductor = std::move(_that.params.conductor);
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                params.dielectric = std::move(_that.params.dielectric);
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                params.diffuseTransmission = std::move(_that.params.diffuseTransmission);
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                params.hair = std::move(_that.params.hair);
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                params.interface = std::move(_that.params.interface);
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                params.mesured = std::move(_that.params.mesured);
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                params.mix = std::move(_that.params.mix);
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                params.subsurface = std::move(_that.params.subsurface);
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                params.thindielectric = std::move(_that.params.thindielectric);
+                break;
+            }
+            }
+
+            // then destroy the moved from object
+            _that.cleanup();
+        }
+        return *this;
+    }
+
+    MaterialSpec::~MaterialSpec() noexcept { cleanup(); }
+
+    void MaterialSpec::cleanup() noexcept
+    {
+        switch (type)
+        {
+            case EMaterialType::eCoateddiffuse:
+            {
+                std::destroy_at(&params.coateddiffuse);
+                break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                std::destroy_at(&params.coatedconductor);
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                std::destroy_at(&params.conductor);
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                std::destroy_at(&params.dielectric);
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                std::destroy_at(&params.diffuseTransmission);
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                std::destroy_at(&params.hair);
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                std::destroy_at(&params.interface);
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                std::destroy_at(&params.mesured);
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                std::destroy_at(&params.mix);
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                std::destroy_at(&params.subsurface);
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                std::destroy_at(&params.thindielectric);
+                break;
+            }
+        }
+    }
+// CameraSpec -------------------------------------------------------
     CameraSpec::CameraSpec(CameraSpec const& other) :
     shutteropen(other.shutteropen),
     shutterclose(other.shutterclose),

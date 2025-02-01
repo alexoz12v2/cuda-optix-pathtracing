@@ -154,6 +154,7 @@ So to
 
 ## How to handle Long Paths then 
 https://stackoverflow.com/questions/38036943/getfullpathnamew-and-long-windows-file-paths
+https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?source=recommendations&tabs=registry#functions-without-max_path-restrictions
 
 ## File Mapping
 https://learn.microsoft.com/en-us/windows/win32/memory/file-mapping

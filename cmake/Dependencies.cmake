@@ -18,6 +18,8 @@ macro(dmt_setup_dependencies)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
   endif()
 
+
+
   if(NOT TARGET Backward::Backward)
     FetchContent_Declare(backward
       GIT_REPOSITORY https://github.com/bombela/backward-cpp
@@ -26,6 +28,10 @@ macro(dmt_setup_dependencies)
     )
     FetchContent_MakeAvailable(backward)
   endif()
+
+
+
+
 
   if(NOT TARGET glad)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/glad)
@@ -40,6 +46,8 @@ macro(dmt_setup_dependencies)
     FetchContent_MakeAvailable(glm)
     add_compile_definitions(GLM_FORCE_XYZW_ONLY)
   endif()
+
+
 
   if(NOT TARGET Eigen3::Eigen)
     FetchContent_Declare(
@@ -70,6 +78,28 @@ macro(dmt_setup_dependencies)
     FetchContent_MakeAvailable(glfw)
   endif()
 
+  if(NOT TARGET Imath::Imath)
+  FetchContent_Declare(Imath
+    GIT_REPOSITORY https://github.com/AcademySoftwareFoundation/Imath.git
+    GIT_TAG        v3.1.12 # or a later release
+    GIT_SHALLOW    ON
+  )
+  FetchContent_MakeAvailable(Imath)
+endif()
+
+  if(NOT TARGET OpenEXR::OpenEXR)
+  set(OPENEXR_INSTALL OFF)
+  set(OPENEXR_INSTALL_TOOLS OFF)
+  FetchContent_Declare(OpenEXR
+    GIT_REPOSITORY https://github.com/AcademySoftwareFoundation/openexr.git
+    GIT_TAG        v3.3.2 # or a later release
+    GIT_SHALLOW    ON
+  )
+  FetchContent_MakeAvailable(OpenEXR)
+endif()
+
+
+
   if(NOT TARGET imgui)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/imgui)
   endif()
@@ -78,4 +108,11 @@ macro(dmt_setup_dependencies)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/implot)
   endif()
 
+  if(NOT TARGET stb)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/stb)
+  endif()
+
+  if(NOT TARGET qoi)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/qoi)
+  endif()
 endmacro()

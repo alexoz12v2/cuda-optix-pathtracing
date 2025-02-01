@@ -1161,6 +1161,26 @@ namespace dmt {
         return 0;
     }
 
+    static constexpr sid_t materialSidFromType(EMaterialType type)
+    {
+        using enum EMaterialType;
+        switch (type)
+        {
+            case eCoateddiffuse: return dict::material::coateddiffuse.sid;
+            case eCoatedconductor: return dict::material::coatedconductor.sid;
+            case eConductor: return dict::material::conductor.sid;
+            case eDielectric: return dict::material::dielectric.sid;
+            case eDiffuse: return dict::material::diffuse.sid;
+            case eDiffusetransmission: return dict::material::diffusetransmission.sid;
+            case eHair: return dict::material::hair.sid;
+            case eInterface: return dict::material::interface.sid;
+            case eMeasured: return dict::material::measured.sid;
+            case eMix: return dict::material::mix.sid;
+            case eSubsurface: return dict::material::subsurface.sid;
+            case eThindielectric: return dict::material::thindielectric.sid;
+        }
+        return 0;
+    }
 
     // Parse and set a float value
     static bool parseAndSetFloat(ParamMap const& params, sid_t paramSid, float& target, float defaultValue)
@@ -1575,8 +1595,75 @@ namespace dmt {
         }
     }
     // MaterialEntity ----------------------------------------------------------------------------------------------------
-    MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params)
+    /*MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params) :
+    SceneEntity(materiaSidFromType(type), _params),
+    spec(type),
+    colorSpace(_colorSpace)
     {
+    }*/
+    MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params) :
+    SceneEntity(materialSidFromType(type), _params),
+    type(type),
+    colorSpace(_colorSpace)
+    {
+
+        switch (type)
+        {
+            case EMaterialType::eCoateddiffuse:
+            {
+                parse break;
+            }
+            case EMaterialType::eCoatedconductor:
+            {
+                std::construct_at(&params.coatedconductor);
+                break;
+            }
+            case EMaterialType::eConductor:
+            {
+                std::construct_at(&params.conductor);
+                break;
+            }
+            case EMaterialType::eDielectric:
+            {
+                std::construct_at(&params.dielectric);
+                break;
+            }
+            case EMaterialType::eDiffusetransmission:
+            {
+                std::construct_at(&params.diffuseTransmission);
+                break;
+            }
+            case EMaterialType::eHair:
+            {
+                std::construct_at(&params.hair);
+                break;
+            }
+            case EMaterialType::eInterface:
+            {
+                std::construct_at(&params.interface);
+                break;
+            }
+            case EMaterialType::eMeasured:
+            {
+                std::construct_at(&params.mesured);
+                break;
+            }
+            case EMaterialType::eMix:
+            {
+                std::construct_at(&params.mix);
+                break;
+            }
+            case EMaterialType::eSubsurface:
+            {
+                std::construct_at(&params.subsurface);
+                break;
+            }
+            case EMaterialType::eThindielectric:
+            {
+                std::construct_at(&params.thindielectric);
+                break;
+            }
+        }
     }
 
     // Parsing Helpers ------------------------------------------------------------------------------------------------
@@ -3350,9 +3437,15 @@ namespace dmt {
 
     void SceneDescription::Texture(sid_t name, ETextureType type, ETextureClass texname, ParamMap const& params) {}
 
-    void SceneDescription::Material(EMaterialType type, ParamMap const& params) {}
+    void SceneDescription::Material(EMaterialType type, ParamMap const& params)
+    {
+        MaterialEntity material{type, m_graphicsState.colorSpace, params};
+        m_materials.push_back(material);
+        m_graphicsState.currentMaterialName = 0;
+    }
 
-    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params) {
+    void SceneDescription::MakeNamedMaterial(sid_t name, ParamMap const& params)
+    {
         SceneEntity material{name, params};
         m_materials.push_back(material);
     }
@@ -3684,9 +3777,8 @@ namespace dmt {
             }
         }
     }
-//MaterialSpec
-    MaterialSpec::MaterialSpec(EMaterialType type) :
-    type(type)
+    //MaterialSpec
+    MaterialSpec::MaterialSpec(EMaterialType type) : type(type)
     {
         switch (type)
         {
@@ -3748,8 +3840,7 @@ namespace dmt {
         }
     }
     // Since realistic camrea stores two filenames as strings, we cannot use memcpy for copy semantics
-    MaterialSpec::MaterialSpec(MaterialSpec const& other) :
-    type(other.type)
+    MaterialSpec::MaterialSpec(MaterialSpec const& other) : type(other.type)
     {
         switch (other.type)
         {
@@ -3810,7 +3901,7 @@ namespace dmt {
             case EMaterialType::eSubsurface:
             {
                 std::construct_at(&params.subsurface);
-                params.subsurface= other.params.subsurface;
+                params.subsurface = other.params.subsurface;
                 break;
             }
             case EMaterialType::eThindielectric:
@@ -3822,8 +3913,7 @@ namespace dmt {
         }
     }
 
-    MaterialSpec::MaterialSpec(MaterialSpec&& _that) noexcept :
-    type(std::exchange(_that.type, EMaterialType::eCount))
+    MaterialSpec::MaterialSpec(MaterialSpec&& _that) noexcept : type(std::exchange(_that.type, EMaterialType::eCount))
     {
         switch (type)
         {
@@ -3904,65 +3994,65 @@ namespace dmt {
             cleanup();
 
             // then assign the new object
-            type  = _that.type;
+            type = _that.type;
 
             switch (type)
             {
                 case EMaterialType::eCoateddiffuse:
-            {
-                params.coateddiffuse = _that.params.coateddiffuse;
-                break;
-            }
-            case EMaterialType::eCoatedconductor:
-            {
-                params.coatedconductor = _that.params.coatedconductor;
-                break;
-            }
-            case EMaterialType::eConductor:
-            {
-                params.conductor = _that.params.conductor;
-                break;
-            }
-            case EMaterialType::eDielectric:
-            {
-                params.dielectric = _that.params.dielectric;
-                break;
-            }
-            case EMaterialType::eDiffusetransmission:
-            {
-                params.diffuseTransmission = _that.params.diffuseTransmission;
-                break;
-            }
-            case EMaterialType::eHair:
-            {
-                params.hair = _that.params.hair;
-                break;
-            }
-            case EMaterialType::eInterface:
-            {
-                params.interface = _that.params.interface;
-                break;
-            }
-            case EMaterialType::eMeasured:
-            {
-                params.mesured = _that.params.mesured;
-                break;
-            }
-            case EMaterialType::eMix:
-            {
-                params.mix = _that.params.mix;
-                break;
-            }
-            case EMaterialType::eSubsurface:
-            {
-                params.subsurface = _that.params.subsurface;
-                break;
-            }
-            case EMaterialType::eThindielectric:
-            {
-                params.thindielectric = _that.params.thindielectric;
-                break;
-            }
+                {
+                    params.coateddiffuse = _that.params.coateddiffuse;
+                    break;
+                }
+                case EMaterialType::eCoatedconductor:
+                {
+                    params.coatedconductor = _that.params.coatedconductor;
+                    break;
+                }
+                case EMaterialType::eConductor:
+                {
+                    params.conductor = _that.params.conductor;
+                    break;
+                }
+                case EMaterialType::eDielectric:
+                {
+                    params.dielectric = _that.params.dielectric;
+                    break;
+                }
+                case EMaterialType::eDiffusetransmission:
+                {
+                    params.diffuseTransmission = _that.params.diffuseTransmission;
+                    break;
+                }
+                case EMaterialType::eHair:
+                {
+                    params.hair = _that.params.hair;
+                    break;
+                }
+                case EMaterialType::eInterface:
+                {
+                    params.interface = _that.params.interface;
+                    break;
+                }
+                case EMaterialType::eMeasured:
+                {
+                    params.mesured = _that.params.mesured;
+                    break;
+                }
+                case EMaterialType::eMix:
+                {
+                    params.mix = _that.params.mix;
+                    break;
+                }
+                case EMaterialType::eSubsurface:
+                {
+                    params.subsurface = _that.params.subsurface;
+                    break;
+                }
+                case EMaterialType::eThindielectric:
+                {
+                    params.thindielectric = _that.params.thindielectric;
+                    break;
+                }
             }
         }
         return *this;
@@ -3976,65 +4066,65 @@ namespace dmt {
             cleanup();
 
             // then assign the new object
-            type  = std::exchange(_that.type, EMaterialType::eCount);
+            type = std::exchange(_that.type, EMaterialType::eCount);
 
             switch (type)
             {
                 case EMaterialType::eCoateddiffuse:
-            {
-                params.coateddiffuse = std::move(_that.params.coateddiffuse);
-                break;
-            }
-            case EMaterialType::eCoatedconductor:
-            {
-                params.coatedconductor = std::move(_that.params.coatedconductor);
-                break;
-            }
-            case EMaterialType::eConductor:
-            {
-                params.conductor = std::move(_that.params.conductor);
-                break;
-            }
-            case EMaterialType::eDielectric:
-            {
-                params.dielectric = std::move(_that.params.dielectric);
-                break;
-            }
-            case EMaterialType::eDiffusetransmission:
-            {
-                params.diffuseTransmission = std::move(_that.params.diffuseTransmission);
-                break;
-            }
-            case EMaterialType::eHair:
-            {
-                params.hair = std::move(_that.params.hair);
-                break;
-            }
-            case EMaterialType::eInterface:
-            {
-                params.interface = std::move(_that.params.interface);
-                break;
-            }
-            case EMaterialType::eMeasured:
-            {
-                params.mesured = std::move(_that.params.mesured);
-                break;
-            }
-            case EMaterialType::eMix:
-            {
-                params.mix = std::move(_that.params.mix);
-                break;
-            }
-            case EMaterialType::eSubsurface:
-            {
-                params.subsurface = std::move(_that.params.subsurface);
-                break;
-            }
-            case EMaterialType::eThindielectric:
-            {
-                params.thindielectric = std::move(_that.params.thindielectric);
-                break;
-            }
+                {
+                    params.coateddiffuse = std::move(_that.params.coateddiffuse);
+                    break;
+                }
+                case EMaterialType::eCoatedconductor:
+                {
+                    params.coatedconductor = std::move(_that.params.coatedconductor);
+                    break;
+                }
+                case EMaterialType::eConductor:
+                {
+                    params.conductor = std::move(_that.params.conductor);
+                    break;
+                }
+                case EMaterialType::eDielectric:
+                {
+                    params.dielectric = std::move(_that.params.dielectric);
+                    break;
+                }
+                case EMaterialType::eDiffusetransmission:
+                {
+                    params.diffuseTransmission = std::move(_that.params.diffuseTransmission);
+                    break;
+                }
+                case EMaterialType::eHair:
+                {
+                    params.hair = std::move(_that.params.hair);
+                    break;
+                }
+                case EMaterialType::eInterface:
+                {
+                    params.interface = std::move(_that.params.interface);
+                    break;
+                }
+                case EMaterialType::eMeasured:
+                {
+                    params.mesured = std::move(_that.params.mesured);
+                    break;
+                }
+                case EMaterialType::eMix:
+                {
+                    params.mix = std::move(_that.params.mix);
+                    break;
+                }
+                case EMaterialType::eSubsurface:
+                {
+                    params.subsurface = std::move(_that.params.subsurface);
+                    break;
+                }
+                case EMaterialType::eThindielectric:
+                {
+                    params.thindielectric = std::move(_that.params.thindielectric);
+                    break;
+                }
             }
 
             // then destroy the moved from object
@@ -4106,7 +4196,10 @@ namespace dmt {
             }
         }
     }
-// CameraSpec -------------------------------------------------------
+
+    //MaterialS----------------------------------------------------------
+    MaterialS::MaterialS(EMaterialType type) : type(type) {}
+    // CameraSpec -------------------------------------------------------
     CameraSpec::CameraSpec(CameraSpec const& other) :
     shutteropen(other.shutteropen),
     shutterclose(other.shutterclose),

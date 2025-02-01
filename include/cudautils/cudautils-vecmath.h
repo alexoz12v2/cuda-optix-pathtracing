@@ -785,6 +785,195 @@ namespace dmt {
         Vector3f rxDirection, ryDirection;
     };
 
+    template <typename T, int N>
+    class array
+    {
+    public:
+        using value_type     = T;
+        using iterator       = value_type*;
+        using const_iterator = value_type const*;
+        using size_t         = std::size_t;
+
+        array() = default;
+
+        DMT_CPU_GPU array(std::initializer_list<T> v)
+        {
+            size_t i = 0;
+            for (T const& val : v)
+                values[i++] = val;
+        }
+
+
+        DMT_CPU_GPU void fill(T const& v)
+        {
+            for (int i = 0; i < N; ++i)
+                values[i] = v;
+        }
+
+
+        DMT_CPU_GPU bool operator==(array<T, N> const& a) const
+        {
+            for (int i = 0; i < N; ++i)
+                if (values[i] != a.values[i])
+                    return false;
+            return true;
+        }
+
+        DMT_CPU_GPU bool operator!=(array<T, N> const& a) const { return !(*this == a); }
+
+
+        DMT_CPU_GPU iterator begin() { return values; }
+
+        DMT_CPU_GPU iterator end() { return values + N; }
+
+        DMT_CPU_GPU const_iterator begin() const { return values; }
+
+        DMT_CPU_GPU const_iterator end() const { return values + N; }
+
+
+        DMT_CPU_GPU size_t size() const { return N; }
+
+
+        DMT_CPU_GPU T& operator[](size_t i) { return values[i]; }
+
+        DMT_CPU_GPU T const& operator[](size_t i) const { return values[i]; }
+
+
+        DMT_CPU_GPU T* data() { return values; }
+
+        DMT_CPU_GPU T const* data() const { return values; }
+
+    private:
+        T values[N] = {};
+    };
+    //optional ----------------------------------------------------------------------
+    template <typename T>
+
+    class optional
+    {
+    public:
+        using value_type = T;
+
+        optional() = default;
+        DMT_CPU_GPU
+        optional(T const& v) : set(true) { new (ptr()) T(v); }
+        DMT_CPU_GPU
+        optional(T&& v) : set(true) { new (ptr()) T(std::move(v)); }
+        DMT_CPU_GPU
+        optional(optional const& v) : set(v.has_value())
+        {
+            if (v.has_value())
+                new (ptr()) T(v.value());
+        }
+        DMT_CPU_GPU
+        optional(optional&& v) : set(v.has_value())
+        {
+            if (v.has_value())
+            {
+                new (ptr()) T(std::move(v.value()));
+                v.reset();
+            }
+        }
+
+        DMT_CPU_GPU
+        optional& operator=(T const& v)
+        {
+            reset();
+            new (ptr()) T(v);
+            set = true;
+            return *this;
+        }
+        DMT_CPU_GPU
+        optional& operator=(T&& v)
+        {
+            reset();
+            new (ptr()) T(std::move(v));
+            set = true;
+            return *this;
+        }
+        DMT_CPU_GPU
+        optional& operator=(optional const& v)
+        {
+            reset();
+            if (v.has_value())
+            {
+                new (ptr()) T(v.value());
+                set = true;
+            }
+            return *this;
+        }
+        DMT_CPU_GPU
+        optional& operator=(optional&& v)
+        {
+            reset();
+            if (v.has_value())
+            {
+                new (ptr()) T(std::move(v.value()));
+                set = true;
+                v.reset();
+            }
+            return *this;
+        }
+
+        DMT_CPU_GPU
+        ~optional() { reset(); }
+
+        DMT_CPU_GPU
+        explicit operator bool() const { return set; }
+
+        DMT_CPU_GPU
+        T value_or(T const& alt) const { return set ? value() : alt; }
+
+        DMT_CPU_GPU
+        T* operator->() { return &value(); }
+        DMT_CPU_GPU
+        T const* operator->() const { return &value(); }
+        DMT_CPU_GPU
+        T& operator*() { return value(); }
+        DMT_CPU_GPU
+        T const& operator*() const { return value(); }
+        DMT_CPU_GPU
+        T& value()
+        {
+            CHECK(set);
+            return *ptr();
+        }
+        DMT_CPU_GPU
+        T const& value() const
+        {
+            CHECK(set);
+            return *ptr();
+        }
+
+        DMT_CPU_GPU
+        void reset()
+        {
+            if (set)
+            {
+                value().~T();
+                set = false;
+            }
+        }
+
+        DMT_CPU_GPU
+        bool has_value() const { return set; }
+
+    private:
+#ifdef __NVCC__
+        // Work-around NVCC bug
+        DMT_CPU_GPU
+        T* ptr() { return reinterpret_cast<T*>(&optionalValue); }
+        DMT_CPU_GPU
+        T const* ptr() const { return reinterpret_cast<T const*>(&optionalValue); }
+#else
+        DMT_CPU_GPU T*       ptr() { return std::launder(reinterpret_cast<T*>(&optionalValue)); }
+        DMT_CPU_GPU T const* ptr() const { return std::launder(reinterpret_cast<T const*>(&optionalValue)); }
+#endif
+
+        std::aligned_storage_t<sizeof(T), alignof(T)> optionalValue;
+        bool                                          set = false;
+    };
+
 } // namespace dmt
 
 /**

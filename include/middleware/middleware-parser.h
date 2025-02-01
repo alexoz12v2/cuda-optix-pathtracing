@@ -683,8 +683,8 @@ namespace dmt {
         MaterialSpec() = default;
         DMT_MIDDLEWARE_API MaterialSpec(EMaterialType type);
         //stores filenames as strings, we cannot use memcpy for copy semantics
-        DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec const&);
-        DMT_MIDDLEWARE_API                  MaterialSpec(MaterialSpec&&) noexcept;
+        DMT_MIDDLEWARE_API               MaterialSpec(MaterialSpec const&);
+        DMT_MIDDLEWARE_API               MaterialSpec(MaterialSpec&&) noexcept;
         DMT_MIDDLEWARE_API MaterialSpec& operator=(MaterialSpec const&);
         DMT_MIDDLEWARE_API MaterialSpec& operator=(MaterialSpec&&) noexcept;
         DMT_MIDDLEWARE_API ~MaterialSpec() noexcept;
@@ -761,56 +761,56 @@ namespace dmt {
         struct DiffuseTransmissionMaterial
         {
             float         displacement;
-            std::u8string normalmap = u8"";
-            float reflectance = 0.25;
-            float transmittance = 0.25;
-            float scale = 1;
+            std::u8string normalmap     = u8"";
+            float         reflectance   = 0.25;
+            float         transmittance = 0.25;
+            float         scale         = 1;
         };
 
         struct HairMaterial
         {
             float         displacement;
-            std::u8string normalmap = u8"";
-            float* sigma_a = nullptr;
-            float* reflectance = nullptr;
-            float eumelanin = 1.3;
-            float pheomalanin;
-            float eta = 1.55;
-            float beta_m = 0.3;
-            float alpha = 2;
+            std::u8string normalmap   = u8"";
+            float*        sigma_a     = nullptr;
+            float*        reflectance = nullptr;
+            float         eumelanin   = 1.3;
+            float         pheomalanin;
+            float         eta    = 1.55;
+            float         beta_m = 0.3;
+            float         alpha  = 2;
         };
-        
+
         struct MeasuredMaterial
         {
             float         displacement;
             std::u8string normalmap = u8"";
-            std::u8string filename = u8"";
+            std::u8string filename  = u8"";
         };
 
         struct MixMaterial
         {
-            std::u8string materials[2]; 
-            float amount = 0.5;
+            std::u8string materials[2];
+            float         amount = 0.5;
         };
 
         struct SubsurfaceMaterial
         {
             float         displacement;
             std::u8string normalmap = u8"";
-            float eta = 1.33;
-            float g = 0;
-            float mfp;
-            std::u8string name = u8"";
-            float* reflectance = nullptr;
-            float* sigma_a = nullptr;
-            float* sigma_s = nullptr;
-            float scale = 1;
+            float         eta       = 1.33;
+            float         g         = 0;
+            float         mfp;
+            std::u8string name        = u8"";
+            float*        reflectance = nullptr;
+            float*        sigma_a     = nullptr;
+            float*        sigma_s     = nullptr;
+            float         scale       = 1;
         };
 
         struct ThinDielectricMaterial
         {
             float         displacement;
-            std::u8string normalmap = u8"";
+            std::u8string normalmap      = u8"";
             float         roughness      = 0;
             float         uroughness     = 0;
             float         vroughness     = 0;
@@ -837,10 +837,60 @@ namespace dmt {
             MixMaterial                 mix;
             SubsurfaceMaterial          subsurface;
             ThinDielectricMaterial      thindielectric;
-            InterfaceMaterial interface;
+            InterfaceMaterial           interface;
         };
 
-        Params params;
+        Params        params;
+        EMaterialType type;
+    };
+
+    struct DMT_MIDDLEWARE_API MaterialS
+    {
+        DMT_MIDDLEWARE_API MaterialS(EMaterialType type);
+        //stores filenames as strings, we cannot use memcpy for copy semantics
+        /*DMT_MIDDLEWARE_API               MaterialS(MaterialS const&);
+        DMT_MIDDLEWARE_API               MaterialS(MaterialS&&) noexcept;
+        DMT_MIDDLEWARE_API MaterialS& operator=(MaterialS const&);
+        DMT_MIDDLEWARE_API MaterialS& operator=(MaterialS&&) noexcept;
+        DMT_MIDDLEWARE_API ~MaterialS() noexcept;*/
+
+        float         displacement;
+        std::u8string normalmap      = u8"";
+        float         albedo         = 0;
+        float         g              = 0;
+        uint32_t      maxdepth       = 10;
+        uint32_t      nsamples       = 1;
+        float         thickness      = 0.01;
+        float*        reflectance    = nullptr;
+        float         roughness      = 0;
+        float         uroughness     = 0;
+        float         vroughness     = 0;
+        bool          remparoughness = true;
+        float*        etaS           = nullptr;
+        float         etaT           = 0.5;
+        float*        k              = nullptr;
+        float         etaText        = 1.5;
+        float*        etaSpectrum    = nullptr;
+        float         thickness      = 0.01;
+        float         displacement;
+        float         displacement;
+        float         transmittance = 0.25;
+        float         scale         = 1;
+        float*        sigma_a       = nullptr;
+        float*        reflectance   = nullptr;
+        float         eumelanin     = 1.3;
+        float         pheomalanin;
+        float         beta_m   = 0.3;
+        float         beta_n   = 0.3;
+        float         alpha    = 2;
+        std::u8string filename = u8"";
+        std::u8string materials[2];
+        float         amount = 0.5;
+        float         mfp;
+        std::u8string name    = u8"";
+        float*        sigma_s = nullptr;
+        float         displacement;
+        Params        params;
         EMaterialType type;
     };
 
@@ -1035,7 +1085,7 @@ namespace dmt {
         MaterialEntity() = default;
         MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params);
 
-        MaterialSpec    spec;
+        EMaterialType   type;
         EColorSpaceType colorSpace;
     };
 
@@ -1343,7 +1393,7 @@ namespace dmt {
     private:
         struct ParsingState
         {
-            // populated once Scne Camera directive is encountered (or left default constructed)
+            // populated once Scene Camera directive is encountered (or left default constructed)
             CameraSpec cameraSpec;
             // populated once the Film directive is encountered
             int32_t xResolution = -1;

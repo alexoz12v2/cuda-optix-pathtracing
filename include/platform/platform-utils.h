@@ -21,9 +21,7 @@
 #include <cctype>
 #include <cstdint>
 
-namespace dmt {
-    using sid_t = uint64_t;
-
+namespace dmt::os {
     DMT_PLATFORM_API uint64_t processId();
     DMT_PLATFORM_API uint64_t threadId();
     DMT_PLATFORM_API void*    reserveVirtualAddressSpace(size_t size);
@@ -32,9 +30,16 @@ namespace dmt {
     DMT_PLATFORM_API bool     freeVirtualAddressSpace(void* address, size_t size);
     DMT_PLATFORM_API void     decommitPage(void* pageAddress, size_t pageSize);
 
+    // use C runtime standard allocation functions
+    DMT_PLATFORM_API void* allocate(size_t _bytes, size_t _align);
+    DMT_PLATFORM_API void  deallocate(void* ptr, [[maybe_unused]] size_t _bytes, [[maybe_unused]] size_t _align);
+
     // for debugging purposes only, so we don't care about memory
     DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
+} // namespace dmt::os
 
+namespace dmt {
+    using sid_t = uint64_t;
     template <typename T>
     struct PmrDeleter
     {
@@ -602,4 +607,142 @@ namespace dmt {
     using Rangef = Range<float>;
     using Rangei = Range<int32_t>;
     static_assert(std::input_iterator<Range<int>::Iterator>, "Failed");
+
+    // https://rigtorp.se/spinlock/
+    // should be usable with lock_guard
+    // TODO move implememntation to cpp
+    // implements the NamedRequireemnt BasicLockable https://en.cppreference.com/w/cpp/named_req/BasicLockable
+    struct DMT_PLATFORM_API SpinLock
+    {
+        bool lock_ = 0;
+
+        void lock() noexcept;
+        bool try_lock() noexcept;
+        void unlock() noexcept;
+    };
+
+    struct DMT_PLATFORM_API CudaSharedMutex
+    {
+        int lock_ = 0; // 0 means unlocked, >0 for shared locks, -1 for exclusive lock
+
+        // Exclusive lock
+        inline DMT_CPU_GPU void lock() noexcept;
+        inline DMT_CPU_GPU bool try_lock() noexcept;
+        inline DMT_CPU_GPU void unlock() noexcept;
+
+        // Shared lock
+        inline DMT_CPU_GPU void lock_shared() noexcept;
+        inline DMT_CPU_GPU bool try_lock_shared() noexcept;
+        inline DMT_CPU_GPU void unlock_shared() noexcept;
+    };
+
+    namespace atomic {
+        inline DMT_CPU_GPU int exchange(int* addr, int val) noexcept
+        {
+#ifdef __CUDA_ARCH__
+            return atomicExch(addr, val);
+#else
+            std::atomic_ref<int> ref(*addr);
+            return ref.exchange(val, std::memory_order_acquire);
+#endif
+        }
+
+        // Utility function for atomic load
+        inline DMT_CPU_GPU int load(int* addr) noexcept
+        {
+#ifdef __CUDA_ARCH__
+            return atomicAdd(addr, 0); // Atomic add with 0 for load
+#else
+            std::atomic_ref<int> ref(*addr);
+            return ref.load(std::memory_order_relaxed);
+#endif
+        }
+
+        // Utility function for atomic compare-and-swap
+        inline DMT_CPU_GPU bool compare_exchange(int* addr, int expected, int desired) noexcept
+        {
+#ifdef __CUDA_ARCH__
+            return atomicCAS(addr, expected, desired) == expected;
+#else
+            std::atomic_ref<int> ref(*addr);
+            return ref.compare_exchange_strong(expected, desired, std::memory_order_acquire);
+#endif
+        }
+
+        // Increment function
+        inline DMT_CPU_GPU int increment(int* addr) noexcept
+        {
+#ifdef __CUDA_ARCH__
+            return atomicAdd(addr, 1); // CUDA atomic increment
+#else
+            std::atomic_ref<int> ref(*addr);
+            return ref.fetch_add(1, std::memory_order_acquire);
+#endif
+        }
+
+        // Decrement function
+        inline DMT_CPU_GPU int decrement(int* addr) noexcept
+        {
+#ifdef __CUDA_ARCH__
+            return atomicAdd(addr, -1); // CUDA atomic decrement
+#else
+            std::atomic_ref<int> ref(*addr);
+            return ref.fetch_sub(1, std::memory_order_acquire);
+#endif
+        }
+    } // namespace atomic
+
+    inline DMT_CPU_GPU void CudaSharedMutex::lock() noexcept
+    {
+        for (;;)
+        {
+            if (atomic::compare_exchange(&lock_, 0, -1))
+            {
+                return; // Successfully acquired exclusive lock
+            }
+            while (atomic::load(&lock_) != 0)
+            {
+            }
+        }
+    }
+
+    inline DMT_CPU_GPU bool CudaSharedMutex::try_lock() noexcept { return atomic::compare_exchange(&lock_, 0, -1); }
+
+    inline DMT_CPU_GPU void CudaSharedMutex::unlock() noexcept
+    {
+        atomic::exchange(&lock_, 0); // Release exclusive lock
+    }
+
+    inline DMT_CPU_GPU void CudaSharedMutex::lock_shared() noexcept
+    {
+        for (;;)
+        {
+            int current_lock = atomic::load(&lock_);
+            if (current_lock >= 0 && atomic::compare_exchange(&lock_, current_lock, current_lock + 1))
+            {
+                return; // Successfully acquired shared lock
+            }
+            while (atomic::load(&lock_) < 0)
+            {
+            }
+        }
+    }
+
+    inline DMT_CPU_GPU bool CudaSharedMutex::try_lock_shared() noexcept
+    {
+        int current_lock = atomic::load(&lock_);
+        return current_lock >= 0 && atomic::compare_exchange(&lock_, current_lock, current_lock + 1);
+    }
+
+    inline DMT_CPU_GPU void CudaSharedMutex::unlock_shared() noexcept
+    {
+        for (;;)
+        {
+            int current_lock = atomic::load(&lock_);
+            if (current_lock > 0 && atomic::compare_exchange(&lock_, current_lock, current_lock - 1))
+            {
+                return; // Successfully released shared lock
+            }
+        }
+    }
 } // namespace dmt

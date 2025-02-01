@@ -1,6 +1,6 @@
 #include "middleware.h"
 
-#include "dmtmacros.h"
+#include "platform/platform-file.h"
 
 #include <array>
 #include <atomic>
@@ -31,7 +31,7 @@ namespace dmt::job {
         actx.log("Starting Parse Scene Header Job");
         bool error = false;
 
-        ChunkedFileReader reader{actx.mctx().pctx, data.filePath.data(), 512};
+        os::ChunkedFileReader reader{actx.mctx().pctx, data.filePath.data(), 512};
         if (reader)
         {
             for (uint32_t chunkNum = 0; chunkNum < reader.numChunks(); ++chunkNum)

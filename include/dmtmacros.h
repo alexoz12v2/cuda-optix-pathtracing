@@ -23,9 +23,11 @@
 #define DMT_CPU     __host__
 #define DMT_CPU_GPU __host__ __device__
 #define DMT_GPU     __device__
+#define DMT_MANAGED __managed__
 #else
 #define DMT_CPU
 #define DMT_CPU_GPU
+#define DMT_MANAGED
 #define DMT_GPU
 #endif
 

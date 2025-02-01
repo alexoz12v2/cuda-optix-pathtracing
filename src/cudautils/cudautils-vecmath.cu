@@ -623,7 +623,7 @@ namespace dmt {
     __host__ __device__ Point3f Bounds3f::corner(EBoundsCorner corner) const
     {
         Point3f const ret{{
-            operator[](corner& eRight).x,
+            operator[](corner & eRight).x,
             operator[]((corner & eForward) >> 1).y,
             operator[]((corner & eTop) >> 2).z,
         }};
@@ -1073,9 +1073,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1106,9 +1106,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1139,9 +1139,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }

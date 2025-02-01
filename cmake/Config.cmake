@@ -543,6 +543,42 @@ function(dmt_add_module_library name module_name)
 endfunction()
 
 
+# This should be called only by the windows operating system
+function(dmt_win32_add_custom_application_manifest target)
+  if (NOT DEFINED DMT_COMPILER_MSVC)
+    message(FATAL_ERROR "Application Manifest generation is supported only for `link.exe`")
+  endif()
+  # construct the full path to the executable file
+  get_target_property(exec_path ${target} RUNTIME_OUTPUT_DIRECTORY)
+  get_target_property(exec_name ${target} OUTPUT_NAME)
+  if (CMAKE_BUILD_TYPE MATCHES "Debug")
+    get_target_property(debug_postfix ${target} DEBUG_POSTFIX)
+    string(APPEND exec_name ${debug_postfix})
+  endif()
+  get_target_property(exec_suffix ${target} SUFFIX)
+  string(APPEND exec_path "\\" ${exec_name} ${exec_suffix})
+
+  # set target options and define custom command
+  target_link_options(${target} PRIVATE $<HOST_LINK:/MANIFEST:NO>)
+  add_custom_command(TARGET ${target}
+    POST_BUILD
+    # Define the path to the temporary script file
+    COMMAND set script_file="${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
+
+    # Write the PowerShell script to the file
+    COMMAND ${CMAKE_COMMAND} -E echo "Write-Host 'Dot Sourcing embedding scripts'" > ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    COMMAND ${CMAKE_COMMAND} -E echo ". ${PROJECT_SOURCE_DIR}/scripts/embed_manifest.ps1" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    COMMAND ${CMAKE_COMMAND} -E echo "Write-Host 'Invoking function'" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    COMMAND ${CMAKE_COMMAND} -E echo "Invoke-Manifest-And-Embed -ExecutableFilePath '${exec_path}' -ManifestTemplateFilePath '${PROJECT_SOURCE_DIR}/res/win32-application.manifest' -ManifestTemplateParams @{version='1.0.0.0'; name='${exec_name}'; description='TEST DESCRIPTION'}" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+
+    # Run the generated PowerShell script
+    COMMAND pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMENT "Embed custom application manifest ${target}"
+    USES_TERMINAL
+  )
+endfunction()
+
 # usage: dmt_add_example creates an executable with no sources, configured and prepared to be
 function(dmt_add_example target)
   set(multivalue PUBLIC_SOURCES PRIVATE_SOURCES PUBLIC_DEPS PRIVATE_DEPS)
@@ -551,11 +587,26 @@ function(dmt_add_example target)
   string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")
   string(REGEX REPLACE "-" "_" v_target_name "${v_target_name}")
 
+  if(DEFINED DMT_OS_WINDOWS)
+    add_executable(${target} WIN32)
+    set_target_properties(${target} PROPERTIES 
+      SUFFIX .exe
+    )
+  else()
+    add_executable(${target})
+  endif()
+
+  set_target_properties(${target} PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+    DEBUG_POSTFIX -d
+    OUTPUT_NAME "${target}"
+    FOLDER "Examples/${v_target_name}"
+    VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+
   # Create the target (assuming it's an executable)
   if(DEFINED DMT_OS_WINDOWS)
     # use /SUBSYSTEM:WINDOWS (which doesn't allocate a console when launched by double click and detaches itself from the console 
     # when launched from a `conhost` process)
-    add_executable(${target} WIN32)
     # add the PE executable with .com extension, since command line prefers it when calling a program without suffix extension
     # this will use /SUBSYSTEM:CONSOLE
     add_executable(${target}-launcher)
@@ -576,8 +627,9 @@ function(dmt_add_example target)
     dmt_add_compile_definitions(${target}-launcher)
     # force build system to rebuild the actual target when launcher is built
     add_dependencies(${target}-launcher ${target})
-  else()
-    add_executable(${target})
+
+    dmt_win32_add_custom_application_manifest(${target})
+    dmt_win32_add_custom_application_manifest(${target}-launcher)
   endif()
 
   message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
@@ -611,12 +663,6 @@ function(dmt_add_example target)
   # set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
-  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
-  set_target_properties(${target} PROPERTIES DEBUG_POSTFIX -d)
-  # target folder (will show in visual studio)
-  set_target_properties(${target} PROPERTIES FOLDER "Examples/${v_target_name}")
-  # visual studio startup path for debugging
-  set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
 
   dmt_set_target_compiler_versions(${target})
 

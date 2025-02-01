@@ -21,10 +21,10 @@
 namespace dmt {
     // CircularOStringStream ------------------------------------------------------------------------------------------
     CircularOStringStream::CircularOStringStream() :
-    m_buffer{reinterpret_cast<char*>(reserveVirtualAddressSpace(bufferSize))},
+    m_buffer{reinterpret_cast<char*>(os::reserveVirtualAddressSpace(bufferSize))},
     m_pos{0}
     {
-        if (!m_buffer || !commitPhysicalMemory(m_buffer, bufferSize))
+        if (!m_buffer || !os::commitPhysicalMemory(m_buffer, bufferSize))
         {
             std::abort();
         }
@@ -43,7 +43,7 @@ namespace dmt {
             return *this;
         }
 
-        freeVirtualAddressSpace(m_buffer, bufferSize);
+        os::freeVirtualAddressSpace(m_buffer, bufferSize);
         m_buffer = std::exchange(other.m_buffer, nullptr);
         m_pos    = std::exchange(other.m_pos, 0);
         return *this;
@@ -53,7 +53,7 @@ namespace dmt {
     {
         if (m_buffer)
         {
-            freeVirtualAddressSpace(m_buffer, bufferSize);
+            os::freeVirtualAddressSpace(m_buffer, bufferSize);
         }
     }
 

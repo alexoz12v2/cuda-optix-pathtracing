@@ -185,10 +185,17 @@ namespace dmt {
         using difference_type = std::ptrdiff_t;
         using value_type      = CharRangeU8;
 
-        // TODO consteval
+
+        /**
+         * @note Uses `char` and not `char8_t` cause `char8_t` doesn't seem to interpret
+         * correctly hex sequences. "\xF0\x9F\x98\x8A" is printed correctly as smiling face emoji,
+         * while u8"\xF0\x9F\x98\x8A" is garbage
+         * @note apparently, `std::bit_cast` doesn't work with `consteval`. I don't want to rewrite
+         * everything using `char` instead of `char8_t`
+         */
         template <uint32_t N>
-        DMT_CPU_GPU constexpr FormatString(char8_t const (&_arr)[N]) :
-        m_start(&_arr[0]),
+        DMT_CPU_GPU constexpr FormatString(char const (&_arr)[N]) :
+        m_start(std::bit_cast<decltype(m_start)>(&_arr[0])),
         m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
         {
             ++*this;
@@ -299,6 +306,7 @@ namespace dmt {
     /**
      * Log Level enum, to check whether we should print or not, and to determine the style of the output
      * @brief log levels for logger configuration
+     * @warning do not change the numbers. the implementation details depends on these exact numbers
      */
     enum class ELogLevel : uint8_t
     {
@@ -307,6 +315,11 @@ namespace dmt {
         WARNING = 2, /** <Warning log level> */
         ERR     = 3, /** <Error log level> */
         NONE    = 4, /** <Log disabled> */
+        eTrace  = TRACE,
+        eLog    = LOG,
+        eWarn   = WARNING,
+        eError  = ERR,
+        eCount  = NONE,
     };
 
     /**
@@ -344,7 +357,7 @@ namespace dmt {
             Device dev;
             Host   host;
         };
-        static constexpr int32_t hostNum = std::numeric_limits<int32_t>::max();
+        static constexpr int32_t hostNum = -1;
 
         U       loc;
         int32_t where; // if dirrerent than how then this is device id
@@ -352,11 +365,12 @@ namespace dmt {
 
     struct DMT_PLATFORM_API LogRecord
     {
-        char8_t const* data;
-        LogLocation    loc;
-        ELogLevel      level;
-        uint32_t       len;
-        uint32_t       numBytes;
+        char8_t const*       data;
+        LogLocation          phyLoc;
+        std::source_location srcLoc;
+        ELogLevel            level;
+        uint32_t             len;
+        uint32_t             numBytes;
     };
 
     // https://stackoverflow.com/questions/44337309/whats-the-most-efficient-way-to-calculate-the-warp-id-lane-id-in-a-1-d-grid
@@ -377,14 +391,16 @@ namespace dmt {
         loc.loc.dev.warp    = threadIdx.x / warpSize;
 #else
         loc.where        = LogLocation::hostNum;
-        loc.loc.host.pid = processId();
-        loc.loc.host.tid = threadId();
+        loc.loc.host.pid = os::processId();
+        loc.loc.host.tid = os::threadId();
 #endif
         return loc;
     }
 
     template <typename T>
     struct UTF8Formatter;
+
+    /** Shortcut to write `std::make_tuple` */
 
     template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
@@ -397,15 +413,17 @@ namespace dmt {
         uint32_t                    _argBufferSize,
         std::tuple<Ts...> const&    _params,
         LogLocation const&          _pysLoc,
-        std::source_location const& loc)
+        std::source_location const& _loc)
     {
         LogRecord record{};
-        record.level = _level;
-        record.loc   = _pysLoc;
-        record.data  = _buffer;
+        record.level  = _level;
+        record.phyLoc = _pysLoc;
+        record.srcLoc = _loc;
+        record.data   = _buffer;
 
         bool                 done            = false;
         uint32_t const       totalArgBufSize = _argBufferSize;
+        uint32_t const       totalBufSize    = _bufferSize;
         char8_t const* const initialArgBuf   = _argBuffer;
 
         // Process tuple of arguments using a fold expression
@@ -458,6 +476,11 @@ namespace dmt {
             else
                 ++fmt;
         }
+        // final newline
+        int32_t off = record.numBytes >= totalBufSize ? -1 : 0;
+        ++record.len;
+        ++record.numBytes;
+        _buffer[off] = u8'\n';
 
         return record;
     }
@@ -467,7 +490,7 @@ namespace dmt {
     struct DMT_PLATFORM_API LogHandler
     {
         void* data;
-        void (*hostFlush)();
+        void (*hostFlush)(void* _data);
         bool (*hostFilter)(void* _data, LogRecord const& record);
         void (*hostCallback)(void* _data, LogRecord const& record);
         void (*hostCleanup)(LogHandlerDeallocate _dealloc, void* _data);
@@ -479,7 +502,9 @@ namespace dmt {
         ELogLevel minimumLevel;
     };
 
-    DMT_PLATFORM_API LogHandler createConsoleHandler(LogHandlerAllocate _alloc, LogHandlerDeallocate _dealloc);
+    DMT_PLATFORM_API bool createConsoleHandler(LogHandler&          _out,
+                                               LogHandlerAllocate   _alloc   = ::dmt::os::allocate,
+                                               LogHandlerDeallocate _dealloc = ::dmt::os::deallocate);
 
     // ----------------------------------------------------------------------------------------------------------------
 
@@ -1034,7 +1059,7 @@ concept LogDisplay = requires(T t)
          * explicit constructor for the base logger starting from the desired level
          * @param level desired log level
          */
-        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level){};
+        explicit BaseLogger(ELogLevel level = ELogLevel::LOG) : m_level(level) {};
 
         /**
          * Setter for the `m_level`

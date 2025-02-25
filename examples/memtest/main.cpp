@@ -56,7 +56,7 @@ static void testChunkedFileReaderPData()
     constexpr uint32_t dataAlignment = 8;
     char const*        filePath      = "..\\res\\test.txt";
     uint8_t            numBuffers    = 12;
-    size_t const       memSize       = dmt::ChunkedFileReader::computeAlignedChunkSize(dataChunkSize);
+    size_t const       memSize       = dmt::os::ChunkedFileReader::computeAlignedChunkSize(dataChunkSize);
 
     // allocate the buffers
     size_t dataSize     = memSize * numBuffers;
@@ -80,7 +80,7 @@ static void testChunkedFileReaderPData()
     std::string str{};
     // reader needs to go out of scope before freeing memory
     {
-        dmt::ChunkedFileReader reader{j.actx.mctx().pctx, filePath, dataChunkSize, numBuffers, data};
+        dmt::os::ChunkedFileReader reader{j.actx.mctx().pctx, filePath, dataChunkSize, numBuffers, data};
         str.resize(dataChunkSize * reader.numChunks());
         for (dmt::ChunkInfo chunkinfo : reader.range(0, reader.numChunks()))
         {
@@ -110,7 +110,7 @@ static void testChunkedFileReader()
     constexpr uint32_t     chunkSize = 512; // Define chunk size (e.g., 1 KB)
     char const*            filePath  = "..\\res\\test.txt";
 
-    dmt::ChunkedFileReader reader(j.actx.mctx().pctx, filePath, chunkSize);
+    dmt::os::ChunkedFileReader reader(j.actx.mctx().pctx, filePath, chunkSize);
 
     // Test 1: Request a chunk
     char buffer[chunkSize];

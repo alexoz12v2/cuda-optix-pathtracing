@@ -788,9 +788,9 @@ namespace dmt {
                 static constexpr SText temperatureoffset = "temperatureoffset"sv; // float, def = 0
                 static constexpr SText temperaturescale  = "temperaturescale"sv;  // float, def = 1
                 static constexpr SText filename          = "filename"sv;          // string
-            }                                                                     // namespace nanovdb_params
-        }                                                                         // namespace media
-    }                                                                             // namespace dict
+            } // namespace nanovdb_params
+        } // namespace media
+    } // namespace dict
 
     static constexpr std::array<sid_t, 2> pointTypes{dict::types::tPoint.sid, dict::types::tPoint3.sid};
 
@@ -1261,7 +1261,7 @@ namespace dmt {
             }
 
             // Extract the value and set it into the target string
-            const std::basic_string_view<CharT, Traits> valueView{reinterpret_cast<CharT const*>(values.valueAt(0).data()),
+            std::basic_string_view<CharT, Traits> const valueView{reinterpret_cast<CharT const*>(values.valueAt(0).data()),
                                                                   values.valueAt(0).size() / sizeof(CharT)};
 
             target.assign(valueView);
@@ -1601,68 +1601,13 @@ namespace dmt {
     colorSpace(_colorSpace)
     {
     }*/
-    MaterialEntity::MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params) :
+    MaterialEntity::MaterialEntity(MaterialSpec const& spec, EColorSpaceType _colorSpace, ParamMap const& _params) :
     SceneEntity(materialSidFromType(type), _params),
     type(type),
     colorSpace(_colorSpace)
     {
-
-        switch (type)
+        switch (spec.type)
         {
-            case EMaterialType::eCoateddiffuse:
-            {
-                parse break;
-            }
-            case EMaterialType::eCoatedconductor:
-            {
-                std::construct_at(&params.coatedconductor);
-                break;
-            }
-            case EMaterialType::eConductor:
-            {
-                std::construct_at(&params.conductor);
-                break;
-            }
-            case EMaterialType::eDielectric:
-            {
-                std::construct_at(&params.dielectric);
-                break;
-            }
-            case EMaterialType::eDiffusetransmission:
-            {
-                std::construct_at(&params.diffuseTransmission);
-                break;
-            }
-            case EMaterialType::eHair:
-            {
-                std::construct_at(&params.hair);
-                break;
-            }
-            case EMaterialType::eInterface:
-            {
-                std::construct_at(&params.interface);
-                break;
-            }
-            case EMaterialType::eMeasured:
-            {
-                std::construct_at(&params.mesured);
-                break;
-            }
-            case EMaterialType::eMix:
-            {
-                std::construct_at(&params.mix);
-                break;
-            }
-            case EMaterialType::eSubsurface:
-            {
-                std::construct_at(&params.subsurface);
-                break;
-            }
-            case EMaterialType::eThindielectric:
-            {
-                std::construct_at(&params.thindielectric);
-                break;
-            }
         }
     }
 

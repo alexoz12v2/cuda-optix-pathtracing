@@ -935,13 +935,13 @@ namespace dmt {
         DMT_CPU_GPU
         T& value()
         {
-            CHECK(set);
+            assert(set);
             return *ptr();
         }
         DMT_CPU_GPU
         T const& value() const
         {
-            CHECK(set);
+            assert(set);
             return *ptr();
         }
 

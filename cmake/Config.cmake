@@ -487,9 +487,6 @@ function(dmt_add_module_library name module_name)
 
   string(REPLACE "dmt-" "" target_path ${name})
   string(REPLACE "dmt-" "dmt::" alias_name ${name})
-  if(NOT target_path STREQUAL ${module_name})
-    message(WARNING "${target_path} not equal to ${module_name} (maybe target name is different from module name, and it shouldn't)")
-  endif()
 
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
@@ -720,8 +717,7 @@ function(dmt_add_test target)
 
   # possible todo: dependencies and proper code coverage
 
-  catch_discover_tests(${target} WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-  message(STATUS "test: Discovered tests for target ${target} from directory ${CMAKE_CURRENT_LIST_DIR}")
+  catch_discover_tests(${target})
   list(APPEND ${THIS_ARGS_TARGET_LIST} ${target})
   return(PROPAGATE ${THIS_ARGS_TARGET_LIST})
 endfunction()

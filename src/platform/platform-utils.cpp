@@ -12,7 +12,7 @@ namespace dmt {
     namespace detail {
         std::map<uint64_t, CtxCtrlBlock> g_ctxMap;
         std::shared_mutex                g_slk;
-    }
+    } // namespace detail
     // SpinLock -------------------------------------------------------------------------------------------------------
     void SpinLock::lock() noexcept
     {

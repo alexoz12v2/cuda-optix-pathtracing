@@ -1,22 +1,23 @@
+#define DMT_ENTRY_POINT
+#include <platform/platform.h>
+
 #include "custuff.h"
-#include "testshared/stuff.h"
 
 #include <iostream>
 
 #include <cstdint>
 
-int32_t main()
+int32_t guardedMain()
 {
     using namespace std::string_view_literals;
     // Hello stuff
     dmt::AppContext actx{512, 8192, {4096, 4096, 4096, 4096}};
     dmt::ctx::init(actx);
-    actx.log("{} should be 3", {dmt::add(4u, 3u)});
     dmt::StringTable strTable;
     dmt::sid_t       sid = strTable.intern("fdsafsf"sv);
     actx.log("{}", {strTable.lookup(sid)});
 
-    auto env = dmt::getEnv();
+    auto env = dmt::os::getEnv();
 
     dmt::CUDAHelloInfo info = dmt::cudaHello(&actx.mctx());
     actx.log("CUDA Initialized");

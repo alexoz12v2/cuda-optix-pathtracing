@@ -276,7 +276,7 @@ namespace pbrt {
                 {
                     // Resample image pixel _(xOut, yOut)_
                     DCHECK(xOut >= 0 && xOut < xWeights.size());
-                    const ResampleWeight& rsw = xWeights[xOut];
+                    ResampleWeight const& rsw = xWeights[xOut];
                     // Compute _inOffset_ into _inBuf_ for _(xOut, yOut)_
                     // w.r.t. inBuf
                     int xIn = rsw.firstPixel - inExtent.pMin.x;
@@ -302,7 +302,7 @@ namespace pbrt {
                 {
                     int yOut = y + outExtent[0][1];
                     DCHECK(yOut >= 0 && yOut < yWeights.size());
-                    const ResampleWeight& rsw = yWeights[yOut];
+                    ResampleWeight const& rsw = yWeights[yOut];
 
                     DCHECK_GE(rsw.firstPixel - inExtent[0][1], 0);
                     int xBufOffset = NChannels() * (x + nxOut * (rsw.firstPixel - inExtent[0][1]));
@@ -383,7 +383,7 @@ namespace pbrt {
                 int    offset = image.PixelOffset({0, yStart});
                 size_t count  = (yEnd - yStart) * nChannels * image.resolution[0];
                 pyramid[i].CopyRectIn(Bounds2i({0, yStart}, {image.resolution[0], yEnd}),
-                                      pstd::span<const float>(image.p32.data() + offset, count));
+                                      pstd::span<float const>(image.p32.data() + offset, count));
             });
             image = std::move(nextImage);
         }
@@ -397,7 +397,7 @@ namespace pbrt {
 
     Image::Image(PixelFormat                   format,
                  Point2i                       resolution,
-                 pstd::span<const std::string> channels,
+                 pstd::span<std::string const> channels,
                  ColorEncoding                 encoding,
                  Allocator                     alloc) :
     format(format),
@@ -421,7 +421,7 @@ namespace pbrt {
             LOG_FATAL("Unhandled format in Image::Image()");
     }
 
-    ImageChannelDesc Image::GetChannelDesc(pstd::span<const std::string> requestedChannels) const
+    ImageChannelDesc Image::GetChannelDesc(pstd::span<std::string const> requestedChannels) const
     {
         ImageChannelDesc desc;
         desc.offset.resize(requestedChannels.size());
@@ -481,7 +481,7 @@ namespace pbrt {
             SetChannel(p, desc.offset[i], values[i]);
     }
 
-    Image::Image(pstd::vector<uint8_t> p8c, Point2i resolution, pstd::span<const std::string> channels, ColorEncoding encoding) :
+    Image::Image(pstd::vector<uint8_t> p8c, Point2i resolution, pstd::span<std::string const> channels, ColorEncoding encoding) :
     format(PixelFormat::U256),
     resolution(resolution),
     channelNames(channels.begin(), channels.end()),
@@ -491,7 +491,7 @@ namespace pbrt {
         CHECK_EQ(p8.size(), NChannels() * resolution[0] * resolution[1]);
     }
 
-    Image::Image(pstd::vector<Half> p16c, Point2i resolution, pstd::span<const std::string> channels) :
+    Image::Image(pstd::vector<Half> p16c, Point2i resolution, pstd::span<std::string const> channels) :
     format(PixelFormat::Half),
     resolution(resolution),
     channelNames(channels.begin(), channels.end()),
@@ -501,7 +501,7 @@ namespace pbrt {
         CHECK(Is16Bit(format));
     }
 
-    Image::Image(pstd::vector<float> p32c, Point2i resolution, pstd::span<const std::string> channels) :
+    Image::Image(pstd::vector<float> p32c, Point2i resolution, pstd::span<std::string const> channels) :
     format(PixelFormat::Float),
     resolution(resolution),
     channelNames(channels.begin(), channels.end()),
@@ -725,7 +725,7 @@ namespace pbrt {
                         encoding.ToLinear({&p8[offset], 1}, {&v, 1});
                         *bufIter = v;
 #else
-                encoding.ToLinear({&p8[offset], 1}, {&*bufIter, 1});
+                        encoding.ToLinear({&p8[offset], 1}, {&*bufIter, 1});
 #endif
                         ++bufIter;
                     });
@@ -864,7 +864,7 @@ namespace pbrt {
 
     Image Image::JointBilateralFilter(ImageChannelDesc const&   toFilterDesc,
                                       int                       halfWidth,
-                                      const Float               xySigma[2],
+                                      Float const               xySigma[2],
                                       ImageChannelDesc const&   jointDesc,
                                       ImageChannelValues const& jointSigma) const
     {

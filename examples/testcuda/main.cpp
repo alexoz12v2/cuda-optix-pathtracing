@@ -1,7 +1,6 @@
 #define DMT_ENTRY_POINT
 #include <platform/platform.h>
 #include <platform/cudaTest.h>
-#include <cudashared/cudashared.h>
 #include "dummy.h"
 
 // Include C++ header files.
@@ -257,8 +256,6 @@ int guardedMain()
 
     actx.log("trying to create a window and fill a screen greenish?");
 
-    float hostres = dmt::test::multiply(3.f, 4.f);
-    actx.log("HOST RES: {}", {hostres});
     std::unique_ptr<float[]> ptr = std::make_unique<float[]>(32);
     dmt::test::multiplyArr(ptr.get());
 

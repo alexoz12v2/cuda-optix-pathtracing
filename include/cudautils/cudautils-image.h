@@ -221,13 +221,13 @@ namespace dmt {
     public:
         // Image Public Methods
         Image(Allocator alloc = {}) : p8(alloc), p16(alloc), p32(alloc), format(PixelFormat::U256), resolution(0, 0) {}
-        Image(pstd::vector<uint8_t> p8, Point2i resolution, pstd::span<const std::string> channels, ColorEncoding encoding);
-        Image(pstd::vector<Half> p16, Point2i resolution, pstd::span<const std::string> channels);
-        Image(pstd::vector<float> p32, Point2i resolution, pstd::span<const std::string> channels);
+        Image(pstd::vector<uint8_t> p8, Point2i resolution, pstd::span<std::string const> channels, ColorEncoding encoding);
+        Image(pstd::vector<Half> p16, Point2i resolution, pstd::span<std::string const> channels);
+        Image(pstd::vector<float> p32, Point2i resolution, pstd::span<std::string const> channels);
 
         Image(PixelFormat                   format,
               Point2i                       resolution,
-              pstd::span<const std::string> channelNames,
+              pstd::span<std::string const> channelNames,
               ColorEncoding                 encoding = nullptr,
               Allocator                     alloc    = {});
 
@@ -238,7 +238,7 @@ namespace dmt {
         PBRT_CPU_GPU
         int                      NChannels() const { return channelNames.size(); }
         std::vector<std::string> ChannelNames() const;
-        const ColorEncoding      Encoding() const { return encoding; }
+        ColorEncoding const      Encoding() const { return encoding; }
 
         PBRT_CPU_GPU
         operator bool() const { return resolution.x > 0 && resolution.y > 0; }
@@ -298,7 +298,7 @@ namespace dmt {
 
         ImageChannelValues GetChannels(Point2i p, WrapMode2D wrapMode = WrapMode::Clamp) const;
 
-        ImageChannelDesc GetChannelDesc(pstd::span<const std::string> channels) const;
+        ImageChannelDesc GetChannelDesc(pstd::span<std::string const> channels) const;
 
         ImageChannelDesc AllChannelsDesc() const
         {
@@ -389,7 +389,7 @@ namespace dmt {
 
         Image JointBilateralFilter(ImageChannelDesc const&   toFilter,
                                    int                       halfWidth,
-                                   const Float               xySigma[2],
+                                   Float const               xySigma[2],
                                    ImageChannelDesc const&   joint,
                                    ImageChannelValues const& jointSigma) const;
 

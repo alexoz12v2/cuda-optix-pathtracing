@@ -854,44 +854,39 @@ namespace dmt {
         DMT_MIDDLEWARE_API MaterialS& operator=(MaterialS&&) noexcept;
         DMT_MIDDLEWARE_API ~MaterialS() noexcept;*/
 
-        float         displacement;
-        std::u8string normalmap      = u8"";
-        float         albedo         = 0;
-        float         g              = 0;
-        uint32_t      maxdepth       = 10;
-        uint32_t      nsamples       = 1;
-        float         thickness      = 0.01;
-        float*        reflectance    = nullptr;
-        float         roughness      = 0;
-        float         uroughness     = 0;
-        float         vroughness     = 0;
-        bool          remparoughness = true;
-        float*        etaS           = nullptr;
-        float         etaT           = 0.5;
-        float*        k              = nullptr;
-        float         etaText        = 1.5;
-        float*        etaSpectrum    = nullptr;
-        float         thickness      = 0.01;
-        float         displacement;
-        float         displacement;
-        float         transmittance = 0.25;
-        float         scale         = 1;
-        float*        sigma_a       = nullptr;
-        float*        reflectance   = nullptr;
-        float         eumelanin     = 1.3;
-        float         pheomalanin;
-        float         beta_m   = 0.3;
-        float         beta_n   = 0.3;
-        float         alpha    = 2;
-        std::u8string filename = u8"";
-        std::u8string materials[2];
-        float         amount = 0.5;
-        float         mfp;
-        std::u8string name    = u8"";
-        float*        sigma_s = nullptr;
-        float         displacement;
-        Params        params;
-        EMaterialType type;
+        float                displacement;
+        std::u8string        normalmap      = u8"";
+        float                albedo         = 0;
+        float                g              = 0;
+        uint32_t             maxdepth       = 10;
+        uint32_t             nsamples       = 1;
+        float                thickness      = 0.01;
+        float*               reflectance    = nullptr;
+        float                roughness      = 0;
+        float                uroughness     = 0;
+        float                vroughness     = 0;
+        bool                 remparoughness = true;
+        float*               etaS           = nullptr;
+        float                etaT           = 0.5;
+        float*               k              = nullptr;
+        float                etaText        = 1.5;
+        float*               etaSpectrum    = nullptr;
+        float                transmittance  = 0.25;
+        float                scale          = 1;
+        float*               sigma_a        = nullptr;
+        float                eumelanin      = 1.3;
+        float                pheomalanin;
+        float                beta_m   = 0.3;
+        float                beta_n   = 0.3;
+        float                alpha    = 2;
+        std::u8string        filename = u8"";
+        std::u8string        materials[2];
+        float                amount = 0.5;
+        float                mfp;
+        std::u8string        name    = u8"";
+        float*               sigma_s = nullptr;
+        MaterialSpec::Params params;
+        EMaterialType        type;
     };
 
 
@@ -1083,7 +1078,7 @@ namespace dmt {
     struct DMT_MIDDLEWARE_API MaterialEntity : public SceneEntity
     {
         MaterialEntity() = default;
-        MaterialEntity(EMaterialType type, EColorSpaceType _colorSpace, ParamMap const& _params);
+        MaterialEntity(MaterialSpec const& spec, EColorSpaceType _colorSpace, ParamMap const& _params);
 
         EMaterialType   type;
         EColorSpaceType colorSpace;

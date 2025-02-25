@@ -18,31 +18,27 @@ module;
  */
 export module testdmt;
 
-namespace dmt
-{
-/**
- * @class TestMath
- * @brief Provides mathematical utilities.
- */
-export class TestMath
-{
-public:
+namespace dmt {
     /**
-     * @brief Adds two integers.
-     * @param a First integer.
-     * @param b Second integer.
-     * @return The sum of `a` and `b`.
+     * @class TestMath
+     * @brief Provides mathematical utilities.
      */
-    static int add(int a, int b);
-
-    /**
-     * @brief Prints a predefined message.
-     * Displays "Hello darkness my old Friend" to the standard output.
-     */
-    static void printStuff()
+    export class TestMath
     {
-        std::cout << "Hello darkness my old Friend\n";
-    }
-};
+    public:
+        /**
+         * @brief Adds two integers.
+         * @param a First integer.
+         * @param b Second integer.
+         * @return The sum of `a` and `b`.
+         */
+        static int add(int a, int b);
+
+        /**
+         * @brief Prints a predefined message.
+         * Displays "Hello darkness my old Friend" to the standard output.
+         */
+        static void printStuff() { std::cout << "Hello darkness my old Friend\n"; }
+    };
 } // namespace dmt
 /** @} */ // End of group testdmt

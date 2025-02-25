@@ -275,7 +275,7 @@ macro(dmt_set_target_warnings target)
 
   if(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
     if(DMT_WARNINGS_AS_ERRORS)
-      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: -Werror>)
+      target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
     endif()
     target_compile_options(${target} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:
@@ -318,19 +318,50 @@ macro(dmt_set_target_warnings target)
       $<$<COMPILE_LANGUAGE:CXX>: -Wno-unknown-warning-option> # do not warn on GCC-specific warning diagnostic pragmas 
     )
   endif()
+
+  # TODO move to another function
+  set_property(TARGET ${target} PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+  # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON) # default = on for shared, off for static
+  set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Shared)
+  # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
+  target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+    -dlink
+    --cudart shared
+    --cudadevrt static
+    --expt-relaxed-constexpr # constexpr functions inside device code
+    --extended-lambda # full C++20 lambda syntax inside device code
+    -dc
+    -use_fast_math
+    # --relocatable-device-code true set by cuda separable compilation
+  >)
 endmacro()
 
 
 function(dmt_set_target_optimization target)
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  # https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/linker-tools-warning-lnk4098?view=msvc-170
+  if(DEFINED DMT_OS_WINDOWS AND DEFINED DMT_COMPILER_MSVC)
+    if((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+      # Debug Multithreaded DLL (/MDd)
+      message(STATUS "(${target}) debug compilation detected on Windows MSVC. Linking to /MDd")
+      target_link_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrt.lib>)
+      target_link_libraries(${target} PRIVATE msvcrtd.lib)  # Explicitly link to msvcrtd.lib
+    else()
+      # Release Multithreaded DLL (/MD)
+      message(STATUS "(${target}) release compilation detected on Windows MSVC. Linking to /MD")
+      target_link_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib>)
+      target_link_libraries(${target} PRIVATE msvcrt.lib)   # Explicitly link to msvcrt.lib
+    endif()
+  endif()
+
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug") # you can also use the CONFIG generator expression
     target_compile_options(${target} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:
         $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi>
         $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O0 -g -fprofile-arcs -ftest-coverage>
       >
-      $<$<COMPILE_LANGUAGE:CUDA>:
-        -G
-      >
+      $<$<COMPILE_LANGUAGE:CUDA>: -G -g -O0>
     )
     target_link_options(${target} PUBLIC $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
   elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -346,9 +377,7 @@ function(dmt_set_target_optimization target)
         $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2 /Zi>
         $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O2 -g>
       >
-      $<$<COMPILE_LANGUAGE:CUDA>:
-        -G
-      >
+      $<$<COMPILE_LANGUAGE:CUDA>: -G -g>
     )
   elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     target_compile_options(${target} PRIVATE
@@ -414,6 +443,34 @@ function(dmt_add_compile_definitions target)
     set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
   endif()
   target_compile_definitions(${target} PRIVATE ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
+  if(DMT_OS_WINDOWS)
+    target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+    if(CMAKE_GENERATOR MATCHES "Visual Studio")
+      target_compile_definitions(${target} PRIVATE DMT_VS_STUPIDITY)
+    endif()
+  endif()
+
+  # <cassert>
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  endif() 
+endfunction()
+
+
+function(dmt_set_target_compiler_versions name)
+  #set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX) # this overrides CUDA's device linking step
+  get_target_property(LINK_LANGUAGE ${name} LINKER_LANGUAGE)
+  if (LINK_LANGUAGE STREQUAL "C")
+    message(FATAL_ERROR "Target ${name} somehow has C linking semantics. Fix it")
+  endif()
+  # modules require C++20 support
+  target_compile_features(${name} PRIVATE cxx_std_20 cuda_std_20)
+
+  if(MSVC)
+    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>)
+  endif()
 endfunction()
 
 
@@ -421,141 +478,48 @@ endfunction()
 # create a c++20 module library, with no target_sources preset, just initialize the bare necessities
 # to have a fully functioning module
 function(dmt_add_module_library name module_name)
+  cmake_parse_arguments(PARSE_ARGV 0 arg "SHARED" "" "")
+  message(STATUS "Received arg: ${arg_SHARED}")
   # parse arguments and extract the clean target path name
-  cmake_parse_arguments(THIS_ARGS
-    "" # no options
-    "MODULE_INTERFACE;MODULE_IMPLEMENTATION" # single argument keys
-    "MODULE_PARTITION_INTERFACES;MODULE_PARTITION_IMPLEMENTATIONS;HEADERS" # multiple arguments keys
-    ${ARGN}
-  )
   if(NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "unexpected arguments while calling dmt_add_module_library: ${THIS_ARGS_UNPARSED_ARGUMENTS}")
   endif()
 
   string(REPLACE "dmt-" "" target_path ${name})
   string(REPLACE "dmt-" "dmt::" alias_name ${name})
-  if(NOT target_path STREQUAL ${module_name})
-    message(WARNING "${target_path} not equal to ${module_name} (maybe target name is different from module name, and it shouldn't)")
-  endif()
 
-  message(STATUS "[${name}] MODULE_INTERFACE: ${THIS_ARGS_MODULE_INTERFACE}")
-  message(STATUS "[${name}] MODULE_IMPLEMENTATION: ${THIS_ARGS_MODULE_IMPLEMENTATION}")
-  message(STATUS "[${name}] MODULE_PARTITION_INTERFACES: ${THIS_ARGS_MODULE_PARTITION_INTERFACES}")
-  message(STATUS "[${name}] MODULE_PARTITION_IMPLEMENTATIONS: ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS}")
-  message(STATUS "[${name}] HEADERS: ${THIS_ARGS_HEADERS}")
   message(STATUS "[${name}] target path name: ${target_path}, alias name: ${alias_name}")
 
-  set(interface_file_list "${CMAKE_SOURCE_DIR}/include/${target_path}/${THIS_ARGS_MODULE_INTERFACE}")
-  set(implementation_file_list "${THIS_ARGS_MODULE_IMPLEMENTATION}")
-  set(header_file_list "")
-  if(DEFINED THIS_ARGS_MODULE_PARTITION_INTERFACES)
-    foreach(interface_file ${THIS_ARGS_MODULE_PARTITION_INTERFACES})
-      string(PREPEND interface_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
-      list(APPEND interface_file_list "${interface_file}")
-    endforeach()
+  if(arg_SHARED)
+    add_library(${name} SHARED)
+  else()
+    add_library(${name})
   endif()
-  if (DEFINED THIS_ARGS_HEADERS)
-    foreach(header_file ${THIS_ARGS_HEADERS})
-      string(PREPEND header_file "${CMAKE_SOURCE_DIR}/include/${target_path}/")
-      list(APPEND header_file_list "${header_file}")
-    endforeach()
-  endif()
-  if(DEFINED THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS)
-    foreach(impl_file ${THIS_ARGS_MODULE_PARTITION_IMPLEMENTATIONS})
-      list(APPEND implementation_file_list "${impl_file}")
-    endforeach()
-  endif()
-  message(STATUS "${name} target sources are\n\tinterfaces     ${interface_file_list}\n\t"
-    "implementation ${implementation_file_list}")
-
-
-  # add library target (static)
-  add_library(${name})
-
-  # may give problems if CUDA interfaces between modules are shared
-  set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX)
-  # modules require C++20 support
-  target_compile_features(${name} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
-
-  # cuda specific
-  set_target_properties(${name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-
+  dmt_set_target_compiler_versions(${name})
   dmt_set_target_warnings(${name})
   dmt_set_target_optimization(${name})
   dmt_add_compile_definitions(${name})
 
-  # Possible TODO: Pre Compiled Headers
-
-  if(MSVC)
-    # TODO correct
-    #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.ifc)
-    #target_compile_options(${name}
-    #  PRIVATE /interface /ifcOutput ${BMI} # treat source as module interface unit https://www.modernescpp.com/index.php/c-20-module-interface-unit-and-module-implementation-unit/
-    #   INTERFACE /reference ${module_name}=${BMI} # the module can reference an external interface file called ${module_name} with path ${BMI}
-    # )
-    # when the clean target is invoked, then remove all files in the ${BMI} path
-    #set_target_properties(${name} PROPERTIES ADDITIONAL_CLEAN_FILES ${BMI})
-    # mark the files as generated such that cmake doesn't expect them to be already there
-    #set_source_files_properties(${BMI} PROPERTIES GENERATED ON)
-
-    # setup path for .ifc file
-    # set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${module_name}.ifc)
-    # message(STATUS "BMI we want to generate from target ${name} is ${BMI}")
-
-    # set flag implementation unit
-    #target_compile_options(${name} 
-    #  PRIVATE /c /interface /TP /ifcOutput ${BMI}
-    #  PUBLIC /reference ${module_name}=${BMI}
-    #)
-    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
-
-    #get_target_property(thing ${name} CXX_SCAN_FOR_MODULES)
-    #message("[${name}] CXX_SCAN_FOR_MODULES: ${thing}")
-
-    # precompile module interface with a custom target (excluded from all?)
-    # might not work with cuda interfaces
-    # dmt_get_msvc_flags(out_flags)
-    # get_target_property(target_flags ${name} COMPILE_FLAGS)
-    # if(target_flags STREQUAL "target_flags-NOTFOUND")
-    #  set(target_flags "")
-    # endif()
-    # message(STATUS ${out_flags})
-    # message(STATUS ${target_flags})
-    # add_custom_target("${name}_interface" 
-    #  BYPRODUCTS ${BMI_PROD}
-    #  COMMAND ${CMAKE_CXX_COMPILER} ${target_flags} ${out_flags} /std:c++20 /interface /ifcOutput ${BMI} /TP /c ${interface_file_list}
-    #  DEPENDS ${interfaces}
-    #)
-    # add_dependencies(${name} "${name}_interface")
-    # set_target_properties(${name} PROPERTIES ADDITIONAL_CLEAN_FILES ${BMI})
-    # set_source_files_properties(${BMI} PROPERTIES GENERATED ON)
-  elseif(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
-    #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/${name}.pcm)
-    #string(REPLACE "dmt-" "" dep_no_namespace ${BMI})
-    #if(NOT dep_no_namespace STREQUAL "")
-    #  set(BMI ${dep_no_namespace})
-    #endif()
-    #message("Compile Options for module target ${name} on BMI ${BMI}")
-    # specify prebuilt module dependencies with -fprebuilt-module-path (TODO)
-
-    # precompile prevents BMI generation, that's because I will generate it by myself?
-    # target_compile_options(${name} PUBLIC -fmodules --precompile -fmodule-output=${BMI})
-
-    #add_custom_command(
-    #  OUTPUT ${BMI}
-    #  COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -x -c++module --precompile -c -o ${BMI}
-    #    ${CMAKE_SOURCE_DIR}/include/testdmt/testImplementationUnit.cppm
-    #  DEPENDS ${CMAKE_SOURCE_DIR}/include/testdmt/testImplementationUnit.cppm
-    #)
-  endif()
-
   # set the exported name of the target (the one you use to target_link_libraries) to dmt::{name}
   # I expect all targets to start with dmt. Replace all - with _,
   # define export symbol (for dlls, linking) as uppercase
-  string(REPLACE "-" "_" NAME_UPPER "${target_path}")
+  string(REPLACE "-" "_" NAME_UPPER "${name}")
   string(TOUPPER "${NAME_UPPER}" NAME_UPPER)
-  set_target_properties(${name} PROPERTIES DEFINE_SYMBOL ${NAME_UPPER}_EXPORTS)
+
+  target_compile_definitions(${name} PRIVATE ${NAME_UPPER}_EXPORTS)
+  if(arg_SHARED)
+    target_compile_definitions(${name} PUBLIC ${NAME_UPPER}_SHARED)
+    set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  else()
+    set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
+  endif()
+
   set_target_properties(${name} PROPERTIES EXPORT_NAME dmt::${target_path})
+
+  set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+  set_target_properties(${name} PROPERTIES FOLDER "Modules")
 
   # Possible todo: Handle Shared libraries (SFML)
 
@@ -563,73 +527,107 @@ function(dmt_add_module_library name module_name)
 
   # add project include as include directory
   target_include_directories(${name}
-    PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/src/${target_path} ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/extern
   )
 
-  if(NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
-    set_target_properties(${name} PROPERTIES CXX_CLANG_TIDY ${DMT_CLANG_TIDY_COMMAND})
-  endif()
-  if(DMT_COMPILER_CLANG AND NOT DMT_CLANG_TIDY_COMMAND STREQUAL "")
-    # TODO: handle dependencies
-    message(STATUS "clang-tidy requires me to manually setup the prebuilt-module-path,\n\tsetting path for ${name} to ${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir")
-    target_compile_options(${name} PRIVATE
-      $<$<COMPILE_LANGUAGE:CXX>:
-        -fprebuilt-module-path=${PROJECT_BINARY_DIR}/src/${target_path}/CMakeFiles/${name}.dir
-      >
-    )
-  endif()
-
-  # construct the sources lists
-  list(LENGTH header_file_list header_count)
-  if(header_count GREATER 0)
-    target_sources(${name}
-      PUBLIC
-        FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
-          FILES ${interface_file_list}
-        FILE_SET "${module_name}_headers" TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
-          FILES ${header_file_list}
-      PRIVATE
-        FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
-    )
-  else()
-    target_sources(${name}
-      PUBLIC
-        FILE_SET ${module_name} TYPE CXX_MODULES BASE_DIRS ${CMAKE_SOURCE_DIR}/include/${target_path}
-          FILES ${interface_file_list}
-      PRIVATE
-        FILE_SET "${module_name}_src" TYPE CXX_MODULES FILES ${implementation_file_list}
-    )
-  endif()
+  # cmake's built-in clang-tidy doesn't seem to work with CXX_MODULES
+  set_target_properties(${name} PROPERTIES CXX_CLANG_TIDY "")
 
   # create alias
   add_library(${alias_name} ALIAS ${name})
   dmt_debug_print_target_props(${name} ${module_name})
-  target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/extern)
-
-  if(MSVC)
-    if(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
-      message(FATAL_ERROR "Windows with Ninja doesn't find the module interface from the module implementation unit. I don't know why.")
-      # module dependency between module interface unit and module implementation unit works fine on visual studio, 
-      # but not on ninja. Still have no idea why
-      #set(BMI ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${name}.dir/${module_name}.ifc)
-      #message("GENERATOR ------------------- ${CMAKE_GENERATOR}, different from VS. Trying to patch up module on ${BMI}")
-      #target_compile_options(${name}
-      #  PRIVATE /interface /ifcOutput ${BMI}
-      #  PUBLIC /reference ${module_name}=${BMI}
-      # )
-    endif()
-  endif()
 endfunction()
 
+
+# This should be called only by the windows operating system
+function(dmt_win32_add_custom_application_manifest target)
+  if (NOT DEFINED DMT_COMPILER_MSVC)
+    message(FATAL_ERROR "Application Manifest generation is supported only for `link.exe`")
+  endif()
+  # construct the full path to the executable file
+  get_target_property(exec_path ${target} RUNTIME_OUTPUT_DIRECTORY)
+  get_target_property(exec_name ${target} OUTPUT_NAME)
+  if (CMAKE_BUILD_TYPE MATCHES "Debug")
+    get_target_property(debug_postfix ${target} DEBUG_POSTFIX)
+    string(APPEND exec_name ${debug_postfix})
+  endif()
+  get_target_property(exec_suffix ${target} SUFFIX)
+  string(APPEND exec_path "\\" ${exec_name} ${exec_suffix})
+
+  # set target options and define custom command
+  target_link_options(${target} PRIVATE $<HOST_LINK:/MANIFEST:NO>)
+  add_custom_command(TARGET ${target}
+    POST_BUILD
+    # Define the path to the temporary script file
+    COMMAND set script_file="${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
+
+    # Write the PowerShell script to the file
+    COMMAND ${CMAKE_COMMAND} -E echo "Write-Host 'Dot Sourcing embedding scripts'" > ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    COMMAND ${CMAKE_COMMAND} -E echo ". ${PROJECT_SOURCE_DIR}/scripts/embed_manifest.ps1" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    COMMAND ${CMAKE_COMMAND} -E echo "Write-Host 'Invoking function'" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    COMMAND ${CMAKE_COMMAND} -E echo "Invoke-Manifest-And-Embed -ExecutableFilePath '${exec_path}' -ManifestTemplateFilePath '${PROJECT_SOURCE_DIR}/res/win32-application.manifest' -ManifestTemplateParams @{version='1.0.0.0'; name='${exec_name}'; description='TEST DESCRIPTION'}" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+
+    # Run the generated PowerShell script
+    COMMAND pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMENT "Embed custom application manifest ${target}"
+    USES_TERMINAL
+  )
+endfunction()
 
 # usage: dmt_add_example creates an executable with no sources, configured and prepared to be
 function(dmt_add_example target)
   set(multivalue PUBLIC_SOURCES PRIVATE_SOURCES PUBLIC_DEPS PRIVATE_DEPS)
   cmake_parse_arguments(ARGS "" "" "${multivalue}" ${ARGN})
 
+  string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")
+  string(REGEX REPLACE "-" "_" v_target_name "${v_target_name}")
+
+  if(DEFINED DMT_OS_WINDOWS)
+    add_executable(${target} WIN32)
+    set_target_properties(${target} PROPERTIES 
+      SUFFIX .exe
+    )
+  else()
+    add_executable(${target})
+  endif()
+
+  set_target_properties(${target} PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+    DEBUG_POSTFIX -d
+    OUTPUT_NAME "${target}"
+    FOLDER "Examples/${v_target_name}"
+    VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+
   # Create the target (assuming it's an executable)
-  add_executable(${target})
+  if(DEFINED DMT_OS_WINDOWS)
+    # use /SUBSYSTEM:WINDOWS (which doesn't allocate a console when launched by double click and detaches itself from the console 
+    # when launched from a `conhost` process)
+    # add the PE executable with .com extension, since command line prefers it when calling a program without suffix extension
+    # this will use /SUBSYSTEM:CONSOLE
+    add_executable(${target}-launcher)
+    target_sources(${target}-launcher PRIVATE ${PROJECT_SOURCE_DIR}/src/win32-launcher/launcher.cpp)
+    # set the same properties for the launcher as well
+    set_target_properties(${target}-launcher PROPERTIES 
+      RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      DEBUG_POSTFIX -d
+      FOLDER "Examples/${v_target_name}"
+      VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      OUTPUT_NAME "${target}"
+      PDB_NAME "${target}-launcher"
+      SUFFIX .com
+    )
+    dmt_set_target_compiler_versions(${target}-launcher)
+    dmt_set_target_warnings(${target}-launcher)
+    dmt_set_target_optimization(${target}-launcher)
+    dmt_add_compile_definitions(${target}-launcher)
+    # force build system to rebuild the actual target when launcher is built
+    add_dependencies(${target}-launcher ${target})
+
+    dmt_win32_add_custom_application_manifest(${target})
+    dmt_win32_add_custom_application_manifest(${target}-launcher)
+  endif()
 
   message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
   message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
@@ -658,21 +656,16 @@ function(dmt_add_example target)
 
   # possible todo: PCH
 
-  set_target_properties(${target} PROPERTIES DEBUG_POSTFIX -d)
-  # target folder (will show in visual studio)
-  set_target_properties(${target} PROPERTIES FOLDER "Examples")
-  # visual studio startup path for debugging
-  set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
+  # put the executable file in the right place
+  # set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+
+  dmt_set_target_compiler_versions(${target})
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
   dmt_add_compile_definitions(${target})
-
-  if(MSVC)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/std:c17>)
-    #target_compile_options(${target} PRIVATE )
-  endif()
 
   # possible todo: Automatically include dependencies here
 endfunction()
@@ -701,50 +694,15 @@ function(dmt_add_test target)
   target_sources(${target} PRIVATE ${THIS_ARGS_FILES})
   # possible TODO: PCH
 
+  target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
   # showup folder on visual studio
   set_target_properties(${target} PROPERTIES FOLDER "Tests")
   # startup path for debugging in IDEs
   set_target_properties(${target} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_features(${target} PUBLIC cxx_std_20 c_std_17 cuda_std_20)
-
-  if(MSVC)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>: /Zc:preprocessor> PUBLIC $<$<COMPILE_LANGUAGE:CXX>: /std:c17>)
-  endif()
-
-  # Iterate over dependencies to add their corresponding BMI paths
-  #set(BMI "")
-  #set(IS_FIRST_DEPENDENCY TRUE)
-  #set(FILTERED_DEPENDS ${THE_DEPENDS})
-  #list(REMOVE_ITEM FILTERED_DEPENDS "dmt-test-main")
-  #foreach(dep ${FILTERED_DEPENDS})
-  #  # Remove the 'dmt::' namespace from the dependency if present
-  #  string(REPLACE "dmt::" "" dep_no_namespace ${dep})
-  #  if(NOT dep_no_namespace STREQUAL "")
-  #    set(dep ${dep_no_namespace})
-  #  endif()
-  #  message(STATUS "current dep ${dep}")
-
-  #  # Skip the first dependency handling the colon
-  #  if(IS_FIRST_DEPENDENCY)
-  #    set(BMI "${CMAKE_BINARY_DIR}/src/${dep}/${dep}.pcm")
-  #    set(IS_FIRST_DEPENDENCY FALSE)
-  #  else()
-  #    # For subsequent dependencies, prepend the colon
-  #    set(BMI "${BMI}:${CMAKE_BINARY_DIR}/src/${dep}/${dep}.pcm")
-  #  endif()
-  #endforeach()
-
-  #message(STATUS "Target ${target} looks for dependent BMIs on paths ${BMI}")
-  #if(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
-  #  target_compile_options(${target} PRIVATE
-  #    -fmodules
-  #  )
-  #  if(NOT BMI STREQUAL "")
-  #    target_compile_options(${target} PRIVATE
-  #      -fprebuilt-module-path=${BMI}
-  #    )
-  #  endif()
-  #endif()
+  dmt_set_target_compiler_versions(${target})
 
   dmt_set_target_warnings(${target})
   dmt_set_target_optimization(${target})
@@ -759,8 +717,7 @@ function(dmt_add_test target)
 
   # possible todo: dependencies and proper code coverage
 
-  catch_discover_tests(${target} WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
-  message(STATUS "test: Discovered tests for target ${target} from directory ${CMAKE_CURRENT_LIST_DIR}")
+  catch_discover_tests(${target})
   list(APPEND ${THIS_ARGS_TARGET_LIST} ${target})
   return(PROPAGATE ${THIS_ARGS_TARGET_LIST})
 endfunction()

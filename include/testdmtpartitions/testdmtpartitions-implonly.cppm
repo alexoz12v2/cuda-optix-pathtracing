@@ -5,17 +5,16 @@
 
 export module testdmtpartitions:implonly;
 
-export namespace dmt
-{
+export namespace dmt {
 
-/**
- * @brief A hidden implementation detail function.
- * Not exported in the primary interface.
- */
-void implOnlyHidden();
+    /**
+     * @brief A hidden implementation detail function.
+     * Not exported in the primary interface.
+     */
+    void implOnlyHidden();
 
-/**
- * @brief A function to demonstrate implementation-only exports.
- */
-void implOnly();
+    /**
+     * @brief A function to demonstrate implementation-only exports.
+     */
+    void implOnly();
 } // namespace dmt

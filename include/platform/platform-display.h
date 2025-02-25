@@ -1,11 +1,10 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
 
-// Keep in sync with .cppm
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
-
 #include <atomic>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
@@ -18,11 +17,9 @@
 #include <vector>
 
 #include <cassert>
-#include <cudaTest.h>
 
-
-DMT_MODULE_EXPORT dmt {
-    typedef struct DMTwindowGLFW
+DMT_MODULE_EXPORT namespace dmt {
+    struct DMTwindowGLFW
     {
         GLFWwindow*        window;
         GLFWmonitor*       monitor;
@@ -30,30 +27,30 @@ DMT_MODULE_EXPORT dmt {
         int                displayW;
         int                displayH;
         bool               fullScreenState = true;
-    } DMTwindowGLFW;
+    };
 
-    typedef struct DMTwindowImGui
+    struct DMTwindowImGui
     {
-        bool                 noScrollbar      = false;
-        bool                 noMove           = true;
-        bool                 noResize         = true;
-        bool                 noBackground     = false;
-        bool                 menuBar          = true;
-        bool                 close            = false;
-        bool                 alwaysAutoResize = false;
-        bool                 noCollapse       = true;
-        ImGuiWindowFlags     windowFlags      = 0;
         ImGuiViewport const* mainViewport;
-    } DMTwindowImGui;
+        ImGuiWindowFlags     windowFlags          = 0;
+        uint32_t             noScrollbar      : 1 = false;
+        uint32_t             noMove           : 1 = true;
+        uint32_t             noResize         : 1 = true;
+        uint32_t             noBackground     : 1 = false;
+        uint32_t             menuBar          : 1 = true;
+        uint32_t             close            : 1 = false;
+        uint32_t             alwaysAutoResize : 1 = false;
+        uint32_t             noCollapse       : 1 = true;
+    };
 
-    typedef struct DMTwindowOpenGL
+    struct DMTwindowOpenGL
     {
         GLuint bufferID;
         GLuint tex;
         GLuint vao;
         GLuint vbo;
         GLuint shaderProgram;
-    } DMTwindowOpenGL;
+    };
 
     class Display
     {

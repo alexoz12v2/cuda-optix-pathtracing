@@ -29,4 +29,20 @@ find_package_handle_standard_args(OptiX80 DEFAULT_MSG OPTIX80_INCLUDE_DIR)
 
 mark_as_advanced(OPTIX80_INCLUDE_DIR)
 
+# Create the target dmtcuda::Optix8
+add_library(dmtcuda-Optix8 INTERFACE)
+add_library(dmtcuda::Optix8 ALIAS dmtcuda-Optix8)
+
+# Set target properties (adjust as needed)
+target_include_directories(dmtcuda-Optix8 
+  INTERFACE 
+    ${CUDA_INCLUDE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${OPTIX80_INCLUDE_DIR}
+)
+target_link_libraries(dmtcuda-Optix8 INTERFACE CUDA::cudart CUDA::cuda_driver)
+
+# Export the target
+export(TARGETS dmtcuda-Optix8 FILE "${CMAKE_BINARY_DIR}/dmtcuda-targets.cmake")
+
 # message("OptiX80_FOUND = " "${OptiX80_FOUND}")

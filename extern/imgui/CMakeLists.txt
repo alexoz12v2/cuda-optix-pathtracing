@@ -1,6 +1,3 @@
-include(GenerateExportHeader)
-include(GNUInstallDirs)
-
 add_library(imgui STATIC)
 target_sources(imgui
   PUBLIC FILE_SET imgui_headers TYPE HEADERS FILES 
@@ -24,13 +21,10 @@ target_sources(imgui
 
 target_include_directories(imgui
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/backends
-  PUBLIC
-    ${PROJECT_SOURCE_DIR}/extern/imgui
   INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backends>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/backends>
 )
 
 target_link_libraries(imgui 
@@ -39,4 +33,6 @@ target_link_libraries(imgui
     OpenGL::GL
 )   
 
+target_compile_definitions(imgui PUBLIC "ImDrawIdx=unsigned int")
 add_library(imgui::imgui ALIAS imgui)
+install(TARGETS imgui FILE_SET imgui_headers)

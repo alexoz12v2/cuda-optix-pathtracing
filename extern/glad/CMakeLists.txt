@@ -5,15 +5,13 @@ add_library(glad STATIC)
 target_sources(glad
   PRIVATE
     src/gl.c
+    src/wgl.c
   PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/glad/gl.h>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/glad/gl.h>
-
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/glad/wgl.h>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/glad/wgl.h>
-
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/KHR/khrplatform.h>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/KHR/khrplatform.h>)
+    FILE_SET glad_headers TYPE HEADERS BASE_DIRS include/
+      FILES include/glad/gl.h
+            include/glad/wgl.h
+            include/KHR/khrplatform.h
+)
 
 target_include_directories(glad
   PRIVATE
@@ -22,5 +20,8 @@ target_include_directories(glad
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+get_target_property(glad_SOURCES glad INTERFACE_SOURCES)
+source_group("GLAD" FILES ${glad_SOURCES})
 
 add_library(glad::glad ALIAS glad)

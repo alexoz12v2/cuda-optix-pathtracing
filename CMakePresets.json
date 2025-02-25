@@ -49,6 +49,46 @@
       }
     },
     {
+      "name": "WindowsNinja",
+      "hidden": true,
+      "inherits": "default",
+      "generator": "Ninja Multi-Config",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64,hostOS=Windows",
+        "strategy": "external"
+      },
+      "toolchainFile": "cmake/Windows.MSVC.toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_PROCESSOR": "AMD64",
+        "VS_INSTALLATION_PATH": "C:/Program Files/Microsoft Visual Studio/2022/Community",
+        "CMAKE_TOOLCHAIN_FILE": "cmake/Windows.MSVC.toolchain.cmake",
+        "CMAKE_VS_VERSION_PRERELEASE": "ON",
+        "CMAKE_CUDA_HOST_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_C_COMPILER": "cl.exe",
+        "VS_EXPERIMENTAL_MODULE": "OFF"
+      }
+    },
+    {
+      "name": "Debug-WinNinja",
+      "hidden": false,
+      "inherits": "WindowsNinja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CONFIGURATION_TYPES": "Debug",
+        "CMAKE_DEFAULT_BUILD_TYPE": "Debug"
+      }
+    },
+    {
       "name": "Debug-VS",
       "hidden": false,
       "inherits": ["WindowsDefault"],
@@ -133,6 +173,11 @@
       "nativeToolOptions": [
         "-d", "explain"
       ]
+    },
+    {
+      "name": "Debug-WinNinja",
+      "configurePreset": "Debug-WinNinja",
+      "verbose": true
     },
     {
       "name": "Debug-VS",

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!-- https://learn.microsoft.com/en-us/windows/win32/sbscs/manifest-file-schema -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+  <assemblyIdentity version="{{version}}" processorArchitecture="amd64" name="{{name}}" type="win32" />
+  <description>DumbTracer Executable: {{description}}</description>
+  
+  <!-- Compatibility section to declare OS support -->
+  <ms_compatibility:compatibility xmlns:ms_compatibility="urn:schemas-microsoft-com:compatibility.v1">
+    <ms_compatibility:application>
+      <!-- Indicate support for Windows 10 and later https://learn.microsoft.com/en-us/windows/win32/sbscs/application-manifests#supportedos -->
+      <ms_compatibility:supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </ms_compatibility:application>
+  </ms_compatibility:compatibility>
+
+  <asmv3:trustInfo>
+    <asmv3:security>
+      <asmv3:requestedPrivileges>
+        <!-- The executable can be opened by a normal user, not necessarely admin -->
+        <asmv3:requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </asmv3:requestedPrivileges>
+    </asmv3:security>
+  </asmv3:trustInfo>
+  
+  <!-- Enable long path support -->
+  <asmv3:application>
+    <asmv3:windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </asmv3:windowsSettings>
+  </asmv3:application>
+</assembly>

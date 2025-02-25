@@ -1,5 +1,6 @@
 ---
 # Project
+BasedOnStyle: LLVM
 Standard: c++20
 ColumnLimit: 120
 
@@ -33,9 +34,9 @@ AllowAllArgumentsOnNextLine: false
 AllowAllConstructorInitializersOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 AllowShortBlocksOnASingleLine: Never
-AllowShortCaseLabelsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
 AllowShortEnumsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: None
+AllowShortFunctionsOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortLambdasOnASingleLine: All
@@ -66,27 +67,30 @@ BraceWrapping:
     AfterControlStatement: Always
     AfterEnum: true
     AfterFunction: true
-    AfterNamespace: true
+    AfterNamespace: false
     AfterStruct: true
     AfterUnion: true
     AfterExternBlock: true
     BeforeCatch: false
     BeforeElse: true
-    BeforeLambdaBody: true
+    BeforeLambdaBody: false 
     BeforeWhile: false
     IndentBraces: false
     SplitEmptyFunction: true
     SplitEmptyRecord: true
     SplitEmptyNamespace: true
 
+LambdaBodyIndentation: OuterScope
+
 # Namespaces
-CompactNamespaces: false
-FixNamespaceComments: true
-NamespaceIndentation: None
 NamespaceMacros:
   - DMT_MODULE_EXPORT
+CompactNamespaces: false
+FixNamespaceComments: true
+NamespaceIndentation: All
 
 # Derive
+LineEnding: LF
 DeriveLineEnding: false
 DerivePointerAlignment: false
 
@@ -120,7 +124,7 @@ IncludeCategories:
     Regex: '^<([^c](.+)|coroutine|charconv|chrono|complex|concepts|condition_variable)>$'
   - Priority: 11
     Regex: '^<c(.+)>$'
-SortIncludes: false
+SortIncludes: false # TODO reset to true once you figure out how to handle C++20 modules without hacks
 SortUsingDeclarations: true
 
 # Penalties

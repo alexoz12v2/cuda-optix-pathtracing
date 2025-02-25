@@ -4,12 +4,11 @@
 #include <fff/fff.h>
 #include <initializer_list>
 
-namespace dmt
-{
+namespace dmt {
 
-int testWork();
+    int testWork();
 
-void resetMockHistory();
+    void resetMockHistory();
 
 } // namespace dmt
 

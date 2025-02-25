@@ -39,8 +39,12 @@ message(STATUS "Executing run-clang-tidy on folder ${PROJECT_BINARY_DIR}, files 
 #  -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy
 #  -p ${PROJECT_BINARY_DIR}
 #  RESULT_VARIABLE EXIT_CODE)
-set(DMT_CLANG_TIDY_COMMAND ${CLANG_TIDY_EXECUTABLE};
+set(CMAKE_CXX_CLANG_TIDY
+  ${CLANG_TIDY_EXECUTABLE};
   -quiet;
   -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy;
   -p ${PROJECT_BINARY_DIR};
 )
+
+# TODO better
+set(CMAKE_CXX_CLANG_TIDY "")

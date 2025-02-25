@@ -22,36 +22,17 @@ set(DMT_TEST_TARGETS_LIST "")
 # todo: Use OpenCppCoverage to generate coverage report
 set(COVERAGE_PREFIX "")
 
-# automatically creates ; lists
-dmt_add_test(dmt-test-testdmt
-  TARGET_LIST DMT_TEST_TARGETS_LIST
-  FILES testdmt/projtest.test.cpp
-  DEPENDENCIES dmt-test-main dmt::testdmt
-)
-
-dmt_add_test(dmt-test-testdmtpartitions
-  TARGET_LIST DMT_TEST_TARGETS_LIST
-  FILES testdmtpartitions/testdmtpartitions.test.cpp testdmtpartitions/testdmtpartitions-implonly.test.cpp
-        testdmtpartitions/testdmtpartitions-moretrig.test.cpp testdmtpartitions/testdmtpartitions-trig.test.cpp
-  DEPENDENCIES dmt-test-main dmt::testdmtpartitions
-)
-
 dmt_add_test(dmt-test-platform
   TARGET_LIST DMT_TEST_TARGETS_LIST
-  FILES platform/platform.test.cpp platform/platform-logging.test.cpp
-  DEPENDENCIES dmt-test-main dmt::platform
+  FILES platform/platform-logging.test.cpp
+  DEPENDENCIES dmt-test-main dmt-platform-mixed
 )
 
-# run tests as soon as you build them
-dmt_set_option(DMT_RUN_TESTS ON BOOL "True to run tests as soon as you build them")
-#if(DMT_RUN_TESTS)
-#  message(STATUS "Running Tests on targets:${DMT_TEST_TARGETS_LIST}")
-#  add_custom_target(dmt-runtests
-#    COMMAND ${COVERAGE_PREFIX} ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
-    # COMMAND ${CMAKE_COMMAND} -P "${PROJECT_BINARY_DIR}/patch_coverage.cmake"
-#    COMMENT "Run Tests"
-#    VERBATIM
-#  )
-#  message(STATUS "DMT_TEST_TARGETS_LIST: ${DMT_TEST_TARGETS_LIST}")
-#  add_dependencies(dmt-runtests ${DMT_TEST_TARGETS_LIST})
-#endif()
+add_custom_target(dmt-runtests
+  COMMAND ${COVERAGE_PREFIX} ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
+  # COMMAND ${CMAKE_COMMAND} -P "${PROJECT_BINARY_DIR}/patch_coverage.cmake"
+  COMMENT "Run Tests"
+  VERBATIM
+)
+message(STATUS "DMT_TEST_TARGETS_LIST: ${DMT_TEST_TARGETS_LIST}")
+add_dependencies(dmt-runtests ${DMT_TEST_TARGETS_LIST})

@@ -1,8 +1,11 @@
 #pragma once
 
 #include "dmtmacros.h"
+#include <platform/platform-macros.h>
+#include <platform/platform-utils.h>
 
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <format>
 #include <mutex>
@@ -12,14 +15,298 @@
 #include <utility>
 
 #include <cassert>
+#include <cinttypes>
 #include <compare>
 #include <cstdint>
 #include <cstring>
 
-DMT_MODULE_EXPORT dmt {
+#if defined(__NVCC__)
+#include <cuda_runtime.h>
+#endif
+
+namespace dmt {
+    /**
+     * @defgroup UTF-8 byte query utils.
+     * @note In the following, consider a code point of type `U+uvwxyz`, in which all letters but `u` are 4 bits,
+     * while `u` is only 1 bit, as it can be either 0 or 1. * <a href="https://en.wikipedia.org/wiki/UTF-8#Description">Reference</a>
+     * @{
+     */
+    namespace utf8 {
+        enum class Direction : uint8_t
+        {
+            eNone = 0,
+            eForward,
+            eBackward
+        };
+
+        DMT_CPU_GPU inline constexpr bool isContinuationByte(char8_t c)
+        {
+            // byte of type 10--'----
+            constexpr char8_t first = 0x80;
+            constexpr char8_t last  = 0xBF;
+            return c >= first && c <= last;
+        }
+        DMT_CPU_GPU inline constexpr bool isStartOf2(char8_t c)
+        {
+            // code point inside [U+0080, U+07FF]
+            // 2 byte char = 110xxxyy | 10yyzzzz
+            constexpr char8_t mask  = 0xE0;
+            constexpr char8_t value = 0xC0;
+            return (c & mask) == value;
+        }
+        DMT_CPU_GPU inline constexpr bool isStartOf3(char8_t c)
+        {
+            // code point inside [U+0800, U+FFFF]
+            // 3 byte char = 1110wwww | 10xxxxyy | 10yyzzzz
+            constexpr char8_t mask  = 0xF0;
+            constexpr char8_t value = 0xE0;
+            return (c & mask) == value;
+        }
+        DMT_CPU_GPU inline constexpr bool isStartOf4(char8_t c)
+        {
+            // code point inside [U+010000, U+10FFFF]. U+10FFFF is the <a href="https://unicodebook.readthedocs.io/unicode.html">Last character</a>
+            // 4 byte char = 11110uvv | 10vvwwww | 10xxxxyy || 10yyzzzz
+            constexpr char8_t mask  = 0xF8;
+            constexpr char8_t value = 0xF0;
+            return (c & mask) == value;
+        }
+        DMT_CPU_GPU inline constexpr bool isInvalidByte(char8_t c)
+        {
+            return c == 0xC0 || c == 0xC1 || (c >= 0xF5 || c <= 0xFF);
+        }
+        DMT_CPU_GPU inline constexpr bool isValidUTF8(char8_t const ch[4])
+        {
+            if (isInvalidByte(ch[0]) || isInvalidByte(ch[1]) || isInvalidByte(ch[2]) || isInvalidByte(ch[3]))
+                return false;
+
+            if (isStartOf4(ch[0]))
+                return (ch[1] & 0xC0) == 0x80 && (ch[2] & 0xC0) == 0x80 &&
+                       (ch[3] & 0xC0) == 0x80; // 11110uvv | 10vvwwww | 10xxxxyy | 10yyzzzz (`U+uvwxyz`)
+            else if (isStartOf3(ch[0]))
+                return (ch[1] & 0xC0) == 0x80 && (ch[2] & 0xC0) == 0x80; // 1110wwww | 10xxxxyy | 10yyzzzz (`U+uvwxyz`)
+            else if (isStartOf2(ch[0]))
+                return (ch[1] & 0xC0) == 0x80;   // 110xxxyy | 10yyzzzz (`U+uvwxyz`)
+            else if (!isContinuationByte(ch[0])) // "Basic Latin" block [U+0000, U+007F]
+                return (ch[0] & 0x80) == 0x00;   // 0yyyzzzz (`U+uvwxyz`)
+            else
+                return false;
+        }
+        DMT_CPU_GPU inline constexpr bool equal(char8_t const a[4], char8_t const b[4])
+        {
+            return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
+        }
+
+        /** @warning doesn't perform bouds checking */
+        DMT_CPU_GPU inline constexpr uint32_t computeUTF8Length(char8_t const* str, uint32_t numBytes)
+        {
+            uint32_t length = 0; // Number of UTF-8 characters
+            uint32_t i      = 0; // Current byte position
+
+            while (i < numBytes)
+            {
+                char8_t currentByte = str[i];
+
+                if (isInvalidByte(currentByte))
+                    return 0; // Return 0 or throw an exception if you prefer error handling for invalid bytes
+
+                // Determine the number of bytes in the current UTF-8 character
+                if (isStartOf4(currentByte))
+                {
+                    if (i + 3 < numBytes && isContinuationByte(str[i + 1]) && isContinuationByte(str[i + 2]) &&
+                        isContinuationByte(str[i + 3]))
+                        i += 4;
+                    else
+                        return 0; // Invalid 4-byte sequence
+                }
+                else if (isStartOf3(currentByte))
+                {
+                    if (i + 2 < numBytes && isContinuationByte(str[i + 1]) && isContinuationByte(str[i + 2]))
+                        i += 3;
+                    else
+                        return 0; // Invalid 3-byte sequence
+                }
+                else if (isStartOf2(currentByte))
+                {
+                    if (i + 1 < numBytes && isContinuationByte(str[i + 1]))
+                        i += 2;
+                    else
+                        return 0; // Invalid 2-byte sequence
+                }
+                else if (!isContinuationByte(currentByte)) // Single-byte character (ASCII)
+                    i += 1;
+                else
+                    return 0; // Invalid sequence
+
+                ++length; // Increment character count
+            }
+
+            return length;
+        }
+        /** @}*/
+
+        /// returns true whenever you need to stop advancing
+        template <typename T>
+        concept PredicateC = std::is_invocable_r_v<Direction, T, char8_t[4]> && std::is_default_constructible_v<T> &&
+                             requires(T t) { t.escaped(); };
+    } // namespace utf8
+
+    struct DMT_PLATFORM_API DefaultPredicate
+    {
+        DMT_CPU_GPU constexpr utf8::Direction operator()(char8_t ch[4])
+        {
+            static_assert(u8'{' == 0x7B && u8'}' == 0x7D);
+            bool const result = [this](char8_t c) {
+                if (inside)
+                    return c == u8'}';
+                else
+                    return c == u8'{';
+            }(ch[0]);
+            if (result)
+                inside = !inside;
+            return result ? (inside ? utf8::Direction::eBackward : utf8::Direction::eForward) : utf8::Direction::eNone;
+        }
+        DMT_CPU_GPU constexpr void escaped() { inside = !inside; }
+
+        bool inside = false;
+    };
+
+    /** Definition of a string view to a UTF-8 encoded string */
+    struct DMT_PLATFORM_API CharRangeU8
+    {
+        char8_t const* data;
+        uint32_t       len;
+        uint32_t       numBytes;
+    };
+
+    template <utf8::PredicateC Pred = DefaultPredicate>
+    class DMT_PLATFORM_API FormatString
+    {
+    public:
+        using difference_type = std::ptrdiff_t;
+        using value_type      = CharRangeU8;
+
+
+        /**
+         * @note Uses `char` and not `char8_t` cause `char8_t` doesn't seem to interpret
+         * correctly hex sequences. "\xF0\x9F\x98\x8A" is printed correctly as smiling face emoji,
+         * while u8"\xF0\x9F\x98\x8A" is garbage
+         * @note apparently, `std::bit_cast` doesn't work with `consteval`. I don't want to rewrite
+         * everything using `char` instead of `char8_t`
+         */
+        template <uint32_t N>
+        DMT_CPU_GPU constexpr FormatString(char const (&_arr)[N]) :
+        m_start(std::bit_cast<decltype(m_start)>(&_arr[0])),
+        m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
+        {
+            ++*this;
+        }
+
+        DMT_CPU_GPU constexpr value_type operator*() const;
+        DMT_CPU_GPU constexpr void       operator++();
+        DMT_CPU_GPU consteval void       operator++(int) { ++*this; }
+        DMT_CPU_GPU constexpr bool       finished() { return m_numBytes == 0; }
+
+    private:
+        struct Pair
+        {
+            char8_t  ch[4];
+            uint32_t numBytes;
+        };
+
+    private:
+        char8_t const* m_start;
+        uint32_t       m_len       = 0;
+        uint32_t       m_lastBytes = 0;
+        uint32_t       m_numBytes;
+        Pred           stop;
+        bool           m_insideArg = false;
+    };
+
+    // it's not an iterator cause the ++ doesn't return a thing
+    static_assert(!std::input_iterator<FormatString<>>);
+
+    template <utf8::PredicateC Pred>
+    DMT_CPU_GPU constexpr FormatString<Pred>::value_type FormatString<Pred>::operator*() const
+    {
+        CharRangeU8 const ret{.data = m_start, .len = m_len, .numBytes = m_lastBytes};
+        return ret;
+    }
+
+    // Compilation should fail in the following cases
+    // - Bytes that never appear in UTF-8: 0xC0, 0xC1, 0xF5–0xFF
+    // - A "continuation byte" (0x80–0xBF) at the start of a character
+    // - A non-continuation byte (or the string ending) before the end of a character
+    // - An overlong encoding (0xE0 followed by less than 0xA0, or 0xF0 followed by less than 0x90)
+    // - A 4-byte sequence that decodes to a value greater than U+10FFFF (0xF4 followed by 0x90 or greater)
+    template <utf8::PredicateC Pred>
+    DMT_CPU_GPU constexpr void FormatString<Pred>::operator++()
+    {
+        // crashed if a character is recognized to have N bytes, but there aren't enough bytes
+#define acquireCharacter(pair)                                                                                            \
+    do                                                                                                                    \
+    {                                                                                                                     \
+        if (utf8::isStartOf4(m_start[m_lastBytes]))                                                                       \
+            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], m_start[m_lastBytes + 3]}, \
+                    4};                                                                                                   \
+        else if (utf8::isStartOf3(m_start[0]))                                                                            \
+            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], 0}, 3};                    \
+        else if (utf8::isStartOf2(m_start[0]))                                                                            \
+            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], 0, 0}, 2};                                           \
+        else                                                                                                              \
+            pair = {{m_start[m_lastBytes], 0, 0, 0}, 1};                                                                  \
+    } while (0)
+
+        // traverse the UTF-8 Multibyte string
+        m_start += m_lastBytes;
+        m_len         = 0;
+        m_lastBytes   = 0;
+        bool finished = false;
+        while (!finished && m_numBytes > 0)
+        {
+            uint32_t iterationBytes = 0;
+            ++m_len;
+            Pair pair;
+            acquireCharacter(pair);
+            //static_assert(utf8::isValidUTF8(pair.ch));
+            iterationBytes += pair.numBytes;
+
+            if (auto res = stop(pair.ch); res != utf8::Direction::eNone)
+            {
+                m_insideArg = !m_insideArg;
+                if (res == utf8::Direction::eBackward)
+                {
+                    --m_len;
+                    iterationBytes -= pair.numBytes;
+                    finished = true;
+                }
+                else // utf8::Direction::eForward
+                {
+                    Pair pair2;
+                    m_lastBytes += iterationBytes;
+                    acquireCharacter(pair2);
+                    m_lastBytes -= iterationBytes;
+                    // if character escaped (==duplicated), go past it
+                    if (utf8::equal(pair2.ch, pair.ch))
+                    {
+                        iterationBytes += pair2.numBytes;
+                        m_insideArg = !m_insideArg;
+                        ++m_len;
+                    }
+                    else
+                        finished = true;
+                }
+            }
+
+            m_numBytes = iterationBytes <= m_numBytes ? m_numBytes - iterationBytes : 0;
+            m_lastBytes += iterationBytes;
+        }
+#undef acquireCharacter
+    }
+
     /**
      * Log Level enum, to check whether we should print or not, and to determine the style of the output
      * @brief log levels for logger configuration
+     * @warning do not change the numbers. the implementation details depends on these exact numbers
      */
     enum class ELogLevel : uint8_t
     {
@@ -28,18 +315,12 @@ DMT_MODULE_EXPORT dmt {
         WARNING = 2, /** <Warning log level> */
         ERR     = 3, /** <Error log level> */
         NONE    = 4, /** <Log disabled> */
+        eTrace  = TRACE,
+        eLog    = LOG,
+        eWarn   = WARNING,
+        eError  = ERR,
+        eCount  = NONE,
     };
-
-    /**
-     * function to convert from a strongly typed enum `ELogLevel` to its numerical representation to make the compiler
-     * happy
-     * @param level log level
-     * @return numerical representation of the log level
-     */
-    constexpr uint8_t toUnderlying(ELogLevel level)
-    {
-        return static_cast<uint8_t>(level);
-    }
 
     /**
      * Spaceship operator (three-way comparison) to generate log level comparison operators
@@ -47,17 +328,192 @@ DMT_MODULE_EXPORT dmt {
      * @param rhs log level no 2
      * @return std::strong_ordering::{less,equivalent,greater} depending on the 2 values
      */
-    constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
+    inline constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
     {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
+
+    // ----------------------------------------------------------------------------------------------------------------
+    struct DMT_PLATFORM_API LogLocation
+    {
+        struct DMT_PLATFORM_API Device
+        {
+            int32_t blockX;
+            int32_t blockY;
+            int32_t blockZ;
+            int32_t threadX;
+            int32_t threadY;
+            int32_t threadZ;
+            int32_t lane;
+            int32_t warp;
+        };
+        struct DMT_PLATFORM_API Host
+        {
+            uint64_t pid;
+            uint64_t tid;
+        };
+        union DMT_PLATFORM_API U
+        {
+            Device dev;
+            Host   host;
+        };
+        static constexpr int32_t hostNum = -1;
+
+        U       loc;
+        int32_t where; // if dirrerent than how then this is device id
+    };
+
+    struct DMT_PLATFORM_API LogRecord
+    {
+        char8_t const*       data;
+        LogLocation          phyLoc;
+        std::source_location srcLoc;
+        ELogLevel            level;
+        uint32_t             len;
+        uint32_t             numBytes;
+    };
+
+    // https://stackoverflow.com/questions/44337309/whats-the-most-efficient-way-to-calculate-the-warp-id-lane-id-in-a-1-d-grid
+    inline DMT_CPU_GPU LogLocation getPhysicalLocation()
+    {
+        LogLocation loc;
+#if defined(__CUDA_ARCH__)
+        int32_t     device  = -1;
+        cudaError_t err     = cudaGetDevice(&device);
+        loc.where           = device;
+        loc.loc.dev.blockX  = blockIdx.x;
+        loc.loc.dev.blockY  = blockIdx.y;
+        loc.loc.dev.blockZ  = blockIdx.z;
+        loc.loc.dev.threadX = threadIdx.x;
+        loc.loc.dev.threadY = threadIdx.y;
+        loc.loc.dev.threadZ = threadIdx.z;
+        loc.loc.dev.lane    = threadIdx.x % warpSize;
+        loc.loc.dev.warp    = threadIdx.x / warpSize;
+#else
+        loc.where        = LogLocation::hostNum;
+        loc.loc.host.pid = os::processId();
+        loc.loc.host.tid = os::threadId();
+#endif
+        return loc;
+    }
+
+    template <typename T>
+    struct UTF8Formatter;
+
+    /** Shortcut to write `std::make_tuple` */
+
+    template <typename... Ts>
+        requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
+    inline constexpr DMT_CPU_GPU LogRecord createRecord(
+        FormatString<>              fmt,
+        ELogLevel                   _level,
+        char8_t*                    _buffer,
+        uint32_t                    _bufferSize,
+        char8_t*                    _argBuffer,
+        uint32_t                    _argBufferSize,
+        std::tuple<Ts...> const&    _params,
+        LogLocation const&          _pysLoc,
+        std::source_location const& _loc)
+    {
+        LogRecord record{};
+        record.level  = _level;
+        record.phyLoc = _pysLoc;
+        record.srcLoc = _loc;
+        record.data   = _buffer;
+
+        bool                 done            = false;
+        uint32_t const       totalArgBufSize = _argBufferSize;
+        uint32_t const       totalBufSize    = _bufferSize;
+        char8_t const* const initialArgBuf   = _argBuffer;
+
+        // Process tuple of arguments using a fold expression
+        uint32_t           offset = 0;
+        auto /*constexpr*/ do_for = [&](auto&&... _args) {
+            (UTF8Formatter<std::remove_cvref_t<decltype(_args)>>{}(std::forward<decltype(_args)>(_args), _argBuffer, offset, _argBufferSize),
+             ...);
+        };
+
+        // Apply the formatters to the tuple
+        std::apply(do_for, _params);
+
+
+        uint32_t const       totalArgBytesWritten = totalArgBufSize - _argBufferSize;
+        char8_t const* const pastEndArgBuf        = initialArgBuf + totalArgBytesWritten;
+
+        // Format the log record
+        while (!done)
+        {
+            CharRangeU8 const portion = *fmt;
+            if (portion.data[0] == u8'{' && portion.data[1] != u8'{' && _argBuffer < pastEndArgBuf)
+            {
+                // Process argument from buffer
+                char8_t const* buf      = _argBuffer + 2 * sizeof(uint32_t);
+                uint32_t const numBytes = *std::bit_cast<uint32_t*>(_argBuffer);
+                uint32_t const len      = *std::bit_cast<uint32_t*>(_argBuffer + sizeof(uint32_t));
+                if (numBytes > 0)
+                {
+                    memcpy(_buffer, buf, numBytes);
+                    _buffer += numBytes;
+                    _bufferSize = _bufferSize >= numBytes ? _bufferSize - numBytes : 0;
+                    record.len += len;
+                    record.numBytes += numBytes;
+                    _argBuffer += numBytes + 2 * sizeof(uint32_t);
+                }
+            }
+            else
+            {
+                // Copy string literal to buffer
+                uint32_t bytesToCopy = fminf(_bufferSize, portion.numBytes);
+                memcpy(_buffer, portion.data, bytesToCopy);
+                _buffer += bytesToCopy;
+                _bufferSize = _bufferSize >= bytesToCopy ? _bufferSize - bytesToCopy : 0;
+                record.len += portion.len;
+                record.numBytes += bytesToCopy;
+            }
+
+            if (_bufferSize == 0 || fmt.finished())
+                done = true;
+            else
+                ++fmt;
+        }
+        // final newline
+        int32_t off = record.numBytes >= totalBufSize ? -1 : 0;
+        ++record.len;
+        ++record.numBytes;
+        _buffer[off] = u8'\n';
+
+        return record;
+    }
+
+    using LogHandlerAllocate   = void* (*)(size_t _numBytes, size_t _align);
+    using LogHandlerDeallocate = void (*)(void* _ptr, size_t _numBytes, size_t _align);
+    struct DMT_PLATFORM_API LogHandler
+    {
+        void* data;
+        void (*hostFlush)(void* _data);
+        bool (*hostFilter)(void* _data, LogRecord const& record);
+        void (*hostCallback)(void* _data, LogRecord const& record);
+        void (*hostCleanup)(LogHandlerDeallocate _dealloc, void* _data);
+
+        // custom memory interface (internal usage only)
+        LogHandlerAllocate   hostAllocate;
+        LogHandlerDeallocate hostDeallocate;
+
+        ELogLevel minimumLevel;
+    };
+
+    DMT_PLATFORM_API bool createConsoleHandler(LogHandler&          _out,
+                                               LogHandlerAllocate   _alloc   = ::dmt::os::allocate,
+                                               LogHandlerDeallocate _dealloc = ::dmt::os::deallocate);
+
+    // ----------------------------------------------------------------------------------------------------------------
 
     /**
      * Obtain from a `ELogLevel` its string representation (in read only memory) as a `std::string_view`
      * @param level log level
      * @return stringified log level
      */
-    constexpr std::string_view stringFromLevel(ELogLevel level)
+    inline constexpr std::string_view stringFromLevel(ELogLevel level)
     {
         using namespace std::string_view_literals;
         constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)>
@@ -68,64 +524,68 @@ DMT_MODULE_EXPORT dmt {
     /**
      * Namespace containing ASCII color codes for console colored output
      */
-    namespace logcolor
-    {
-    /**
-     * ASCII sequence to reset the color of the terminal. called at the end of `write` of `ConsoleLogger`
-     */
-    inline constexpr std::string_view const reset = "\033[0m";
+    namespace logcolor {
+        /**
+         * ASCII sequence to reset the color of the terminal. called at the end of `write` of `ConsoleLogger`
+         */
+        inline constexpr std::string_view const reset = "\033[0m";
 
-    /**
-     *  ASCII sequence for the red color
-     */
-    inline constexpr std::string_view const red = "\033[31m";
+        /**
+         *  ASCII sequence for the red color
+         */
+        inline constexpr std::string_view const red = "\033[31m";
 
-    /**
-     *  ASCII sequence for the green color
-     */
-    inline constexpr std::string_view const green = "\033[32m";
+        /**
+         *  ASCII sequence for the green color
+         */
+        inline constexpr std::string_view const green = "\033[32m";
 
-    /**
-     *  ASCII sequence for a bright tint of yellow
-     */
-    inline constexpr std::string_view const brightYellow = "\033[93m";
+        /**
+         *  ASCII sequence for a bright tint of yellow
+         */
+        inline constexpr std::string_view const brightYellow = "\033[93m";
 
-    /**
-     *  ASCII sequence for a greyish green
-     */
-    inline constexpr std::string_view const greyGreen = "\033[38;5;102m";
+        /**
+         *  ASCII sequence for a darker tint of yellow
+         */
+        inline constexpr std::string_view const darkYellow = "\033[33m";
 
-    /**
-     *  ASCII sequence for the blue color
-     */
-    inline constexpr std::string_view const blue = "\033[34m";
+        /**
+         *  ASCII sequence for a greyish green
+         */
+        inline constexpr std::string_view const greyGreen = "\033[38;5;102m";
 
-    /**
-     *  ASCII sequence for the magenta color
-     */
-    inline constexpr std::string_view const magenta = "\033[35m";
+        /**
+         *  ASCII sequence for the blue color
+         */
+        inline constexpr std::string_view const blue = "\033[34m";
 
-    /**
-     *  ASCII sequence for the cyan color
-     */
-    inline constexpr std::string_view const cyan = "\033[36m";
+        /**
+         *  ASCII sequence for the magenta color
+         */
+        inline constexpr std::string_view const magenta = "\033[35m";
 
-    /**
-     *  ASCII sequence for a bold-like white color
-     */
-    inline constexpr std::string_view const brightWhite = "\033[97m";
+        /**
+         *  ASCII sequence for the cyan color
+         */
+        inline constexpr std::string_view const cyan = "\033[36m";
 
-    /**
-     * Extract the terminal.color from an `ELogLevel`
-     * @param level log level
-     * @return ASCII color sequence for console logging
-     */
-    inline constexpr std::string_view colorFromLevel(ELogLevel level)
-    {
-        assert(level != ELogLevel::NONE);
-        constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, brightYellow, red};
-        return colors[toUnderlying(level)];
-    }
+        /**
+         *  ASCII sequence for a bold-like white color
+         */
+        inline constexpr std::string_view const brightWhite = "\033[97m";
+
+        /**
+         * Extract the terminal.color from an `ELogLevel`
+         * @param level log level
+         * @return ASCII color sequence for console logging
+         */
+        inline constexpr std::string_view colorFromLevel(ELogLevel level)
+        {
+            assert(level != ELogLevel::NONE);
+            constexpr std::array<std::string_view, toUnderlying(ELogLevel::NONE)> colors{greyGreen, brightWhite, darkYellow, red};
+            return colors[toUnderlying(level)];
+        }
     } // namespace logcolor
 
     /**
@@ -135,7 +595,22 @@ DMT_MODULE_EXPORT dmt {
     {
         Console,
         WindowPanel,
+        Forward,
+        Count,
     };
+
+    template <std::integral I>
+    inline constexpr char const* defaultFormatter()
+    {
+        if constexpr (std::is_signed_v<I> && sizeof(I) <= 4)
+            return "%d";
+        if constexpr (std::is_signed_v<I>)
+            return "%lld";
+        if constexpr (std::is_unsigned_v<I> && sizeof(I) <= 4)
+            return "%u";
+        else
+            return "%zu";
+    }
 
     /**
      * Class whose purpose is to convert to a string representation whichever types are to be supported by default in the
@@ -149,15 +624,21 @@ DMT_MODULE_EXPORT dmt {
          * @param len length of the pointed string, excluding the '\0' (expected positive)
          *
          */
-        constexpr StrBuf(char const* str, int32_t len) : str(str), len(len)
-        {
-        }
+        inline constexpr StrBuf(char const* str, int32_t len) : str(str), len(len) {}
 
         /**
          * Constructor which initializes from a \0 terminated string with strlen
          * @param str
          */
-        StrBuf(char const* str) : str(str), len(static_cast<int32_t>(std::strlen(str)))
+        inline StrBuf(char const* str) : str(str), len(static_cast<int32_t>(std::strlen(str))) {}
+
+        /**
+         * Converting constructor from a string_view. NOT `explicit` on purpose
+         * @param view
+         */
+        inline constexpr StrBuf(std::string_view const& view) :
+        str(view.data()),
+        len(static_cast<int32_t>(view.length()))
         {
         }
 
@@ -165,17 +646,7 @@ DMT_MODULE_EXPORT dmt {
          * Converting constructor from a string_view. NOT `explicit` on purpose
          * @param view
          */
-        constexpr StrBuf(std::string_view const& view) : str(view.data()), len(static_cast<int32_t>(view.length()))
-        {
-        }
-
-        /**
-         * Converting constructor from a string. NOT `explicit` on purpose
-         */
-        template <typename Char, typename Traits, typename Alloc>
-        StrBuf(std::basic_string<Char, Traits, Alloc> const& str) :
-        str(str.c_str()),
-        len(static_cast<uint32_t>(str.size()))
+        inline constexpr StrBuf(std::string const& view) : str(view.c_str()), len(static_cast<int32_t>(view.length()))
         {
         }
 
@@ -183,9 +654,7 @@ DMT_MODULE_EXPORT dmt {
          * Converting constructor for formatting booleans
          * @param b
          */
-        constexpr StrBuf(bool b) : StrBuf(b ? strue : sfalse)
-        {
-        }
+        inline constexpr StrBuf(bool b) : StrBuf(b ? strue : sfalse) {}
 
         /**
          * Constructor from a floating point value. If the format string is reasonable, it shouldn't allocate and use
@@ -196,9 +665,21 @@ DMT_MODULE_EXPORT dmt {
          * @param fstr formatting string
          */
         template <std::floating_point F>
-        constexpr StrBuf(F f, char const* fstr = "%.3f")
+        inline constexpr StrBuf(F f, char const* fstr = "%.3g")
         {
             initialize(f, fstr);
+        }
+
+        /**
+         * Constructor from an address in memory
+         * @tparam P pointer type
+         * @param f pointer value
+         */
+        template <typename P>
+            requires std::is_pointer_v<P>
+        inline constexpr StrBuf(P f)
+        {
+            initialize(reinterpret_cast<uintptr_t>(f), "0x%" PRIXPTR);
         }
 
         /**
@@ -208,7 +689,7 @@ DMT_MODULE_EXPORT dmt {
          * @param fstr
          */
         template <std::integral I>
-        constexpr StrBuf(I i, char const* fstr = "%d")
+        inline constexpr StrBuf(I i, char const* fstr = defaultFormatter<I>())
         {
             initialize(i, fstr);
         }
@@ -267,11 +748,8 @@ DMT_MODULE_EXPORT dmt {
             len     = -sz;
         }
     };
-} // namespace dmt
 
-// not exported stuff the next classes need
-namespace dmt {
-    class BaseAsyncIOManager
+    class DMT_PLATFORM_API BaseAsyncIOManager
     {
     public:
         static inline constexpr uint32_t numAios = 4;
@@ -288,12 +766,12 @@ namespace dmt {
 
 #if defined(DMT_OS_LINUX)
 
-    struct alignas(8) AioSpace
+    struct DMT_PLATFORM_API alignas(8) AioSpace
     {
         unsigned char bytes[256];
     };
 
-    class LinuxAsyncIOManager : public BaseAsyncIOManager
+    class DMT_PLATFORM_API LinuxAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         LinuxAsyncIOManager();
@@ -325,12 +803,12 @@ namespace dmt {
 
 #elif defined(DMT_OS_WINDOWS)
 
-    struct alignas(8) AioSpace
+    struct DMT_PLATFORM_API alignas(8) AioSpace
     {
         unsigned char bytes[32];
     };
 
-    class WindowsAsyncIOManager : public BaseAsyncIOManager
+    class DMT_PLATFORM_API WindowsAsyncIOManager : public BaseAsyncIOManager
     {
     public:
         WindowsAsyncIOManager();
@@ -357,15 +835,19 @@ namespace dmt {
         unsigned char m_padding[8];
     };
 #endif
-} // namespace dmt
-
-DMT_MODULE_EXPORT dmt {
     /**
      * Class which formats all the given arguments into a local buffer
      */
-    class CircularOStringStream
+    class DMT_PLATFORM_API CircularOStringStream
     {
     public:
+        CircularOStringStream();
+        CircularOStringStream(CircularOStringStream const&) = delete;
+        CircularOStringStream(CircularOStringStream&&) noexcept;
+        CircularOStringStream& operator=(CircularOStringStream const&) = delete;
+        CircularOStringStream& operator=(CircularOStringStream&&) noexcept;
+        ~CircularOStringStream() noexcept;
+
         /**
          * fixed size of the circular buffer. Could be made a template param
          */
@@ -409,16 +891,18 @@ DMT_MODULE_EXPORT dmt {
          */
         std::string_view str();
 
+        size_t maxLogArgBytes() const { return bufferSize; }
+
     private:
         /**
          * character buffer
          */
-        char m_buffer[bufferSize]{}; // zero initialisation
+        char* m_buffer; // zero initialisation
 
         /**
          * Indicator of the first free character
          */
-        uint32_t m_pos{0};
+        uint32_t m_pos;
     };
 
     // clang-format off
@@ -456,13 +940,119 @@ concept LogDisplay = requires(T t)
 };
     // clang-format on
 
+    // TODO ForceInline
+    template <typename Derived>
+    class InterfaceLogger
+    {
+    public:
+        /**
+         * Function which performs logging with the `LOG` log level, only if `m_level` is at least `LOG`
+         * @param str the string to print
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void log(std::string_view const&     str,
+                                 std::source_location const& loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::LOG, str, loc);
+        }
+
+        /**
+         * Function which performs logging with the `ERROR` log level, only if `m_level` is at least `LOG`
+         * @param str the string to print
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void error(std::string_view const&     str,
+                                   std::source_location const& loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::ERR, str, loc);
+        }
+
+        /**
+         * Function which performs logging with the `ERROR` log level, only if `m_level` is at least `WARN`
+         * @param str the string to print
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void warn(std::string_view const&     str,
+                                  std::source_location const& loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, loc);
+        }
+
+        /**
+         * Function which performs logging with the `ERROR` log level, only if `m_level` is at least `TRACE`
+         * @param str the string to print
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void trace(std::string_view const&     str,
+                                   std::source_location const& loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, loc);
+        }
+
+        /**
+         * Function which formats the given arguments into a format string, to then print it through the logger, only if
+         * the logging level is at least `LOG`
+         * @param str format string
+         * @param list list of arguments
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void log(std::string_view const&              str,
+                                 std::initializer_list<StrBuf> const& list,
+                                 std::source_location const&          loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::LOG, str, list, loc);
+        }
+
+        /**
+         * Function which formats the given arguments into a format string, to then print it through the logger, only if
+         * the logging level is at least `ERROR`
+         * @param str format string
+         * @param list list of arguments
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void error(std::string_view const&              str,
+                                   std::initializer_list<StrBuf> const& list,
+                                   std::source_location const&          loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::ERR, str, list, loc);
+        }
+
+        /**
+         * Function which formats the given arguments into a format string, to then print it through the logger, only if
+         * the logging level is at least `WARN`
+         * @param str format string
+         * @param list list of arguments
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void warn(std::string_view const&              str,
+                                  std::initializer_list<StrBuf> const& list,
+                                  std::source_location const&          loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, list, loc);
+        }
+
+        /**
+         * Function which formats the given arguments into a format string, to then print it through the logger, only if
+         * the logging level is at least `TRACE`
+         * @param str format string
+         * @param list list of arguments
+         * @param loc source location of the caller, auto calculated
+         */
+        DMT_FORCEINLINE void trace(std::string_view const&              str,
+                                   std::initializer_list<StrBuf> const& list,
+                                   std::source_location const&          loc = std::source_location::current())
+        {
+            static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, list, loc);
+        }
+    };
+
     /**
      * CRTP base class for a logger, implementing redundant functions like `log`, `error`, ... using the `Derived`
      * `write` function
      * @tparam Derived type of the derived logger class
      */
     template <typename Derived>
-    class BaseLogger
+    class BaseLogger : public InterfaceLogger<Derived>
     {
     public:
         /**
@@ -475,47 +1065,55 @@ concept LogDisplay = requires(T t)
          * Setter for the `m_level`
          * @param level new level
          */
-        void setLevel(ELogLevel level)
-        {
-            m_level = level;
-        }
+        void setLevel(ELogLevel level) { m_level = level; }
 
         /**
          * check if the given log level is enabled
          * @param level log level
          * @return boolean indicating whether the given log level is enabled
          */
-        [[nodiscard]] bool enabled(ELogLevel level) const
-        {
-            return m_level <= level;
-        }
+        [[nodiscard]] bool enabled(ELogLevel level) const { return m_level >= level; }
 
         /**
          * Checks if the `LOG` log level is enabled
          * @return boolean indicating whether the `LOG` log level is enabled
          */
-        [[nodiscard]] bool logEnabled() const
-        {
-            return enabled(ELogLevel::LOG);
-        }
+        [[nodiscard]] bool logEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::LOG); }
 
         /**
          * Checks if the `ERROR` log level is enabled
          * @return boolean indicating whether the `ERROR` log level is enabled
          */
-        [[nodiscard]] bool errorEnabled() const
-        {
-            return enabled(ELogLevel::ERR);
-        }
+        [[nodiscard]] bool errorEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::ERR); }
 
         /**
          * Checks if the `TRACE` log level is enabled
          * @return boolean indicating whether the `TRACE` log level is enabled
          */
-        [[nodiscard]] bool traceEnabled() const
-        {
-            return enabled(ELogLevel::TRACE);
-        }
+        [[nodiscard]] bool traceEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::TRACE); }
+
+        /**
+         * Checks if the `WARN` log level is enabled
+         * @return boolean indicating whether the `WARN` log level is enabled
+         */
+        [[nodiscard]] bool warnEnabled() { return static_cast<Derived*>(this)->enabled(ELogLevel::WARNING); }
+        /**
+         * Checks if the `LOG` log level is enabled
+         * @return boolean indicating whether the `LOG` log level is enabled
+         */
+        [[nodiscard]] bool logEnabled() const { return static_cast<Derived const*>(this)->enabled(ELogLevel::LOG); }
+
+        /**
+         * Checks if the `ERROR` log level is enabled
+         * @return boolean indicating whether the `ERROR` log level is enabled
+         */
+        [[nodiscard]] bool errorEnabled() const { return static_cast<Derived const*>(this)->enabled(ELogLevel::ERR); }
+
+        /**
+         * Checks if the `TRACE` log level is enabled
+         * @return boolean indicating whether the `TRACE` log level is enabled
+         */
+        [[nodiscard]] bool traceEnabled() const { return static_cast<Derived const*>(this)->enabled(ELogLevel::TRACE); }
 
         /**
          * Checks if the `WARN` log level is enabled
@@ -523,103 +1121,7 @@ concept LogDisplay = requires(T t)
          */
         [[nodiscard]] bool warnEnabled() const
         {
-            return enabled(ELogLevel::WARNING);
-        }
-
-        /**
-         * Function which performs logging with the `LOG` log level, only if `m_level` is at least `LOG`
-         * @param str the string to print
-         * @param loc source location of the caller, auto calculated
-         */
-        void log(std::string_view const& str, std::source_location const& loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::LOG, str, loc);
-        }
-
-        /**
-         * Function which performs logging with the `ERROR` log level, only if `m_level` is at least `LOG`
-         * @param str the string to print
-         * @param loc source location of the caller, auto calculated
-         */
-        void error(std::string_view const& str, std::source_location const& loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::ERR, str, loc);
-        }
-
-        /**
-         * Function which performs logging with the `ERROR` log level, only if `m_level` is at least `WARN`
-         * @param str the string to print
-         * @param loc source location of the caller, auto calculated
-         */
-        void warn(std::string_view const& str, std::source_location const& loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, loc);
-        }
-
-        /**
-         * Function which performs logging with the `ERROR` log level, only if `m_level` is at least `TRACE`
-         * @param str the string to print
-         * @param loc source location of the caller, auto calculated
-         */
-        void trace(std::string_view const& str, std::source_location const& loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, loc);
-        }
-
-        /**
-         * Function which formats the given arguments into a format string, to then print it through the logger, only if
-         * the logging level is at least `LOG`
-         * @param str format string
-         * @param list list of arguments
-         * @param loc source location of the caller, auto calculated
-         */
-        void log(std::string_view const&              str,
-                 std::initializer_list<StrBuf> const& list,
-                 std::source_location const&          loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::LOG, str, list, loc);
-        }
-
-        /**
-         * Function which formats the given arguments into a format string, to then print it through the logger, only if
-         * the logging level is at least `ERROR`
-         * @param str format string
-         * @param list list of arguments
-         * @param loc source location of the caller, auto calculated
-         */
-        void error(std::string_view const&              str,
-                   std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::ERR, str, list, loc);
-        }
-
-        /**
-         * Function which formats the given arguments into a format string, to then print it through the logger, only if
-         * the logging level is at least `WARN`
-         * @param str format string
-         * @param list list of arguments
-         * @param loc source location of the caller, auto calculated
-         */
-        void warn(std::string_view const&              str,
-                  std::initializer_list<StrBuf> const& list,
-                  std::source_location const&          loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::WARNING, str, list, loc);
-        }
-
-        /**
-         * Function which formats the given arguments into a format string, to then print it through the logger, only if
-         * the logging level is at least `TRACE`
-         * @param str format string
-         * @param list list of arguments
-         * @param loc source location of the caller, auto calculated
-         */
-        void trace(std::string_view const&              str,
-                   std::initializer_list<StrBuf> const& list,
-                   std::source_location const&          loc = std::source_location::current())
-        {
-            static_cast<Derived*>(this)->write(ELogLevel::TRACE, str, list, loc);
+            return static_cast<Derived const*>(this)->enabled(ELogLevel::WARNING);
         }
 
     protected:
@@ -653,23 +1155,14 @@ concept AsyncIOManager = requires(T t) {
      * Implementation of the `AsyncIOManager` concept which does nothing. Used to fill moved-from
      * `ConsoleLogger` objects
      */
-    class alignas(8) NullAsyncIOManager : public BaseAsyncIOManager
+    class alignas(8) DMT_PLATFORM_API NullAsyncIOManager : public BaseAsyncIOManager
     {
     public:
-        char* operator[](uint32_t i)
-        {
-            return m_padding;
-        }
+        char* operator[](uint32_t i) { return m_padding; }
 
-        uint32_t findFirstFreeBlocking() const
-        {
-            return 0;
-        }
+        uint32_t findFirstFreeBlocking() const { return 0; }
 
-        bool enqueue(uint32_t idx, size_t sz) const
-        {
-            return true;
-        }
+        bool enqueue(uint32_t idx, size_t sz) const { return true; }
 
     private:
         char m_padding[asyncIOClassSize]{};
@@ -683,13 +1176,19 @@ concept AsyncIOManager = requires(T t) {
 #endif
     static_assert(AsyncIOManager<NullAsyncIOManager>);
 
+    class DMT_PLATFORM_API ConsoleLogger;
+    extern template BaseLogger<ConsoleLogger>;
+
     /**
      * Class implementing basic console logging while making use of the async IO facilities of the Windows and Linux
      * Operating system.
      * Note: OS API usage is not beneficial to performance here, but it's for learning and reference
      */
-    class ConsoleLogger : public BaseLogger<ConsoleLogger>
+    class DMT_PLATFORM_API ConsoleLogger
     {
+    public:
+        ELogLevel level;
+
     public:
         // -- Types --
         /**
@@ -731,13 +1230,12 @@ concept AsyncIOManager = requires(T t) {
                    std::string_view const& functionName,
                    uint32_t                line,
                    std::string_view const& levelStr,
-                   std::string_view const& content)
-            {
+                   std::string_view const& content) {
                 T&       clazz   = *reinterpret_cast<T*>(pClazz);
                 uint32_t freeIdx = clazz.findFirstFreeBlocking();
                 int32_t  sz      = std::snprintf(clazz[freeIdx],
                                            T::lineSize,
-                                           "%s[%s %s:%s:%u] %s <> %s\n%s",
+                                           "%s[%s %s:%s:%u] %s <> %s%s\n\0",
                                            logcolor::colorFromLevel(levell).data(),
                                            date.data(),
                                            fileName.data(),
@@ -749,8 +1247,9 @@ concept AsyncIOManager = requires(T t) {
                 assert(sz > 0 && "could not log to buffer");
                 return clazz.enqueue(freeIdx, static_cast<uint32_t>(sz));
             };
-            logger.m_IOClassInterface.destructor = [](unsigned char* pClazz)
-            { std::destroy_at<T>(reinterpret_cast<T*>(pClazz)); };
+            logger.m_IOClassInterface.destructor = [](unsigned char* pClazz) {
+                std::destroy_at<T>(reinterpret_cast<T*>(pClazz));
+            };
             return logger;
         }
 
@@ -804,17 +1303,17 @@ concept AsyncIOManager = requires(T t) {
             return *reinterpret_cast<std::remove_cvref_t<T>*>(&m_asyncIOClass);
         }
 
+        size_t maxLogArgBytes() const;
+
     private:
         // -- Constructors --
-        explicit ConsoleLogger(ELogLevel level) : BaseLogger<ConsoleLogger>(level)
-        {
-        }
+        explicit ConsoleLogger(ELogLevel level) : level(level) {}
 
         // -- Types --
         /**
          * Interface type calling into the type erased class implementation
          */
-        struct Table
+        struct DMT_PLATFORM_API Table
         {
             bool (*tryAsyncLog)(unsigned char*          pClazz,
                                 ELogLevel               level,
@@ -926,6 +1425,85 @@ concept AsyncIOManager = requires(T t) {
         /**
          * Mutex to ensure thread-safety for write methods
          */
-        mutable std::mutex m_writeMutex;
+        static inline std::mutex s_writeMutex;
+    };
+
+    class DMT_PLATFORM_API LoggingContext : public InterfaceLogger<LoggingContext>
+    {
+    public:
+        LoggingContext();
+
+        /**
+         * Setter for the `m_level`
+         * @param level new level
+         * @warning Purposefully name hiding the `BaseLogger`
+         */
+        void setLevel(ELogLevel level) { logger.level = level; }
+
+        void log(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void log(std::string_view const&              str,
+                 std::initializer_list<StrBuf> const& list,
+                 std::source_location const&          loc = std::source_location::current());
+
+        void warn(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void warn(std::string_view const&              str,
+                  std::initializer_list<StrBuf> const& list,
+                  std::source_location const&          loc = std::source_location::current());
+
+        void error(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void error(std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc = std::source_location::current());
+
+        void trace(std::string_view const& str, std::source_location const& loc = std::source_location::current());
+        void trace(std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc = std::source_location::current());
+
+        /**
+         * Write function mandated by the CRTP pattern of the class `BaseLogger`
+         * @param level log level
+         * @param str string to output
+         * @param loc location of the log
+         */
+        void write(ELogLevel level, std::string_view const& str, std::source_location const& loc);
+
+        /**
+         * Write function mandated by the CRTP pattern of the class `BaseLogger`
+         * @param level log level
+         * @param str format string
+         * @param list list of arguments which will be used to create the final string
+         * @param loc location of the log
+         */
+        void write(ELogLevel                            level,
+                   std::string_view const&              str,
+                   std::initializer_list<StrBuf> const& list,
+                   std::source_location const&          loc);
+
+        /**
+         * CRTP overridden function to check if the true underlying logger is enabled on the log level
+         * @param level log level requested
+         * @return bool signaling whether the requested log level is enabled
+         */
+        bool enabled(ELogLevel level) const { return level >= logger.level; }
+
+        bool traceEnabled() const { return enabled(ELogLevel::TRACE); }
+
+        bool logEnabled() const { return enabled(ELogLevel::LOG); }
+
+        bool warnEnabled() const { return enabled(ELogLevel::WARNING); }
+
+        bool errorEnabled() const { return enabled(ELogLevel::ERR); }
+
+        void dbgTraceStackTrace();
+
+        void dbgErrorStackTrace();
+
+        size_t maxLogArgBytes() const;
+
+        uint64_t millisFromStart() const;
+
+        ConsoleLogger logger;
+        int64_t       start;
     };
 } // namespace dmt

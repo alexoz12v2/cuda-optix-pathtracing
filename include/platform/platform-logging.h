@@ -225,6 +225,7 @@ namespace dmt {
     // it's not an iterator cause the ++ doesn't return a thing
     static_assert(!std::input_iterator<FormatString<>>);
 
+    // Non puo essere constexpr e anche essere DMT_CPU_GPU, a meno che la compilation unit che lo include e' cuda. va rifatto o rimosso
     template <utf8::PredicateC Pred>
     DMT_CPU_GPU constexpr FormatString<Pred>::value_type FormatString<Pred>::operator*() const
     {

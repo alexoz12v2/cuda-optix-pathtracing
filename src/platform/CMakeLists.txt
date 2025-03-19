@@ -102,6 +102,7 @@ target_link_libraries(dmt-platform
 dmt_add_module_library(dmt-platform-cuda platform)
 string(CONCAT platform_cuda_private_sources
   "platform-cuda-utils.cu;"
+  "platform-logging-default-formatters.cu;"
   "cudaTest.cu;"
   "platform-context.cu;" # keep ; as we will concatenate more
 )
@@ -130,6 +131,7 @@ target_sources(dmt-platform-cuda
             ${CMAKE_SOURCE_DIR}/include/platform/cudaTest.h
             ${CMAKE_SOURCE_DIR}/include/platform/platform-context.h
             ${CMAKE_SOURCE_DIR}/include/platform/platform-cuda-fileMapping.h
+            ${CMAKE_SOURCE_DIR}/include/platform/platform-logging-default-formatters.h 
   PRIVATE
     ${platform_cuda_private_sources}
   PRIVATE # display only files

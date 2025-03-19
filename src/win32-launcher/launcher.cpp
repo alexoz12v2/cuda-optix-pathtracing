@@ -766,9 +766,11 @@ int main()
 
     // wait for io threads (for now this hangs)
     s_terminate.store(true);
-    WaitForMultipleObjects(2, hThreads, true, INFINITE);
-    //TerminateThread(hThreads[0], 0);
-    //TerminateThread(hThreads[1], 0);
+    if (WaitForMultipleObjects(2, hThreads, false, 100))
+    {
+        TerminateThread(hThreads[0], 0);
+        TerminateThread(hThreads[1], 0);
+    }
 
 #if defined(USE_NAMED_PIPES)
     j.data->closeHandles();

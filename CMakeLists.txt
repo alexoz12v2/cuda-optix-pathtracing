@@ -87,6 +87,15 @@ include(cmake/SetupDoxygen.cmake)
 dmt_define_environment()
 dmt_setup_dependencies()
 
+# grab python executable (msut be after `dmt_define_environment`). sets variable PYTHON_EXEC
+dmt_find_python_executable()
+execute_process(
+  COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/test_python.py
+  COMMAND_ECHO STDOUT
+  OUTPUT_VARIABLE test_python_STDOUT
+)
+message(STATUS "${test_python_STDOUT}")
+
 # possible TODO: make this work
 if(DMT_COMPILER_MSVC)
   dmt_set_option(DMT_GENERATE_PDB ON BOOL "True to generate PDB Symbols")

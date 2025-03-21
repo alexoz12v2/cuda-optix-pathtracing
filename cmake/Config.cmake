@@ -235,6 +235,45 @@ function(dmt_get_msvc_flags out_flags)
 endfunction()
 
 
+# if you need to install libraries, it's best to provide in the repo a virtual environment
+function(dmt_find_python_executable)
+  if(DMT_OS_WINDOWS)
+    execute_process(
+      COMMAND py -3.11 -c "import sys; print(sys.executable)"
+      RESULT_VARIABLE PYTHON_RESULT
+      OUTPUT_VARIABLE PYTHON_EXEC
+      ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    
+    if(NOT PYTHON_RESULT EQUAL 0)
+      message(FATAL_ERROR "Python 3.11+ not found. Please install it with \"winget install python.python.3.11\" and ensure it's accessible via 'py -3.11'.")
+    endif()
+  else()
+    execute_process(
+      COMMAND python3 -c "import sys; print(sys.executable)"
+      RESULT_VARIABLE PYTHON_RESULT
+      OUTPUT_VARIABLE PYTHON_EXEC
+      ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    
+    if(NOT PYTHON_RESULT EQUAL 0)
+      message(FATAL_ERROR "Python 3.11+ not found. Please install it and ensure 'python3' is accessible.")
+    endif()
+    
+    execute_process(
+      COMMAND python3 -c "import sys; exit(0 if sys.version_info >= (3,11) else 1)"
+      RESULT_VARIABLE PYTHON_VERSION_OK
+      ERROR_QUIET
+    )
+    
+    if(NOT PYTHON_VERSION_OK EQUAL 0)
+      message(FATAL_ERROR "Python version is lower than 3.11. Please upgrade Python.")
+    endif()
+  endif()
+  return(PROPAGATE PYTHON_EXEC)
+endfunction()
+
+
 macro(dmt_set_target_warnings target)
   option(DMT_WARNINGS_AS_ERRORS "Treat Compiler Warnings as errors" OFF)
   if(DMT_COMPILER_MSVC)

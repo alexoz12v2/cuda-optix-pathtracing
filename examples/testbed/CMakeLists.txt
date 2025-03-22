@@ -1,4 +1,5 @@
-dmt_add_example(dmt-testbed
-  PRIVATE_SOURCES main.cpp dummy.cu
-  PRIVATE_DEPS dmt-middleware-mixed
+dmt_add_example(dmt-testbed)
+target_sources(dmt-testbed
+  PRIVATE main.cpp dummy.cu
 )
+target_link_libraries(dmt-testbed PRIVATE dmt-middleware-mixed)

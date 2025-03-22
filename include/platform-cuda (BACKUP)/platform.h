@@ -1,7 +1,7 @@
 #pragma once
 
 // keep in sync with .cppm file
-#include "platform/platform-macros.h"
+#include "platform/platform-mixed-macros.h"
 
 #include <platform/platform-launch.h> // must be included before all the rest
 #include <platform/platform-utils.h>
@@ -10,7 +10,9 @@
 #include <platform/platform-threadPool.h>
 #include <platform/platform-display.h>
 #include <platform/platform-file.h>
+#include <platform/platform-cuda-utils.h>
 #include <platform/platform-context.h>
+#include <platform/platform-cuda-fileMapping.h>
 
 #include <array>
 #include <bit>
@@ -32,13 +34,13 @@ namespace dmt {
     class AppContext;
     namespace ctx {
         using namespace dmt;
-        DMT_PLATFORM_API void        init(AppContext& ctx);
-        DMT_PLATFORM_API AppContext* acquireCurrent();
-        DMT_PLATFORM_API void        releaseCurrent();
-        DMT_PLATFORM_API void        unregister();
+        DMT_PLATFORM_MIXED_API void        init(AppContext& ctx);
+        DMT_PLATFORM_MIXED_API AppContext* acquireCurrent();
+        DMT_PLATFORM_MIXED_API void        releaseCurrent();
+        DMT_PLATFORM_MIXED_API void        unregister();
     } // namespace ctx
 
-    class DMT_PLATFORM_API AppContextJanitor
+    class DMT_PLATFORM_MIXED_API AppContextJanitor
     {
     public:
         AppContextJanitor() : actx(*ctx::acquireCurrent()) {}
@@ -52,10 +54,10 @@ namespace dmt {
     };
 
     struct AppContextImpl;
-    class DMT_PLATFORM_API AppContext
+    class DMT_PLATFORM_MIXED_API AppContext
     {
-        friend DMT_PLATFORM_API void ctx::init(AppContext& ctx);
-        friend DMT_PLATFORM_API void ctx::unregister();
+        friend DMT_PLATFORM_MIXED_API void ctx::init(AppContext& ctx);
+        friend DMT_PLATFORM_MIXED_API void ctx::unregister();
 
     public:
         AppContext(uint32_t                                   pageTrackCapacity  = 512,

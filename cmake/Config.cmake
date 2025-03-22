@@ -617,9 +617,6 @@ endfunction()
 
 # usage: dmt_add_example creates an executable with no sources, configured and prepared to be
 function(dmt_add_example target)
-  set(multivalue PUBLIC_SOURCES PRIVATE_SOURCES PUBLIC_DEPS PRIVATE_DEPS)
-  cmake_parse_arguments(ARGS "" "" "${multivalue}" ${ARGN})
-
   string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")
   string(REGEX REPLACE "-" "_" v_target_name "${v_target_name}")
 
@@ -647,8 +644,6 @@ function(dmt_add_example target)
     # this will use /SUBSYSTEM:CONSOLE
     add_executable(${target}-launcher)
     target_sources(${target}-launcher PRIVATE ${PROJECT_SOURCE_DIR}/src/win32-launcher/launcher.cpp)
-    # add dependencies to serialize-deserialize json options
-    target_link_libraries(${target}-launcher PRIVATE nlohmann_json::nlohmann_json)
     # set the same properties for the launcher as well
     set_target_properties(${target}-launcher PROPERTIES 
       RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
@@ -674,28 +669,6 @@ function(dmt_add_example target)
   message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
   message(STATUS "${target} ARGS_PUBLIC_DEPS ${ARGS_PUBLIC_DEPS}")
   message(STATUS "${target} ARGS_PRIVATE_DEPS ${ARGS_PRIVATE_DEPS}")
-
-  # Add public sources if provided
-  if(ARGS_PUBLIC_SOURCES)
-    target_sources(${target} PUBLIC ${ARGS_PUBLIC_SOURCES})
-  endif()
-
-  # Add private sources if provided
-  if(ARGS_PRIVATE_SOURCES)
-    target_sources(${target} PRIVATE ${ARGS_PRIVATE_SOURCES})
-  endif()
-
-  # Add public dependencies if provided
-  if(ARGS_PUBLIC_DEPS)
-    target_link_libraries(${target} PUBLIC ${ARGS_PUBLIC_DEPS})
-  endif()
-
-  # Add private dependencies if provided
-  if(ARGS_PRIVATE_DEPS)
-    target_link_libraries(${target} PRIVATE ${ARGS_PRIVATE_DEPS})
-  endif()
-
-  # possible todo: PCH
 
   # put the executable file in the right place
   # set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)

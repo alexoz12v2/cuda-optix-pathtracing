@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dmtmacros.h"
 #include <platform/platform-macros.h>
 #include <platform/platform-utils.h>
 
@@ -19,6 +20,10 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(__NVCC__)
+#include <cuda_runtime.h>
+#endif
+
 namespace dmt {
     /**
      * @defgroup UTF-8 byte query utils.
@@ -34,14 +39,14 @@ namespace dmt {
             eBackward
         };
 
-        inline constexpr bool isContinuationByte(char8_t c)
+        DMT_CPU_GPU inline constexpr bool isContinuationByte(char8_t c)
         {
             // byte of type 10--'----
             constexpr char8_t first = 0x80;
             constexpr char8_t last  = 0xBF;
             return c >= first && c <= last;
         }
-        inline constexpr bool isStartOf2(char8_t c)
+        DMT_CPU_GPU inline constexpr bool isStartOf2(char8_t c)
         {
             // code point inside [U+0080, U+07FF]
             // 2 byte char = 110xxxyy | 10yyzzzz
@@ -49,7 +54,7 @@ namespace dmt {
             constexpr char8_t value = 0xC0;
             return (c & mask) == value;
         }
-        inline constexpr bool isStartOf3(char8_t c)
+        DMT_CPU_GPU inline constexpr bool isStartOf3(char8_t c)
         {
             // code point inside [U+0800, U+FFFF]
             // 3 byte char = 1110wwww | 10xxxxyy | 10yyzzzz
@@ -57,7 +62,7 @@ namespace dmt {
             constexpr char8_t value = 0xE0;
             return (c & mask) == value;
         }
-        inline constexpr bool isStartOf4(char8_t c)
+        DMT_CPU_GPU inline constexpr bool isStartOf4(char8_t c)
         {
             // code point inside [U+010000, U+10FFFF]. U+10FFFF is the <a href="https://unicodebook.readthedocs.io/unicode.html">Last character</a>
             // 4 byte char = 11110uvv | 10vvwwww | 10xxxxyy || 10yyzzzz
@@ -65,8 +70,11 @@ namespace dmt {
             constexpr char8_t value = 0xF0;
             return (c & mask) == value;
         }
-        inline constexpr bool isInvalidByte(char8_t c) { return c == 0xC0 || c == 0xC1 || (c >= 0xF5 || c <= 0xFF); }
-        inline constexpr bool isValidUTF8(char8_t const ch[4])
+        DMT_CPU_GPU inline constexpr bool isInvalidByte(char8_t c)
+        {
+            return c == 0xC0 || c == 0xC1 || (c >= 0xF5 || c <= 0xFF);
+        }
+        DMT_CPU_GPU inline constexpr bool isValidUTF8(char8_t const ch[4])
         {
             if (isInvalidByte(ch[0]) || isInvalidByte(ch[1]) || isInvalidByte(ch[2]) || isInvalidByte(ch[3]))
                 return false;
@@ -83,13 +91,13 @@ namespace dmt {
             else
                 return false;
         }
-        inline constexpr bool equal(char8_t const a[4], char8_t const b[4])
+        DMT_CPU_GPU inline constexpr bool equal(char8_t const a[4], char8_t const b[4])
         {
             return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
         }
 
         /** @warning doesn't perform bouds checking */
-        inline constexpr uint32_t computeUTF8Length(char8_t const* str, uint32_t numBytes)
+        DMT_CPU_GPU inline constexpr uint32_t computeUTF8Length(char8_t const* str, uint32_t numBytes)
         {
             uint32_t length = 0; // Number of UTF-8 characters
             uint32_t i      = 0; // Current byte position
@@ -144,7 +152,7 @@ namespace dmt {
 
     struct DMT_PLATFORM_API DefaultPredicate
     {
-        constexpr utf8::Direction operator()(char8_t ch[4])
+        DMT_CPU_GPU constexpr utf8::Direction operator()(char8_t ch[4])
         {
             static_assert(u8'{' == 0x7B && u8'}' == 0x7D);
             bool const result = [this](char8_t c) {
@@ -157,26 +165,26 @@ namespace dmt {
                 inside = !inside;
             return result ? (inside ? utf8::Direction::eBackward : utf8::Direction::eForward) : utf8::Direction::eNone;
         }
-        constexpr void escaped() { inside = !inside; }
+        DMT_CPU_GPU constexpr void escaped() { inside = !inside; }
 
         bool inside = false;
     };
 
     /** Definition of a string view to a UTF-8 encoded string */
-    struct CharRangeU8
+    struct DMT_PLATFORM_API CharRangeU8
     {
         char8_t const* data;
         uint32_t       len;
         uint32_t       numBytes;
     };
-    static_assert(std::is_trivial_v<CharRangeU8> && std::is_standard_layout_v<CharRangeU8>);
 
     template <utf8::PredicateC Pred = DefaultPredicate>
-    class FormatString
+    class DMT_PLATFORM_API FormatString
     {
     public:
         using difference_type = std::ptrdiff_t;
         using value_type      = CharRangeU8;
+
 
         /**
          * @note Uses `char` and not `char8_t` cause `char8_t` doesn't seem to interpret
@@ -186,17 +194,17 @@ namespace dmt {
          * everything using `char` instead of `char8_t`
          */
         template <uint32_t N>
-        constexpr FormatString(char const (&_arr)[N]) :
+        DMT_CPU_GPU constexpr FormatString(char const (&_arr)[N]) :
         m_start(std::bit_cast<decltype(m_start)>(&_arr[0])),
         m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
         {
             ++*this;
         }
 
-        constexpr value_type operator*() const;
-        constexpr void       operator++();
-        consteval void       operator++(int) { ++*this; }
-        constexpr bool       finished() { return m_numBytes == 0; }
+        DMT_CPU_GPU constexpr value_type operator*() const;
+        DMT_CPU_GPU constexpr void       operator++();
+        DMT_CPU_GPU consteval void       operator++(int) { ++*this; }
+        DMT_CPU_GPU constexpr bool       finished() { return m_numBytes == 0; }
 
     private:
         struct Pair
@@ -217,9 +225,9 @@ namespace dmt {
     // it's not an iterator cause the ++ doesn't return a thing
     static_assert(!std::input_iterator<FormatString<>>);
 
-    // Non puo essere constexpr e anche essere , a meno che la compilation unit che lo include e' cuda. va rifatto o rimosso
+    // Non puo essere constexpr e anche essere DMT_CPU_GPU, a meno che la compilation unit che lo include e' cuda. va rifatto o rimosso
     template <utf8::PredicateC Pred>
-    constexpr FormatString<Pred>::value_type FormatString<Pred>::operator*() const
+    DMT_CPU_GPU constexpr FormatString<Pred>::value_type FormatString<Pred>::operator*() const
     {
         CharRangeU8 const ret{.data = m_start, .len = m_len, .numBytes = m_lastBytes};
         return ret;
@@ -232,7 +240,7 @@ namespace dmt {
     // - An overlong encoding (0xE0 followed by less than 0xA0, or 0xF0 followed by less than 0x90)
     // - A 4-byte sequence that decodes to a value greater than U+10FFFF (0xF4 followed by 0x90 or greater)
     template <utf8::PredicateC Pred>
-    constexpr void FormatString<Pred>::operator++()
+    DMT_CPU_GPU constexpr void FormatString<Pred>::operator++()
     {
         // crashed if a character is recognized to have N bytes, but there aren't enough bytes
 #define acquireCharacter(pair)                                                                                            \
@@ -366,9 +374,8 @@ namespace dmt {
         uint32_t             numBytes;
     };
 
-    // TODO refactor elsewhere
     // https://stackoverflow.com/questions/44337309/whats-the-most-efficient-way-to-calculate-the-warp-id-lane-id-in-a-1-d-grid
-    inline LogLocation getPhysicalLocation()
+    inline DMT_CPU_GPU LogLocation getPhysicalLocation()
     {
         LogLocation loc;
 #if defined(__CUDA_ARCH__)
@@ -398,7 +405,7 @@ namespace dmt {
 
     template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char8_t*, uint32_t&, uint32_t&> && ...)
-    inline constexpr LogRecord createRecord(
+    inline constexpr DMT_CPU_GPU LogRecord createRecord(
         FormatString<>              fmt,
         ELogLevel                   _level,
         char8_t*                    _buffer,

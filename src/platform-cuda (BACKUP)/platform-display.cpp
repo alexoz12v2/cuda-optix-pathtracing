@@ -10,23 +10,13 @@
 #include <backends/imgui_impl_opengl3.h>
 #include <imgui.h>
 
+#include <cudaTest.h>
+
 namespace dmt {
     //glfw staff
     DMTwindowGLFW   Display::m_winGLFW;
     DMTwindowImGui  Display::m_winImGui;
     DMTwindowOpenGL Display::m_winOpenGL;
-
-    static uint32_t createOpenGLTexture(int width, int height)
-    {
-        GLuint texture;
-        glGenTextures(1, &texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-
-        return texture;
-    }
 
     Display::Display()
     {
@@ -87,8 +77,7 @@ namespace dmt {
             glClear(GL_COLOR_BUFFER_BIT);
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-            // TODO runtime loading of cudart.dll
-            // dmt::RegImgSurf(m_winOpenGL.tex, m_winOpenGL.vbo, 0.2f * m_winGLFW.displayW, 0.8 * m_winGLFW.displayW);
+            dmt::RegImgSurf(m_winOpenGL.tex, m_winOpenGL.vbo, 0.2f * m_winGLFW.displayW, 0.8 * m_winGLFW.displayW);
             glUseProgram(m_winOpenGL.shaderProgram);
             glBindVertexArray(m_winOpenGL.vao);
 

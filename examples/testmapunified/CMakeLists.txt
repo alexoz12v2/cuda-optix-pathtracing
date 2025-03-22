@@ -1,4 +1,5 @@
-dmt_add_example(dmt-testmapunified
-  PRIVATE_SOURCES main.cu
-  PRIVATE_DEPS implot::implot dmt-platform-mixed dmt::cudautils
+dmt_add_example(dmt-testmapunified)
+target_sources(dmt-testmapunified
+  PRIVATE main.cu
 )
+target_link_libraries(dmt-testmapunified PRIVATE implot::implot dmt-platform-mixed dmt::cudautils)

@@ -2,6 +2,9 @@
 #include "platform/platform.h"
 #include "platform/platform-logging-default-formatters.h"
 
+// testing cuda wrapper
+#include "stuff.h"
+
 // windwoos only
 #include <Psapi.h>
 #include <iostream>
@@ -38,7 +41,7 @@ namespace dmt {
         {
             wchar_t* modName  = new wchar_t[1024];
             char*    uModName = new char[1024];
-            for (int32_t i = 0; i < (needed / sizeof(HMODULE)); ++i)
+            for (int32_t i = 1 /*skip .exe*/; i < (needed / sizeof(HMODULE)); ++i)
             {
                 if (DWORD len = GetModuleFileNameExW(hProcess, hMods[i], modName, 1024); len > 0)
                 {
@@ -56,8 +59,6 @@ int32_t guardedMain()
 {
     using namespace std::string_view_literals;
     auto res = dmt::ctx::addContext(true);
-    if (res != dmt::ctx::ECtxReturn::eCreatedOnManaged)
-        std::abort();
     dmt::ctx::cs->setActive(0);
 
     dmt::Context ctx;
@@ -110,6 +111,26 @@ int32_t guardedMain()
 
     ctx.log("Path tests completed.", {});
     // continue testing and logging
+
+    std::unique_ptr<NvcudaLibraryFunctions> cudaApi = std::make_unique<NvcudaLibraryFunctions>();
+    if (!loadNvcudaFunctions(cudaApi.get()))
+    {
+        ctx.error("Couldn't load nvcuda.dll", {});
+        return 1;
+    }
+
+    ctx.log("Loaded cuda library, meaning the list of loaded DLLs should contain nvcuda", {});
+    dmt::listLoadedDLLs();
+    ctx.log("Loaded cuda library, trying a random function", {});
+    CUdevice device;
+    cudaApi->cuInit(0);
+    CUresult    result   = cudaApi->cuCtxGetDevice(&device);
+    char const* errorStr = nullptr;
+    cudaApi->cuGetErrorString(result, &errorStr);
+    if (result != CUDA_SUCCESS)
+        ctx.error("Couln't get the device. Error: {}", std::make_tuple(errorStr));
+    else
+        ctx.log("Got device", {});
 
     return 0;
 }

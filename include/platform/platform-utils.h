@@ -36,9 +36,81 @@ namespace dmt::os {
 
     // for debugging purposes only, so we don't care about memory
     DMT_PLATFORM_API std::vector<std::pair<std::u8string, std::u8string>> getEnv();
+
+    class DMT_PLATFORM_API Path
+    {
+    public:
+        static Path home(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        static Path cwd(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        static Path invalid(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+
+        // disk designator ignored in everything different than windows
+        static Path root(char const*                diskDesignator,
+                         std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+
+        static Path executableDir(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+
+        void parent_();
+        Path parent() const;
+
+        // shouldn't contain any path separator. case insensitive on windows
+        void operator/=(char const* pathComponent);
+
+        // uses the same memory reosurce
+        Path operator/(char const* pathComponent) const;
+
+        bool isDirectory() const { return m_isDir; }
+        bool isFile() const { return !m_isDir; }
+        bool isValid() const { return m_valid; }
+
+        // if nullptr, use the current resource
+        std::pmr::string toUnderlying(std::pmr::memory_resource* resource = nullptr) const;
+
+        void const* internalData() const { return m_data; }
+
+        // implement also a lazy iterator to enumerate all children, like python pathlib's iterdir
+        // mkdir, rmdir, newFile
+
+        Path(Path const&);
+        Path(Path&&) noexcept;
+        Path& operator=(Path const&);
+        Path& operator=(Path&&) noexcept;
+        ~Path() noexcept;
+
+    private:
+        Path(std::pmr::memory_resource* resource, void* content, uint32_t capacity, uint32_t size);
+
+        std::pmr::memory_resource* m_resource;
+
+        // this is a wchar_t* in windows, char (utf8) in linux. this is always normalized. this always starts
+        // with "\\?\" (long path) on windows (unless the disk designator is a UCN name)
+        // since the path is always normalized, the constructor should check the content
+        void* m_data;
+        // both length and size are count of bytes
+        uint32_t m_capacity;
+        uint32_t m_dataSize;
+        bool     m_isDir;
+        bool     m_valid;
+    };
 } // namespace dmt::os
 
 namespace dmt {
+    inline int32_t strlen_mb(std::string_view const s)
+    {
+        std::mblen(nullptr, 0); // reset the conversion state
+        int32_t     result = 0;
+        char const* ptr    = s.data();
+        for (char const* const end = ptr + s.size(); ptr < end; ++result)
+        {
+            int const next = std::mblen(ptr, end - ptr);
+            if (next == -1)
+                // throw std::runtime_error("strlen_mb(): conversion error");
+                return -1;
+            ptr += next;
+        }
+        return result;
+    }
+
     using sid_t = uint64_t;
     template <typename T>
     struct PmrDeleter

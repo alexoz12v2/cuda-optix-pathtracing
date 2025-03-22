@@ -65,5 +65,51 @@ int32_t guardedMain()
     ctx.log("Hello World", {});
     dmt::listLoadedDLLs();
 
+    ctx.log("Starting Path tests", {});
+
+    // Test 1: Get Executable Directory
+    dmt::os::Path exeDir = dmt::os::Path::executableDir();
+    ctx.log("Executable Path: {}", std::make_tuple(exeDir.toUnderlying()));
+
+    // Test 2: Get Home Directory
+    dmt::os::Path homeDir = dmt::os::Path::home();
+    ctx.log("Home Directory: {}", std::make_tuple(homeDir.toUnderlying()));
+
+    // Test 3: Get Current Working Directory
+    dmt::os::Path cwd = dmt::os::Path::cwd();
+    ctx.log("Current Working Directory: {}", std::make_tuple(cwd.toUnderlying()));
+
+    // Test 4: Root Path from Disk Designator
+    dmt::os::Path rootPath = dmt::os::Path::root("C:");
+    ctx.log("Root Path: {}\n", std::make_tuple(rootPath.toUnderlying()));
+
+    // Test 5: Parent Directory
+    dmt::os::Path parentPath = exeDir.parent();
+    ctx.log("Parent of Executable Path: {}", std::make_tuple(parentPath.toUnderlying()));
+
+    // Test 6: Modify Path using Parent_
+    dmt::os::Path mutablePath = exeDir;
+    mutablePath.parent_();
+    ctx.log("After parent_() call: {}", std::make_tuple(mutablePath.toUnderlying()));
+
+    // Test 7: Append Path Component
+    dmt::os::Path appendedPath = exeDir / "testFolder";
+    ctx.log("Appended Path: {}", std::make_tuple(appendedPath.toUnderlying()));
+
+    // Test 8: Check Validity and Directory/File Status
+    ctx.log("Is Executable Directory valid?: {}", std::make_tuple(exeDir.isValid()));
+    ctx.log("Is Executable Directory actually a directory?: {}", std::make_tuple(exeDir.isDirectory()));
+
+    // Test 9: Test Move Constructor
+    dmt::os::Path movedPath = std::move(exeDir);
+    ctx.log("Moved Path: {}", std::make_tuple(movedPath.toUnderlying()));
+
+    // Test 10: Test Copy Constructor
+    dmt::os::Path copiedPath = homeDir;
+    ctx.log("Copied Path: {}", std::make_tuple(copiedPath.toUnderlying()));
+
+    ctx.log("Path tests completed.", {});
+    // continue testing and logging
+
     return 0;
 }

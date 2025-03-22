@@ -89,12 +89,14 @@ dmt_setup_dependencies()
 
 # grab python executable (msut be after `dmt_define_environment`). sets variable PYTHON_EXEC
 dmt_find_python_executable()
-execute_process(
-  COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/test_python.py
-  COMMAND_ECHO STDOUT
-  OUTPUT_VARIABLE test_python_STDOUT
-)
-message(STATUS "${test_python_STDOUT}")
+block()
+  execute_process(
+    COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/test_python.py
+    COMMAND_ECHO STDOUT
+    OUTPUT_VARIABLE test_python_STDOUT
+  )
+  message(STATUS "${test_python_STDOUT}")
+endblock()
 
 # possible TODO: make this work
 if(DMT_COMPILER_MSVC)

@@ -647,6 +647,8 @@ function(dmt_add_example target)
     # this will use /SUBSYSTEM:CONSOLE
     add_executable(${target}-launcher)
     target_sources(${target}-launcher PRIVATE ${PROJECT_SOURCE_DIR}/src/win32-launcher/launcher.cpp)
+    # add dependencies to serialize-deserialize json options
+    target_link_libraries(${target}-launcher PRIVATE nlohmann_json::nlohmann_json)
     # set the same properties for the launcher as well
     set_target_properties(${target}-launcher PROPERTIES 
       RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>

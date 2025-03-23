@@ -405,6 +405,80 @@ namespace dmt::os {
         return copy;
     }
 
+    // Library Loader ------------------------------------------------------------------------------------------------
+    void* LibraryLoader::loadLibrary(std::string_view name, bool useSystemPaths, Path const* pathOverride) const
+    {
+        HMODULE result = nullptr;
+        if (name.empty())
+            return result;
+
+        if (pathOverride)
+        {
+            Path const     path     = *pathOverride / name.data();
+            wchar_t const* wPathLib = reinterpret_cast<wchar_t const*>(path.internalData());
+
+            result = LoadLibraryW(wPathLib);
+        }
+        else if (m_searchPathsLen > 0)
+        {
+            // Compute the maximum path length
+            uint32_t maxPathLen = 0;
+            for (uint32_t i = 0; i < m_searchPathsLen; ++i)
+            {
+                maxPathLen = std::max(maxPathLen, m_searchPaths[i].dataLength());
+            }
+
+            // Allocate buffer once
+            uint32_t          requiredSize = static_cast<uint32_t>(maxPathLen + name.size() + 1);
+            std::pmr::wstring fullPath(m_resource);
+            fullPath.resize(requiredSize);
+            wchar_t* buffer = fullPath.data();
+
+            // convert name to UTF16
+            std::pmr::wstring wName   = win32::utf16FromUtf8(name, m_resource);
+            uint32_t          nameLen = static_cast<uint32_t>(wName.size());
+
+            // Try each search path
+            for (uint32_t i = 0; i < m_searchPathsLen && !result; ++i)
+            {
+                uint32_t offset = m_searchPaths[i].dataLength();
+                std::memcpy(buffer, m_searchPaths[i].internalData(), offset * sizeof(wchar_t));
+
+                assert(offset + nameLen <= requiredSize);
+
+                std::memcpy(buffer + offset, wName.data(), nameLen * sizeof(wchar_t));
+                buffer[offset + nameLen] = L'\0'; // Ensure null termination
+                result                   = LoadLibraryW(buffer);
+            }
+        }
+
+        if (!result && useSystemPaths)
+        {
+            std::pmr::wstring wNameLib = win32::utf16FromUtf8(name, m_resource);
+            result                     = LoadLibraryW(wNameLib.c_str());
+        }
+
+        return result;
+    }
+
+    bool LibraryLoader::unloadLibrary(void* library) const
+    {
+        if (!library)
+            return false; // Nothing to unload
+
+        return FreeLibrary(static_cast<HMODULE>(library)) != 0;
+    }
+
+    // library utils
+    namespace lib {
+        void* getFunc(void* library, char const* funcName)
+        {
+            if (!library)
+                return nullptr;
+            return GetProcAddress(static_cast<HMODULE>(library), funcName);
+        }
+    }
+
     // not exported utils --------------------------------------------------------------------------------------------
     void* reserveVirtualAddressSpace(size_t size)
     {
@@ -436,14 +510,16 @@ namespace dmt::os {
 
     void deallocate(void* ptr, [[maybe_unused]] size_t _bytes, [[maybe_unused]] size_t _align) { _aligned_free(ptr); }
 
-    std::vector<std::pair<std::u8string, std::u8string>> getEnv()
+    std::pmr::vector<std::pair<std::pmr::string, std::pmr::string>> getEnv(std::pmr::memory_resource* resource)
     {
-        std::vector<std::pair<std::u8string, std::u8string>> vec;
-        LPWCH                                                envStrings = GetEnvironmentStringsW();
+        std::pmr::vector<std::pair<std::pmr::string, std::pmr::string>> vec{resource};
+        vec.reserve(32);
+
+        wchar_t* envStrings = GetEnvironmentStringsW();
         if (!envStrings)
             return vec;
 
-        LPWCH current = envStrings;
+        wchar_t* current = envStrings;
         while (*current)
         {
             std::wstring_view wideEntry{current};
@@ -453,16 +529,16 @@ namespace dmt::os {
                 std::wstring_view wideName  = wideEntry.substr(0, pos);
                 std::wstring_view wideValue = wideEntry.substr(pos + 1);
 
-                // TODO: refactor this outside
+                // TODO document this check
                 if (!wideEntry.starts_with(L'='))
                 {
-                    std::u8string name  = win32::utf8FromUtf16(wideName);
-                    std::u8string value = win32::utf8FromUtf16(wideValue);
-                    vec.emplace_back(name, value);
+                    std::pmr::string name  = win32::utf8FromUtf16(wideName, resource);
+                    std::pmr::string value = win32::utf8FromUtf16(wideValue, resource);
+                    vec.emplace_back(std::move(name), std::move(value));
                 }
             }
 
-            current += wcslen(current) + 1;
+            current += wideEntry.length() + 1;
         }
         FreeEnvironmentStringsW(envStrings);
 

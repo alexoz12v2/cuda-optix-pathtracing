@@ -112,6 +112,10 @@ int32_t guardedMain()
     ctx.log("Path tests completed.", {});
     // continue testing and logging
 
+    // This works, TODO: Test added paths.
+    //dmt::os::LibraryLoader loader{false};
+    //void*                  cudaLibrary = loader.loadLibrary("nvcuda.dll", true);
+
     std::unique_ptr<NvcudaLibraryFunctions> cudaApi = std::make_unique<NvcudaLibraryFunctions>();
     if (!loadNvcudaFunctions(cudaApi.get()))
     {
@@ -127,7 +131,7 @@ int32_t guardedMain()
     CUresult    result   = cudaApi->cuCtxGetDevice(&device);
     char const* errorStr = nullptr;
     cudaApi->cuGetErrorString(result, &errorStr);
-    if (result != CUDA_SUCCESS)
+    if (result != ::CUDA_SUCCESS)
         ctx.error("Couln't get the device. Error: {}", std::make_tuple(errorStr));
     else
         ctx.log("Got device", {});

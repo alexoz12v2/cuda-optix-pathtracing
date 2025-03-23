@@ -239,6 +239,13 @@ def main():
         type=str,
         required=True
     )
+    # TODO 
+    parser.add_argument(
+        "-up",
+        "--use-platform",
+        action="store_true",
+        help="Produce a translation unit which depends on the dmt-platform cmake target",
+    )
 
     args = parser.parse_args()
 

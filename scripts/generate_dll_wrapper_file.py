@@ -262,13 +262,13 @@ def platform_generate_loader(
     header_string[0] += "void* m_library;\n"
     append_class_header_termination(header_string, data)
     header_string[0] += (
-        f"\nbool load{library_class_name}Functions(dmt::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
+        f"\nbool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
     )
 
     implementation_string[0] += (
-        f"bool load{library_class_name}Functions(dmt::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList) {{\n"
+        f"bool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList) {{\n"
     )
-    implementation_string[0] += "    using std::string_view_literals;\n\n"
+    implementation_string[0] += "    using namespace std::string_view_literals;\n\n"
     implementation_string[0] += (
         f"    dmt::os::Path path = dmt::os::Path::root({search_drive}){search_composition};\n"
     )

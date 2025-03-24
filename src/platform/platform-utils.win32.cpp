@@ -477,7 +477,7 @@ namespace dmt::os {
                 return nullptr;
             return GetProcAddress(static_cast<HMODULE>(library), funcName);
         }
-    }
+    } // namespace lib
 
     // not exported utils --------------------------------------------------------------------------------------------
     void* reserveVirtualAddressSpace(size_t size)

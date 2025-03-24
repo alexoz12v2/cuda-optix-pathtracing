@@ -129,7 +129,7 @@ namespace dmt::os {
     };
 
     namespace lib {
-        void* DMT_PLATFORM_API getFunc(void* library, char const* funcName);
+        DMT_PLATFORM_API void* getFunc(void* library, char const* funcName);
     }
 } // namespace dmt::os
 

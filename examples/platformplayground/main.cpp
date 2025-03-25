@@ -112,12 +112,11 @@ int32_t guardedMain()
     ctx.log("Path tests completed.", {});
     // continue testing and logging
 
-    // This works, TODO: Test added paths.
-    //dmt::os::LibraryLoader loader{false};
-    //void*                  cudaLibrary = loader.loadLibrary("nvcuda.dll", true);
+    // TODO add a library loader inside the context
+    dmt::os::LibraryLoader loader{false};
 
     std::unique_ptr<NvcudaLibraryFunctions> cudaApi = std::make_unique<NvcudaLibraryFunctions>();
-    if (!loadNvcudaFunctions(cudaApi.get()))
+    if (!loadNvcudaFunctions(loader, cudaApi.get()))
     {
         ctx.error("Couldn't load nvcuda.dll", {});
         return 1;

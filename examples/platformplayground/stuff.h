@@ -1,3 +1,6 @@
+#pragma once
+#include "platform/platform-utils.h"
+
 
 #include "cuda.h"
 
@@ -2415,6 +2418,7 @@ public:
     using cudbgGetAPI_t                        = void (*)();
     using cudbgGetAPIVersion_t                 = void (*)();
     using cudbgMain_t                          = void (*)();
+    void* m_library;
 
 public:
     cuArray3DCreate_v2_t                                   cuArray3DCreate;
@@ -2973,4 +2977,5 @@ public:
     cudbgGetAPIVersion_t                                   cudbgGetAPIVersion;
     cudbgMain_t                                            cudbgMain;
 };
-bool loadNvcudaFunctions(NvcudaLibraryFunctions* funcList);
+
+bool loadNvcudaFunctions(dmt::os::LibraryLoader const& loader, NvcudaLibraryFunctions* funcList);

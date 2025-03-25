@@ -9,6 +9,11 @@ from typing import List, Tuple
 
 
 MethodData = namedtuple("MethodData", "name type latest_version")
+LibraryData = namedtuple("LibraryData", "drive search_path_expr")
+
+
+def get_header() -> str:
+    return "// This file has been generated\n"
 
 
 def get_exports_windows(dll_path: Path) -> List[str]:
@@ -108,22 +113,25 @@ def write_type_declarations_and_populate_method_data(
         data.append(MethodData(base_name, t_sig.split(" ")[1], latest_version))
 
 
-def prepare_library_population(library_path, version_pattern, latest_only):
-    is_windows = platform.system() == "Windows"
-    exports = (
-        get_exports_windows(library_path)
-        if is_windows
-        else get_exports_linux(library_path)
-    )
+def prepare_library_population(
+    library_dict: dict[str, Path], version_pattern, latest_only
+):
+    match platform.system():
+        case "Windows":
+            exports = get_exports_windows(library_dict["Windows"])
+        case "Linux":
+            exports = get_exports_linux(library_dict["Linux"])
+        case _:
+            raise ValueError("Unsupported platform")
 
     if latest_only:
         exports = filter_latest_versions(exports, version_pattern)
 
-    library_name = Path(library_path).name
+    library_name = Path(library_dict["Windows"]).name
     library_class_name = library_name.replace("-", "_").capitalize()[
         : library_name.rfind(".")
     ]
-    return exports, library_name, library_class_name
+    return exports, library_class_name
 
 
 def append_class_header_termination(header_string, data):
@@ -148,7 +156,7 @@ class {library_class_name}LibraryFunctions {{
 
 
 def generate_loader(
-    library_path,
+    library_path: dict[str, Path],
     includes,
     version_pattern,
     latest_only,
@@ -156,9 +164,9 @@ def generate_loader(
     header_name: str | None,
 ) -> Tuple[str, str]:
     """Generates C++ code for dynamically loading functions from a shared library."""
-    header_string = ["#pragma once\n"]
+    header_string = [f"#pragma once\n{get_header()}"]
     implementation_string = [""]
-    exports, library_name, library_class_name = prepare_library_population(
+    exports, library_class_name = prepare_library_population(
         library_path, version_pattern, latest_only
     )
     data: List[MethodData] = list()
@@ -172,7 +180,7 @@ def generate_loader(
         f"bool load{library_class_name}Functions({library_class_name}LibraryFunctions* funcList);\n"
     )
 
-    implementation_string[0] += f'#include "{header_name}"\n\n'
+    implementation_string[0] += f'#include "{header_name}"\n{get_header()}\n'
     implementation_string[0] += """#ifdef _WIN32
 #include <windows.h>
 #else
@@ -189,9 +197,9 @@ static void* libraryHandle = nullptr;
 static void LoadLibraryOnce() {{
     if (!libraryHandle) {{
 #ifdef _WIN32
-        libraryHandle = LoadLibraryW(L"{library_name}");
+        libraryHandle = LoadLibraryW(L"{library_path["Windows"]}");
 #else
-        libraryHandle = dlopen("{library_name}", RTLD_LAZY);
+        libraryHandle = dlopen("{library_path["Linux"]}", RTLD_LAZY);
 #endif
     }}
 }}
@@ -236,24 +244,32 @@ bool load{library_class_name}Functions({library_class_name}LibraryFunctions* fun
 
 
 def platform_generate_loader(
-    library_path: Path,
+    library_dict: dict[str, Path],
     includes: List[str],
     version_pattern: str,
     latest_only: bool,
     json_file: Path,
     header_name: str | None,
 ) -> Tuple[str, str]:
-    header_string = ['#pragma once\n#include "platform/platform-utils.h"\n\n']
-    implementation_string = [f'#include "{header_name}"\n\n']
-    exports, library_name, library_class_name = prepare_library_population(
-        library_path, version_pattern, latest_only
+    header_string = [
+        f'#pragma once\n{get_header()}\n#include "platform/platform-utils.h"\n'
+    ]
+    implementation_string = [f'#include "{header_name}"\n{get_header()}\n']
+    exports, library_class_name = prepare_library_population(
+        library_dict, version_pattern, latest_only
     )
     data: List[MethodData] = list()
-    search_path_parts = library_path.parent.parts
-    search_composition = " / " + " / ".join(
-        f'"{s}"' for i, s in enumerate(search_path_parts) if i > 0
-    )
-    search_drive = '"' + library_path.drive + '"'
+
+    library_loading_dict: dict[str, LibraryData] = dict()
+
+    for plat, library_path_str in library_dict.items():
+        library_path = Path(library_path_str)
+        search_path_parts = library_path.parent.parts
+        library_loading_dict[plat] = LibraryData(
+            '"' + library_path.drive + '"',
+            (" / " if len(search_path_parts) > 0 else "")
+            + " / ".join(f'"{s}"' for i, s in enumerate(search_path_parts) if i > 0),
+        )
 
     append_class_header_preamble(includes, header_string, exports, library_class_name)
     write_type_declarations_and_populate_method_data(
@@ -269,13 +285,32 @@ def platform_generate_loader(
         f"bool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList) {{\n"
     )
     implementation_string[0] += "    using namespace std::string_view_literals;\n\n"
-    implementation_string[0] += (
-        f"    dmt::os::Path path = dmt::os::Path::root({search_drive}){search_composition};\n"
-    )
-    implementation_string[0] += (
-        f'    funcList->m_library = loader.loadLibrary("{library_name}"sv, true, &path);\n'
-    )
-    implementation_string[0] += "    if (!funcList->m_library) {{ return false; }}\n"
+
+    def macro_from_plat(plat: str):
+        match plat:
+            case "Windows":
+                return "DMT_OS_WINDOWS"
+            case "Linux":
+                return "DMT_OS_LINUX"
+
+    plats = ["Windows", "Linux"]
+    for i, plat in enumerate(plats):
+        if i == 0:
+            implementation_string[0] += f"#if defined({macro_from_plat(plat)})\n"
+        else:
+            implementation_string[0] += f"#elif defined({macro_from_plat(plat)})\n"
+
+        library_name = library_dict[plat].name
+        implementation_string[0] += (
+            f"    dmt::os::Path path = dmt::os::Path::root({library_loading_dict[plat].drive}){library_loading_dict[plat].search_path_expr};\n"
+        )
+        implementation_string[0] += (
+            f'    funcList->m_library = loader.loadLibrary("{library_name}"sv, true, &path);\n'
+        )
+        if i == len(plats) - 1:
+            implementation_string[0] += '#else\n#error "unsupported platform"\n#endif\n'
+
+    implementation_string[0] += "    if (!funcList->m_library) { return false; }\n"
     for methodData in data:
         implementation_string[0] += (
             f'    funcList->{methodData.name} = reinterpret_cast<{library_class_name}LibraryFunctions::{methodData.type}>(dmt::os::lib::getFunc(funcList->m_library, "{methodData.latest_version}"));\n'
@@ -296,7 +331,7 @@ def main():
     )
     parser.add_argument(
         "library",
-        type=Path,
+        type=str,
         help="Path to the DLL/.so file to generate the wrapper for.",
     )
     parser.add_argument(
@@ -339,9 +374,11 @@ def main():
 
     args = parser.parse_args()
 
-    if not args.library.exists():
-        print(f"Error: Library file '{args.library}' not found.")
-        return
+    library_json = json.loads(args.library)
+    library_json = {key: Path(value) for key, value in library_json.items()}
+    for path in library_json.values():
+        if not path.exists():
+            raise ValueError(f"Path {str(path)} doesn't exist")
 
     header_file = Path(args.header_file)
     cpp_file = Path(args.cpp_file)
@@ -359,7 +396,7 @@ def main():
         generate_loader_function = generate_loader
 
     header_string, implementation_string = generate_loader_function(
-        args.library,
+        library_json,
         args.includes,
         args.version_pattern,
         args.latest_only,
@@ -377,5 +414,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Example Usage:
-#  py -3.11 .\scripts\generate_dll_wrapper_file.py C:\Windows\System32\nvcuda.dll -i cuda.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_driver.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h
+# Example Usage (windows powershell):
+#  py -3.11 .\scripts\generate_dll_wrapper_file.py '{ "Windows": "C:\\Windows\\System32\\nvcuda.dll", "Linux": "" }' -i cuda.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_driver.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up

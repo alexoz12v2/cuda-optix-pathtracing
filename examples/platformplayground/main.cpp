@@ -3,7 +3,9 @@
 #include "platform/platform-logging-default-formatters.h"
 
 // testing cuda wrapper
-#include "stuff.h"
+#define DMT_CUDAUTILS_IMPL
+#include "platform/cuda-wrapper.h"
+#include "cudautils/cudautils.h"
 
 // windwoos only
 #include <Psapi.h>

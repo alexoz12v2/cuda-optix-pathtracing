@@ -1,9 +1,19 @@
 #include "cudautils-float.h"
 
-#include "cudautils-vecconv.cuh"
-
+// TODO add platform-math
 #if defined(DMT_ARCH_X86_64)
 #include <immintrin.h>
+#endif
+
+#define GLM_ENABLE_EXPERIMENTAL
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#include <glm/common.hpp>
+#include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
+#include <glm/gtc/epsilon.hpp>
+
+#if defined(near)
+#undef near
 #endif
 
 namespace dmt::fl {

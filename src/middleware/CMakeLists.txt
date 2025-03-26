@@ -10,7 +10,7 @@ target_sources(dmt-middleware
 
 target_link_libraries(dmt-middleware 
   PUBLIC
-    dmt-platform-mixed
+    dmt-platform
     dmt-cudautils
 )
 
@@ -22,7 +22,7 @@ target_sources(dmt-middleware-cuda
   PRIVATE
     middleware-model.cu 
 )
-target_link_libraries(dmt-middleware-cuda PUBLIC dmt-platform-mixed)
+target_link_libraries(dmt-middleware-cuda PUBLIC dmt-platform)
 
 dmt_add_module_library(dmt-middleware-mixed middleware)
 target_sources(dmt-middleware-mixed

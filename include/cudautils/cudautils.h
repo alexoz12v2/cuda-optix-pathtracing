@@ -19,3 +19,7 @@
 #include "cudautils/cudautils-spectrum.h"
 #include "cudautils/cudautils-color.h"
 #include "cudautils/cudautils-numbers.h"
+
+#if defined(DMT_CUDAUTILS_IMPL)
+#include "cudautils.cu"
+#endif

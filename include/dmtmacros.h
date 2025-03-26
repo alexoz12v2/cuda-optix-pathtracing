@@ -55,7 +55,7 @@
 
 // Visual Studio doesn't seem to pick up that .cu files (tagged with Item Type CUDA C++)
 // should understand CUDA syntax
-#if !defined(__NVCC__) && defined(DMT_VS_STUPIDITY)
+#if !defined(__NVCC__)
 #define __host__
 #define __device__
 #define __global__

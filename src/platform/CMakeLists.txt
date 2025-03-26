@@ -88,13 +88,43 @@ block()
   )
   source_group("Unused" FILES ${platform_os_unused_private_source})
 
+  # generate library files  
+  set(cuda_driver_cpp_file ${CMAKE_CURRENT_BINARY_DIR}/platform/cuda-wrapper.cpp)
+  set(cuda_driver_h_file ${CMAKE_CURRENT_BINARY_DIR}/platform/cuda-wrapper.h)
+  set(cuda_driver_files ${cuda_driver_cpp_file} ${cuda_driver_h_file})
+
+  # TODO path in linux
+  add_custom_command(#TARGET dmt-platform PRE_BUILD 
+    OUTPUT ${cuda_driver_files}
+    COMMAND ${PYTHON_EXEC} 
+    ${CMAKE_SOURCE_DIR}/scripts/generate_dll_wrapper_file.py 
+    "{ \"Windows\": \"C:\\\\Windows\\\\System32\\\\nvcuda.dll\", \"Linux\": \"\" }"
+    -i cuda.h 
+    -v "_v{n}" 
+    -l 
+    -j ${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_driver.json 
+    --cpp-file ${cuda_driver_cpp_file}
+    --header-file ${cuda_driver_h_file}
+    -up
+    COMMENT "Python Script to generate library wrappers for the CUDA Driver API"
+    VERBATIM
+    #BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/cuda-wrapper.h ${CMAKE_CURRENT_BINARY_DIR}/cuda-wrapper.cpp
+  )
+  add_custom_target(platform-generated-src ALL DEPENDS 
+    ${cuda_driver_files}
+  )
+  set_source_files_properties(${cuda_driver_files} PROPERTIES GENERATED TRUE)
+  source_group("Generated" FILES ${cuda_driver_files})
+
   target_sources(dmt-platform
     PUBLIC
-      FILE_SET platform_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform FILES ${platform_headers}
+      FILE_SET platform_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/platform ${CMAKE_CURRENT_BINARY_DIR} FILES ${platform_headers} ${cuda_driver_h_file}
     PRIVATE
       ${platform_private_sources}
       ${platform_unused_private_source}
+      ${cuda_driver_cpp_file}
   )
+  add_dependencies(dmt-platform platform-generated-src)
 
   # display unused sources anyways
   set_source_files_properties(${platform_unused_private_source} PROPERTIES HEADER_FILE_ONLY TRUE)
@@ -106,6 +136,7 @@ target_link_libraries(dmt-platform
     glad
     glfw
     imgui
+    CUDA::cuda_driver
   PRIVATE
     dmt-platform-os-utils
     $<$<BOOL:${DMT_OS_LINUX}>:rt pthread > # needed by async io linux

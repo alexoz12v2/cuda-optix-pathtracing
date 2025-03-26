@@ -32,6 +32,7 @@ macro(dmt_setup_dependencies)
   endif()
 
   if(NOT TARGET glm::glm)
+    set(BUILD_STATIC_LIBS TRUE)
     FetchContent_Declare(glm
       GIT_REPOSITORY https://github.com/g-truc/glm.git
       GIT_TAG bf71a834948186f4097caa076cd2663c69a10e1e # refs/tags/1.0.1

@@ -1,7 +1,5 @@
 #include "cudautils-transform.h"
 
-#include "cudautils-vecconv.cuh"
-
 #include <platform/platform.h> // using AppContextJanitor
 
 namespace dmt {

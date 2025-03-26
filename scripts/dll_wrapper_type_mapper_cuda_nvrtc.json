@@ -1,0 +1,23 @@
+{
+    "nvrtcAddNameExpression": "",
+    "nvrtcCompileProgram": "",
+    "nvrtcCreateProgram": "",
+    "nvrtcDestroyProgram": "",
+    "nvrtcGetCUBIN": "",
+    "nvrtcGetCUBINSize": "",
+    "nvrtcGetErrorString": "",
+    "nvrtcGetLTOIR": "",
+    "nvrtcGetLTOIRSize": "",
+    "nvrtcGetLoweredName": "",
+    "nvrtcGetNVVM": "",
+    "nvrtcGetNVVMSize": "",
+    "nvrtcGetNumSupportedArchs": "",
+    "nvrtcGetOptiXIR": "",
+    "nvrtcGetOptiXIRSize": "",
+    "nvrtcGetPTX": "",
+    "nvrtcGetPTXSize": "",
+    "nvrtcGetProgramLog": "",
+    "nvrtcGetProgramLogSize": "",
+    "nvrtcGetSupportedArchs": "",
+    "nvrtcVersion": ""
+}

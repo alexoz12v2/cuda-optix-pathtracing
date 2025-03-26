@@ -1,10 +1,9 @@
 #include "cudautils-spectrum.h"
 
 #include <platform/platform.h>
-#include <platform/platform-cuda-utils.cuh>
+// #include <platform/platform-cuda-utils.cuh>
 
 #include <cudautils-float.h>
-#include "cudautils-vecconv.cuh"
 #include <cudautils-numbers.h>
 
 namespace dmt {
@@ -253,6 +252,7 @@ namespace dmt {
 
     // Densely Sampled Spectrum ---------------------------------------------------------------------------------------
 
+    /* TODO remake
     __host__ __device__ DenselySampledSpectrum::DenselySampledSpectrum(
         FloatFunction2      func,
         BaseMemoryResource* alloc,
@@ -515,5 +515,6 @@ namespace dmt {
 #endif
         return buffer;
     }
+    */
 
 } // namespace dmt

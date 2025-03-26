@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import platform
+import sys
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import List, Tuple
@@ -326,6 +327,7 @@ def platform_generate_loader(
 
 # TODO add clang-format after generation
 def main():
+    print("Command-line arguments:", " ".join(sys.argv))
     parser = ArgumentParser(
         description="Generate a C++ wrapper for dynamically loading DLL/.so functions."
     )
@@ -404,9 +406,11 @@ def main():
         header_name,
     )
 
+    cpp_file.parent.mkdir(parents=True, exist_ok=True)
     with cpp_file.open("w", encoding="utf-8") as f:
         f.write(implementation_string)
 
+    header_file.parent.mkdir(parents=True, exist_ok=True)
     with header_file.open("w", encoding="utf-8") as f:
         f.write(header_string)
 

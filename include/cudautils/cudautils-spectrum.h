@@ -2,7 +2,7 @@
 
 #include "dmtmacros.h"
 #include <platform/platform-utils.h>
-#include <platform/platform-cuda-utils.h>
+// #include <platform/platform-cuda-utils.h>
 
 #include <concepts>
 
@@ -124,71 +124,76 @@ namespace dmt {
      * specified range, taken at 1nm intervals. The typical size for this array is 830 - 360 = 470, meaning
      * `~1.84 kB` with float32
      */
-    struct DenselySampledSpectrum
-    {
-    public:
-        DMT_CPU_GPU DenselySampledSpectrum(FloatFunction2      func,
-                                           BaseMemoryResource* alloc,
-                                           CudaStreamHandle    stream     = noStream,
-                                           int32_t             _lambdaMin = lambdaMin(),
-                                           int32_t             _lambdaMax = lambdaMax());
+    // TODO remake
+    //struct DenselySampledSpectrum
+    //{
+    //public:
+    //    DMT_CPU_GPU DenselySampledSpectrum(FloatFunction2      func,
+    //                                       BaseMemoryResource* alloc,
+    //                                       CudaStreamHandle    stream     = noStream,
+    //                                       int32_t             _lambdaMin = lambdaMin(),
+    //                                       int32_t             _lambdaMax = lambdaMax());
 
-        /**
-         * construct a denssely sampled spectrum from an existing spectrum. Useful if the starting spectrum is costly to evaluate
-         * @note if you are executing dmt with a CUDA capable device, this should be created with `UnifiedMemoryResource` or passed by
-         * value to the device (64 bytes anyways)
-         * @note cannot allow construction from the device cause we don't know, due to divergence, how many active threads enter the
-         * constructor. If constrution from the device is desired, use the construction which doesn't initialze the values
-         */
-        template <SpectrumType S>
-        DMT_CPU DenselySampledSpectrum(S const&            spectrum,
-                                       BaseMemoryResource* alloc,
-                                       CudaStreamHandle    stream     = noStream,
-                                       int32_t             _lambdaMin = lambdaMin(),
-                                       int32_t             _lambdaMax = lambdaMax()) :
-        m_values(sizeof(float), alloc, stream),
-        m_lambdaMin(_lambdaMin),
-        m_lambdaMax(_lambdaMax)
-        {
-            assert(m_lambdaMax > m_lambdaMin + 3); // at least 4 values
-            int32_t const numel = m_lambdaMax - m_lambdaMin + 1;
+    //    /**
+    //     * construct a denssely sampled spectrum from an existing spectrum. Useful if the starting spectrum is costly to evaluate
+    //     * @note if you are executing dmt with a CUDA capable device, this should be created with `UnifiedMemoryResource` or passed by
+    //     * value to the device (64 bytes anyways)
+    //     * @note cannot allow construction from the device cause we don't know, due to divergence, how many active threads enter the
+    //     * constructor. If constrution from the device is desired, use the construction which doesn't initialze the values
+    //     */
+    //    template <SpectrumType S>
+    //    DMT_CPU DenselySampledSpectrum(S const&            spectrum,
+    //                                   BaseMemoryResource* alloc,
+    //                                   CudaStreamHandle    stream     = noStream,
+    //                                   int32_t             _lambdaMin = lambdaMin(),
+    //                                   int32_t             _lambdaMax = lambdaMax()) :
+    //    m_values(sizeof(float), alloc, stream),
+    //    m_lambdaMin(_lambdaMin),
+    //    m_lambdaMax(_lambdaMax)
+    //    {
+    //        assert(m_lambdaMax > m_lambdaMin + 3); // at least 4 values
+    //        int32_t const numel = m_lambdaMax - m_lambdaMin + 1;
 
-            m_values.resize(numel);
-            if (m_values.resource()->hostHasAccess())
-            {
-                m_values.lockForRead();
-                for (int32_t index = 0; index < numel; ++index)
-                    m_values.operator[]<float>(index) = spectrum(index + m_lambdaMin);
-                m_values.unlockForRead();
-            }
-            else
-            {
-                std::unique_ptr<float[]> data = std::make_unique<float[]>(numel);
-                for (int32_t index = 0; index < numel; ++index)
-                    data[index] = spectrum(index + m_lambdaMin);
-                m_values.copyFromHostAsync(data.get(), numel * sizeof(float));
-                m_values.syncWithStream();
-            }
-        }
+    //        m_values.resize(numel);
+    //        if (m_values.resource()->hostHasAccess())
+    //        {
+    //            m_values.lockForRead();
+    //            for (int32_t index = 0; index < numel; ++index)
+    //                m_values.operator[]<float>(index) = spectrum(index + m_lambdaMin);
+    //            m_values.unlockForRead();
+    //        }
+    //        else
+    //        {
+    //            std::unique_ptr<float[]> data = std::make_unique<float[]>(numel);
+    //            for (int32_t index = 0; index < numel; ++index)
+    //                data[index] = spectrum(index + m_lambdaMin);
+    //            m_values.copyFromHostAsync(data.get(), numel * sizeof(float));
+    //            m_values.syncWithStream();
+    //        }
+    //    }
 
-        // `SpectrumType` Interface -----------------------------------------------------------------------------------
-        /** @warning If called from `__host__` and the `DynaArray` is not accessible by the host, a
-         * `cudaMemcpyAsync` will be issued to fetch a single elemnent. Should be used only for testing purposes
-         */
-        DMT_CPU_GPU float           operator()(float lambdanm) const;
-        DMT_CPU_GPU float           maxValue() const;
-        DMT_CPU_GPU SampledSpectrum sample(SampledWavelengths const& wavelengths) const;
+    //    // `SpectrumType` Interface -----------------------------------------------------------------------------------
+    //    /** @warning If called from `__host__` and the `DynaArray` is not accessible by the host, a
+    //     * `cudaMemcpyAsync` will be issued to fetch a single elemnent. Should be used only for testing purposes
+    //     */
+    //    DMT_CPU_GPU float           operator()(float lambdanm) const;
+    //    DMT_CPU_GPU float           maxValue() const;
+    //    DMT_CPU_GPU SampledSpectrum sample(SampledWavelengths const& wavelengths) const;
 
-        // Other public Stuff -----------------------------------------------------------------------------------------
-        DMT_CPU_GPU void scale(float factor);
+    //    // Other public Stuff -----------------------------------------------------------------------------------------
+    //    DMT_CPU_GPU void scale(float factor);
 
-    private:
-        DMT_CPU_GPU float*       getBuffer();
-        DMT_CPU_GPU float const* getBuffer() const;
+    //private:
+    //    DMT_CPU_GPU float*       getBuffer();
+    //    DMT_CPU_GPU float const* getBuffer() const;
 
-    private:
-        DynaArray m_values;
-        int32_t   m_lambdaMin, m_lambdaMax;
-    };
-    static_assert(sizeof(DenselySampledSpectrum) == 64 && SpectrumType<DenselySampledSpectrum>);
+    //private:
+    //    DynaArray m_values;
+    //    int32_t   m_lambdaMin, m_lambdaMax;
+    //};
+    //static_assert(sizeof(DenselySampledSpectrum) == 64 && SpectrumType<DenselySampledSpectrum>);
 } // namespace dmt
+
+#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_SPECTRUM_IMPL)
+#include "cudautils-spectrum.cu"
+#endif

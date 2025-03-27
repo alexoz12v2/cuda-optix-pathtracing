@@ -13,6 +13,12 @@ MethodData = namedtuple("MethodData", "name type latest_version")
 LibraryData = namedtuple("LibraryData", "drive search_path_expr")
 
 
+def remove_json_comments(json_str: str) -> str:
+    json_str = re.sub(r"//.*", "", json_str)  # Remove `//` comments
+    json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)  # Remove `/* */` comments
+    return json_str
+
+
 def get_header() -> str:
     return "// This file has been generated\n"
 
@@ -96,7 +102,7 @@ def write_type_declarations_and_populate_method_data(
 ):
     if json_file is not None:
         with json_file.open(encoding="UTF-8") as source:
-            tmap = json.load(source)
+            tmap = json.loads(remove_json_comments(source.read()))
             tmap = {k.lower(): v for k, v in tmap.items()}  # Case-insensitive mapping
     else:
         tmap = {}
@@ -341,7 +347,7 @@ def main():
         "--includes",
         nargs="*",
         default=[],
-        help="List of header files to include.",
+        help="space separated List of header files to include.",
     )
     parser.add_argument(
         "-v",
@@ -376,7 +382,7 @@ def main():
 
     args = parser.parse_args()
 
-    library_json = json.loads(args.library)
+    library_json = json.loads(remove_json_comments(args.library))
     library_json = {key: Path(value) for key, value in library_json.items()}
     for path in library_json.values():
         if not path.exists():
@@ -420,3 +426,5 @@ if __name__ == "__main__":
 
 # Example Usage (windows powershell):
 #  py -3.11 .\scripts\generate_dll_wrapper_file.py '{ "Windows": "C:\\Windows\\System32\\nvcuda.dll", "Linux": "" }' -i cuda.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_driver.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up
+#  py -3.11 .\scripts\generate_dll_wrapper_file.py "{ `"Windows`": `"$(${Env:\CUDA_PATH_V12_6}.replace('\','\\'))\\bin\\nvrtc64_120_0.dll `", `"Linux`": `"`" }" -i nvrtc.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_nvrtc.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up
+#  py -3.11 .\scripts\generate_dll_wrapper_file.py '{ "Windows": "C:\\Windows\\System32\\nvcuda.dll", "Linux": "" }' -i cuda_runtime_api.h cuda_gl_interop.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_driver.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up

@@ -15,8 +15,43 @@ LibraryData = namedtuple("LibraryData", "drive search_path_expr")
 
 def remove_json_comments(json_str: str) -> str:
     json_str = re.sub(r"//.*", "", json_str)  # Remove `//` comments
-    json_str = re.sub(r"/\*.*?\*/", "", json_str, flags=re.DOTALL)  # Remove `/* */` comments
+    json_str = re.sub(
+        r"/\*.*?\*/", "", json_str, flags=re.DOTALL
+    )  # Remove `/* */` comments
     return json_str
+
+
+def remove_matching_quotes(s: str) -> str:
+    # Check if the first and last characters are both quotes and are the same
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        # Remove both the first and last characters (the matching quotes)
+        return s[1:-1]
+    return s
+
+
+def fix_backslashes(input_string: str) -> str:
+    if platform.system() == "Windows":
+        # We need to replace single backslashes with double backslashes, but leave existing double backslashes intact.
+        result = []
+        i = 0
+        while i < len(input_string):
+            if input_string[i] == "\\":
+                # Check if the next character is also a backslash (this is part of an existing '\\')
+                if i + 1 < len(input_string) and input_string[i + 1] == "\\":
+                    result.append("\\")  # Preserve the double backslash as it is
+                    i += 2  # Skip the next backslash
+                else:
+                    result.append(
+                        "\\\\"
+                    )  # Replace single backslash with double backslash
+                    i += 1  # Skip the current backslash
+            else:
+                result.append(input_string[i])
+                i += 1
+        return "".join(result)
+
+    # If not Windows, return the input string unchanged
+    return input_string
 
 
 def get_header() -> str:
@@ -382,15 +417,25 @@ def main():
 
     args = parser.parse_args()
 
-    library_json = json.loads(remove_json_comments(args.library))
-    library_json = {key: Path(value) for key, value in library_json.items()}
+    json_string = fix_backslashes(remove_json_comments(args.library))
+
+    library_json = json.loads(json_string)
+    library_json = {
+        key: Path(remove_matching_quotes(value)) for key, value in library_json.items()
+    }
     for path in library_json.values():
         if not path.exists():
             raise ValueError(f"Path {str(path)} doesn't exist")
 
-    header_file = Path(args.header_file)
-    cpp_file = Path(args.cpp_file)
+    header_file = Path(remove_matching_quotes(args.header_file))
+    cpp_file = Path(remove_matching_quotes(args.cpp_file))
     header_name = header_file.name
+    with open("Y:/why.txt", "w+") as f:
+        f.write(json_string)
+        f.write("\n")
+        f.write(str(header_file))
+        f.write("\n")
+        f.write(str(cpp_file))
 
     json_file = Path(args.json_type_mapping)
     if json_file.exists() and json_file.is_file():
@@ -427,4 +472,4 @@ if __name__ == "__main__":
 # Example Usage (windows powershell):
 #  py -3.11 .\scripts\generate_dll_wrapper_file.py '{ "Windows": "C:\\Windows\\System32\\nvcuda.dll", "Linux": "" }' -i cuda.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_driver.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up
 #  py -3.11 .\scripts\generate_dll_wrapper_file.py "{ `"Windows`": `"$(${Env:\CUDA_PATH_V12_6}.replace('\','\\'))\\bin\\nvrtc64_120_0.dll `", `"Linux`": `"`" }" -i nvrtc.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_nvrtc.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up
-#  py -3.11 .\scripts\generate_dll_wrapper_file.py '{ "Windows": "C:\\Windows\\System32\\nvcuda.dll", "Linux": "" }' -i cuda_runtime_api.h cuda_gl_interop.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_driver.json --cpp-file ..\stuff.cpp --header-file ..\stuff.h -up
+#  py -3.11 .\scripts\generate_dll_wrapper_file.py "{ `"Windows`": `"$(${Env:\CUDA_PATH_V12_6}.replace('\','\\'))\\bin\\cudart64_12.dll`", `"Linux`": `"`" }" -i cuda_runtime_api.h cuda_gl_interop.h -v "_v{n}" -l -j .\scripts\dll_wrapper_type_mapper_cuda_runtime.json --cpp-file ..\stuff2.cpp --header-file ..\stuff2.h -up

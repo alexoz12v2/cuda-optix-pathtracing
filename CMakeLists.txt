@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30) # C++ 20 modules require clang 16, cmake 3.28 at least
+cmake_minimum_required(VERSION 3.29) # C++ 20 modules require clang 16, cmake 3.28 at least
 
 ################################################################################
 # Policies
@@ -68,7 +68,7 @@ dmt_set_option(DMT_GENERATE_DOCS ON BOOL "Generate Docs")
 project(
   DumbTracer
   VERSION 1.0.0
-  DESCRIPTION "Project aiming to perform VR Photon Mapping"
+  DESCRIPTION "CUDA Path Tracing"
   LANGUAGES CXX C CUDA
 )
 

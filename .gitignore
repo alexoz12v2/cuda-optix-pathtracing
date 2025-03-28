@@ -449,3 +449,6 @@ TSWLatexianTemp*
 # vscode
 .vscode/
 .vs/
+
+# python
+__pycache__/

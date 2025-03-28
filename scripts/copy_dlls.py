@@ -1,20 +1,19 @@
 import shutil
-import platform
 import argparse
 from pathlib import Path
+import sys
+import os
+
+# Add the parent directory of `pyshared` to sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from pyshared import dll_names
 
 
 def copy_cuda_libs(cuda_path: Path, output_dir: Path):
-    system = platform.system()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    match system:
-        case "Windows":
-            lib_files = ["cudart64_*.dll", "nvrtc64_*.dll"]
-        case "Linux":
-            lib_files = ["libcudart.so*", "libnvrtc.so*"]
-        case _:
-            raise RuntimeError(f"Unsupported OS: {system}")
+    lib_files = dll_names.dll_files()
 
     lib_dirs = [
         cuda_path / "bin",

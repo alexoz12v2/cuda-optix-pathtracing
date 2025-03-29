@@ -28,18 +28,30 @@ endif()
 # Remove trailing newline or spaces from nvrtc_path
 string(STRIP ${nvrtc_path} nvrtc_path)
 
+# get file names
+get_filename_component(cudart_name ${cudart_path} NAME)
+get_filename_component(nvrtc_name ${nvrtc_path} NAME)
+
+# declare out shared lib files
+set(cudart_build_path ${CMAKE_BINARY_DIR}/bin/${cudart_name})
+set(nvrtc_build_path ${CMAKE_BINARY_DIR}/bin/${nvrtc_name})
+
 # Copy CUDA DLLs using custom targets
-add_custom_target(copy_cuda_dlls ALL
+add_custom_command(
+  OUTPUT ${cudart_build_path}
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
   ${cudart_path} ${CMAKE_BINARY_DIR}/bin
   COMMENT "Copying cudart.dll to the bin directory"
 )
+add_custom_target(copy_cuda_dlls ALL DEPENDS ${cudart_build_path})
 
-add_custom_target(copy_nvrtc_dlls ALL
+add_custom_command(
+  OUTPUT ${nvrtc_build_path}
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
   ${nvrtc_path} ${CMAKE_BINARY_DIR}/bin
   COMMENT "Copying nvrtc.dll to the bin directory"
 )
+add_custom_target(copy_nvrtc_dlls ALL DEPENDS ${nvrtc_build_path})
 
 # Ensure these copy steps run after the build
 add_dependencies(copy_cuda_dlls dmt-platform)
@@ -55,14 +67,15 @@ set(cuda_nvrtc_h_file ${CMAKE_CURRENT_BINARY_DIR}/cuda-wrappers/cuda-nvrtc.h)
 add_custom_command(
   OUTPUT ${cuda_runtime_cpp_file} ${cuda_runtime_h_file}
   COMMAND ${PYTHON_EXEC} ${CMAKE_SOURCE_DIR}/scripts/generate_dll_wrapper_file.py
-  "{ \"Windows\": \"${cudart_path}\", \"Linux\": \"${cudart_path}\" }"
-  -i cuda_runtime_api.h cuda_gl_interop.h
+  "{ \"Windows\": \"${cudart_build_path}\", \"Linux\": \"${cudart_build_path}\" }"
+  -i cuda_runtime_api.h glad/gl.h cuda_gl_interop.h
   -v "_v{n}"
   -l
   -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_runtime.json\""
   --cpp-file "\"${cuda_runtime_cpp_file}\""
   --header-file "\"${cuda_runtime_h_file}\""
   -up
+  -pexe
   COMMENT "Generate CUDA Runtime API Wrappers"
   VERBATIM
 )
@@ -70,20 +83,21 @@ add_custom_command(
 add_custom_command(
   OUTPUT ${cuda_nvrtc_cpp_file} ${cuda_nvrtc_h_file}
   COMMAND ${PYTHON_EXEC} ${CMAKE_SOURCE_DIR}/scripts/generate_dll_wrapper_file.py
-  "{ \"Windows\": \"${nvrtc_path}\", \"Linux\": \"${nvrtc_path}\" }"
+  "{ \"Windows\": \"${nvrtc_build_path}\", \"Linux\": \"${nvrtc_build_path}\" }"
   -i nvrtc.h
   -v "_v{n}"
   -l
-  -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_runtime.json\""
+  -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_nvrtc.json\""
   --cpp-file "\"${cuda_nvrtc_cpp_file}\""
   --header-file "\"${cuda_nvrtc_h_file}\""
   -up
+  -pexe
   COMMENT "Generate CUDA NVRTC Wrappers"
   VERBATIM
 )
 
 # Set files as generated
-set_source_files_properties(${cuda_runtime_cpp_file} ${cuda_runtime_h_file} ${cuda_nvrtc_cpp_file} ${cuda_nvrtc_h_file} PROPERTIES GENERATED TRUE)
+set_source_files_properties(${cuda_runtime_cpp_file} ${cuda_runtime_h_file} ${cuda_nvrtc_cpp_file} ${cuda_nvrtc_h_file} ${cudart_build_path} ${nvrtc_build_path} PROPERTIES GENERATED TRUE)
 source_group("Generated" FILES ${cuda_runtime_cpp_file} ${cuda_runtime_h_file} ${cuda_nvrtc_cpp_file} ${cuda_nvrtc_h_file})
 
 # Create module for the CUDA wrappers
@@ -101,10 +115,10 @@ target_sources(dmt-cuda-wrappers
 add_dependencies(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls)
 
 # Link target to the platform
-target_link_libraries(dmt-cuda-wrappers PUBLIC dmt-platform)
+target_link_libraries(dmt-cuda-wrappers PUBLIC dmt-platform glad::glad)
 
 # Install generated headers
 install(TARGETS dmt-cuda-wrappers FILE_SET dmt_cuda_wrappers_headers)
 
 # Set the folder for Visual Studio to organize the target
-set_target_properties(dmt-cuda-wrappers PROPERTIES FOLDER "Modules")
+set_target_properties(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls PROPERTIES FOLDER "Modules/CUDA Wrappers")

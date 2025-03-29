@@ -145,7 +145,7 @@ target_link_libraries(dmt-platform
     nlohmann_json::nlohmann_json
 )
 
-set_target_properties(dmt-platform-os-utils dmt-platform PROPERTIES FOLDER "Modules/Platform")
+set_target_properties(dmt-platform-os-utils platform-generated-src dmt-platform PROPERTIES FOLDER "Modules/Platform")
 
 install(TARGETS dmt-platform-os-utils dmt-platform
   FILE_SET platform_os_utils_headers

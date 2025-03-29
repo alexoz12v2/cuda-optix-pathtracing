@@ -14,11 +14,39 @@ LibraryData = namedtuple("LibraryData", "drive search_path_expr")
 
 
 def remove_json_comments(json_str: str) -> str:
-    json_str = re.sub(r"//.*", "", json_str)  # Remove `//` comments
-    json_str = re.sub(
-        r"/\*.*?\*/", "", json_str, flags=re.DOTALL
-    )  # Remove `/* */` comments
-    return json_str
+    """Removes // and /* */ comments from a JSON-like string, preserving comments inside strings."""
+    result = []
+    in_string = False
+    escape = False
+    i = 0
+    while i < len(json_str):
+        char = json_str[i]
+
+        if char == '"' and not escape:
+            in_string = not in_string  # Toggle string state
+
+        if not in_string:
+            # Handle `//` single-line comments
+            if json_str[i : i + 2] == "//":
+                i = json_str.find("\n", i)  # Skip to end of line
+                if i == -1:  # If no newline is found, exit
+                    break
+                continue
+
+            # Handle `/* */` multi-line comments
+            if json_str[i : i + 2] == "/*":
+                i = json_str.find("*/", i)  # Find the closing */
+                if i == -1:  # If no closing is found, exit
+                    break
+                i += 1  # Move past `*/`
+                continue
+
+        # Handle escape sequences inside strings
+        escape = char == "\\" and in_string
+        result.append(char)
+        i += 1
+
+    return "".join(result)
 
 
 def remove_matching_quotes(s: str) -> str:
@@ -35,18 +63,15 @@ def fix_backslashes(input_string: str) -> str:
         result = []
         i = 0
         while i < len(input_string):
-            if input_string[i] == "\\":
-                # Check if the next character is also a backslash (this is part of an existing '\\')
-                if i + 1 < len(input_string) and input_string[i + 1] == "\\":
-                    result.append("\\")  # Preserve the double backslash as it is
-                    i += 2  # Skip the next backslash
+            result.append(input_string[i])
+            if input_string[i] == "\\" and i + 1 < len(input_string):
+                if input_string[i + 1] != "\\":
+                    result.append("\\")
+                    i += 1
                 else:
-                    result.append(
-                        "\\\\"
-                    )  # Replace single backslash with double backslash
-                    i += 1  # Skip the current backslash
+                    result.append("\\")
+                    i += 2
             else:
-                result.append(input_string[i])
                 i += 1
         return "".join(result)
 
@@ -137,9 +162,15 @@ def write_type_declarations_and_populate_method_data(
 ):
     if json_file is not None:
         with json_file.open(encoding="UTF-8") as source:
-            tmap = json.loads(remove_json_comments(source.read()))
+            json_string = remove_json_comments(source.read())
+            with Path("Y:/why2.txt").open("w") as f:
+                f.write("\n" + json_string)
+            tmap = json.loads(json_string)
             tmap = {k.lower(): v for k, v in tmap.items()}  # Case-insensitive mapping
     else:
+        # uncomment if you need to debug
+        # with Path("Y:/why2.txt").open("w") as f:
+        #     f.write("\nNOTHING")
         tmap = {}
 
     for base_name, latest_version in exports.items():
@@ -204,6 +235,7 @@ def generate_loader(
     latest_only,
     json_file,
     header_name: str | None,
+    use_executable_dir: bool,
 ) -> Tuple[str, str]:
     """Generates C++ code for dynamically loading functions from a shared library."""
     header_string = [f"#pragma once\n{get_header()}"]
@@ -292,6 +324,7 @@ def platform_generate_loader(
     latest_only: bool,
     json_file: Path,
     header_name: str | None,
+    use_executable_dir: bool,
 ) -> Tuple[str, str]:
     header_string = [
         f'#pragma once\n{get_header()}\n#include "platform/platform-utils.h"\n'
@@ -317,7 +350,7 @@ def platform_generate_loader(
     write_type_declarations_and_populate_method_data(
         json_file, exports, data, header_string
     )
-    header_string[0] += "void* m_library;\n"
+    header_string[0] += "    void* m_library;\n"
     append_class_header_termination(header_string, data)
     header_string[0] += (
         f"\nbool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
@@ -343,9 +376,14 @@ def platform_generate_loader(
             implementation_string[0] += f"#elif defined({macro_from_plat(plat)})\n"
 
         library_name = library_dict[plat].name
-        implementation_string[0] += (
-            f"    dmt::os::Path path = dmt::os::Path::root({library_loading_dict[plat].drive}){library_loading_dict[plat].search_path_expr};\n"
-        )
+        if use_executable_dir:
+            implementation_string[0] += (
+                "    dmt::os::Path path = dmt::os::Path::executableDir();\n"
+            )
+        else:
+            implementation_string[0] += (
+                f"    dmt::os::Path path = dmt::os::Path::root({library_loading_dict[plat].drive}){library_loading_dict[plat].search_path_expr};\n"
+            )
         implementation_string[0] += (
             f'    funcList->m_library = loader.loadLibrary("{library_name}"sv, true, &path);\n'
         )
@@ -369,6 +407,9 @@ def platform_generate_loader(
 # TODO add clang-format after generation
 def main():
     print("Command-line arguments:", " ".join(sys.argv))
+    # uncomment if you need to debug
+    # with open("Y:/why.txt", "w") as f:
+    #     f.write(" ".join(sys.argv))
     parser = ArgumentParser(
         description="Generate a C++ wrapper for dynamically loading DLL/.so functions."
     )
@@ -406,7 +447,6 @@ def main():
     )
     parser.add_argument("-hf", "--header-file", type=str, required=True)
     parser.add_argument("-cpp", "--cpp-file", type=str, required=True)
-    # TODO
     parser.add_argument(
         "-up",
         "--use-platform",
@@ -414,10 +454,20 @@ def main():
         default=False,
         help="Produce a translation unit which depends on the dmt-platform cmake target",
     )
+    parser.add_argument(
+        "-pexe",
+        "--use-executable-path",
+        action="store_true",
+        default=False,
+        help="If set, library lookup will use the executable directory to search for DLLs",
+    )
 
     args = parser.parse_args()
 
     json_string = fix_backslashes(remove_json_comments(args.library))
+    # uncomment if you need to debug
+    # with open("Y:/why.txt", "w+") as f:
+    #     f.write(json_string)
 
     library_json = json.loads(json_string)
     library_json = {
@@ -430,18 +480,29 @@ def main():
     header_file = Path(remove_matching_quotes(args.header_file))
     cpp_file = Path(remove_matching_quotes(args.cpp_file))
     header_name = header_file.name
-    with open("Y:/why.txt", "w+") as f:
-        f.write(json_string)
-        f.write("\n")
-        f.write(str(header_file))
-        f.write("\n")
-        f.write(str(cpp_file))
+    # uncomment if you need to debug
+    # with open("Y:/why.txt", "w+") as f:
+    #     f.write(json_string)
+    #     f.write("\n")
+    #     f.write(str(header_file))
+    #     f.write("\n")
+    #     f.write(str(cpp_file))
 
-    json_file = Path(args.json_type_mapping)
+    json_file = Path(remove_matching_quotes(args.json_type_mapping))
+    # uncomment if you need to debug
+    # with open("Y:/why.txt", "a+") as f:
+    #     f.write(" ".join(sys.argv))
+    #     f.write(args.json_type_mapping + "\n")
+    #     f.write(str(json_file))
+
     if json_file.exists() and json_file.is_file():
         json_file = json_file.resolve()
     else:
         json_file = None
+
+    # uncomment if you need to debug
+    # with open("Y:/why.txt", "a+") as f:
+    #     f.write("\n\nLATER: " + str(json_file))
 
     if args.use_platform:
         generate_loader_function = platform_generate_loader
@@ -455,6 +516,7 @@ def main():
         args.latest_only,
         json_file,
         header_name,
+        args.use_executable_path,
     )
 
     cpp_file.parent.mkdir(parents=True, exist_ok=True)

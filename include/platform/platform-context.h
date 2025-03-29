@@ -116,12 +116,6 @@ namespace dmt {
          * everywhere and use a default as the first active context
          */
         extern DMT_PLATFORM_API Contexts* cs;
-
-        /**
-         * @warning thread unsafe
-         * @warning memory leak is on purpose
-         */
-        DMT_PLATFORM_API ECtxReturn addContext(bool managed = false, int32_t* outIdx = nullptr);
     } // namespace ctx
 
     /**
@@ -141,6 +135,8 @@ namespace dmt {
         ContextImpl* impl();
 
     public:
+        inline bool isValid() const { return m_pimpl; }
+
         // Logging ----------------------------------------------------------------------------------------------------
         template <typename... Ts>
         void log(FormatString<>              _fmt,

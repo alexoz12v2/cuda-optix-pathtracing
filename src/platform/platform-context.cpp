@@ -32,7 +32,7 @@ namespace dmt {
         common.handlers[i].hostCallback(common.handlers[i].data, record);
     }
 
-    Context::Context() : m_pimpl(ctx::cs->acquireActive()) {}
+    Context::Context() : m_pimpl(ctx::cs ? ctx::cs->acquireActive() : nullptr) {}
 
     Context::~Context() { ctx::cs->releaseActive(&m_pimpl); }
 
@@ -151,27 +151,6 @@ namespace dmt {
             }
         }
 
-        DMT_PLATFORM_API Contexts* cs;
-
-        ECtxReturn addContext(bool managed, int32_t* outIdx)
-        {
-            if (!cs)
-            {
-                //if (managed)
-                //{
-                //    cudaError_t err = cudaMallocManaged(&cs, sizeof(Contexts));
-                //    if (err != ::cudaSuccess)
-                //        std::abort();
-                //}
-                //else
-                {
-                    cs = new Contexts;
-                    if (!cs)
-                        std::abort();
-                }
-                std::construct_at(cs);
-            }
-            return cs->addContext(managed, outIdx);
-        }
+        DMT_PLATFORM_API Contexts* cs = nullptr;
     } // namespace ctx
 } // namespace dmt

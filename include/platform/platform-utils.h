@@ -732,6 +732,7 @@ namespace dmt {
         void unlock() noexcept;
     };
 
+    /// @brief @Deprecated Don't use this. This should be removed
     struct DMT_PLATFORM_API CudaSharedMutex
     {
         int lock_ = 0; // 0 means unlocked, >0 for shared locks, -1 for exclusive lock
@@ -747,6 +748,7 @@ namespace dmt {
         inline DMT_CPU_GPU void unlock_shared() noexcept;
     };
 
+    /// @brief This should be removed
     namespace atomic {
         inline DMT_CPU_GPU int exchange(int* addr, int val) noexcept
         {

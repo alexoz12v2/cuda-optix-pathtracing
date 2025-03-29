@@ -110,7 +110,7 @@ int32_t guardedMain()
     dmt::Ctx::init();
     struct Janitor
     {
-        ~Janitor() 
+        ~Janitor()
         {
             if (cudaApi)
             {
@@ -135,11 +135,11 @@ int32_t guardedMain()
 
         dmt::os::LibraryLoader                         loader{false};
         std::unique_ptr<NvcudaLibraryFunctions>        cudaApi   = nullptr;
-        std::unique_ptr<Cudart64_12LibraryFunctions> cudartApi = nullptr;
+        std::unique_ptr<Cudart64_12LibraryFunctions>   cudartApi = nullptr;
         std::unique_ptr<Nvrtc64_120_0LibraryFunctions> nvrtcApi  = nullptr;
-        CUcontext cuContext = nullptr;
-        CUdeviceptr d_x = 0, d_y = 0, d_result = 0;
-        CUmodule cuModule = nullptr;
+        CUcontext                                      cuContext = nullptr;
+        CUdeviceptr                                    d_x = 0, d_y = 0, d_result = 0;
+        CUmodule                                       cuModule = nullptr;
     } j;
 
     // Ctx::destroy should be called without any contexts
@@ -315,18 +315,13 @@ int32_t guardedMain()
         int   threadsPerBlock = 256;
         int   blocksPerGrid   = (count + threadsPerBlock - 1) / threadsPerBlock; // ceilDiv(count, threadsPerBlock)
 
-        // clang-format 0ff
-        CUresult driverRes = j.cudaApi->cuLaunchKernel(saxpyFunction,
-                                                       blocksPerGrid,
-                                                       1,
-                                                       1, // Grid Dimensions
-                                                       threadsPerBlock,
-                                                       1,
-                                                       1, // Block Dimensions
-                                                       0,
-                                                       nullptr, // shared memory and stream
-                                                       args,
-                                                       nullptr);
+        // clang-format off
+        CUresult driverRes = j.cudaApi->cuLaunchKernel(
+            saxpyFunction,
+            blocksPerGrid, 1, 1, // Grid Dimensions
+            threadsPerBlock, 1, 1, // Block Dimensions
+            0, nullptr, // shared memory and stream
+            args, nullptr); // arguments and extra configuration
         // clang-format on
         if (!dmt::cudaDriverCall(j.cudaApi.get(), driverRes))
             return 1;

@@ -13,10 +13,9 @@
 #include "platform/platform-logging-default-formatters.h" // must be after platform-logging
 #include <platform/cuda-wrapper.h>
 
-namespace dmt 
-{
+namespace dmt {
     /**
-     * Checks the `CUresult` of a CUDA Driver API operation, and, if different than `::CUDA_SUCCESS`, 
+     * Checks the `CUresult` of a CUDA Driver API operation, and, if different than `::CUDA_SUCCESS`,
      * @note This is supposed to be used in CUDA calls whose failure is fatal
      */
     [[nodiscard]] DMT_PLATFORM_API bool cudaDriverCall(NvcudaLibraryFunctions* cudaApi, CUresult result);
@@ -28,7 +27,7 @@ namespace dmt
     DMT_PLATFORM_API void fixCUDADriverSymbols(NvcudaLibraryFunctions* cudaApi);
 
     /**
-     * Adds a ContextImpl object inside 
+     * Adds a ContextImpl object inside
      */
     class DMT_PLATFORM_API Ctx
     {
@@ -36,11 +35,12 @@ namespace dmt
         /**
          * @warning The `resource` object should live beyond the `destroy` function call
          */
-        static void init(bool destroyIfExising = false, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        static void init(bool                       destroyIfExising = false,
+                         std::pmr::memory_resource* resource         = std::pmr::get_default_resource());
         static void destroy();
 
     private:
-        Ctx() = default;
+        Ctx()                                               = default;
         static inline std::pmr::memory_resource* m_resource = nullptr;
     };
 } // namespace dmt

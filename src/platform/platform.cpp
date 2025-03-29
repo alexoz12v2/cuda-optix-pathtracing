@@ -33,7 +33,7 @@ namespace dmt {
 
     static std::recursive_mutex s_allocMutex;
 
-    void Ctx::init(bool destroyIfExising, std::pmr::memory_resource* resource) 
+    void Ctx::init(bool destroyIfExising, std::pmr::memory_resource* resource)
     {
         {
             std::scoped_lock lock{s_allocMutex};
@@ -47,7 +47,7 @@ namespace dmt {
 
             assert(!ctx::cs);
             m_resource = resource;
-            ctx::cs = reinterpret_cast<ctx::Contexts*>(resource->allocate(sizeof(ctx::Contexts)));
+            ctx::cs    = reinterpret_cast<ctx::Contexts*>(resource->allocate(sizeof(ctx::Contexts)));
             std::construct_at(ctx::cs);
         }
 
@@ -58,12 +58,11 @@ namespace dmt {
         ctx.impl()->addHandler([](dmt::LogHandler& _out) { dmt::createConsoleHandler(_out); });
     }
 
-    void Ctx::destroy() 
-    { 
+    void Ctx::destroy()
+    {
         std::scoped_lock lock{s_allocMutex};
         std::destroy_at(ctx::cs);
         m_resource->deallocate(ctx::cs, sizeof(ctx::Contexts));
         m_resource = nullptr;
     }
 } // namespace dmt
-

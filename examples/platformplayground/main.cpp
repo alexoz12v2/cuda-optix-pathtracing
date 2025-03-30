@@ -126,9 +126,12 @@ int32_t guardedMain()
                     cudaApi->cuCtxDestroy(cuContext);
             }
 
-            loader.unloadLibrary(nvrtcApi->m_library);
-            loader.unloadLibrary(cudartApi->m_library);
-            loader.unloadLibrary(cudaApi->m_library);
+            if (nvrtcApi && nvrtcApi->m_library)
+                loader.unloadLibrary(nvrtcApi->m_library);
+            if (cudartApi && cudartApi->m_library)
+                loader.unloadLibrary(cudartApi->m_library);
+            if (cudaApi && cudaApi->m_library)
+                loader.unloadLibrary(cudaApi->m_library);
 
             dmt::Ctx::destroy();
         }

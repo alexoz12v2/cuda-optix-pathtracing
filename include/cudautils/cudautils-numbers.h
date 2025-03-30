@@ -26,3 +26,7 @@ namespace dmt::sampling {
     DMT_CPU_GPU float    sampleVisibleWavelengths(float u);
     DMT_CPU_GPU Vector4f sampleVisibleWavelengths(Vector4f u);
 } // namespace dmt::sampling
+
+#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_NUMBERS_IMPL)
+#include "cudautils-numbers.cu"
+#endif

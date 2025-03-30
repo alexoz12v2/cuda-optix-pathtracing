@@ -1,8 +1,5 @@
 #pragma once
 
-#include <pbrt/pbrt.h>
-
-
 #include <cudautils/cudautils-vecmath.h>
 #include <cudautils/cudautils-color.h>
 
@@ -467,3 +464,7 @@ namespace dmt {
     };
 
 } // namespace dmt
+
+#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_IMAGE_IMPL)
+#include "cudautils-image.cu"
+#endif

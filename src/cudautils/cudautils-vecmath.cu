@@ -1,6 +1,4 @@
-#include "cudautils.h"
-
-#include "cudautils-vecconv.cuh"
+#include "cudautils-vecmath.h"
 
 #if defined(DMT_ARCH_X86_64)
 #include <immintrin.h>
@@ -339,27 +337,27 @@ namespace dmt {
 
     __host__ __device__ Tuple2f fma(Tuple2f mult0, Tuple2f mult1, Tuple2f add)
     {
-        return {fromGLM(glm::fma(toGLM(mult0), toGLM(mult1), toGLM(add)))};
+        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
     }
     __host__ __device__ Tuple2i fma(Tuple2i mult0, Tuple2i mult1, Tuple2i add)
     {
-        return {fromGLM(glm::fma(toGLM(mult0), toGLM(mult1), toGLM(add)))};
+        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
     }
     __host__ __device__ Tuple3f fma(Tuple3f mult0, Tuple3f mult1, Tuple3f add)
     {
-        return {fromGLM(glm::fma(toGLM(mult0), toGLM(mult1), toGLM(add)))};
+        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
     }
     __host__ __device__ Tuple3i fma(Tuple3i mult0, Tuple3i mult1, Tuple3i add)
     {
-        return {fromGLM(glm::fma(toGLM(mult0), toGLM(mult1), toGLM(add)))};
+        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
     }
     __host__ __device__ Tuple4f fma(Tuple4f mult0, Tuple4f mult1, Tuple4f add)
     {
-        return {fromGLM(glm::fma(toGLM(mult0), toGLM(mult1), toGLM(add)))};
+        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
     }
     __host__ __device__ Tuple4i fma(Tuple4i mult0, Tuple4i mult1, Tuple4i add)
     {
-        return {fromGLM(glm::fma(toGLM(mult0), toGLM(mult1), toGLM(add)))};
+        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
     }
 
     __host__ __device__ Tuple2f min(Tuple2f a, Tuple2f b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }

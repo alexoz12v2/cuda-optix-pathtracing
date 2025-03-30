@@ -1,7 +1,3 @@
-#define DMT_ENTRY_POINT
-#include <platform/platform.h>
-#include <cudautils/cudautils-spectrum.h>
-
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -9,9 +5,11 @@
 #include <imgui_impl_opengl3.h>
 #include <implot.h>
 
-#include <iostream>
+#define DMT_ENTRY_POINT
+#include <platform/platform.h>
 
-#include <cstdint>
+#define DMT_CUDAUTILS_IMPL
+#include "cudautils/cudautils.h"
 
 namespace pbrt {
     inline float Blackbody(float lambda, float T)
@@ -35,18 +33,18 @@ public:
     imguiJanitor()
     {
         if (!glfwInit())
-            std::abort();
+            return;
 
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         window = glfwCreateWindow(800, 600, "TestPlot", nullptr, nullptr);
         if (!window)
-            std::abort();
+            return;
         glfwMakeContextCurrent(window);
         int32_t version = gladLoadGL(glfwGetProcAddress);
         if (version == 0)
-            std::abort();
+            return;
 
         glViewport(0, 0, 800, 600);
         glClearColor(0.2f, 0.2f, 0.2f, 1.f);
@@ -55,14 +53,15 @@ public:
         IMGUI_CHECKVERSION();
         ctx = ImGui::CreateContext();
         if (!ctx)
-            std::abort();
+            return;
         plotCtx = ImPlot::CreateContext();
         if (!plotCtx)
-            std::abort();
+            return;
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
         ImGui_ImplGlfw_InitForOpenGL(window, true);
         ImGui_ImplOpenGL3_Init();
+        m_valid = true;
     }
     imguiJanitor(imguiJanitor const&)                = delete;
     imguiJanitor(imguiJanitor&&) noexcept            = delete;
@@ -90,53 +89,71 @@ public:
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     }
 
+    bool isValid() const { return m_valid; }
+
     GLFWwindow*    window;
     ImGuiContext*  ctx;
     ImPlotContext* plotCtx;
+
+private:
+    bool m_valid = false;
 };
 
 int guardedMain()
 {
-    dmt::AppContext ctx;
-    float           black    = dmt::blackbody(827.f, 673.f);
-    float           expected = pbrt::Blackbody(827.f, 673.f);
-    ctx.log("Blackbody radiation at 827 nm, 673 K is {} vs {} (W/(sr m^2))", {black, expected});
-
-    static constexpr int32_t numSamples = 1000;
-    float                    xData[numSamples];
-    float                    yData[numSamples];
-    float                    lambda = dmt::lambdaMin();
-
-    float const delta = (dmt::lambdaMax() - dmt::lambdaMin()) / numSamples;
-    float const tempK = 4896.f;
-    for (int32_t i = 0; i < 1000; ++i, lambda += delta)
+    dmt::Ctx::init();
+    struct Janitor
     {
-        xData[i] = lambda;
-        yData[i] = dmt::blackbody(lambda, tempK);
-    }
+        ~Janitor() { dmt::Ctx::destroy(); }
+    } j;
 
-    // janitor artificial scope
+    // when dmt::Ctx::destroy runs, no active Context instances are allowed on the same thread, otherwise deadlock
     {
-        imguiJanitor glJanitor;
-        while (!glfwWindowShouldClose(glJanitor.window))
+        dmt::Context ctx;
+        if (!ctx.isValid())
+            return 1;
+
+        float black    = dmt::blackbody(827.f, 673.f);
+        float expected = pbrt::Blackbody(827.f, 673.f);
+        ctx.log("Blackbody radiation at 827 nm, 673 K is {} vs {} (W/(sr m^2))", std::make_tuple(black, expected));
+
+        static constexpr int32_t numSamples = 1000;
+        float                    xData[numSamples];
+        float                    yData[numSamples];
+        float                    lambda = dmt::lambdaMin();
+
+        float const delta = (dmt::lambdaMax() - dmt::lambdaMin()) / numSamples;
+        float const tempK = 4896.f;
+        for (int32_t i = 0; i < 1000; ++i, lambda += delta)
         {
-            glfwPollEvents(); // power hungry version to check events
-            glClear(GL_COLOR_BUFFER_BIT);
-            glJanitor.start();
-
-            ImPlotStyle& style = ImPlot::GetStyle();
-            if (ImPlot::BeginPlot("BlackBody Emission", {0, 0}))
-            {
-                ImPlot::PlotLine("T=673.15 K", xData, yData, numSamples);
-                ImPlot::EndPlot();
-            }
-
-            glJanitor.end();
-            glfwSwapBuffers(glJanitor.window);
+            xData[i] = lambda;
+            yData[i] = dmt::blackbody(lambda, tempK);
         }
-    }
 
-    ctx.log("Press Anything to exit");
-    std::cin.get();
-    return 0;
+        // janitor artificial scope
+        {
+            imguiJanitor glJanitor;
+            if (!glJanitor.isValid())
+                return 2;
+
+            while (!glfwWindowShouldClose(glJanitor.window))
+            {
+                glfwPollEvents(); // power hungry version to check events
+                glClear(GL_COLOR_BUFFER_BIT);
+                glJanitor.start();
+
+                ImPlotStyle& style = ImPlot::GetStyle();
+                if (ImPlot::BeginPlot("BlackBody Emission", {0, 0}))
+                {
+                    ImPlot::PlotLine("T=673.15 K", xData, yData, numSamples);
+                    ImPlot::EndPlot();
+                }
+
+                glJanitor.end();
+                glfwSwapBuffers(glJanitor.window);
+            }
+        }
+
+        return 0;
+    }
 }

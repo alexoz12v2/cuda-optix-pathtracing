@@ -19,6 +19,8 @@ namespace dmt {
 } // namespace dmt
 
 namespace dmt::os {
+    // TODO Why does it have to be aligned as 32? I think it has to do with the fact that the internal data uses tagged pointer.
+    // TODO refactor away file creation and just leave the reading strategy. File creation should be handled by the Path class
     class DMT_PLATFORM_API alignas(32) ChunkedFileReader
     {
     public:
@@ -81,21 +83,23 @@ namespace dmt::os {
         static constexpr uint32_t maxNumBuffers = 72;
         static constexpr uint32_t size          = 64;
         static constexpr uint32_t alignment     = 32;
-        ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize); // udata mode
-        ChunkedFileReader(LoggingContext& pctx,
-                          char const*     filePath,
-                          uint32_t        chunkSize,
-                          uint8_t         numBuffers,
-                          uintptr_t*      pBuffers); // pdata mode
+        ChunkedFileReader(char const*                filePath,
+                          uint32_t                   chunkSize,
+                          std::pmr::memory_resource* resource = std::pmr::get_default_resource()); // udata mode
+        ChunkedFileReader(char const*                filePath,
+                          uint32_t                   chunkSize,
+                          uint8_t                    numBuffers,
+                          uintptr_t*                 pBuffers,
+                          std::pmr::memory_resource* resource = std::pmr::get_default_resource()); // pdata mode
         ChunkedFileReader(ChunkedFileReader const&)                = delete;
         ChunkedFileReader(ChunkedFileReader&&) noexcept            = delete;
         ChunkedFileReader& operator=(ChunkedFileReader const&)     = delete;
         ChunkedFileReader& operator=(ChunkedFileReader&&) noexcept = delete;
         ~ChunkedFileReader() noexcept;
 
-        bool     requestChunk(LoggingContext& pctx, void* chunkBuffer, uint32_t chunkNum);
-        bool     waitForPendingChunk(LoggingContext& pctx, uint32_t timeoutMillis);
-        bool     waitForPendingChunk(LoggingContext& pctx);
+        bool     requestChunk(void* chunkBuffer, uint32_t chunkNum);
+        bool     waitForPendingChunk(uint32_t timeoutMillis);
+        bool     waitForPendingChunk();
         uint32_t lastNumBytesRead();
         void     markFree(ChunkInfo const& chunkInfo);
         uint32_t numChunks() const;
@@ -107,5 +111,6 @@ namespace dmt::os {
 
     private:
         alignas(alignment) unsigned char m_data[size];
+        std::pmr::memory_resource* m_resource;
     };
 } // namespace dmt::os

@@ -25,7 +25,7 @@ set(COVERAGE_PREFIX "")
 dmt_add_test(dmt-test-platform
   TARGET_LIST DMT_TEST_TARGETS_LIST
   FILES platform/platform-logging.test.cpp
-  DEPENDENCIES dmt-test-main dmt-platform-mixed
+  DEPENDENCIES dmt-test-main dmt-platform
 )
 
 add_custom_target(dmt-runtests

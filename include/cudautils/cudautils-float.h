@@ -303,3 +303,7 @@ inline constexpr DMT_CPU_GPU float arg(float f)
 #if defined(DMT_OS_WINDOWS)
 #pragma pop_macro("near")
 #endif
+
+#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_FLOAT_IMPL)
+#include "cudautils-float.cu"
+#endif

@@ -12,18 +12,18 @@ namespace dmt {
      */
     // total size should be exactly 4KB in all platforms
     // should be allocated with `cudaMallocManaged` to make CUDA Path work properly
-    struct ContextImpl
+    struct DMT_PLATFORM_API ContextImpl
     {
     public:
-        DMT_CPU ContextImpl();
-        DMT_CPU ~ContextImpl();
+        ContextImpl();
+        ~ContextImpl();
 
         /**
          * @warning Thread unsafe, should be done when the process has a single thread owning the ContextImpl
          */
         template <typename F>
             requires std::is_invocable_v<F, LogHandler&>
-        inline DMT_CPU void addHandler(F&& f)
+        inline void addHandler(F&& f)
         {
             if (common.numHandlers >= maxHandlers)
                 return;
@@ -31,37 +31,19 @@ namespace dmt {
             f(ref);
         }
 
-        inline DMT_CPU_GPU bool handlerEnabled(uint32_t i) const
-        {
-            return common.handlers[i].minimumLevel < ELogLevel::NONE;
-        }
+        bool handlerEnabled(uint32_t i) const;
 
-        inline DMT_CPU_GPU bool anyHandlerEnabledFor(ELogLevel _level) const
-        {
-            assert(_level != ELogLevel::NONE);
-            for (uint32_t i = 0; i < common.numHandlers; ++i)
-            {
-                if (common.handlers[i].minimumLevel <= _level)
-                    return true;
-            }
-            return false;
-        }
+        bool anyHandlerEnabledFor(ELogLevel _level) const;
 
-        inline DMT_CPU bool logFilterPassesFor(uint32_t i, LogRecord const& record)
-        {
-            return common.handlers[i].hostFilter(common.handlers[i].data, record);
-        }
+        bool logFilterPassesFor(uint32_t i, LogRecord const& record);
 
-        inline DMT_CPU void logCallbackFor(uint32_t i, LogRecord const& record)
-        {
-            common.handlers[i].hostCallback(common.handlers[i].data, record);
-        }
+        void logCallbackFor(uint32_t i, LogRecord const& record);
 
     public:
         static constexpr uint32_t maxHandlers          = 4;
         static constexpr uint32_t logBufferNumBytes    = 2048;
         static constexpr uint32_t argLogBufferNumBytes = 1024;
-        struct Common
+        struct DMT_PLATFORM_API Common
         {
             // 8 byte aligned
             LogHandler handlers[maxHandlers]{};
@@ -92,7 +74,7 @@ namespace dmt {
             eGenericError
         };
         inline constexpr uint32_t maxNumCtxs = 4;
-        class Contexts
+        class DMT_PLATFORM_API Contexts
         {
         public:
             Contexts()                               = default;
@@ -100,22 +82,22 @@ namespace dmt {
             Contexts(Contexts&&) noexcept            = delete;
             Contexts& operator=(Contexts const&)     = delete;
             Contexts& operator=(Contexts&&) noexcept = delete;
-            DMT_CPU ~Contexts();
+            ~Contexts();
 
         public:
-            DMT_CPU ECtxReturn addContext(bool managed = false, int32_t* outIdx = nullptr);
+            ECtxReturn addContext(bool managed = false, int32_t* outIdx = nullptr);
 
-            DMT_CPU bool setActive(int32_t index);
+            bool setActive(int32_t index);
 
-            DMT_CPU_GPU ContextImpl* acquireActive();
+            ContextImpl* acquireActive();
 
-            DMT_CPU_GPU void releaseActive(ContextImpl** pCtx);
-
-        private:
-            DMT_CPU void waitActiveUnused();
+            void releaseActive(ContextImpl** pCtx);
 
         private:
-            struct Wrapper
+            void waitActiveUnused();
+
+        private:
+            struct DMT_PLATFORM_API Wrapper
             {
                 ContextImpl* pctx      = nullptr;
                 int32_t      readCount = 0;
@@ -128,112 +110,82 @@ namespace dmt {
             int32_t         activeIndex = -1; // managed with atomic_ref
             CudaSharedMutex lock;
         };
-        extern DMT_MANAGED Contexts* cs;
 
         /**
-         * @warning thread unsafe
-         * @warning memory leak is on purpose
+         * Global variable which stores all contexts in use. the correct usage should be pass the context as parameter
+         * everywhere and use a default as the first active context
          */
-        DMT_CPU ECtxReturn addContext(bool managed = false, int32_t* outIdx = nullptr);
+        extern DMT_PLATFORM_API Contexts* cs;
     } // namespace ctx
 
     /**
-     * Buffer to facilitate GPU side logging
-     * Requirements:
-     * - call "LogBuffer" = activeMask + sizeof(LogRecord) + UTF-8 character buffer for the format string
-     * - there should be N * warpSize LogBuffers allocated in managed memory
-     * - when
-     * @warning should be constructed in `__managed__` memory
-     */
-    class WarpBuffers
-    {
-    public:
-        struct Buffer
-        {
-            LogRecord record[32];
-            char      arg[1024][32];
-            char      buf[1024][32];
-            bool      used[32];
-        };
-
-    public:
-        DMT_CPU WarpBuffers();
-        WarpBuffers(WarpBuffers const&)                = delete;
-        WarpBuffers(WarpBuffers&&) noexcept            = delete;
-        WarpBuffers& operator=(WarpBuffers const&)     = delete;
-        WarpBuffers& operator=(WarpBuffers&&) noexcept = delete;
-        DMT_CPU ~WarpBuffers();
-
-    public:
-
-    private:
-
-    private:
-    };
-
-    /**
      * It's meant to be reacquired, so no copy control
-     * @warning all `DMT_CPU_GPU` methods must be implemented as `inline` here cause this is not a CUDA translation unit
+     * @warning all `` methods must be implemented as `inline` here cause this is not a CUDA translation unit
      */
-    class Context
+    class DMT_PLATFORM_API Context
     {
     public:
-        DMT_CPU_GPU          Context() : m_pimpl(ctx::cs->acquireActive()) {}
-        DMT_CPU_GPU          Context(Context const&)       = delete;
-        DMT_CPU_GPU          Context(Context&&) noexcept   = delete;
-        DMT_CPU_GPU Context& operator=(Context const&)     = delete;
-        DMT_CPU_GPU Context& operator=(Context&&) noexcept = delete;
-        DMT_CPU_GPU ~Context()
-        { //
-            ctx::cs->releaseActive(&m_pimpl);
-        }
+        Context();
+        Context(Context const&)                = delete;
+        Context(Context&&) noexcept            = delete;
+        Context& operator=(Context const&)     = delete;
+        Context& operator=(Context&&) noexcept = delete;
+        ~Context();
 
-        inline ContextImpl* impl() { return m_pimpl; }
+        ContextImpl* impl();
 
     public:
+        // TODO move inline stuff away
+        inline bool isValid() const { return m_pimpl; }
+
+        inline bool isLogEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::LOG); }
+        inline bool isWarnEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::WARNING); }
+        inline bool isTraceEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::TRACE); }
+        inline bool isErrorEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::ERR); }
+
         // Logging ----------------------------------------------------------------------------------------------------
         template <typename... Ts>
-        DMT_CPU_GPU void log(FormatString<>              _fmt,
-                             std::tuple<Ts...> const&    _params,
-                             LogLocation const&          _pysLoc = getPhysicalLocation(),
-                             std::source_location const& loc     = std::source_location::current())
+        void log(FormatString<>              _fmt,
+                 std::tuple<Ts...> const&    _params,
+                 LogLocation const&          _pysLoc = getPhysicalLocation(),
+                 std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::LOG, _params, _pysLoc, loc);
         }
 
         template <typename... Ts>
-        DMT_CPU_GPU void trace(FormatString<>              _fmt,
-                               std::tuple<Ts...> const&    _params,
-                               LogLocation const&          _pysLoc = getPhysicalLocation(),
-                               std::source_location const& loc     = std::source_location::current())
+        void trace(FormatString<>              _fmt,
+                   std::tuple<Ts...> const&    _params,
+                   LogLocation const&          _pysLoc = getPhysicalLocation(),
+                   std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::TRACE, _params, _pysLoc, loc);
         }
 
         template <typename... Ts>
-        DMT_CPU_GPU void warn(FormatString<>              _fmt,
-                              std::tuple<Ts...> const&    _params,
-                              LogLocation const&          _pysLoc = getPhysicalLocation(),
-                              std::source_location const& loc     = std::source_location::current())
+        void warn(FormatString<>              _fmt,
+                  std::tuple<Ts...> const&    _params,
+                  LogLocation const&          _pysLoc = getPhysicalLocation(),
+                  std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::WARNING, _params, _pysLoc, loc);
         }
 
         template <typename... Ts>
-        DMT_CPU_GPU void error(FormatString<>              _fmt,
-                               std::tuple<Ts...> const&    _params,
-                               LogLocation const&          _pysLoc = getPhysicalLocation(),
-                               std::source_location const& loc     = std::source_location::current())
+        void error(FormatString<>              _fmt,
+                   std::tuple<Ts...> const&    _params,
+                   LogLocation const&          _pysLoc = getPhysicalLocation(),
+                   std::source_location const& loc     = std::source_location::current())
         {
             write(_fmt, ELogLevel::ERR, _params, _pysLoc, loc);
         }
 
         template <typename... Ts>
-        DMT_CPU_GPU void write(FormatString<>              _fmt,
-                               ELogLevel                   _level,
-                               std::tuple<Ts...> const&    _params,
-                               LogLocation const&          _pysLoc,
-                               std::source_location const& loc)
+        void write(FormatString<>              _fmt,
+                   ELogLevel                   _level,
+                   std::tuple<Ts...> const&    _params,
+                   LogLocation const&          _pysLoc,
+                   std::source_location const& loc)
         {
             if (!m_pimpl->anyHandlerEnabledFor(_level))
                 return;

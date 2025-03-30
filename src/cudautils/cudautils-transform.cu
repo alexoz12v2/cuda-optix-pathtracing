@@ -1,7 +1,5 @@
 #include "cudautils-transform.h"
 
-#include "cudautils-vecconv.cuh"
-
 #include <platform/platform.h> // using AppContextJanitor
 
 namespace dmt {
@@ -1044,10 +1042,6 @@ namespace dmt {
     // CameraTransform ------------------------------------------------------------------------------------------------
     __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys)
     {
-#if !defined(__CUDA_ARCH__)
-        // TODO wrap AppContextJanitor in another janitor class to handle cuda execution
-        AppContextJanitor j;
-#endif
         switch (renderCoordSys)
         {
             using enum ERenderCoordSys;
@@ -1064,9 +1058,8 @@ namespace dmt {
             {
                 break;
             }
-            default:
+            default: // should be never reached
 #if !defined(__CUDA_ARCH__)
-                j.actx.error("Unexpected render coordinate system, aborting");
                 std::abort();
 #else
                 // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated

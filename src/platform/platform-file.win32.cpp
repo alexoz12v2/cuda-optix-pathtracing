@@ -1,5 +1,6 @@
 #include "platform-file.h"
 #include "platform-os-utils.win32.h"
+#include "platform-context.h"
 
 #include <Windows.h>
 
@@ -101,12 +102,14 @@ namespace dmt::os {
         }
     }
 
-    static bool initFile(LoggingContext& pctx, char const* filePath, Win32ChunkedFileReader& data)
+    // TODO move to path class, enable long path handling, ...
+    static bool initFile(wchar_t const* filePath, Win32ChunkedFileReader& data)
     {
+        dmt::Context  ctx;
         LARGE_INTEGER fileSize;
 
         // create file with ascii path only
-        data.hFile = CreateFileA(filePath,
+        data.hFile = CreateFileW(filePath,
                                  GENERIC_READ,
                                  FILE_SHARE_READ,
                                  nullptr, // TODO maybe insert process descriptor, when you refactor system and process information
@@ -116,33 +119,42 @@ namespace dmt::os {
                                  nullptr);
         if (data.hFile == INVALID_HANDLE_VALUE)
         {
-            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
-            pctx.error("CreateFileA failed: {}", {view});
+            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), length};
+            if (ctx.isValid())
+                ctx.error("CreateFileA failed: {}", std::make_tuple(view));
             return false;
         }
         if (!GetFileSizeEx(data.hFile, &fileSize))
         {
-            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
-            pctx.error("CreateFileA failed: {}", {view});
+            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), length};
+            if (ctx.isValid())
+                ctx.error("CreateFileA failed: {}", std::make_tuple(view));
             return false;
         }
         data.fileSize = fileSize.QuadPart;
         return true;
     }
 
-    ChunkedFileReader::ChunkedFileReader(LoggingContext& pctx, char const* filePath, uint32_t chunkSize)
+    ChunkedFileReader::ChunkedFileReader(char const* filePath, uint32_t chunkSize, std::pmr::memory_resource* resource) :
+    m_resource(resource)
     {
+        assert(m_resource);
+        dmt::Context            ctx;
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
         if (!isPowerOfTwoAndGE512(chunkSize))
         {
-            pctx.error("Invalid Chunk Size. Win32 requires a POT GE 512");
+            if (ctx.isValid())
+                ctx.error("Invalid Chunk Size. Win32 requires a POT GE 512", {});
             data.hFile = INVALID_HANDLE_VALUE;
             return;
         }
-        if (!initFile(pctx, filePath, data))
+        auto wPath = dmt::os::win32::utf16FromUtf8(filePath, m_resource);
+        if (!initFile(wPath.c_str(), data))
         {
+            if (ctx.isValid())
+                ctx.error("Invalid File. Cannot create ChunkedFileReader", {});
             return;
         }
 
@@ -154,28 +166,34 @@ namespace dmt::os {
         data.u.uData.overlapped.hEvent = std::bit_cast<HANDLE>(TaggedPointer{this, 0x400});
     }
 
-    ChunkedFileReader::ChunkedFileReader(LoggingContext& pctx,
-                                         char const*     filePath,
-                                         uint32_t        chunkSize,
-                                         uint8_t         numBuffers,
-                                         uintptr_t*      pBuffers)
+    ChunkedFileReader::ChunkedFileReader(char const*                filePath,
+                                         uint32_t                   chunkSize,
+                                         uint8_t                    numBuffers,
+                                         uintptr_t*                 pBuffers,
+                                         std::pmr::memory_resource* resource) :
+    m_resource(resource)
     {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        assert(m_resource);
+        dmt::Context ctx;
         if (numBuffers > maxNumBuffers)
         {
-            pctx.error("Exceeded maximum number of buffers for chunked file read");
+            if (ctx.isValid())
+                ctx.error("Exceeded maximum number of buffers for chunked file read", {});
             data.hFile = INVALID_HANDLE_VALUE;
             return;
         }
         if (!isPowerOfTwoAndGE512(chunkSize))
         {
-            pctx.error("Invalid Chunk Size. Win32 requires a POT GE 512");
+            if (ctx.isValid())
+                ctx.error("Invalid Chunk Size. Win32 requires a POT GE 512", {});
             data.hFile = INVALID_HANDLE_VALUE;
             return;
         }
 
         data.chunkSize = chunkSize;
-        if (!initFile(pctx, filePath, data))
+        auto wPath     = dmt::os::win32::utf16FromUtf8(filePath, m_resource);
+        if (!initFile(wPath.c_str(), data))
         {
             return;
         }
@@ -196,20 +214,23 @@ namespace dmt::os {
         }
     }
 
-    bool ChunkedFileReader::requestChunk(LoggingContext& pctx, void* chunkBuffer, uint32_t chunkNum)
+    bool ChunkedFileReader::requestChunk(void* chunkBuffer, uint32_t chunkNum)
     {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        dmt::Context            ctx;
         assert(chunkNum < data.numChunks);
 
         if (alignTo(chunkBuffer, 8) != chunkBuffer)
         {
-            pctx.error("invalid chunk buffer, nned it aligned to a 8 byte boundary");
+            if (ctx.isValid())
+                ctx.error("invalid chunk buffer, nned it aligned to a 8 byte boundary", {});
             return false;
         }
 
         if (data.u.pData.magic == Win32ChunkedFileReader::theMagic)
         {
-            pctx.error("invalid state. initialized for multi chunk operator, tried single buffer op");
+            if (ctx.isValid())
+                ctx.error("invalid state. initialized for multi chunk operator, tried single buffer op", {});
             return false;
         }
 
@@ -219,9 +240,10 @@ namespace dmt::os {
 
         if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.u.uData.overlapped, completionRoutine))
         {
-            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
-            pctx.error("CreateFileA failed: {}", {view});
+            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), length};
+            if (ctx.isValid())
+                ctx.error("CreateFileA failed: {}", std::make_tuple(view));
             return false;
         }
         return true;
@@ -237,28 +259,31 @@ namespace dmt::os {
         return data.u.uData.numBytesReadLastTransfer;
     }
 
-    bool ChunkedFileReader::waitForPendingChunk(LoggingContext& pctx)
+    bool ChunkedFileReader::waitForPendingChunk()
     {
         uint32_t timeoutMillis;
         timeoutMillis = INFINITE;
-        return waitForPendingChunk(pctx, timeoutMillis);
+        return waitForPendingChunk(timeoutMillis);
     }
 
-    bool ChunkedFileReader::waitForPendingChunk(LoggingContext& pctx, uint32_t timeoutMillis)
+    bool ChunkedFileReader::waitForPendingChunk(uint32_t timeoutMillis)
     {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(&m_data);
+        dmt::Context            ctx;
         if (data.u.pData.magic == Win32ChunkedFileReader::theMagic)
         {
-            pctx.error("invalid state. initialized for multi chunk operator, tried single buffer op");
+            if (ctx.isValid())
+                ctx.error("invalid state. initialized for multi chunk operator, tried single buffer op", {});
             return false;
         }
 
         if (DWORD err = GetLastError(); err != ERROR_SUCCESS && err != ERROR_IO_PENDING)
         {
             SetLastError(err);
-            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
-            pctx.error("Read Operation failed: {}", {view});
+            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
+            std::string_view view{sErrorBuffer.data(), length};
+            if (ctx.isValid())
+                ctx.error("Read Operation failed: {}", std::make_tuple(view));
             return false;
         }
 

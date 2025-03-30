@@ -449,3 +449,8 @@ TSWLatexianTemp*
 # vscode
 .vscode/
 .vs/
+
+# python
+__pycache__/
+
+imgui.ini

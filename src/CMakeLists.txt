@@ -1,3 +1,5 @@
 add_subdirectory(platform)
 add_subdirectory(cudautils)
-add_subdirectory(middleware)
+add_subdirectory(cuda-wrappers)
+add_subdirectory(application)
+# add_subdirectory(middleware)

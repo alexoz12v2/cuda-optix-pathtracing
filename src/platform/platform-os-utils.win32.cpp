@@ -37,7 +37,7 @@ namespace dmt::os::win32 {
         return actualLength;
     }
 
-    DMT_PLATFORM_OS_UTILS_API std::unique_ptr<wchar_t[]> quickUtf16leFrom(char const* prefix, char const* str)
+    std::unique_ptr<wchar_t[]> quickUtf16leFrom(char const* prefix, char const* str)
     {
         uint32_t const             len      = static_cast<uint32_t>(std::strlen(prefix) + std::strlen(str));
         uint32_t const             numChars = len + 16;
@@ -136,18 +136,34 @@ namespace dmt::os::win32 {
         }
     }
 
-    // TODO if used beyond debugging, write a version which uses our memory systems
-    std::u8string utf8FromUtf16(std::wstring_view wideStr)
+    std::pmr::wstring utf16FromUtf8(std::string_view mbStr, std::pmr::memory_resource* resource)
     {
         using namespace std::string_literals;
-        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), wideStr.length(), nullptr, 0, nullptr, nullptr);
-        if (sizeNeeded == 0)
+        std::pmr::wstring result{resource};
+        int               sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, mbStr.data(), mbStr.length(), nullptr, 0);
+        if (sizeNeeded > 0)
         {
-            return u8""s;
+            std::unique_ptr<wchar_t[]> buf = std::make_unique<wchar_t[]>(sizeNeeded + 1);
+            buf[sizeNeeded]                = L'\0';
+            MultiByteToWideChar(CP_UTF8, 0, mbStr.data(), mbStr.length(), buf.get(), sizeNeeded);
+            result.append(buf.get());
         }
-        std::unique_ptr<char[]> buf = std::make_unique<char[]>(sizeNeeded + 1);
-        buf[sizeNeeded]             = '\0';
-        WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), wideStr.length(), buf.get(), sizeNeeded, nullptr, nullptr);
-        return std::u8string(reinterpret_cast<char8_t const*>(buf.get()));
+
+        return result;
+    }
+
+    std::pmr::string utf8FromUtf16(std::wstring_view wideStr, std::pmr::memory_resource* resource)
+    {
+        using namespace std::string_literals;
+        std::pmr::string result{resource};
+        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), wideStr.length(), nullptr, 0, nullptr, nullptr);
+        if (sizeNeeded > 0)
+        {
+            std::unique_ptr<char[]> buf = std::make_unique<char[]>(sizeNeeded + 1);
+            buf[sizeNeeded]             = '\0';
+            WideCharToMultiByte(CP_UTF8, 0, wideStr.data(), wideStr.length(), buf.get(), sizeNeeded, nullptr, nullptr);
+            result.append(buf.get());
+        }
+        return result;
     }
 } // namespace dmt::os::win32

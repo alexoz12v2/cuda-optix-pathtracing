@@ -31,8 +31,12 @@ namespace dmt::os::win32 {
         return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
     }
 
-    // TODO if used beyond debugging, write a version which uses our memory systems
-    DMT_PLATFORM_OS_UTILS_API std::u8string utf8FromUtf16(std::wstring_view wideStr);
+    DMT_PLATFORM_OS_UTILS_API std::pmr::wstring utf16FromUtf8(
+        std::string_view           mbStr,
+        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    DMT_PLATFORM_OS_UTILS_API std::pmr::string utf8FromUtf16(
+        std::wstring_view          wideStr,
+        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
     DMT_PLATFORM_OS_UTILS_API uint32_t utf16le_From_utf8(
         char8_t const* DMT_RESTRICT _u8str,

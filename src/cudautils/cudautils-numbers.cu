@@ -1,7 +1,5 @@
 #include "cudautils-numbers.h"
 
-#include "cudautils-vecconv.cuh"
-
 namespace dmt::sampling {
     __host__ __device__ float visibleWavelengthsPDF(float lambda)
     {

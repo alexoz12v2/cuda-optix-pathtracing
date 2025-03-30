@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30) # C++ 20 modules require clang 16, cmake 3.28 at least
+cmake_minimum_required(VERSION 3.29) # C++ 20 modules require clang 16, cmake 3.28 at least
 
 ################################################################################
 # Policies
@@ -68,7 +68,7 @@ dmt_set_option(DMT_GENERATE_DOCS ON BOOL "Generate Docs")
 project(
   DumbTracer
   VERSION 1.0.0
-  DESCRIPTION "Project aiming to perform VR Photon Mapping"
+  DESCRIPTION "CUDA Path Tracing"
   LANGUAGES CXX C CUDA
 )
 
@@ -86,6 +86,17 @@ include(cmake/SetupDoxygen.cmake)
 
 dmt_define_environment()
 dmt_setup_dependencies()
+
+# grab python executable (msut be after `dmt_define_environment`). sets variable PYTHON_EXEC
+dmt_find_python_executable()
+block()
+  execute_process(
+    COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/test_python.py
+    COMMAND_ECHO STDOUT
+    OUTPUT_VARIABLE test_python_STDOUT
+  )
+  message(STATUS "${test_python_STDOUT}")
+endblock()
 
 # possible TODO: make this work
 if(DMT_COMPILER_MSVC)

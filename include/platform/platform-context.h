@@ -135,7 +135,13 @@ namespace dmt {
         ContextImpl* impl();
 
     public:
+        // TODO move inline stuff away
         inline bool isValid() const { return m_pimpl; }
+
+        inline bool isLogEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::LOG); }
+        inline bool isWarnEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::WARNING); }
+        inline bool isTraceEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::TRACE); }
+        inline bool isErrorEnabled() const { return m_pimpl && m_pimpl->anyHandlerEnabledFor(ELogLevel::ERR); }
 
         // Logging ----------------------------------------------------------------------------------------------------
         template <typename... Ts>

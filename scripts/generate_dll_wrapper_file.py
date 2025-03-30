@@ -163,8 +163,9 @@ def write_type_declarations_and_populate_method_data(
     if json_file is not None:
         with json_file.open(encoding="UTF-8") as source:
             json_string = remove_json_comments(source.read())
-            with Path("Y:/why2.txt").open("w") as f:
-                f.write("\n" + json_string)
+            # uncomment to debug
+            # with Path("Y:/why2.txt").open("w") as f:
+            #     f.write("\n" + json_string)
             tmap = json.loads(json_string)
             tmap = {k.lower(): v for k, v in tmap.items()}  # Case-insensitive mapping
     else:
@@ -215,14 +216,20 @@ def append_class_header_termination(header_string, data):
     header_string[0] += "};\n"
 
 
-def append_class_header_preamble(includes, header_string, exports, library_class_name):
+def append_class_header_preamble(includes, header_string, exports, library_class_name, export_macro: str):
     header_string[0] += "\n" + "".join(f'#include "{inc}"\n' for inc in includes) + "\n"
 
     # Add the #undef macros
     for base_name in exports.keys():
         header_string[0] += f"#ifdef {base_name}\n#undef {base_name}\n#endif\n"
 
-    header_string[0] += f"""
+    if export_macro and len(export_macro) > 0:
+        header_string[0] += f"""
+class {export_macro} {library_class_name}LibraryFunctions {{
+  public:
+"""
+    else:
+        header_string[0] += f"""
 class {library_class_name}LibraryFunctions {{
   public:
 """
@@ -236,6 +243,7 @@ def generate_loader(
     json_file,
     header_name: str | None,
     use_executable_dir: bool,
+    export_macro: str
 ) -> Tuple[str, str]:
     """Generates C++ code for dynamically loading functions from a shared library."""
     header_string = [f"#pragma once\n{get_header()}"]
@@ -245,7 +253,7 @@ def generate_loader(
     )
     data: List[MethodData] = list()
 
-    append_class_header_preamble(includes, header_string, exports, library_class_name)
+    append_class_header_preamble(includes, header_string, exports, library_class_name, export_macro)
     write_type_declarations_and_populate_method_data(
         json_file, exports, data, header_string
     )
@@ -300,7 +308,13 @@ static void* LoadLibraryFunc(const char* func_name) {{
 }}
 """
 
-    implementation_string[0] += f"""
+    if export_macro and len(export_macro) > 0:
+        implementation_string[0] += f"""
+bool {export_macro} load{library_class_name}Functions({library_class_name}LibraryFunctions* funcList)
+{{
+"""
+    else:
+        implementation_string[0] += f"""
 bool load{library_class_name}Functions({library_class_name}LibraryFunctions* funcList)
 {{
 """
@@ -325,6 +339,7 @@ def platform_generate_loader(
     json_file: Path,
     header_name: str | None,
     use_executable_dir: bool,
+    export_macro: str
 ) -> Tuple[str, str]:
     header_string = [
         f'#pragma once\n{get_header()}\n#include "platform/platform-utils.h"\n'
@@ -346,15 +361,20 @@ def platform_generate_loader(
             + " / ".join(f'"{s}"' for i, s in enumerate(search_path_parts) if i > 0),
         )
 
-    append_class_header_preamble(includes, header_string, exports, library_class_name)
+    append_class_header_preamble(includes, header_string, exports, library_class_name, export_macro)
     write_type_declarations_and_populate_method_data(
         json_file, exports, data, header_string
     )
     header_string[0] += "    void* m_library;\n"
     append_class_header_termination(header_string, data)
-    header_string[0] += (
-        f"\nbool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
-    )
+    if export_macro and len(export_macro) > 0:
+        header_string[0] += (
+            f"\nbool {export_macro} load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
+        )
+    else:
+        header_string[0] += (
+            f"\nbool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
+        )
 
     implementation_string[0] += (
         f"bool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList) {{\n"
@@ -461,6 +481,14 @@ def main():
         default=False,
         help="If set, library lookup will use the executable directory to search for DLLs",
     )
+    parser.add_argument(
+        "-em",
+        "--export-macro",
+        required=False,
+        type=str,
+        default="",
+        help="DLL import export macro which will be inserted on the class name and functions in the header"
+    )
 
     args = parser.parse_args()
 
@@ -517,6 +545,7 @@ def main():
         json_file,
         header_name,
         args.use_executable_path,
+        args.export_macro
     )
 
     cpp_file.parent.mkdir(parents=True, exist_ok=True)

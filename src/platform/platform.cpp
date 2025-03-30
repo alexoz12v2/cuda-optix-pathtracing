@@ -5,7 +5,7 @@
 #include <cassert>
 
 namespace dmt {
-    [[noreturn]] bool cudaDriverCall(NvcudaLibraryFunctions* cudaApi, CUresult result)
+    [[nodiscard]] bool cudaDriverCall(NvcudaLibraryFunctions const* cudaApi, CUresult result)
     {
         if (result == ::CUDA_SUCCESS)
             return true;
@@ -13,7 +13,12 @@ namespace dmt {
         Context     ctx;
         char const* errorStr = nullptr;
         cudaApi->cuGetErrorString(result, &errorStr);
-        ctx.error("Couln't get the device. Error: {}", std::make_tuple(errorStr));
+
+        if (errorStr != nullptr)
+            ctx.error("CUDA Driver Error: {}", std::make_tuple(errorStr));
+        else
+            ctx.error("CUDA Driver Unrecognized Error (did you forget to call cuInit?)", {});
+
         return false;
     }
 

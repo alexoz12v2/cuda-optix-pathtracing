@@ -1,16 +1,22 @@
 #pragma once
 
+// group 1: macros
 #include "platform/platform-macros.h"
-#include <platform/platform-launch.h> // must be included before all the rest
 
+// group 2: launch
+#include <platform/platform-launch.h>
+
+// group 3: utils, logging, context (order matters)
 #include <platform/platform-utils.h>
 #include <platform/platform-logging.h>
+#include <platform/platform-context.h>
+
+// group 4: stuff. (order doesn't matter)
 #include <platform/platform-memory.h>
 #include <platform/platform-threadPool.h>
-#include <platform/platform-display.h>
 #include <platform/platform-file.h>
-#include <platform/platform-context.h>
-#include "platform/platform-logging-default-formatters.h" // must be after platform-logging
+
+// group 5: generated
 #include <platform/cuda-wrapper.h>
 
 namespace dmt {
@@ -18,7 +24,7 @@ namespace dmt {
      * Checks the `CUresult` of a CUDA Driver API operation, and, if different than `::CUDA_SUCCESS`,
      * @note This is supposed to be used in CUDA calls whose failure is fatal
      */
-    [[nodiscard]] DMT_PLATFORM_API bool cudaDriverCall(NvcudaLibraryFunctions* cudaApi, CUresult result);
+    [[nodiscard]] DMT_PLATFORM_API bool cudaDriverCall(NvcudaLibraryFunctions const* cudaApi, CUresult result);
 
     /**
      * This function (and similiar for all loaded dlls) should be populated with more

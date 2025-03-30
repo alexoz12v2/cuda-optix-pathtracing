@@ -101,6 +101,7 @@ set_source_files_properties(${cuda_runtime_cpp_file} ${cuda_runtime_h_file} ${cu
 source_group("Generated" FILES ${cuda_runtime_cpp_file} ${cuda_runtime_h_file} ${cuda_nvrtc_cpp_file} ${cuda_nvrtc_h_file})
 
 # Create module for the CUDA wrappers
+# NOTE: This is static
 dmt_add_module_library(dmt-cuda-wrappers cuda-wrappers)
 
 target_sources(dmt-cuda-wrappers

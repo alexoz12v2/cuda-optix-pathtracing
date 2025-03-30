@@ -145,6 +145,10 @@ int32_t guardedMain()
         CUmodule                                       cuModule = nullptr;
     } j;
 
+    j.cudaApi   = std::make_unique<NvcudaLibraryFunctions>();
+    j.cudartApi = std::make_unique<Cudart64_12LibraryFunctions>();
+    j.nvrtcApi  = std::make_unique<Nvrtc64_120_0LibraryFunctions>();
+
     // Ctx::destroy should be called without any contexts
     {
         dmt::Context ctx;
@@ -204,7 +208,6 @@ int32_t guardedMain()
 
         // Test 11: CUDA Driver API
         // TODO: These functions are not calling unloadLibrary on the loader.
-        j.cudaApi = std::make_unique<NvcudaLibraryFunctions>();
         if (!loadNvcudaFunctions(j.loader, j.cudaApi.get()))
         {
             ctx.error("Couldn't load nvcuda.dll", {});
@@ -232,7 +235,6 @@ int32_t guardedMain()
         }
 
         // Test: CUDA Runtime Library
-        j.cudartApi = std::make_unique<Cudart64_12LibraryFunctions>();
         if (!loadCudart64_12Functions(j.loader, j.cudartApi.get()))
         {
             ctx.error("Couldn't load CUDA Runtime Library", {});
@@ -240,7 +242,6 @@ int32_t guardedMain()
         }
 
         // Test: CUDA NVRTC Library
-        j.nvrtcApi = std::make_unique<Nvrtc64_120_0LibraryFunctions>();
         if (!loadNvrtc64_120_0Functions(j.loader, j.nvrtcApi.get()))
         {
             ctx.error("Couldn't load CUDA NVRTC Library", {});

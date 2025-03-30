@@ -5,10 +5,8 @@ block()
   set(HEADER_DIR "${CMAKE_SOURCE_DIR}/include/platform")
   set(platform_headers
       ${HEADER_DIR}/platform-context.h
-      ${HEADER_DIR}/platform-display.h
       ${HEADER_DIR}/platform-file.h
       ${HEADER_DIR}/platform-launch.h
-      ${HEADER_DIR}/platform-logging-default-formatters.h
       ${HEADER_DIR}/platform-logging.h
       ${HEADER_DIR}/platform-macros.h
       ${HEADER_DIR}/platform-memory.h
@@ -19,9 +17,7 @@ block()
 
   set(platform_private_sources
       platform-context.cpp
-      platform-display.cpp
       platform-launch.cpp
-      platform-logging-default-formatters.cpp
       platform-logging.cpp
       platform-memory.cpp
       platform-threadPool.cpp
@@ -106,6 +102,7 @@ block()
     --cpp-file ${cuda_driver_cpp_file}
     --header-file ${cuda_driver_h_file}
     -up
+    -em DMT_PLATFORM_API
     COMMENT "Python Script to generate library wrappers for the CUDA Driver API"
     VERBATIM
     #BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/cuda-wrapper.h ${CMAKE_CURRENT_BINARY_DIR}/cuda-wrapper.cpp
@@ -134,8 +131,6 @@ endblock()
 target_link_libraries(dmt-platform
   PUBLIC
     glad
-    glfw
-    imgui
     CUDA::cuda_driver
   PRIVATE
     dmt-platform-os-utils

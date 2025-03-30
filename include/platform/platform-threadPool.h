@@ -21,6 +21,7 @@
 #include <queue>
 #include <utility>
 #include <vector>
+#include <memory_resource>
 
 #include <cstdint>
 
@@ -105,18 +106,19 @@ namespace dmt {
         friend void               jobWorkerThread(ThreadPoolV2* threadPool);
 
     public:
-        DMT_PLATFORM_API ThreadPoolV2(MemoryContext& ctx);
+        DMT_PLATFORM_API ThreadPoolV2(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
         ThreadPoolV2(ThreadPoolV2 const&)                = delete;
         ThreadPoolV2(ThreadPoolV2&&) noexcept            = delete;
         ThreadPoolV2& operator=(ThreadPoolV2 const&)     = delete;
         ThreadPoolV2& operator=(ThreadPoolV2&&) noexcept = delete;
-        // TODO Destr5uctor?
+        DMT_PLATFORM_API ~ThreadPoolV2() noexcept;
 
-        DMT_PLATFORM_API void addJob(MemoryContext& ctx, Job const& job, EJobLayer layer);
-        DMT_PLATFORM_API void cleanup(MemoryContext& ctx);
+        DMT_PLATFORM_API void addJob(Job const& job, EJobLayer layer);
+        DMT_PLATFORM_API void cleanup();
         DMT_PLATFORM_API void kickJobs();
         DMT_PLATFORM_API void pauseJobs();
         DMT_PLATFORM_API bool otherLayerActive(EJobLayer& layer) const;
+        DMT_PLATFORM_API bool isValid() const;
 
     private:
         static constexpr bool isTrueTaggedPointer(TaggedPointer ptr) { return ptr.tag() != nullTag; }
@@ -143,7 +145,7 @@ namespace dmt {
         TaggedPointer m_pThreads;
 
         mutable std::condition_variable_any m_cv;
-        sid_t                               m_memoryTrackingSid;
+        std::pmr::memory_resource*          m_resource;
         EJobLayer                           m_activeLayer{EJobLayer::eEmpty};
         uint32_t                            m_numJobs      = 0;
         std::atomic_flag                    m_jobsInFlight = ATOMIC_FLAG_INIT;

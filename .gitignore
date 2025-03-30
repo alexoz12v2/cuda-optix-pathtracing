@@ -452,3 +452,5 @@ TSWLatexianTemp*
 
 # python
 __pycache__/
+
+imgui.ini

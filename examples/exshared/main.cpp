@@ -1,12 +1,6 @@
 #define DMT_ENTRY_POINT
 #include <platform/platform.h>
 
-#include "custuff.h"
-
-#include <iostream>
-
-#include <cstdint>
-
 int32_t guardedMain()
 {
     using namespace std::string_view_literals;
@@ -94,10 +88,5 @@ int32_t guardedMain()
         //}
 
         //dmt::UnifiedMemoryResource::destroy(unified);
-
-        //std::cout << "Press Any key to exit" << std::endl;
-        //std::cin.get();
-        //std::cout << "Goodbye!" << std::endl;
-        //dmt::ctx::unregister();
     }
 }

@@ -326,5 +326,7 @@
     "CuGRAPHICSMAPRESOURCES" :"CUresult (CUDAAPI *) (unsigned int count, CUgraphicsResource *resources, CUstream hStream)",
     "CuGRAPHICSUNMAPRESOURCES" :"CUresult (CUDAAPI *) (unsigned int count, CUgraphicsResource *resources, CUstream hStream)",
     "CuGETEXPORTTABLE" :"CUresult (CUDAAPI *) (const void **ppExportTable, const CUuuid *pExportTableId)",
-    "CuFUNCGETMODULE" :"CUresult (CUDAAPI *) (CUmodule *hmod, CUfunction hfunc)"
+    "CuFUNCGETMODULE" :"CUresult (CUDAAPI *) (CUmodule *hmod, CUfunction hfunc)",
+    "cuGraphicsGLRegisterBuffer": "CUresult (CUDAAPI *)(CUgraphicsResource* pCudaResource, uint32_t/*GLuint*/ buffer, unsigned int Flags)",
+    "cuGraphicsGLRegisterImage": "CUresult (CUDAAPI *)(CUgraphicsResource* pCudaResource, uint32_t/*GLuint*/ image, uint32_t/*GLenum*/ target, unsigned int Flags)"
 }

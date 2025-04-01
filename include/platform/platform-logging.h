@@ -178,123 +178,149 @@ namespace dmt {
         using difference_type = std::ptrdiff_t;
         using value_type      = CharRangeU8;
 
-        /**
-         * @note Uses `char` and not `char8_t` cause `char8_t` doesn't seem to interpret
-         * correctly hex sequences. "\xF0\x9F\x98\x8A" is printed correctly as smiling face emoji,
-         * while u8"\xF0\x9F\x98\x8A" is garbage
-         * @note apparently, `std::bit_cast` doesn't work with `consteval`. I don't want to rewrite
-         * everything using `char` instead of `char8_t`
-         */
         template <uint32_t N>
         constexpr FormatString(char const (&_arr)[N]) :
-        m_start(std::bit_cast<decltype(m_start)>(&_arr[0])),
-        m_numBytes(_arr[N - 1] == u8'\0' ? N - 1 : N)
+        m_start(reinterpret_cast<char8_t const*>(&_arr[0])),
+        m_numBytes(N - 1)
         {
-            ++*this;
+            advance();
         }
 
-        constexpr value_type operator*() const;
-        constexpr void       operator++();
-        consteval void       operator++(int) { ++*this; }
-        constexpr bool       finished() { return m_numBytes == 0; }
+        inline constexpr FormatString(std::string_view str) :
+        m_start(reinterpret_cast<char8_t const*>(str.data())),
+        m_numBytes(static_cast<uint32_t>(str.size()))
+        {
+            advance();
+        }
+
+        constexpr value_type operator*() const { return {m_start, m_len, m_lastBytes}; }
+
+        constexpr void operator++() { advance(); }
+        constexpr bool finished() const { return m_numBytes == 0 && m_dirty; }
+        constexpr bool isFormatSpecifier() const { return m_insideArg; }
 
     private:
+        constexpr void advance()
+        {
+            if (m_numBytes == 0)
+            {
+                m_dirty = true;
+                return;
+            }
+
+            m_start += m_lastBytes;
+            m_lastBytes             = 0;
+            m_len                   = 0;
+            m_insideArg             = false;
+            bool     foundSpecifier = false;
+            bool     escaped        = false;
+            bool     potentialExit  = false;
+            bool     argFinished    = false;
+            bool     checkEscape    = false;
+            uint32_t lastNumBytes   = 0;
+
+            while (m_numBytes > 0 && !argFinished)
+            {
+                Pair pair = acquireCharacter();
+                m_lastBytes += pair.numBytes;
+                m_len++;
+                m_numBytes -= pair.numBytes;
+
+                if (foundSpecifier)
+                {
+                    if (!escaped && potentialExit)
+                    {
+                        if (pair.ch[0] != u8'}')
+                        {
+                            m_lastBytes -= pair.numBytes;
+                            m_len--;
+                            m_numBytes += pair.numBytes;
+                            argFinished = true;
+                        }
+                        else
+                            potentialExit = false;
+                    }
+                    else if (!escaped && pair.ch[0] == u8'{')
+                        escaped = true;
+                    else if (!escaped && pair.ch[0] == u8'}')
+                    {
+                        if (!potentialExit && m_numBytes > 0)
+                            potentialExit = true;
+                        else if (m_numBytes == 0)
+                            argFinished = true; // shouldn't be needed
+                    }
+                    else if (escaped)
+                    {
+                        foundSpecifier = false;
+                        m_insideArg    = false;
+                    }
+                }
+                else
+                {
+                    if (pair.ch[0] == u8'{')
+                    {
+                        if (m_len > 1)
+                        {
+                            if (checkEscape)
+                                checkEscape = false;
+                            else if (m_numBytes > 0)
+                            {
+                                checkEscape  = true;
+                                lastNumBytes = pair.numBytes;
+                            }
+                            else
+                            {
+                                argFinished = true;
+                            }
+                        }
+                        else
+                        {
+                            assert(!argFinished && !checkEscape);
+                            lastNumBytes   = 0;
+                            foundSpecifier = true;
+                            m_insideArg    = true;
+                        }
+                    }
+                    else if (checkEscape)
+                    {
+
+                        m_lastBytes -= pair.numBytes + lastNumBytes;
+                        m_len -= 2;
+                        m_numBytes += pair.numBytes + lastNumBytes;
+                        argFinished = true;
+                    }
+                    else
+                        lastNumBytes = 0;
+                }
+            }
+        }
+
         struct Pair
         {
             char8_t  ch[4];
             uint32_t numBytes;
         };
 
-    private:
+        constexpr Pair acquireCharacter() const
+        {
+            if (utf8::isStartOf4(m_start[m_lastBytes]))
+                return {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], m_start[m_lastBytes + 3]},
+                        4};
+            if (utf8::isStartOf3(m_start[m_lastBytes]))
+                return {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], 0}, 3};
+            if (utf8::isStartOf2(m_start[m_lastBytes]))
+                return {{m_start[m_lastBytes], m_start[m_lastBytes + 1], 0, 0}, 2};
+            return {{m_start[m_lastBytes + 0], 0, 0, 0}, 1};
+        }
+
         char8_t const* m_start;
         uint32_t       m_len       = 0;
         uint32_t       m_lastBytes = 0;
         uint32_t       m_numBytes;
         Pred           stop;
         bool           m_insideArg = false;
+        bool           m_dirty     = false;
     };
-
-    // it's not an iterator cause the ++ doesn't return a thing
-    static_assert(!std::input_iterator<FormatString<>>);
-
-    // Non puo essere constexpr e anche essere , a meno che la compilation unit che lo include e' cuda. va rifatto o rimosso
-    template <utf8::PredicateC Pred>
-    constexpr FormatString<Pred>::value_type FormatString<Pred>::operator*() const
-    {
-        CharRangeU8 const ret{.data = m_start, .len = m_len, .numBytes = m_lastBytes};
-        return ret;
-    }
-
-    // Compilation should fail in the following cases
-    // - Bytes that never appear in UTF-8: 0xC0, 0xC1, 0xF5�0xFF
-    // - A "continuation byte" (0x80�0xBF) at the start of a character
-    // - A non-continuation byte (or the string ending) before the end of a character
-    // - An overlong encoding (0xE0 followed by less than 0xA0, or 0xF0 followed by less than 0x90)
-    // - A 4-byte sequence that decodes to a value greater than U+10FFFF (0xF4 followed by 0x90 or greater)
-    template <utf8::PredicateC Pred>
-    constexpr void FormatString<Pred>::operator++()
-    {
-        // crashed if a character is recognized to have N bytes, but there aren't enough bytes
-#define acquireCharacter(pair)                                                                                            \
-    do                                                                                                                    \
-    {                                                                                                                     \
-        if (utf8::isStartOf4(m_start[m_lastBytes]))                                                                       \
-            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], m_start[m_lastBytes + 3]}, \
-                    4};                                                                                                   \
-        else if (utf8::isStartOf3(m_start[0]))                                                                            \
-            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], m_start[m_lastBytes + 2], 0}, 3};                    \
-        else if (utf8::isStartOf2(m_start[0]))                                                                            \
-            pair = {{m_start[m_lastBytes], m_start[m_lastBytes + 1], 0, 0}, 2};                                           \
-        else                                                                                                              \
-            pair = {{m_start[m_lastBytes], 0, 0, 0}, 1};                                                                  \
-    } while (0)
-
-        // traverse the UTF-8 Multibyte string
-        m_start += m_lastBytes;
-        m_len         = 0;
-        m_lastBytes   = 0;
-        bool finished = false;
-        while (!finished && m_numBytes > 0)
-        {
-            uint32_t iterationBytes = 0;
-            ++m_len;
-            Pair pair;
-            acquireCharacter(pair);
-            //static_assert(utf8::isValidUTF8(pair.ch));
-            iterationBytes += pair.numBytes;
-
-            if (auto res = stop(pair.ch); res != utf8::Direction::eNone)
-            {
-                m_insideArg = !m_insideArg;
-                if (res == utf8::Direction::eBackward)
-                {
-                    --m_len;
-                    iterationBytes -= pair.numBytes;
-                    finished = true;
-                }
-                else // utf8::Direction::eForward
-                {
-                    Pair pair2;
-                    m_lastBytes += iterationBytes;
-                    acquireCharacter(pair2);
-                    m_lastBytes -= iterationBytes;
-                    // if character escaped (==duplicated), go past it
-                    if (utf8::equal(pair2.ch, pair.ch))
-                    {
-                        iterationBytes += pair2.numBytes;
-                        m_insideArg = !m_insideArg;
-                        ++m_len;
-                    }
-                    else
-                        finished = true;
-                }
-            }
-
-            m_numBytes = iterationBytes <= m_numBytes ? m_numBytes - iterationBytes : 0;
-            m_lastBytes += iterationBytes;
-        }
-#undef acquireCharacter
-    }
 
     /**
      * Log Level enum, to check whether we should print or not, and to determine the style of the output
@@ -406,76 +432,49 @@ namespace dmt {
         char8_t*                    _argBuffer,
         uint32_t                    _argBufferSize,
         std::tuple<Ts...> const&    _params,
-        LogLocation const&          _pysLoc,
+        LogLocation const&          _phyLoc,
         std::source_location const& _loc)
     {
-        LogRecord record{};
-        record.level  = _level;
-        record.phyLoc = _pysLoc;
-        record.srcLoc = _loc;
-        record.data   = _buffer;
+        LogRecord record{_buffer, _phyLoc, _loc, _level, 0, 0};
+        char8_t*  argBufPtr     = _argBuffer;
+        uint32_t  totalArgBytes = 0;
 
-        bool                 done            = false;
-        uint32_t const       totalArgBufSize = _argBufferSize;
-        uint32_t const       totalBufSize    = _bufferSize;
-        char8_t const* const initialArgBuf   = _argBuffer;
+        std::apply([&](auto&&... args) {
+            ((UTF8Formatter<std::decay_t<decltype(args)>>{}(args, argBufPtr, totalArgBytes, _argBufferSize)), ...);
+        }, _params);
 
-        // Process tuple of arguments using a fold expression
-        uint32_t           offset = 0;
-        auto /*constexpr*/ do_for = [&](auto&&... _args) {
-            (UTF8Formatter<std::remove_cvref_t<decltype(_args)>>{}(std::forward<decltype(_args)>(_args), _argBuffer, offset, _argBufferSize),
-             ...);
-        };
-
-        // Apply the formatters to the tuple
-        std::apply(do_for, _params);
-
-
-        uint32_t const       totalArgBytesWritten = totalArgBufSize - _argBufferSize;
-        char8_t const* const pastEndArgBuf        = initialArgBuf + totalArgBytesWritten;
-
-        // Format the log record
-        while (!done)
+        while (!fmt.finished())
         {
-            CharRangeU8 const portion = *fmt;
-            if (portion.data[0] == u8'{' && portion.data[1] != u8'{' && _argBuffer < pastEndArgBuf)
+            if (fmt.isFormatSpecifier() && argBufPtr < _argBuffer + (totalArgBytes - _argBufferSize))
             {
-                // Process argument from buffer
-                char8_t const* buf      = _argBuffer + 2 * sizeof(uint32_t);
-                uint32_t const numBytes = *std::bit_cast<uint32_t*>(_argBuffer);
-                uint32_t const len      = *std::bit_cast<uint32_t*>(_argBuffer + sizeof(uint32_t));
-                if (numBytes > 0)
-                {
-                    memcpy(_buffer, buf, numBytes);
-                    _buffer += numBytes;
-                    _bufferSize = _bufferSize >= numBytes ? _bufferSize - numBytes : 0;
-                    record.len += len;
-                    record.numBytes += numBytes;
-                    _argBuffer += numBytes + 2 * sizeof(uint32_t);
-                }
+                uint32_t numBytes = *reinterpret_cast<uint32_t*>(argBufPtr);
+                uint32_t len      = *reinterpret_cast<uint32_t*>(argBufPtr + sizeof(uint32_t));
+                memcpy(_buffer, argBufPtr + 2 * sizeof(uint32_t), numBytes);
+                _buffer += numBytes;
+                _bufferSize -= numBytes;
+                record.len += len;
+                record.numBytes += numBytes;
+                argBufPtr += numBytes + 2 * sizeof(uint32_t);
             }
             else
             {
-                // Copy string literal to buffer
-                uint32_t bytesToCopy = fminf(_bufferSize, portion.numBytes);
+                CharRangeU8 portion     = *fmt;
+                uint32_t    bytesToCopy = std::min(_bufferSize, portion.numBytes);
                 memcpy(_buffer, portion.data, bytesToCopy);
                 _buffer += bytesToCopy;
-                _bufferSize = _bufferSize >= bytesToCopy ? _bufferSize - bytesToCopy : 0;
+                _bufferSize -= bytesToCopy;
                 record.len += portion.len;
                 record.numBytes += bytesToCopy;
             }
-
-            if (_bufferSize == 0 || fmt.finished())
-                done = true;
-            else
-                ++fmt;
+            ++fmt;
         }
-        // final newline
-        int32_t off = record.numBytes >= totalBufSize ? -1 : 0;
-        ++record.len;
-        ++record.numBytes;
-        _buffer[off] = u8'\n';
 
+        if (record.numBytes < _bufferSize)
+        {
+            _buffer[0] = u8'\n';
+            record.numBytes++;
+            record.len++;
+        }
         return record;
     }
 

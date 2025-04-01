@@ -819,3 +819,6 @@ int main()
     LocalFree(lpDisplayBuf);
     ExitProcess(1);
 }
+
+// TODO: restore the original Terminal color at exit
+// TODO: Rework to not use `ExitProcess` and similiar, because it skips destructors

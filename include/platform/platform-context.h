@@ -219,4 +219,6 @@ namespace dmt {
     private:
         ContextImpl* m_pimpl;
     };
+
+    // TODO Define logging macros
 } // namespace dmt

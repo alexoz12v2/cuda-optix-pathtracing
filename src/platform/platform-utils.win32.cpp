@@ -29,6 +29,60 @@ namespace dmt::os {
         return ret;
     }
 
+    namespace env {
+        bool set(std::string_view name, std::string_view value, std::pmr::memory_resource* resource)
+        {
+            static constexpr size_t maxWinLength = 32760;
+            bool                    result       = false;
+            if (name.length() <= 0 || value.length() > maxWinLength)
+                return result;
+
+#if defined(_WIN32)
+            // TODO switch to smart pointers maybe?
+            std::pmr::wstring const wName  = dmt::os::win32::utf16FromUtf8(name, resource);
+            std::pmr::wstring const wValue = dmt::os::win32::utf16FromUtf8(value, resource);
+            result                         = SetEnvironmentVariableW(wName.c_str(), wValue.c_str());
+#else
+#error "not done yet"
+#endif
+            return result;
+        }
+
+        bool remove(std::string_view name, std::pmr::memory_resource* resource)
+        {
+            std::pmr::wstring const wName = dmt::os::win32::utf16FromUtf8(name, resource);
+            return SetEnvironmentVariableW(wName.c_str(), nullptr);
+        }
+
+        std::pmr::string get(std::string_view name, std::pmr::memory_resource* resource)
+        {
+            std::pmr::wstring const wName = dmt::os::win32::utf16FromUtf8(name, resource);
+            std::pmr::string        result{resource};
+            if (DWORD numChars = GetEnvironmentVariableW(wName.c_str(), nullptr, 0); numChars > 0)
+            {
+                wchar_t* wBuffer  = reinterpret_cast<wchar_t*>(resource->allocate((numChars + 1) * sizeof(wchar_t)));
+                wBuffer[numChars] = L'\0';
+                if (GetEnvironmentVariableW(wName.c_str(), wBuffer, numChars) > 0)
+                {
+                    result.resize(numChars + 10);
+                    // clang-format off
+                    if (WideCharToMultiByte(
+                        CP_UTF8, 0,
+                        wBuffer, numChars,
+                        result.data(), static_cast<int32_t>(result.size()),
+                        nullptr, nullptr)
+                        <= 0)
+                    {
+                        // clang-format on
+                        result.clear();
+                    }
+                }
+            }
+
+            return result;
+        }
+    } // namespace env
+
     // Path ----------------------------------------------------------------------------------------------------------
     Path::Path(std::pmr::memory_resource* resource, void* content, uint32_t capacity, uint32_t size) :
     m_resource(resource),

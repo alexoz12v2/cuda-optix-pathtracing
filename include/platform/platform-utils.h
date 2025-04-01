@@ -37,6 +37,23 @@ namespace dmt::os {
     DMT_PLATFORM_API std::pmr::vector<std::pair<std::pmr::string, std::pmr::string>> getEnv(
         std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
+    namespace env {
+        inline std::pmr::vector<std::pair<std::pmr::string, std::pmr::string>> copy(
+            std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+        {
+            return ::dmt::os::getEnv(resource);
+        }
+
+        DMT_PLATFORM_API bool set(std::string_view           name,
+                                  std::string_view           value,
+                                  std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        DMT_PLATFORM_API bool remove(std::string_view           name,
+                                     std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        // TODO overload which returs unique pointer and does size query
+        DMT_PLATFORM_API std::pmr::string get(std::string_view           name,
+                                              std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    } // namespace env
+
     class DMT_PLATFORM_API Path
     {
     public:

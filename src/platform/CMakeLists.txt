@@ -138,7 +138,7 @@ target_link_libraries(dmt-platform
     dmt-platform-os-utils
     $<$<BOOL:${DMT_OS_LINUX}>:rt pthread > # needed by async io linux
     $<$<BOOL:${DMT_OS_WINDOWS}>:kernel32.dll advapi32.dll> # needed by fileapi.h (does it automatically with dll, clarity)
-    Backward::Backward
+    backward
     nlohmann_json::nlohmann_json
 )
 

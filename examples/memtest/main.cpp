@@ -1,5 +1,10 @@
 #define DMT_ENTRY_POINT
-#include <platform/platform.h>
+#include "platform/platform.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image.h"
+#include "stb_image_write.h"
 
 #include <bit>
 #include <memory>
@@ -11,6 +16,14 @@
 #include <cstdint>
 #include <cstdio>
 
+#if defined(_WIN32)
+#include <windows.h>
+#define STRICT_TYPED_ITEMIDS // Better type safety for IDLists
+#include <commdlg.h>
+#include <shobjidl.h> // For IFileDialog
+#include <shlobj.h>   // For SHGetPathFromIDListW
+#endif
+
 static void worker(void* unused)
 {
     dmt::Context ctx;
@@ -21,6 +34,70 @@ static void worker(void* unused)
     }
 }
 
+#if defined(_WIN32)
+static std::string WideToUtf8(std::wstring const& wide)
+{
+    if (wide.empty())
+        return {};
+
+    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (sizeNeeded == 0)
+        return {};
+
+    std::string result(sizeNeeded - 1, '\0'); // -1 to remove null terminator
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, result.data(), sizeNeeded, nullptr, nullptr);
+    return result;
+}
+
+// https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/shell/common-file-dialog.md
+static HRESULT showFolderSelectDialog(std::wstring& outFolderPath)
+{
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(hr))
+        return hr;
+
+    IFileDialog* pFileDialog = nullptr;
+    hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFileDialog));
+    if (FAILED(hr))
+        return hr;
+
+    // Set the dialog options
+    DWORD dwOptions;
+    hr = pFileDialog->GetOptions(&dwOptions);
+    if (SUCCEEDED(hr))
+    {
+        hr = pFileDialog->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        if (FAILED(hr))
+        {
+            pFileDialog->Release();
+            return hr;
+        }
+    }
+
+    // Show the dialog
+    hr = pFileDialog->Show(NULL);
+    if (SUCCEEDED(hr))
+    {
+        IShellItem* pItem = nullptr;
+        hr                = pFileDialog->GetResult(&pItem);
+        if (SUCCEEDED(hr))
+        {
+            PWSTR pszFolderPath = nullptr;
+            hr                  = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFolderPath);
+            if (SUCCEEDED(hr))
+            {
+                outFolderPath = pszFolderPath;
+                CoTaskMemFree(pszFolderPath);
+            }
+            pItem->Release();
+        }
+    }
+
+    pFileDialog->Release();
+    CoUninitialize();
+    return hr;
+}
+#endif
 
 int guardedMain()
 {
@@ -122,56 +199,69 @@ int guardedMain()
         if (!allocator.isValid())
         {
             ctx.error("Allocator is not valid!", {});
-            return -1; // Early exit if invalid
-        }
-
-        // Allocate memory: Try to allocate 512 bytes
-        void* ptr = allocator.allocate(512);
-        if (ptr != nullptr)
-        {
-            ctx.log("Successfully allocated 512 bytes.", {});
         }
         else
         {
-            ctx.error("Allocation failed!", {});
-            return -1;
+            // Allocate memory: Try to allocate 512 bytes
+            void* ptr = allocator.allocate(512);
+            if (ptr != nullptr)
+                ctx.log("Successfully allocated 512 bytes.", {});
+            else
+                ctx.error("Allocation failed!", {});
+
+            // Allocate more memory: Try to allocate another 128 bytes
+            void* ptr2 = allocator.allocate(128);
+            if (ptr2 != nullptr)
+                ctx.log("Successfully allocated another 128 bytes.", {});
+            else
+                ctx.error("Second allocation failed!", {});
+
+            // Deallocate memory: Free the first pointer (512 bytes)
+            allocator.deallocate(ptr, 512);
+            ctx.log("Successfully deallocated 512 bytes.", {});
+
+            // Deallocate second memory block (128 bytes)
+            allocator.deallocate(ptr2, 128);
+            ctx.log("Successfully deallocated 128 bytes.", {});
+
+            // Attempting allocation after deallocation
+            void* ptr3 = allocator.allocate(256);
+            if (ptr3 != nullptr)
+                ctx.log("Successfully allocated 256 bytes after deallocation.", {});
+            else
+                ctx.error("Allocation after deallocation failed!", {});
+
+            // Check number of blocks in the allocator
+            uint32_t numBlocks = allocator.numBlocks();
+            ctx.log("Number of blocks in the allocator: {}", std::make_tuple(numBlocks));
         }
 
-        // Allocate more memory: Try to allocate another 128 bytes
-        void* ptr2 = allocator.allocate(128);
-        if (ptr2 != nullptr)
+        // Threadpool test
+        dmt::ThreadPoolV2 threadPool{};
+#if defined(_WIN32)
+        std::wstring wstr;
+        while (wstr.empty() /* and is not a valid directory*/)
+            showFolderSelectDialog(wstr);
+
+        std::string str = WideToUtf8(wstr);
+        ctx.log("Selected Folder: {{}} \"{}\"", std::make_tuple(str));
+
+
+        int32_t                   width = 512, height = 512, channels = 3;
+        dmt::UniqueRef<uint8_t[]> data = dmt::makeUniqueRef<uint8_t[]>(std::pmr::get_default_resource(),
+                                                                       width * height * channels);
+        for (size_t i = 0; i < width * height; ++i)
         {
-            ctx.log("Successfully allocated another 128 bytes.", {});
-        }
-        else
-        {
-            ctx.error("Second allocation failed!", {});
-            return -1;
+            data[i * channels]     = 128;
+            data[i * channels + 1] = 128;
+            data[i * channels + 2] = 128;
         }
 
-        // Deallocate memory: Free the first pointer (512 bytes)
-        allocator.deallocate(ptr, 512);
-        ctx.log("Successfully deallocated 512 bytes.", {});
-
-        // Deallocate second memory block (128 bytes)
-        allocator.deallocate(ptr2, 128);
-        ctx.log("Successfully deallocated 128 bytes.", {});
-
-        // Attempting allocation after deallocation
-        void* ptr3 = allocator.allocate(256);
-        if (ptr3 != nullptr)
-        {
-            ctx.log("Successfully allocated 256 bytes after deallocation.", {});
-        }
-        else
-        {
-            ctx.error("Allocation after deallocation failed!", {});
-            return -1;
-        }
-
-        // Check number of blocks in the allocator
-        uint32_t numBlocks = allocator.numBlocks();
-        ctx.log("Number of blocks in the allocator: {}", std::make_tuple(numBlocks));
+        str += "\\image.png";
+        ctx.log("Saving grey image to {}", std::make_tuple(str));
+        if (!::stbi_write_png(str.c_str(), width, height, channels, data.get(), width * channels))
+            ctx.error("Failed save", {});
+#endif
     }
 
     return 0;

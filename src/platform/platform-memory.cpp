@@ -261,7 +261,7 @@ namespace dmt {
         auto const [bitmapOffset, bitmapShamt] = bitPairOffsetAndMaskFromBlock(blkIdx);
 
         // clean bit pair
-        reinterpret_cast<uint8_t*>(m_bitmap)[bitmapOffset] |= (full & (bitmapMask << bitmapShamt));
+        reinterpret_cast<uint8_t*>(m_bitmap)[bitmapOffset] &= ~(full & (bitmapMask << bitmapShamt));
         // set new state
         reinterpret_cast<uint8_t*>(m_bitmap)[bitmapOffset] |= (state << bitmapShamt);
     }

@@ -238,7 +238,17 @@ namespace dmt {
                             argFinished = true;
                         }
                         else
-                            potentialExit = false;
+                        {
+                            if (m_numBytes == 0 || m_start[m_lastBytes] == '}')
+                            {
+                                m_lastBytes -= pair.numBytes;
+                                m_len--;
+                                m_numBytes += pair.numBytes;
+                                argFinished = true;
+                            }
+                            else
+                                potentialExit = false;
+                        }
                     }
                     else if (!escaped && pair.ch[0] == '{')
                         escaped = true;
@@ -458,13 +468,39 @@ namespace dmt {
             }
             else
             {
-                CharRangeU8 portion     = *fmt;
-                uint32_t    bytesToCopy = std::min(_bufferSize, portion.numBytes);
-                memcpy(_buffer, portion.data, bytesToCopy);
-                _buffer += bytesToCopy;
-                _bufferSize -= bytesToCopy;
-                record.len += portion.len;
-                record.numBytes += bytesToCopy;
+                CharRangeU8 portion   = *fmt;
+                char const* src       = portion.data;
+                uint32_t    remaining = portion.numBytes;
+
+                while (remaining > 0 && _bufferSize > 0)
+                {
+                    if (remaining >= 2 && src[0] == '{' && src[1] == '{')
+                    {
+                        *_buffer++ = '{';
+                        src += 2;
+                        remaining -= 2;
+                        _bufferSize--;
+                        record.len += 1;
+                        record.numBytes += 1;
+                    }
+                    else if (remaining >= 2 && src[0] == '}' && src[1] == '}')
+                    {
+                        *_buffer++ = '}';
+                        src += 2;
+                        remaining -= 2;
+                        _bufferSize--;
+                        record.len += 1;
+                        record.numBytes += 1;
+                    }
+                    else
+                    {
+                        *_buffer++ = *src++;
+                        remaining--;
+                        _bufferSize--;
+                        record.len += 1;
+                        record.numBytes += 1;
+                    }
+                }
             }
             ++fmt;
         }

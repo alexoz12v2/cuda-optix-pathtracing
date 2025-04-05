@@ -16,18 +16,14 @@
 #include <cassert>
 
 namespace dmt {
-    struct BufferCountPair
-    {
-        std::unique_ptr<TaggedPointer[]> p;
-        uint32_t                         count;
-    };
-
     static void jobWorkerThread(void* that)
     {
-        ThreadPoolV2* threadPool = reinterpret_cast<ThreadPoolV2*>(that);
-        Job           copy;
-        EJobLayer     currentLayer   = EJobLayer::eEmpty;
-        bool          otherRemaining = false;
+        auto*          storage    = reinterpret_cast<ThreadPoolV2::ThreadStorage*>(that);
+        auto*          threadPool = storage->threadPool;
+        uint32_t const index      = storage->index;
+        Job            copy;
+        EJobLayer      currentLayer   = EJobLayer::eEmpty;
+        bool           otherRemaining = false;
 
         // forever
         while (true)
@@ -62,7 +58,7 @@ namespace dmt {
             if (copy.func)
             {
                 threadPool->m_jobsInFlight.test_and_set();
-                copy.func(copy.data);
+                copy.func(copy.data, index);
                 if (!otherRemaining)
                 {
                     threadPool->m_jobsInFlight.clear();
@@ -75,6 +71,7 @@ namespace dmt {
     m_resource(resource),
     m_index(makeUniqueRef<IndexArray>(resource)),
     m_threads(makeUniqueRef<os::Thread[]>(resource, numThreads)),
+    m_threadIndices(makeUniqueRef<ThreadStorage[]>(resource, numThreads)),
     m_numThreads(numThreads)
     {
         using namespace std::string_view_literals;
@@ -108,7 +105,9 @@ namespace dmt {
         for (uint32_t i = 0; i < m_numThreads; ++i)
         {
             std::construct_at(&m_threads[i], jobWorkerThread, m_resource);
-            m_threads[i].start(this);
+            m_threadIndices[i].index      = i;
+            m_threadIndices[i].threadPool = this;
+            m_threads[i].start(&m_threadIndices[i]);
         }
     }
 
@@ -242,8 +241,6 @@ namespace dmt {
         blob->jobs[blob->counter++] = job;
 
         ++m_numJobs;
-        m_ready = true;
-        m_cv.notify_one(); // or notify_all() if broadcasting is better
     }
 
     Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
@@ -289,11 +286,15 @@ namespace dmt {
 
     bool ThreadPoolV2::otherLayerActive(EJobLayer& layer) const
     {
-        for (uint32_t i = 0; i < layerCardinality; ++i)
+        if (m_jobsInFlight.test())
         {
-            if (m_index->layers[i] < layer && m_index->ptrs[i] != nullptr && m_index->ptrs[i]->counter > 0)
+            for (uint32_t i = 0; i < layerCardinality; ++i)
             {
-                return true;
+                if (m_index->layers[i] < layer && m_index->ptrs[i] != nullptr && m_index->ptrs[i]->counter > 0)
+                {
+                    layer = m_index->layers[i];
+                    return true;
+                }
             }
         }
         return false;

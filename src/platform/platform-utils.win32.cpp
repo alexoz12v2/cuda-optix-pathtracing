@@ -17,15 +17,15 @@
 #include <utility>
 
 namespace dmt::os {
-    uint64_t processId()
+    uint32_t processId()
     {
-        uint64_t const ret = static_cast<uint64_t>(GetCurrentProcessId());
+        uint32_t const ret = static_cast<uint32_t>(GetCurrentProcessId());
         return ret;
     }
 
-    uint64_t threadId()
+    uint32_t threadId()
     {
-        uint64_t const ret = static_cast<uint64_t>(GetCurrentThreadId());
+        uint32_t const ret = static_cast<uint32_t>(GetCurrentThreadId());
         return ret;
     }
 

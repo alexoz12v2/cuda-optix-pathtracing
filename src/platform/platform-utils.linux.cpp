@@ -5,18 +5,18 @@
 
 namespace dmt::os {
     // TODO switch to uint32_t
-    uint64_t processId()
+    uint32_t processId()
     {
-        uint64_t    ret = 0;
+        uint32_t    ret = 0;
         pid_t const pid = getpid();
-        ret             = static_cast<uint64_t>(pid);
+        ret             = static_cast<uint32_t>(pid);
         return ret;
     }
 
-    uint64_t threadId()
+    uint32_t threadId()
     {
-        uint64_t ret = 0;
-        ret          = static_cast<uint64_t>(gettid());
+        uint32_t ret = 0;
+        ret          = static_cast<uint32_t>(gettid());
         return ret;
     }
 

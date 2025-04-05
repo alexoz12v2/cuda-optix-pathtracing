@@ -61,7 +61,7 @@ namespace dmt::os {
 } // namespace dmt::os
 
 namespace dmt {
-    using JobSignature = void (*)(uintptr_t data);
+    using JobSignature = void (*)(uintptr_t data, uint32_t tid);
 
     /**
      * Enum containing tagged job priorities. Since Thread Pool based job scheduling
@@ -131,6 +131,12 @@ namespace dmt {
         };
         static_assert(std::is_standard_layout_v<IndexArray>); // allows to use memcpy/memset
 
+        struct ThreadStorage
+        {
+            ThreadPoolV2* threadPool;
+            uint32_t      index;
+        };
+
     private:
         Job nextJob(bool& otherJobsRemaining, EJobLayer& outLayer);
 
@@ -150,6 +156,7 @@ namespace dmt {
          */
         UniqueRef<os::Thread[]> m_threads;
 
+        UniqueRef<ThreadStorage[]> m_threadIndices;
 
         mutable std::condition_variable_any m_cv;
 

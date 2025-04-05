@@ -21,8 +21,8 @@
 #include <cstdint>
 
 namespace dmt::os {
-    DMT_PLATFORM_API uint64_t processId();
-    DMT_PLATFORM_API uint64_t threadId();
+    DMT_PLATFORM_API uint32_t processId();
+    DMT_PLATFORM_API uint32_t threadId();
     DMT_PLATFORM_API size_t   systemAlignment();
 
     // use C runtime standard allocation functions

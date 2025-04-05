@@ -11,202 +11,16 @@
 #include <cstdint>
 #include <cstdio>
 
-
-struct TestObject
-{
-    int x, y;
-    TestObject(int a, int b) : x(a), y(b) {}
-    ~TestObject()
-    {
-        dmt::Context ctx;
-        ctx.log("Destruction TestObject", {});
-    }
-};
-
-static dmt::StrBuf formatAlloc(dmt::AllocationInfo const& alloc, char const* sidStr)
-{
-    static thread_local char storage[256]{};
-
-    // Format the information into the storage buffer
-    int len = std::snprintf(storage,
-                            sizeof(storage),
-                            "( Address: %p, AllocTime: %llu ms, FreeTime: %llu ms, Size: %zu bytes, "
-                            "SID: %s, Alignment: %u, Transient: %u, Tag: %s )",
-                            alloc.address,
-                            alloc.allocTime,
-                            alloc.freeTime,
-                            alloc.size,
-                            sidStr,
-                            alloc.alignment,
-                            alloc.transient,
-                            dmt::memoryTagStr(alloc.tag));
-
-    // Ensure the string is null-terminated and does not exceed the buffer
-    if (len < 0 || static_cast<size_t>(len) >= sizeof(storage))
-    {
-        // Handle formatting errors or truncation
-        storage[sizeof(storage) - 1] = '\0';
-    }
-
-    return {storage, len};
-}
-
-static void testChunkedFileReaderPData()
-{
-    using namespace std::string_view_literals;
-    constexpr uint32_t dataChunkSize = 512;
-    constexpr uint32_t dataAlignment = 8;
-    dmt::os::Path      filePath      = dmt::os::Path::executableDir() / "test.txt";
-    uint8_t            numBuffers    = 12;
-    size_t const       memSize       = dmt::os::ChunkedFileReader::computeAlignedChunkSize(dataChunkSize);
-    dmt::Context       ctx;
-
-    ctx.log("Starting ChunkedFileReader tests in PData mode", {});
-
-    // allocate the buffers
-    size_t dataSize     = memSize * numBuffers;
-    size_t pointersSize = sizeof(uintptr_t) * numBuffers;
-    size_t sz           = dataSize + pointersSize;
-
-    // TODO memory reource custom
-    auto*    data = reinterpret_cast<uintptr_t*>(std::pmr::get_default_resource()->allocate(sz, dataAlignment));
-    auto     addr = std::bit_cast<uintptr_t>(data);
-    uint64_t off  = numBuffers * sizeof(uintptr_t);
-    assert(data);
-
-    // setup the array of pointers to `memSize` sized buffers
-    for (uint32_t i = 0; i < numBuffers; ++i)
-    {
-        data[i] = dmt::alignToAddr(addr + off, dataAlignment);
-        off += memSize;
-    }
-
-    std::string str{};
-    // reader needs to go out of scope before freeing memory
-    {
-        std::pmr::string           filePathStr = filePath.toUnderlying();
-        dmt::os::ChunkedFileReader reader{filePathStr.c_str(), dataChunkSize, numBuffers, data};
-        str.resize(dataChunkSize * reader.numChunks());
-        for (dmt::ChunkInfo chunkinfo : reader.range(0, reader.numChunks()))
-        {
-            assert(chunkinfo.numBytesRead <= dataChunkSize);
-            for (uint32_t i = 0; i < chunkinfo.numBytesRead; ++i)
-            {
-                str[chunkinfo.chunkNum * dataChunkSize + i] = reinterpret_cast<char*>(chunkinfo.buffer)[i];
-            }
-            reader.markFree(chunkinfo);
-        }
-    }
-
-    ctx.log("The string read from the file is {}...", std::make_tuple(str.substr(0, 230)));
-    std::pmr::get_default_resource()->deallocate(data, sz, dataAlignment);
-}
-
-static void testChunkedFileReader()
-{
-    constexpr uint32_t chunkSize = 512; // Define chunk size (e.g., 1 KB)
-    char const*        filePath  = "..\\res\\test.txt";
-    dmt::Context       ctx;
-
-    dmt::os::ChunkedFileReader reader(filePath, chunkSize);
-
-    // Test 1: Request a chunk
-    char buffer[chunkSize];
-    std::memset(buffer, 0, sizeof(buffer));
-    bool success = reader.requestChunk(buffer, 0); // Read first chunk
-    assert(success && "Failed to request chunk");
-
-    // Test 2: Wait for completion (non-blocking for this test)
-    bool completed = reader.waitForPendingChunk(1000); // Wait for 1 second max
-    assert(completed && "Chunk read did not complete in time");
-
-    // Test 3: Verify data is not empty (assuming file has content)
-    bool dataNonEmpty = std::strlen(buffer) > 0;
-    assert(dataNonEmpty && "Buffer contains no data");
-
-    std::string_view view{buffer, std::min(reader.lastNumBytesRead(), 25u)};
-    ctx.log("Bytes read from test file: {}", std::make_tuple(view));
-
-    // Test 4: Destructor cleanup (implicitly tested)
-    // When the reader goes out of scope, the destructor will close the file handle.
-
-    ctx.log("All tests passed for ChunkedFileReader in uData mode.", {});
-}
-
-void testThreadpool()
+static void worker(void* unused)
 {
     dmt::Context ctx;
-    struct JobData
+    for (int i = 0; i < 5; ++i)
     {
-        std::atomic<int> counter;
-
-        JobData() : counter(0) {}
-    };
-    dmt::ThreadPoolV2 threadPool;
-
-    // Create job data shared between jobs
-    JobData test0Data;
-    JobData test1Data;
-
-    // Define jobs for layer eTest0
-    auto jobTest0 = [](uintptr_t data) {
-        dmt::Context ctx;
-        JobData*     jobData = reinterpret_cast<JobData*>(data);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Simulate work
-        ++jobData->counter;
-        ctx.log("Executed job in eTest0 layer, counter: {}", std::make_tuple(jobData->counter.load()));
-    };
-
-    // Define jobs for layer eTest1
-    auto jobTest1 = [](uintptr_t data) {
-        dmt::Context ctx;
-        JobData*     jobData = reinterpret_cast<JobData*>(data);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // Simulate work
-        ++jobData->counter;
-        ctx.log("Executed job in eTest1 layer, counter: {}", std::make_tuple(jobData->counter.load()));
-    };
-
-    // Enqueue jobs for eTest0 layer
-    int const numJobsTest0 = 5;
-    for (int i = 0; i < numJobsTest0; ++i)
-    {
-        dmt::Job job{jobTest0, reinterpret_cast<uintptr_t>(&test0Data)};
-        threadPool.addJob(job, dmt::EJobLayer::eTest0);
-    }
-
-    // Enqueue jobs for eTest1 layer
-    int const numJobsTest1 = 3;
-    for (int i = 0; i < numJobsTest1; ++i)
-    {
-        dmt::Job job{jobTest1, reinterpret_cast<uintptr_t>(&test1Data)};
-        threadPool.addJob(job, dmt::EJobLayer::eTest1);
-    }
-
-    for (int i = 0; i < numJobsTest0; ++i)
-    {
-        dmt::Job job{jobTest0, reinterpret_cast<uintptr_t>(&test0Data)};
-        threadPool.addJob(job, dmt::EJobLayer::eTest0);
-    }
-
-    // Kick off the jobs
-    threadPool.kickJobs();
-
-    // Wait for jobs to complete
-    while (test0Data.counter.load() < 2 * numJobsTest0 || test1Data.counter.load() < numJobsTest1)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    // Ensure all jobs in eTest0 were executed before eTest1
-    if (test0Data.counter.load() == 2 * numJobsTest0 && test1Data.counter.load() == numJobsTest1)
-    {
-        ctx.log("All jobs in eTest0 executed before eTest1. ThreadPool tests Finished", {});
-    }
-    else
-    {
-        ctx.error("Job execution order violated.", {});
+        ctx.log("Thread running... {}", std::make_tuple(i));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
+
 
 int guardedMain()
 {
@@ -219,11 +33,145 @@ int guardedMain()
 
     {
         dmt::Context ctx;
-        ctx.log("Hello darkness my old friend", {});
+        ctx.log("Starting memory management tests...", {});
 
-        testThreadpool();
-        testChunkedFileReaderPData();
-        testChunkedFileReader();
+        static constexpr size_t testSize      = dmt::toUnderlying(dmt::EPageSize::e2MB);
+        static constexpr size_t largePageSize = dmt::toUnderlying(dmt::EPageSize::e1GB);
+
+        // Test: Reserve Virtual Address Space
+        void* reservedAddress = dmt::os::reserveVirtualAddressSpace(testSize);
+        if (reservedAddress)
+        {
+            ctx.log("Successfully reserved virtual address space", {});
+        }
+        else
+        {
+            ctx.error("Failed to reserve virtual address space", {});
+        }
+
+        // Test: Commit Physical Memory
+        bool commitSuccess = dmt::os::commitPhysicalMemory(reservedAddress, testSize);
+        if (commitSuccess)
+        {
+            ctx.log("Successfully committed physical memory", {});
+        }
+        else
+        {
+            ctx.error("Failed to commit physical memory", {});
+        }
+
+        // Test: Decommit Physical Memory
+        dmt::os::decommitPhysicalMemory(reservedAddress, testSize);
+        ctx.log("Decommitted physical memory", {});
+
+        // Test: Free Virtual Address Space
+        bool freeSuccess = dmt::os::freeVirtualAddressSpace(reservedAddress, testSize);
+        if (freeSuccess)
+        {
+            ctx.log("Successfully freed virtual address space", {});
+        }
+        else
+        {
+            ctx.error("Failed to free virtual address space", {});
+        }
+
+        // Test: Allocate Locked Large Pages (2MB)
+        void* largePageMemory2MB = dmt::os::allocateLockedLargePages(testSize, dmt::EPageSize::e2MB, false);
+        if (largePageMemory2MB)
+        {
+            ctx.log("Successfully allocated locked large pages (2MB)", {});
+            dmt::os::deallocateLockedLargePages(largePageMemory2MB, testSize, dmt::EPageSize::e2MB);
+            ctx.log("Successfully deallocated locked large pages (2MB)", {});
+        }
+        else
+        {
+            ctx.error("Failed to allocate locked large pages (2MB)", {});
+        }
+
+        // Test: Allocate Locked Large Pages (1GB)
+        void* largePageMemory1GB = dmt::os::allocateLockedLargePages(largePageSize, dmt::EPageSize::e1GB, false);
+        if (largePageMemory1GB)
+        {
+            ctx.log("Successfully allocated locked large pages (1GB)", {});
+            dmt::os::deallocateLockedLargePages(largePageMemory1GB, largePageSize, dmt::EPageSize::e1GB);
+            ctx.log("Successfully deallocated locked large pages (1GB)", {});
+        }
+        else
+        {
+            ctx.error("Failed to allocate locked large pages (1GB)", {});
+        }
+
+        ctx.log("Memory management tests completed.", {});
+
+        dmt::os::Thread t{worker};
+        ctx.log("Running thread {}", std::make_tuple(t.id()));
+        t.start();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+        ctx.log("Joining Thread {}", std::make_tuple(t.id()));
+        t.join();
+        ctx.log("Thread Joined", {});
+
+        ctx.log("Starting Pool Allocator memory tests", {});
+
+        // Create a SyncPoolAllocator instance
+        dmt::SyncPoolAllocator allocator(dmt::EMemoryTag::eUnknown, 1024 * 1024, 64, dmt::EBlockSize::e256B); // 1MB reserved, 256B block size, 64 initial blocks
+
+        // Check if allocator is valid
+        if (!allocator.isValid())
+        {
+            ctx.error("Allocator is not valid!", {});
+            return -1; // Early exit if invalid
+        }
+
+        // Allocate memory: Try to allocate 512 bytes
+        void* ptr = allocator.allocate(512);
+        if (ptr != nullptr)
+        {
+            ctx.log("Successfully allocated 512 bytes.", {});
+        }
+        else
+        {
+            ctx.error("Allocation failed!", {});
+            return -1;
+        }
+
+        // Allocate more memory: Try to allocate another 128 bytes
+        void* ptr2 = allocator.allocate(128);
+        if (ptr2 != nullptr)
+        {
+            ctx.log("Successfully allocated another 128 bytes.", {});
+        }
+        else
+        {
+            ctx.error("Second allocation failed!", {});
+            return -1;
+        }
+
+        // Deallocate memory: Free the first pointer (512 bytes)
+        allocator.deallocate(ptr, 512);
+        ctx.log("Successfully deallocated 512 bytes.", {});
+
+        // Deallocate second memory block (128 bytes)
+        allocator.deallocate(ptr2, 128);
+        ctx.log("Successfully deallocated 128 bytes.", {});
+
+        // Attempting allocation after deallocation
+        void* ptr3 = allocator.allocate(256);
+        if (ptr3 != nullptr)
+        {
+            ctx.log("Successfully allocated 256 bytes after deallocation.", {});
+        }
+        else
+        {
+            ctx.error("Allocation after deallocation failed!", {});
+            return -1;
+        }
+
+        // Check number of blocks in the allocator
+        uint32_t numBlocks = allocator.numBlocks();
+        ctx.log("Number of blocks in the allocator: {}", std::make_tuple(numBlocks));
     }
 
     return 0;

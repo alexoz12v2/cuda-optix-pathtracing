@@ -23,11 +23,7 @@
 namespace dmt::os {
     DMT_PLATFORM_API uint64_t processId();
     DMT_PLATFORM_API uint64_t threadId();
-    DMT_PLATFORM_API void*    reserveVirtualAddressSpace(size_t size);
     DMT_PLATFORM_API size_t   systemAlignment();
-    DMT_PLATFORM_API bool     commitPhysicalMemory(void* address, size_t size);
-    DMT_PLATFORM_API bool     freeVirtualAddressSpace(void* address, size_t size);
-    DMT_PLATFORM_API void     decommitPage(void* pageAddress, size_t pageSize);
 
     // use C runtime standard allocation functions
     DMT_PLATFORM_API void* allocate(size_t _bytes, size_t _align);
@@ -168,19 +164,6 @@ namespace dmt {
     }
 
     using sid_t = uint64_t;
-    template <typename T>
-    struct PmrDeleter
-    {
-        explicit PmrDeleter(std::pmr::memory_resource* pRes) : resource(pRes) {}
-
-        void operator()(T* ptr) const
-        {
-            if (ptr)
-                resource->deallocate(ptr, sizeof(T), alignof(T));
-        }
-
-        std::pmr::memory_resource* resource;
-    };
 
     template <typename Enum>
         requires(std::is_enum_v<Enum>)
@@ -274,6 +257,12 @@ namespace dmt {
             value |= value >> 4;
             return ++value;
         }
+    }
+
+    template <std::integral T>
+    inline constexpr bool isPOT(T value)
+    {
+        return (value > 0) && ((value & (value - 1)) == 0);
     }
 
     inline constexpr uint32_t smallestPOTMask(uint32_t value)

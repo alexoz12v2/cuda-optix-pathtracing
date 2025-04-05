@@ -158,14 +158,13 @@ namespace dmt {
     /**
      * Class responsible to intern a given string and give back a unique string identifier `sid_t` for the string, obtained
      * with the CRC64 algorithm
-     * @warning for now, even if it lives in the `MemoryContext`, it doesn't use our own memory allocators
      */
     class alignas(8) StringTable
     {
     public:
         static constexpr uint32_t MAX_SID_LEN = 256;
 
-        StringTable() : m_stringTable(&s_pool) {}
+        DMT_PLATFORM_API StringTable(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
         StringTable(StringTable const&)                = delete;
         StringTable(StringTable&&) noexcept            = delete;
         StringTable& operator=(StringTable const&)     = delete;
@@ -195,11 +194,7 @@ namespace dmt {
         DMT_PLATFORM_API std::string_view lookup(sid_t sid) const;
 
     private:
-        static inline std::pmr::pool_options const opts{
-            .max_blocks_per_chunk        = 8,
-            .largest_required_pool_block = 256,
-        };
-        static inline std::pmr::synchronized_pool_resource s_pool{opts};
+        std::pmr::memory_resource* m_resource;
 
         /**
          * Red Black Tree storing pairs of associated string ids and ASCII strings. They are stored `'\0'` terminated
@@ -231,1041 +226,149 @@ namespace dmt {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
 
-    /**
-     * Utility function used to scale to the next page size whenever a large/huge page allocation fails
-     * (Example: (Win32) lack of SeLockMemoryPrivilege, or (Linux) nr_hugepages == 0)
-     */
-    inline constexpr EPageSize scaleDownPageSize(EPageSize pageSize)
-    {
-        switch (pageSize)
-        {
-            case EPageSize::e1GB: return EPageSize::e2MB;
-            case EPageSize::e2MB: return EPageSize::e4KB;
-            default: return EPageSize::e4KB;
-        }
-    }
-
-    /**
-     * Enum to customize the behaviour of the `PageAllocator` Allocate Bytes method
-     */
-    enum class EPageAllocationQueryOptions : uint8_t
-    {
-        eNone = 0,
-        eNo1GB,
-        eForce4KB,
-        Count,
-    };
-
-#if defined(_MSC_VER)
-#pragma pack(1)
-#endif
-    /**
-     * Tracking data for a page allocation
-     */
-    struct DMT_PLATFORM_API alignas(8) PageAllocation
-    {
-        void*     address;
-        int64_t   pageNum; // in linux, 55 bits, windows void pointer, but it should be at least 4KB aligned
-        EPageSize pageSize;
-        uint32_t  bits  : 24; /** OS specific information, eg was this allocated with mmap or aligned_alloc? */
-        uint32_t  count : 8;
-    };
-#if defined(_MSC_VER)
-#pragma pack()
-#endif
-    static_assert(sizeof(PageAllocation) == 24 && alignof(PageAllocation) == 8);
-
-    /**
-     * struct for the return type of the `PageAllocator` allocate Bytes method
-     */
-    struct DMT_PLATFORM_API AllocatePageForBytesResult
-    {
-        size_t   numBytes;
-        uint32_t numPages;
-    };
-
-    /**
-     * table of function pointers related to memory tracking, called by the `PageAllocator` upon successful
-     * page Allocation or deallocation.
-     * We use function pointers instead of directly injecting the type `PageAllocationTracker` to give the ability
-     * to turn off memory tracking at runtime
-     */
-    struct DMT_PLATFORM_API PageAllocatorHooks
-    {
-        void (*allocHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
-        void (*freeHook)(void* data, LoggingContext& ctx, PageAllocation const& alloc);
-        void* data;
-    };
-
-    // TODO make OS specific protected functions which handle parts of the logic, such
-    // TODO that we can test them individually by subclassing this
-    /**
-     * Class encapsulating the current machine's capability to perform large/huge page allocations, with methods to
-     * perform them
-     */
-    class alignas(8) PageAllocator
-    {
-    public:
-        // -- Types --
-        static constexpr uint32_t num4KBIn2MB = toUnderlying(EPageSize::e2MB) / toUnderlying(EPageSize::e4KB);
-
-        // -- Construtors/Copy Control --
-        DMT_PLATFORM_API                PageAllocator(LoggingContext& ctx, PageAllocatorHooks const& hooks);
-        DMT_PLATFORM_API                PageAllocator(PageAllocator const&)     = default;
-        DMT_PLATFORM_API                PageAllocator(PageAllocator&&) noexcept = default;
-        DMT_PLATFORM_API PageAllocator& operator=(PageAllocator const&)         = default;
-        DMT_PLATFORM_API PageAllocator& operator=(PageAllocator&&)              = default;
-        DMT_PLATFORM_API ~PageAllocator();
-
-        // -- Functions --
-        /**
-         * Method to allocate, 1 page at a time of the maximum supported size, the requested number of bytes
-         * It's really slow. Prefer using the util function `reserveVirtualAddressSpace` of the `allocate2MB`.
-         * It's supposed to be used after `allocatePagesForBytesQuery` to know how many `PageAllocation` structs
-         * the caller needs to allocate
-         * @note there's no alignment requirement being passed because we are allocating pages
-         * @param ctx `LoggingContext` to perform necessary logging to console
-         * @param numBytes lower bound of bytes to allocate
-         * @param pOut `PageAllocation` array
-         * @param inNum length of the `pOut` array
-         * @param pageSize page size override (instead of preferring the maximum possible)
-         * @return `AllocatePageForBytesResult` allocated pages information (bytes and number of pages)
-         */
-        DMT_PLATFORM_API [[nodiscard]] AllocatePageForBytesResult allocatePagesForBytes(
-            LoggingContext& ctx,
-            size_t          numBytes,
-            PageAllocation* pOut,
-            uint32_t        inNum,
-            EPageSize       pageSize);
-
-        /**
-         * Method to query for the number of `PageAllocation` struct you need to prepare. It's actually hard to do and
-         * it's not 100% reliable, as large/huge allocations can fail depending on the current workload of the memory system and
-         * configuration of the (Win32) Registry or (Linux) `/sys/kernel/mm/hugepages/`. Therefore, the only reliable way to make
-         * this work is to use `EPageAllocationQueryOptions::eForce4KB`, ie. assume the smallest page possible
-         * @param ctx `LoggingContext` to perform informative logging to console only
-         * @param numBytes lower bound on the number of bytes to allocate
-         * @param inOutNum number of `PageAllocation` the caller needs to allocate to call `allocatePagesForBytes`
-         * @param opts enum options for the behaviour of the function
-         * @return `EPageSize` page size used for the `inOutNum` computation
-         */
-        DMT_PLATFORM_API EPageSize allocatePagesForBytesQuery(
-            LoggingContext&             ctx,
-            size_t                      numBytes,
-            uint32_t&                   inOutNum,
-            EPageAllocationQueryOptions opts = EPageAllocationQueryOptions::eForce4KB);
-
-        /**
-         * @warning do not use this
-         * method called by the `allocatePagesForBytesQuery` when not in `eForce4KB` mode. To check whether large/huge page
-         * allocation is actually available at the moment, the method tries to allocate and then immediately deallocate a page.
-         * It's bad and you shouldn't use it
-         * @param ctx `LoggingContext` to perform console only logs
-         * @param pageSize the page size we want to check availability for
-         */
-        DMT_PLATFORM_API bool checkPageSizeAvailability(LoggingContext& ctx, EPageSize pageSize);
-
-        /**
-         * Allocate 2MB of memory using the larges page size possible, ie. either a 2MB page or a bunch of 4KB pages
-         * @param ctx `LoggingContext` to perforn console only logging
-         * @param out `PageAllocation` containing, among other things, a pointer to the allocated page
-         * @retuns `true` if the allocation was successful, `false` otherwise
-         */
-        DMT_PLATFORM_API bool allocate2MB(LoggingContext& ctx, PageAllocation& out);
-
-        /**
-         * Allocate the largest page available on the system (or the page size suggested from the override parameter).
-         * Whenever the requested page size allocation fails, it scales down the page size and tries again.
-         * @warning Since you don't know how much memory is being allocated, you shouldn't use this. Prefer the utils method
-         * `reserveVirtualAddressSpace`, or, if you need tracking, `allocate2MB`
-         * @param ctx `LoggingContext` console only logging facility
-         * @param sizeOverride page size override
-         * @return `PageAllocation` struct containing the address to the allocated memory and its size, or `nullptr` if it failed
-         */
-        DMT_PLATFORM_API PageAllocation allocatePage(LoggingContext& ctx, EPageSize sizeOverride = EPageSize::e1GB);
-
-        /**
-         * Static method which performs a page deallocation without updating a tracker
-         * @warning Don't use this. use `deallocPage`
-         * @param ctx `LoggingContext` console only logging
-         * @param alloc page(s) to deallocate
-         */
-        DMT_PLATFORM_API static void deallocatePage(LoggingContext& ctx, PageAllocation& alloc);
-
-        /**
-         * Method to deallocate a page allocated with `allocate2MB`, `allocatePage` or `AllocatePagesForBytes`
-         * @param ctx `LoggingContext` console only logging
-         * @param alloc page(s) to deallocate
-         */
-        DMT_PLATFORM_API void deallocPage(LoggingContext& ctx, PageAllocation& alloc);
-
-    protected:
-#if defined(DMT_OS_WINDOWS)
-        /**
-         * Check whether the current process token has "SeLockMemoryPrivilege". If it has it,
-         * then enabled it if not enabled. If there's no privilege or cannot enable it, false
-         */
-        static bool  checkAndAdjustPrivileges(LoggingContext& ctx,
-                                              void*           hProcessToken,
-                                              void const*     seLockMemoryPrivilegeLUID,
-                                              void*           pData);
-        static bool  enableLockPrivilege(LoggingContext& ctx,
-                                         void*           hProcessToken,
-                                         void const*     seLockMemoryPrivilegeLUID,
-                                         int64_t         seLockMemoryPrivilegeIndex,
-                                         void*           pData);
-        static bool  checkVirtualAlloc2InKernelbaseDll(LoggingContext& ctx);
-        static void* createImpersonatingThreadToken(LoggingContext& ctx, void* hProcessToken, void* pData);
-
-        // TODO shared between windows and linux
-        void addAllocInfo(LoggingContext& ctx, bool isLargePageAlloc, PageAllocation& ret);
-#endif
-
-    private:
-        explicit PageAllocator(PageAllocatorHooks const& hooks) : m_hooks(hooks) {}
-
-        //-- Members --
-#if defined(DMT_OS_LINUX)
-        int32_t   m_mmap2MBHugepages   = 0;
-        int32_t   m_mmap1GBHugepages   = 0;
-        EPageSize m_enabledPageSize    = EPageSize::e4KB;
-        uint32_t  m_thpSize            = 0;
-        bool      m_thpEnabled         = false;
-        bool      m_mmapHugeTlbEnabled = false;
-        bool      m_hugePageEnabled    = false;
-#elif defined(DMT_OS_WINDOWS)
-        uint32_t      m_allocationGranularity = 0;
-        uint32_t      m_systemPageSize        = 0;
-        bool          m_largePage1GB          = false;
-        bool          m_largePageEnabled      = false;
-        unsigned char m_padding[14];
-#endif
-        PageAllocatorHooks m_hooks;
-    };
-
-    static_assert(alignof(PageAllocator) == 8 && sizeof(PageAllocator) == 48);
-
-    /**
-     * Tracking data for an *Object* allocation, ie. coming from the `StackAllocator`, `MultiPoolAllocator`, or any other
-     * Allocation function which uses a `PageAllocator` instance as its memory backing
-     */
-    struct DMT_PLATFORM_API alignas(8) AllocationInfo
-    {
-        void*         address;
-        uint64_t      allocTime; // millieconds from start of app
-        uint64_t      freeTime;  // 0 means not freed yet
-        size_t        size;
-        sid_t         sid;
-        uint32_t      alignment : 31;
-        uint32_t      transient : 1; // whether to automatically untrack this after 1 iteration
-        EMemoryTag    tag;
-        unsigned char padding[8];
-    };
-    static_assert(sizeof(AllocationInfo) == 56 && alignof(AllocationInfo) == 8);
-
-    /**
-     * table of function pointers related to memory tracking, called by any allocation strategy using `PageAllocator` as
-     * its memory backing upon successful object Allocation or deallocation.
-     * We use function pointers instead of directly injecting the type `PageAllocationTracker` to give the ability
-     * to turn off memory tracking at runtime
-     */
-    struct DMT_PLATFORM_API AllocatorHooks
-    {
-        void (*allocHook)(void* data, LoggingContext& ctx, AllocationInfo const& alloc) =
-            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {};
-        void (*freeHook)(void* data, LoggingContext& ctx, AllocationInfo const& alloc) =
-            [](void* data, LoggingContext& ctx, AllocationInfo const& alloc) {};
-        void (*cleanTransients)(void* data, LoggingContext& ctx) = [](void* data, LoggingContext& ctx) {};
-        void* data                                               = nullptr;
-    };
-
-    /**
-     * Free List element, containing two possible states. "Free" and "Occupied". The "Free" state is active if
-     * the first 8 bytes of the Node are all sst to 1
-     */
+    // Custom deleter that uses std::pmr::memory_resource
     template <typename T>
-        requires(std::is_standard_layout_v<T> && std::is_trivially_destructible_v<T>)
-    union Node
+        requires(!std::is_array_v<T> || std::is_trivially_destructible_v<std::remove_extent_t<T>>)
+    struct PmrDeleter
     {
-        using DType = T;
-        struct TrackData
+        std::pmr::memory_resource* resource;
+        std::size_t                size = 1; // Default to single object; for arrays, this stores the element count
+
+        void operator()(std::conditional_t<std::is_array_v<T>, std::decay_t<T>, T*> ptr) const
         {
-            T     alloc;
-            Node* next;
-        };
-        struct Free
-        {
-            uint64_t magic;
-            Node*    nextFree;
-        };
-        TrackData data;
-        Free      free;
-    };
-
-    template union Node<PageAllocation>;
-    template union Node<AllocationInfo>;
-    using PageNode  = Node<PageAllocation>;
-    using AllocNode = Node<AllocationInfo>;
-    static_assert(sizeof(PageNode) == 32 && alignof(PageNode) == 8);
-    static_assert(sizeof(AllocNode) == 64 && alignof(AllocNode) == 8);
-    static_assert(TemplateInstantiationOf<Node, PageNode>);
-    static_assert(TemplateInstantiationOf<Node, AllocNode>);
-
-    /**
-     * Data structure holding, in a non owning way, a buffer, over which it constructs two linked lists
-     * A first one of free nodes of fixed size, and a second one of occupied nodes of the same size
-     * Used by the `PageAllocationsMemoryTracker` to hold tracking information
-     */
-    template <typename NodeType>
-        requires(TemplateInstantiationOf<Node, NodeType>)
-    class FreeList
-    {
-        friend class PageAllocationsTracker;
-
-    public:
-        static constexpr uint64_t theMagic = static_cast<uint64_t>(-1);
-
-        class Iterator
-        {
-        public:
-            explicit Iterator(NodeType* node) : m_current(node) {}
-
-            Iterator& operator++()
-            {
-                if (m_current)
-                    m_current = m_current->data.next;
-
-                return *this;
-            }
-
-            bool operator!=(Iterator const& other) const { return m_current != other.m_current; }
-
-            NodeType& operator*() const { return *m_current; }
-
-            NodeType* operator->() const { return m_current; }
-
-        private:
-            NodeType* m_current = nullptr;
-        };
-
-        Iterator beginAllocated() { return Iterator(m_occupiedHead); }
-        Iterator endAllocated() { return Iterator(nullptr); }
-
-        // Add a node to the occupied list from the free list
-        void addNode(typename NodeType::DType const& data)
-        {
-            assert(m_freeHead && "unexpected node state");
-
-            // Allocate node from free list
-            NodeType* node = m_freeHead;
-            m_freeHead     = getNextFree(node);
-
-            // Initialize the node with data and link to the occupied list
-            node->data.alloc = data;
-            setNextOccupied(node, m_occupiedHead);
-            m_occupiedHead = node;
-        }
-
-        // Remove a node from the occupied list and return it to the free list
-        bool removeNode(typename NodeType::DType const& data)
-        {
-            NodeType* prev = nullptr;
-            NodeType* curr = m_occupiedHead;
-
-            // Locate the node in the occupied list
-            while (curr)
-            {
-                if (curr->data.alloc.address == data.address)
-                {
-                    // Unlink from occupied list
-                    if (prev)
-                        setNextOccupied(prev, getNextOccupied(curr));
-                    else
-                        m_occupiedHead = getNextOccupied(curr);
-
-                    // Return node to free list
-                    setFreeNode(curr);
-                    return true;
-                }
-                prev = curr;
-                curr = getNextOccupied(curr);
-            }
-            return false; // Node not found
-        }
-
-        // Reset the free list to its initial state
-        void reset()
-        {
-            NodeType* curr = m_freeHead;
-            for (uint32_t i = 0; i < m_freeSize - 1; ++i)
-            {
-                NodeType* next = m_growBackwards ? curr - 1 : curr + 1;
-                setNextFree(curr, next);
-                curr->free.magic = theMagic;
-                curr             = next;
-            }
-
-            if (curr)
-            {
-                setNextFree(curr, nullptr); // Last node
-                curr->free.magic = theMagic;
-            }
-        }
-
-        // Grow the free list with new nodes
-        void growList(uint32_t newNodes, NodeType* start)
-        {
-            NodeType* curr = start;
-
-            for (uint32_t i = 0; i < newNodes - 1; ++i)
-            {
-                NodeType* next = m_growBackwards ? curr - 1 : curr + 1;
-                setNextFree(curr, next);
-                curr->free.magic = theMagic;
-                curr             = next;
-            }
-
-            if (curr)
-            {
-                setNextFree(curr, m_freeHead); // Link new list to existing free list
-                curr->free.magic = theMagic;
-            }
-
-            m_freeHead = start;
-            m_freeSize += newNodes;
-        }
-
-
-    protected:
-        NodeType* m_freeHead      = nullptr; // Head of the free list
-        NodeType* m_occupiedHead  = nullptr; // Head of the occupied list
-        uint32_t  m_capacity      = 0;       // Total capacity of the list
-        uint32_t  m_freeSize      = 0;       // Number of free nodes available
-        bool      m_growBackwards = false;   // Growth direction
-
-        // Helper functions for managing free and occupied nodes
-        NodeType* getNextFree(NodeType* node) const { return reinterpret_cast<NodeType*>(node->free.nextFree); }
-
-        void setNextFree(NodeType* node, NodeType* next) const
-        {
-            node->free.nextFree = reinterpret_cast<NodeType*>(next);
-        }
-
-        NodeType* getNextOccupied(NodeType* node) const { return reinterpret_cast<NodeType*>(node->data.next); }
-
-        void setNextOccupied(NodeType* node, NodeType* next) const
-        {
-            node->data.next = reinterpret_cast<NodeType*>(next);
-        }
-
-        void setFreeNode(NodeType* node)
-        {
-            setNextFree(node, m_freeHead);
-            node->free.magic = theMagic;
-            m_freeHead       = node;
-        }
-    };
-
-    template <typename NodeType>
-    class TransientFreeList : public FreeList<NodeType>
-    {
-    public:
-        void forEachTransientNodes(void*    data,
-                                   uint64_t freeTime,
-                                   void (*func)(void* data, uint64_t freeTime, NodeType::DType const& alloc))
-            requires std::is_same_v<NodeType, AllocNode>
-        {
-            //NodeType* prev = nullptr;
-            NodeType* curr = this->m_occupiedHead;
-
-            while (curr)
-            {
-                if (curr->data.alloc.transient) // Check if node is transient
-                {
-                    func(data, freeTime, curr->data.alloc);
-                }
-                curr = this->getNextOccupied(curr);
-            }
-        }
-
-        void removeTransientNodes()
-            requires std::is_same_v<NodeType, AllocNode>
-        {
-            NodeType* prev = nullptr;
-            NodeType* curr = this->m_occupiedHead;
-
-            while (curr)
-            {
-                if (curr->data.alloc.transient) // Check if node is transient
-                {
-                    // Remove the node from the occupied list
-                    if (prev)
-                        this->setNextOccupied(prev, this->getNextOccupied(curr));
-                    else
-                        this->m_occupiedHead = this->getNextOccupied(curr);
-
-                    // Return the node to the free list
-                    this->setFreeNode(curr);
-                }
-                else
-                {
-                    prev = curr; // Only move the previous pointer if we don't remove the node
-                }
-
-                // Move to the next node in the occupied list
-                curr = this->getNextOccupied(curr);
-            }
-        }
-    };
-    template class DMT_PLATFORM_API FreeList<PageNode>;
-    template class DMT_PLATFORM_API TransientFreeList<AllocNode>;
-
-    inline constexpr uint32_t log16GB = 30 + 4;
-    inline constexpr size_t   num16GB = 1ULL << log16GB;
-
-    // At construction, reserve a huge portion of the virtual address space, and partition it into 16 slices
-    //   For each slice, commit the first 4KB page.
-    // You will keep an array of pointers and an active index. Such buffers will have an header, having a uintptr_t to the first
-    //   address not yet committed, and a uintptr_t to the start of the next buffer (limit).
-    //   the uintptr_t to the start of the buffer is implicitly computed as alignToAddr(start + sizeof(Header), alignof(AllocInfo))
-    class DMT_PLATFORM_API ObjectAllocationsSlidingWindow
-    {
-    private:
-        struct DMT_PLATFORM_API Header
-        {
-            uintptr_t firstNotCommitted;
-            uintptr_t limit;
-            size_t    size;
-        };
-
-        static inline AllocationInfo* firstAllocFromHeader(Header* ptr)
-        {
-            uintptr_t pFirst = alignToAddr(std::bit_cast<uintptr_t>(ptr) + sizeof(Header), alignof(AllocationInfo));
-            return std::bit_cast<AllocationInfo*>(pFirst);
-        }
-
-        static inline AllocationInfo const* firstAllocFromHeaderConst(Header const* ptr)
-        {
-            uintptr_t pFirst = alignToAddr(std::bit_cast<uintptr_t>(ptr) + sizeof(Header), alignof(AllocationInfo));
-            return std::bit_cast<AllocationInfo const*>(pFirst);
-        }
-
-    public:
-        struct DMT_PLATFORM_API EndSentinel
-        {
-            constexpr EndSentinel(uintptr_t last) : last{last} {}
-            uintptr_t last;
-        };
-
-        struct DMT_PLATFORM_API AllocIterator
-        {
-        public:
-            using difference_type = std::ptrdiff_t;
-            using value_type      = AllocationInfo;
-            using reference_type  = AllocationInfo const&;
-
-            AllocIterator() : m_ptr(nullptr) {}
-            AllocIterator(AllocationInfo const* ptr) : m_ptr(ptr) {}
-
-            AllocationInfo const& operator*() const { return *m_ptr; }
-
-            AllocIterator& operator++()
-            {
-                ++m_ptr;
-                return *this;
-            }
-
-            AllocIterator operator++(int)
-            {
-                auto tmp = *this;
-                ++*this;
-                return tmp;
-            }
-
-            bool operator==(AllocIterator const& other) const { return m_ptr == other.m_ptr; }
-
-            bool operator==(EndSentinel end) const { return !m_ptr || std::bit_cast<uintptr_t>(m_ptr) >= end.last; }
-
-        private:
-            AllocationInfo const* m_ptr;
-        };
-
-        struct DMT_PLATFORM_API AllocRange
-        {
-        public:
-            AllocRange(Header* block) : m_block(block) {}
-
-            AllocIterator begin() const { return {firstAllocFromHeaderConst(m_block)}; }
-
-            EndSentinel end() const
-            {
-                uintptr_t last = std::bit_cast<uintptr_t>(firstAllocFromHeader(m_block)) +
-                                 m_block->size * sizeof(AllocationInfo);
-                return {last};
-            }
-
-        private:
-            Header* m_block;
-        };
-
-        struct DMT_PLATFORM_API WindowIterator
-        {
-        public:
-            using difference_type = std::ptrdiff_t;
-            using value_type      = AllocRange;
-
-            WindowIterator() : m_block(nullptr) {}
-
-            WindowIterator(Header* start) : m_block(start) {}
-
-            AllocRange operator*() const { return {m_block}; }
-
-            WindowIterator& operator++()
-            {
-                m_block = std::bit_cast<decltype(m_block)>(m_block->limit);
-                return *this;
-            }
-
-            WindowIterator operator++(int)
-            {
-                auto tmp = *this;
-                ++*this;
-                return tmp;
-            }
-
-            bool operator==(WindowIterator const other) const { return m_block == other.m_block; }
-
-            bool operator==(EndSentinel end) const { return !m_block || m_block->limit > end.last; }
-
-        private:
-            Header* m_block;
-        };
-        static_assert(std::forward_iterator<WindowIterator>);
-        static_assert(std::forward_iterator<AllocIterator>);
-
-        static constexpr uint32_t numBlocks = 16;
-
-        ObjectAllocationsSlidingWindow(size_t reservedSize = num16GB);
-        ObjectAllocationsSlidingWindow(ObjectAllocationsSlidingWindow const&)                = delete;
-        ObjectAllocationsSlidingWindow(ObjectAllocationsSlidingWindow&&) noexcept            = delete;
-        ObjectAllocationsSlidingWindow& operator=(ObjectAllocationsSlidingWindow const&)     = delete;
-        ObjectAllocationsSlidingWindow& operator=(ObjectAllocationsSlidingWindow&&) noexcept = delete;
-        ~ObjectAllocationsSlidingWindow() noexcept;
-
-        void addToCurrent(AllocationInfo const& alloc);
-        void touchFreeTime(void* address, uint64_t freeTime);
-        void switchTonext();
-
-        WindowIterator begin() const { return {m_blocks[0]}; }
-
-        EndSentinel end() const { return {std::bit_cast<uintptr_t>(m_blocks[numBlocks - 1])}; }
-
-    private:
-        bool commitBlock();
-
-        Header*  m_blocks[numBlocks];
-        size_t   m_reservedSize;
-        uint32_t m_activeIndex;
-    };
-
-    /**
-     * Class which reserves a large portion of the virtual address to memory tracking and manage such space as two linked lists
-     * on one end we'll track page allocations, on the other object allocation.
-     */
-    class DMT_PLATFORM_API alignas(8) PageAllocationsTracker
-    {
-    public:
-        struct DMT_PLATFORM_API PageAllocationView
-        {
-            PageAllocationView(FreeList<PageNode>* pageTracking) : m_pageTracking(pageTracking) {}
-            auto begin() { return m_pageTracking->beginAllocated(); }
-            auto end() { return m_pageTracking->endAllocated(); }
-
-        private:
-            FreeList<PageNode>* m_pageTracking;
-        };
-        struct DMT_PLATFORM_API AllocationView
-        {
-            AllocationView(FreeList<AllocNode>* allocTracking) : m_allocTracking(allocTracking) {}
-            auto begin() { return m_allocTracking->beginAllocated(); }
-            auto end() { return m_allocTracking->endAllocated(); }
-
-        private:
-            FreeList<AllocNode>* m_allocTracking;
-        };
-
-        PageAllocationsTracker(LoggingContext& ctx, uint32_t pageTrackCapacity, uint32_t allocTrackCapacity);
-        PageAllocationsTracker(PageAllocationsTracker const&)                = delete;
-        PageAllocationsTracker(PageAllocationsTracker&&) noexcept            = delete;
-        PageAllocationsTracker& operator=(PageAllocationsTracker const&)     = delete;
-        PageAllocationsTracker& operator=(PageAllocationsTracker&&) noexcept = delete;
-        ~PageAllocationsTracker() noexcept;
-
-        /**
-         * Getter to an iterable type to cycle through all tracked page allocations
-         */
-        PageAllocationView pageAllocations() { return {&m_pageTracking}; }
-
-        /**
-         * Getter to an iterable type to cycle through all tracked object allocations
-         */
-        AllocationView allocations() { return {&m_allocTracking}; }
-
-        /**
-         * Method to track a page allocation into the `m_pageTracking` occupied linked list
-         * @param ctx `LoggingContext` console only logging
-         * @param alloc page allocation information
-         */
-        void track(LoggingContext& ctx, PageAllocation const& alloc);
-
-        /**
-         * Method to remove a page allocation information from the `m_pageTracking` occupied linked list and
-         * put back its node into the `m_pageTracking` free linked list
-         * @param ctx `LoggingContext` console only logging
-         * @param alloc page allocation information (search by comparing address)
-         */
-        void untrack(LoggingContext& ctx, PageAllocation const& alloc);
-
-        /**
-         * Method to track a page allocation into the `m_allocTracking` occupied linked list
-         * @param ctx `LoggingContext` console only logging
-         * @param alloc object allocation information
-         */
-        void track(LoggingContext& ctx, AllocationInfo const& alloc);
-
-        /**
-         * Method to remove a page allocation information from the `m_allocTracking` occupied linked list and
-         * put back its node into the `m_allocTracking` free linked list
-         * @param ctx `LoggingContext` console only logging
-         * @param alloc object allocation information (search by comparing address)
-         */
-        void untrack(LoggingContext& ctx, AllocationInfo const& alloc);
-
-        /**
-         * Remove all object allocations from the `m_allocTracking` marked with the `transient` bit set (see `AllocationInfo`)
-         * @param ctx `LoggingContext` console only logging
-         */
-        void claenTransients(LoggingContext& ctx);
-
-        void nextCycle() { m_slidingWindow.switchTonext(); }
-
-        ObjectAllocationsSlidingWindow const& slidingWindow() const { return m_slidingWindow; }
-
-    private:
-        static constexpr uint32_t initialNodeNum = 128;
-        template <typename NodeType>
-            requires(TemplateInstantiationOf<Node, NodeType>)
-        static void growFreeList(LoggingContext& ctx, FreeList<NodeType>& freeList, void* base)
-        {
-            // Check if we can commit more memory
-            if (freeList.m_freeSize >= freeList.m_capacity)
-            {
-                ctx.error("Buffer capacity exceeded, cannot grow the free list further.");
-                std::abort();
-            }
-
-            // Calculate how many new nodes to commit (doubling strategy)
-            uint32_t newNodes = std::min(initialNodeNum, freeList.m_capacity - freeList.m_freeSize);
-            if (newNodes == 0)
-            {
-                ctx.error("Cannot grow free list: Capacity fully utilized.");
-                std::abort();
-            }
-
-            // Determine where to start the new free list
-            void* newBuffer = nullptr;
-            if (freeList.m_growBackwards)
-            {
-                newBuffer = reinterpret_cast<void*>(
-                    reinterpret_cast<uintptr_t>(base) - (freeList.m_freeSize + newNodes) * sizeof(NodeType));
+            if (!ptr)
+                return;
+
+            if constexpr (!std::is_array_v<T>)
+            { // Single object
+                ptr->~T();
+                resource->deallocate(ptr, sizeof(T), alignof(T));
             }
             else
-            {
-                newBuffer = reinterpret_cast<void*>(
-                    reinterpret_cast<uintptr_t>(base) + freeList.m_freeSize * sizeof(NodeType));
+            { // Array case
+                resource->deallocate(ptr, sizeof(std::remove_extent_t<T>) * size, alignof(std::remove_extent_t<T>));
             }
-
-            // Commit additional memory
-            if (!os::commitPhysicalMemory(newBuffer, newNodes * sizeof(NodeType)))
-            {
-                ctx.error("Failed to commit additional memory for {} nodes.", {newNodes});
-                std::abort();
-            }
-
-            // Add newly committed nodes to the free list
-            NodeType* newFreeListStart = reinterpret_cast<NodeType*>(newBuffer);
-            freeList.growList(newNodes, newFreeListStart);
         }
-
-        ObjectAllocationsSlidingWindow m_slidingWindow;
-        FreeList<PageNode>             m_pageTracking;
-        TransientFreeList<AllocNode>   m_allocTracking;
-        void*                          m_base   = nullptr;
-        void*                          m_buffer = nullptr;
-        size_t                         m_bufferBytes;
-        void*                          m_pageBase;
-        void*                          m_allocBase;
-        char                           m_padding[8];
-    };
-    static_assert(sizeof(PageAllocationsTracker) == 256 && alignof(PageAllocationsTracker) == 8);
-
-    /**
-     * Class to manage object allocation with a linked list of buffers, each managed as a stack
-     * To allocate `size` bytes with a given`alignment`, check whether the current stack holds enough space.
-     * If yes, advance the stack pointer and return its previous position (alignment accounted). Otherwise,
-     * Try the next buffer (allocate it if needed)
-     * If a stack buffer different from the first one is not used for `notUsedForThreshold` `reset` cycles, it
-     * is deallocated (Invariant: a given stack in the linked list has the `notUsedFor` less than or equal to all the previous stacks)
-     */
-    class StackAllocator
-    {
-    public:
-        DMT_PLATFORM_API StackAllocator(LoggingContext& ctx, PageAllocator& pageAllocator, AllocatorHooks const& hooks);
-        StackAllocator(StackAllocator const&)                = delete;
-        StackAllocator(StackAllocator&&) noexcept            = delete;
-        StackAllocator& operator=(StackAllocator const&)     = delete;
-        StackAllocator& operator=(StackAllocator&&) noexcept = delete;
-
-        /**
-         * Method to free all allocated pages used by the stack allocator.
-         * @param ctx `LoggingContext` console only logging
-         * @param pageAllocator pageAllocator
-         */
-        DMT_PLATFORM_API void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
-
-        /**
-         * Method to allocate some space, with a given `size` and `alignment` on a free enough stack
-         * @param ctx `LoggingContext` console only logging
-         * @param pageAllocator used only if we need to allocate a new stack
-         * @param size number of bytes requested
-         * @param alignment alignment requirement of the allocation
-         */
-        DMT_PLATFORM_API void* allocate(LoggingContext& ctx,
-                                        PageAllocator&  pageAllocator,
-                                        size_t          size,
-                                        size_t          alignment,
-                                        EMemoryTag      tag,
-                                        sid_t           sid);
-
-        /**
-         * Ends a reset cycle for the stack allocator, resetting all stack pointers, and deallocating all stack buffers
-         * whose `notUsedFor` member in the header of the buffer crossed the `notUsedForThreshold`
-         * @warning since the stack allocator doesn't care about the objects stored inside it when it resets its buffers, they should
-         * be objects which are not needed after the reset and trivially destructible
-         * @param ctx `LoggingContext` console only logging
-         * @param pageAllocator pageAllocator
-         */
-        DMT_PLATFORM_API void reset(LoggingContext& ctx, PageAllocator& pageAllocator);
-
-    private:
-        struct alignas(8) StackHeader
-        {
-            PageAllocation alloc;
-            uintptr_t      bp; // not necessary, but there's excess space to get to 64 bytes
-            uintptr_t      sp; // empty ascending stack
-            StackHeader*   prev;
-            StackHeader*   next;
-            uint8_t        notUsedFor;
-        };
-        static_assert(sizeof(StackHeader) == 64 && alignof(StackHeader) == 8);
-        static constexpr size_t   bufferSize          = toUnderlying(EPageSize::e2MB);
-        static constexpr uint32_t notUsedForThreshold = 10;
-
-        bool newBuffer(LoggingContext& ctx, PageAllocator& pageAllocator);
-
-        // cleanup: until last is different than first, give back the buffer to the page tracker, which will be
-        // allocated in the "bootstrap memory page", which is a minimuum (4KB) page containing whathever data the
-        // application needs to track in order to start
-        // the bootstrap page should contain, as last member, the allocation tracking data, because it is variable length
-        // there might be the possibility we have to track 2 variable length arrays, eg
-
-        AllocatorHooks     m_hooks;
-        mutable std::mutex m_mtx;
-        StackHeader*       m_pFirst;
-        StackHeader*       m_pLast;
     };
 
-    /**
-     * block sizes supported by the `MultiPoolAllocator`
-     */
-    enum class EBlockSize : uint16_t
+    template <typename T>
+        requires(!std::is_array_v<T> || std::is_trivially_destructible_v<std::remove_extent_t<T>>)
+    using UniqueRef = std::unique_ptr<T, PmrDeleter<T>>;
+
+    // clang-format off
+    struct NullptrTag { };
+    inline constexpr NullptrTag nullptrTag;
+    // clang-format on
+
+    // For a single object (with construction)
+    template <typename T, typename... Args>
+        requires(!std::is_array_v<T> && (!std::is_same_v<Args, NullptrTag> && ...))
+    UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource, Args&&... args)
     {
-        e32B  = 32u,
+        void* mem = resource->allocate(sizeof(T), alignof(T));
+        T*    obj = new (mem) T(std::forward<Args>(args)...);
+        return UniqueRef<T>(obj, PmrDeleter<T>{resource});
+    }
+
+    // For an array (without construction)
+    template <typename T>
+        requires(std::is_trivially_destructible_v<std::remove_extent_t<T>> && std::is_array_v<T>)
+    std::unique_ptr<T, PmrDeleter<T>> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size)
+    {
+        using ElementType = std::remove_extent_t<T>;
+        void*        mem  = resource->allocate(sizeof(ElementType) * size, alignof(ElementType));
+        ElementType* arr  = static_cast<ElementType*>(mem); // Memory allocated, but elements NOT constructed
+
+        return UniqueRef<T>(arr, PmrDeleter<T>{resource, size});
+    }
+
+    template <typename T>
+        requires(!std::is_array_v<T>)
+    UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource, NullptrTag const)
+    {
+        return UniqueRef<T>(nullptr, PmrDeleter<T>{resource});
+    }
+
+    // For an array (without construction)
+    template <typename T>
+        requires(std::is_trivially_destructible_v<std::remove_extent_t<T>> && std::is_array_v<T>)
+    std::unique_ptr<T, PmrDeleter<T>> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size, NullptrTag const)
+    {
+        return UniqueRef<T>(nullptr, PmrDeleter<T>{resource, size});
+    }
+
+    namespace os {
+        // TODO query functions
+        DMT_PLATFORM_API void* reserveVirtualAddressSpace(size_t size);
+        DMT_PLATFORM_API bool  commitPhysicalMemory(void* address, size_t size);
+        DMT_PLATFORM_API void  decommitPhysicalMemory(void* pageAddress, size_t size);
+        DMT_PLATFORM_API bool  freeVirtualAddressSpace(void* address, size_t size);
+
+        DMT_PLATFORM_API void* allocateLockedLargePages(size_t    size,
+                                                        EPageSize pageSize     = EPageSize::e2MB,
+                                                        bool      skipAclCheck = false);
+        DMT_PLATFORM_API void  deallocateLockedLargePages(void*                      address,
+                                                          size_t                     size,
+                                                          [[maybe_unused]] EPageSize pageSize = EPageSize::e2MB);
+    } // namespace os
+
+    enum class EBlockSize : uint32_t
+    {
         e64B  = 64u,
         e128B = 128u,
         e256B = 256u,
+        e512B = 512u
     };
 
-    /**
-     * `MultiPoolAllocator` makes use of `TaggedPointesr`, as all allocations are 32 byte aligned (5 least significant bits free to use)
-     * and we are supporting only x86_64 (hence 57 bit wide virtual addresses), gaining a total of 12 bits for a tag. Of these,
-     * 2 bits are used to encode the block size of the allocation
-     * The remaining 10 are for the buffer index, as the `MultiPoolAllocator`, like the `StackAllocator`, manages a linked list of buffers
-     */
-    inline constexpr uint8_t blockSizeEncoding(EBlockSize blkSize)
+    class DMT_PLATFORM_API SyncPoolAllocator : public std::pmr::memory_resource
     {
-        switch (blkSize)
-        {
-            using enum EBlockSize;
-            case e32B: return 0;
-            case e64B: return 1;
-            case e128B: return 2;
-            case e256B: return 3;
-        }
-
-        assert(false && "unknown block size");
-        return 0;
-    }
-
-    /**
-     * Boilerplate to get the size of the block from the encoded information inside a `TaggedPointer` returned by `MultiPoolAllocator`
-     */
-    inline constexpr EBlockSize fromEncoding(uint8_t encoding)
-    {
-        using enum EBlockSize;
-        switch (encoding)
-        {
-            case 0: return e32B;
-            case 1: return e64B;
-            case 2: return e128B;
-            case 3: return e256B;
-        }
-
-        assert(false && "invalid value");
-        return e32B;
-    }
-
-    inline constexpr uint32_t numBlockSizes = 4;
-
-    /**
-     * Class managing a linked list of buffers. Each buffer contains a header and a data space.
-     * - The Data space is subdivided into 4 lists of blocks of ascending size
-     * - The header contains, among others, a pointer to the next buffer, and a bit vector, associating 1 bit for each
-     *   block. If the bit is set, then the block is occupied, otherwise it is free
-     */
-    class MultiPoolAllocator
-    {
-        static constexpr uint32_t poolBaseAlignment = 32; // we need 5 bits for the tagged pointer
-        static constexpr size_t   bufferSize        = toUnderlying(EPageSize::e2MB);
-
     public:
-        DMT_PLATFORM_API MultiPoolAllocator(LoggingContext&                     ctx,
-                                            PageAllocator&                      pageAllocator,
-                                            std::array<uint32_t, numBlockSizes> numBlocksPerPool,
-                                            AllocatorHooks const&               hooks);
-        MultiPoolAllocator(MultiPoolAllocator const&)                = delete;
-        MultiPoolAllocator(MultiPoolAllocator&&) noexcept            = delete;
-        MultiPoolAllocator& operator=(MultiPoolAllocator const&)     = delete;
-        MultiPoolAllocator& operator=(MultiPoolAllocator&&) noexcept = delete;
+        SyncPoolAllocator(EMemoryTag tag,
+                          size_t     reservedSize,
+                          uint32_t   numInitialBlocks = 32,
+                          EBlockSize blockSize        = EBlockSize::e256B);
+        SyncPoolAllocator(SyncPoolAllocator const&)                = delete;
+        SyncPoolAllocator(SyncPoolAllocator&&) noexcept            = delete;
+        SyncPoolAllocator& operator=(SyncPoolAllocator const&)     = delete;
+        SyncPoolAllocator& operator=(SyncPoolAllocator&&) noexcept = delete;
+        ~SyncPoolAllocator() noexcept;
 
-        static constexpr uint16_t bufferIndex(uint16_t tag)
-        { // 7 high bits + 3 low bits
-            return tag >> 2;
-        }
+        bool     isValid() const;
+        uint32_t numBlocks() const;
 
-        static constexpr uint8_t blockSizeEncoding(uint16_t tag)
-        { // 2 least significant bits
-            return tag & 0x3;
-        }
-
-        /**
-         * method to let the PageAllocator yield all pages allocated by the MultiPoolAllocator to the system
-         * @warning To be called, you need to be absolutely sure that all objects inside it have been destroyed
-         * (or they are trivially destructible)
-         * @param ctx `LoggingContext` console only logging
-         * @param pageAllocator pageAllocator
-         */
-        DMT_PLATFORM_API void cleanup(LoggingContext& ctx, PageAllocator& pageAllocator);
-
-        /**
-         * Allocate `numBlocks` adjacent 32 byte aligned block of the requested size
-         * @warning `numBlocks < m_blocksPerPool[blockSizeEncoding(blockSize)]`
-         * @param ctx `LoggingContext` console only logging
-         * @param pageAllocator pageAllocator
-         * @param numBlocks number of adjacent blocks
-         * @param blockSize size of the block
-         * @return tagged pointer to allocated block. 12 bits tag = 10 bits buffer index, 2 bits blocksize encoding
-         */
-        DMT_PLATFORM_API TaggedPointer allocateBlocks(
-            LoggingContext& ctx,
-            PageAllocator&  pageAllocator,
-            uint32_t        numBlocks,
-            EBlockSize      blockSize,
-            EMemoryTag      tag,
-            sid_t           sid);
-
-        /**
-         * Free `numBlocks` adjacent blocks previously allocated with the `MultiPoolAllocator`
-         * @param ctx `LoggingContext` console only logging
-         * @param pageAllocator pageAllocator (not sure it's needed here)
-         * @param numBlocks numbers of blocks to free. Should be equal to the number passed to `allocateBlocks`
-         * @param ptr Tagged pointer obtained by a previous call to `allocateBlocks`
-         */
-        DMT_PLATFORM_API void freeBlocks(LoggingContext& ctx, PageAllocator& pageAllocator, uint32_t numBlocks, TaggedPointer ptr);
+    protected:
+        void* do_allocate(size_t _Bytes, size_t _Align) override;
+        void* NewFunction(uint32_t& blkNum, size_t& blkStart, size_t numBlocksRequired, bool& retFlag);
+        void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
+        bool  do_is_equal(memory_resource const& _That) const noexcept override;
 
     private:
-        struct BufferHeader
+        static constexpr uint8_t bitmapStateFree         = 0;
+        static constexpr uint8_t bitmapStateOccupied     = 2;
+        static constexpr uint8_t bitmapStateLastOccupied = 1;
+        static constexpr uint8_t bitmapMask              = 0b11;
+
+        size_t bitmapReservedSize() const;
+        size_t bitmapCommittedSize() const;
+        struct S
         {
-            PageAllocation alloc;
-            BufferHeader*  next; // skip list if too slow
-            uintptr_t      poolBase;
+            size_t  offset;
+            uint8_t shamt;
         };
-        static_assert(sizeof(BufferHeader) == 40 && alignof(BufferHeader) == 8);
+        S       bitPairOffsetAndMaskFromBlock(size_t blkIdx) const;
+        uint8_t extractBitPairState(size_t blkIdx) const;
+        void    setBitPairState(size_t blkIdx, uint8_t state);
+        bool    grow(size_t additionalMemory, size_t additionalBitmap);
+        void*   scrollAndTagBlocks(size_t startBlkIdx, size_t numBlocksRequired);
 
-        void newBlock(LoggingContext& ctx, PageAllocator& pageAllocator, BufferHeader** ptr);
-
-        mutable std::mutex                  m_mtx;
-        std::array<uint32_t, numBlockSizes> m_blocksPerPool;
-        AllocatorHooks                      m_hooks;
-        BufferHeader*                       m_firstBuffer;
-        BufferHeader*                       m_lastBuffer;
-        size_t                              m_totalSize;
-        uint32_t                            m_numBytesMetadata;
-        uint32_t                            m_numBlocksPerPool[numBlockSizes];
-    };
-
-
-    /**
-     * Helper type to construct a linked list from nodes allocated with the `MultiPoolAllocator`.
-     * (Example: Used by the `ThreadPoolV2` class)
-     */
-    template <typename T, EBlockSize size>
-        requires(sizeof(T) + sizeof(uintptr_t) == toUnderlying(size))
-    struct alignas(32) PoolNode
-    {
-        T             data;
-        TaggedPointer next;
-    };
-
-    /**
-     * Class holding a `LoggingContext` plus all functionalities declared inside the `platform-memory` module partition,
-     * Bundled to allow easier dependency injection
-     */
-    struct MemoryContext
-    {
-        DMT_PLATFORM_API MemoryContext(uint32_t                                   pageTrackCapacity,
-                                       uint32_t                                   allocTrackCapacity,
-                                       std::array<uint32_t, numBlockSizes> const& numBlocksPerPool);
-
-        // stack methods
-        DMT_PLATFORM_API void* stackAllocate(size_t size, size_t alignment, EMemoryTag tag, sid_t sid);
-        DMT_PLATFORM_API void  stackReset();
-
-        // pool methods
-        DMT_PLATFORM_API TaggedPointer poolAllocateBlocks(uint32_t numBlocks, EBlockSize blockSize, EMemoryTag tag, sid_t sid);
-        DMT_PLATFORM_API void poolFreeBlocks(uint32_t numBlocks, TaggedPointer ptr);
-
-        // clean up everything (TODO: move to destructor)
-        DMT_PLATFORM_API void cleanup();
-
-        LoggingContext         pctx;
-        PageAllocationsTracker tracker;
-        PageAllocatorHooks     pageHooks;
-        AllocatorHooks         allocHooks;
-        PageAllocator          pageAllocator;
-        StackAllocator         stackAllocator;
-        MultiPoolAllocator     multiPoolAllocator;
-        StringTable            strTable;
+    private:
+        size_t           m_committedSize;
+        size_t           m_reservedSize;
+        void*            m_bitmap; // 0 = free, 1 = occupied, end, 2 = occupied, continues on next
+        void*            m_memory;
+        EMemoryTag       m_tag;
+        uint32_t         m_blockSize;
+        mutable SpinLock m_mtx;
     };
 } // namespace dmt
 

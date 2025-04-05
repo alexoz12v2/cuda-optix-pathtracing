@@ -39,13 +39,13 @@ namespace dmt::os::win32 {
         std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
     DMT_PLATFORM_OS_UTILS_API uint32_t utf16le_From_utf8(
-        char8_t const* DMT_RESTRICT _u8str,
-        uint32_t                    _u8NumBytes,
-        wchar_t* DMT_RESTRICT       _mediaBuf,
-        uint32_t                    _mediaMaxBytes,
-        wchar_t* DMT_RESTRICT       _outBuf,
-        uint32_t                    _maxBytes,
-        uint32_t*                   _outBytesWritten);
+        char const* DMT_RESTRICT _u8str,
+        uint32_t                 _u8NumBytes,
+        wchar_t* DMT_RESTRICT    _mediaBuf,
+        uint32_t                 _mediaMaxBytes,
+        wchar_t* DMT_RESTRICT    _outBuf,
+        uint32_t                 _maxBytes,
+        uint32_t*                _outBytesWritten);
 
     /** requires a nul terminated string, returns a nul terminated string */
     DMT_PLATFORM_OS_UTILS_API std::unique_ptr<wchar_t[]> quickUtf16leFrom(char const* prefix, char const* str);

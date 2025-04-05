@@ -25,6 +25,41 @@
 
 #include <cstdint>
 
+namespace dmt::os {
+    class DMT_PLATFORM_API Thread
+    {
+    public:
+        using ThreadFunc = void (*)(void*); // Raw function pointer for triviality
+        struct Internal
+        {
+            ThreadFunc func;
+            void*      data;
+        };
+
+        Thread(ThreadFunc func, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        Thread(Thread const&)                = delete;
+        Thread(Thread&&) noexcept            = delete;
+        Thread& operator=(Thread const&)     = delete;
+        Thread& operator=(Thread&&) noexcept = delete;
+
+        void     start(void* arg = nullptr);
+        void     join();
+        void     terminate();
+        bool     running() const;
+        uint32_t id() const;
+
+    private:
+#ifdef _WIN32
+        void* m_handle = nullptr; // HANDLE is a void* in Windows
+#else
+        unsigned long m_thread = 0; // pthread_t is an unsigned long (or struct on some platforms)
+#endif
+        Internal*                  m_internal;
+        std::pmr::memory_resource* m_resource;
+    };
+    static_assert(std::is_trivially_destructible_v<Thread>);
+} // namespace dmt::os
+
 namespace dmt {
     using JobSignature = void (*)(uintptr_t data);
 
@@ -54,59 +89,17 @@ namespace dmt {
     };
     static_assert(sizeof(Job) == 16 && alignof(Job) == 8);
 
-    struct JobBlob
-    {
-        std::array<Job, 15> jobs;
-        uint64_t            counter;
-    };
-    template struct PoolNode<JobBlob, EBlockSize::e256B>;
-    using JobNode256B = PoolNode<JobBlob, EBlockSize::e256B>;
-
-    inline constexpr uint32_t layerCardinality = 20;
-    struct IndexArray
-    {
-        std::array<TaggedPointer, layerCardinality> ptrs;
-        std::array<EJobLayer, layerCardinality>     layers;
-        unsigned char                               padding[8];
-    };
-    template struct PoolNode<IndexArray, EBlockSize::e256B>;
-    using IndexNode256B = PoolNode<IndexArray, EBlockSize::e256B>;
-
-    /**
-     * Class which wraps a thread and ensures that the thread struct size is uniform across the supported platforms
-     * clang and gcc have, as of now (gcc 14 and clang 17) sizeof(std::thread) == 8, while msvc 19.40 has sizeof(std::thread) == 16
-     */
-    struct ThreadWrapper
-    {
-        static constexpr uint32_t tSize = 16;
-        std::thread               t;
-#if !defined(DMT_COMPILER_MSVC)
-        unsigned char padding[tSize - sizeof(std::thread)];
-#endif
-    };
-    static_assert(sizeof(ThreadWrapper) == ThreadWrapper::tSize && alignof(ThreadWrapper) == 8);
-    struct ThreadBlob
-    {
-        static constexpr uint32_t        numTs = 15;
-        std::array<ThreadWrapper, numTs> ts;
-        uint8_t                          activeCount;
-    };
-
-    template struct PoolNode<ThreadBlob, EBlockSize::e256B>;
-    using ThreadNode256B = PoolNode<ThreadBlob, EBlockSize::e256B>;
-
     class ThreadPoolV2
     {
 #undef max
-        static constexpr uint16_t nullTag     = 0xFFFU;
-        static constexpr uint32_t blockSz     = toUnderlying(EBlockSize::e256B);
-        static constexpr uint32_t numBlocks   = 10;
-        static constexpr uint32_t num32Blocks = ceilDiv(layerCardinality * static_cast<uint32_t>(sizeof(TaggedPointer)),
-                                                        layerCardinality);
-        friend void               jobWorkerThread(ThreadPoolV2* threadPool);
+        static constexpr uint16_t nullTag   = 0xFFFU;
+        static constexpr uint32_t blockSz   = toUnderlying(EBlockSize::e256B);
+        static constexpr uint32_t numBlocks = 10;
+        friend void               jobWorkerThread(void* that);
 
     public:
-        DMT_PLATFORM_API ThreadPoolV2(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        DMT_PLATFORM_API ThreadPoolV2(uint32_t                   numThreads = std::thread::hardware_concurrency(),
+                                      std::pmr::memory_resource* resource   = std::pmr::get_default_resource());
         ThreadPoolV2(ThreadPoolV2 const&)                = delete;
         ThreadPoolV2(ThreadPoolV2&&) noexcept            = delete;
         ThreadPoolV2& operator=(ThreadPoolV2 const&)     = delete;
@@ -121,14 +114,27 @@ namespace dmt {
         DMT_PLATFORM_API bool isValid() const;
 
     private:
-        static constexpr bool isTrueTaggedPointer(TaggedPointer ptr) { return ptr.tag() != nullTag; }
+        static constexpr uint32_t layerCardinality = 20;
 
+        struct JobBlob
+        {
+            std::array<Job, 15> jobs;
+            uint64_t            counter;
+            JobBlob*            next;
+        };
+        static_assert(std::is_standard_layout_v<JobBlob> && std::is_trivial_v<JobBlob>);
+
+        struct IndexArray
+        {
+            std::array<JobBlob*, layerCardinality>  ptrs;
+            std::array<EJobLayer, layerCardinality> layers;
+        };
+        static_assert(std::is_standard_layout_v<IndexArray>); // allows to use memcpy/memset
+
+    private:
         Job nextJob(bool& otherJobsRemaining, EJobLayer& outLayer);
 
-        void          forEachTrueJobIndexBlock(void (*func)(void*, TaggedPointer), void* p);
-        void          forEachTrueThreadBlock(void (*func)(void*, TaggedPointer), void* p, bool joinAll);
-        void          prepareThreadNode(TaggedPointer current, TaggedPointer next, uint8_t activeCount);
-        TaggedPointer getSmallestLayer(EJobLayer& outLayer) const;
+        std::pmr::memory_resource* m_resource;
 
         /**
          * pointer to `num32Blocks` 32B adjacent blocks from the pool allocator
@@ -136,97 +142,25 @@ namespace dmt {
          * then you will reuse the index already assigned to it, which can be found by binary search
          * Each pointed object is a linked list of arrays of jobs.
          */
-        TaggedPointer m_pIndex;
+        UniqueRef<IndexArray> m_index;
 
         /**
          * Pointer to threads running an entry point which wait on the condition variable, wake up, try to steal
          * the lowest layer job from the index, copy its data, mark the place on the index empty, and execute the job
          */
-        TaggedPointer m_pThreads;
+        UniqueRef<os::Thread[]> m_threads;
+
 
         mutable std::condition_variable_any m_cv;
-        std::pmr::memory_resource*          m_resource;
-        EJobLayer                           m_activeLayer{EJobLayer::eEmpty};
-        uint32_t                            m_numJobs      = 0;
-        std::atomic_flag                    m_jobsInFlight = ATOMIC_FLAG_INIT;
-        mutable SpinLock                    m_mtx;
-        mutable bool                        m_ready             = false;
-        mutable bool                        m_shutdownRequested = false;
+
+        mutable std::atomic_flag m_jobsInFlight = ATOMIC_FLAG_INIT;
+        EJobLayer                m_activeLayer{EJobLayer::eEmpty};
+        uint32_t                 m_numJobs = 0;
+        uint32_t                 m_numThreads;
+
+        mutable SpinLock m_mtx;
+        mutable bool     m_ready             = false;
+        mutable bool     m_shutdownRequested = false;
     };
-    static_assert(sizeof(ThreadPoolV2) == 128 && alignof(ThreadPoolV2) <= 8);
 
-    class ThreadPool
-    {
-    public:
-        DMT_PLATFORM_API ThreadPool(int const size);
-
-        DMT_PLATFORM_API ~ThreadPool();
-
-        //ThreadPool cannot be copied or assigned
-        ThreadPool(ThreadPool const&)            = delete;
-        ThreadPool& operator=(ThreadPool const&) = delete;
-
-        //ThreadPool object cannot be moved and move assignment
-        ThreadPool(ThreadPool&&)            = delete;
-        ThreadPool& operator=(ThreadPool&&) = delete;
-
-        DMT_PLATFORM_API void Shutdown();
-
-        //Allow to the user to add different functions with a arbitrary type and arbitrary arguments
-        //f function, args function arguments, detect the return a futere of the detection function type returned
-        //trailing return type
-        template <typename F, typename... Args>
-        auto AddTask(F&& f, Args&&... args) -> std::future<decltype(f(args...))>
-        {
-            //make a shared_ptr(more effient allocation)
-            auto task_ptr = std::make_shared<std::packaged_task<decltype(f(args...))()>>(
-                std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
-            auto wrapper_func = [task_ptr]() { (*task_ptr)(); };
-
-            //scope of lock m_mutex
-            //push a new task in queue
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_queue.push(wrapper_func);
-                // Wake up one thread if its waiting
-                m_conditionVariable.notify_one();
-            }
-
-            // Return turn a future
-            return task_ptr->get_future();
-        }
-
-        DMT_PLATFORM_API int QueueSize();
-
-    private:
-        //callable object
-        class ThreadWorker
-        {
-        public:
-            //set the pointer of the pool so the worker can access to the shared queue and mutex
-            ThreadWorker(ThreadPool* pool);
-
-            //execute immediately starts to execute
-            void operator()();
-
-        private:
-            ThreadPool* m_threadPool;
-        };
-        //jobs queue of void funcitions with nothing parameters
-
-    public:
-        int busyThreads;
-
-    private:
-        mutable std::mutex m_mutex;
-        //allows to put threads into a spleeping mode and wake-up
-        std::condition_variable m_conditionVariable;
-
-        std::vector<std::thread> m_threads;
-        //destroy the threads
-        bool m_shutdownRequested;
-
-        std::queue<std::function<void()>> m_queue;
-    };
 } // namespace dmt

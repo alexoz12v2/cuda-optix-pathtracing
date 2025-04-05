@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 namespace dmt::os {
+    // TODO switch to uint32_t
     uint64_t processId()
     {
         uint64_t    ret = 0;
@@ -19,37 +20,10 @@ namespace dmt::os {
         return ret;
     }
 
-    void* reserveVirtualAddressSpace(size_t size)
-    {
-        void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (address == MAP_FAILED)
-        {
-            return nullptr;
-        }
-        return address;
-    }
-
     size_t systemAlignment()
     {
         // TODO
         return 0;
-    }
-
-    bool commitPhysicalMemory(void* address, size_t size)
-    {
-        int result = mprotect(address, size, PROT_READ | PROT_WRITE);
-        return result == 0;
-    }
-
-    bool freeVirtualAddressSpace(void* address, size_t size) // true if success
-    {
-        return !munmap(address, size);
-    }
-
-    void decommitPage(void* pageAddress, size_t pageSize)
-    {
-        mprotect(pageAddress, pageSize, PROT_NONE);
-        madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
     }
 
     void* allocate(size_t _bytes, size_t _align) { return std::aligned_alloc(_bytes, _align); }

@@ -4,6 +4,16 @@
 
 #include <Windows.h>
 
+static constexpr uint32_t errorBufferSize = 1024;
+static thread_local char  s_errorBuffer[errorBufferSize];
+
+static std::string_view getLastWin32Error()
+{
+    uint32_t const   length = ::dmt::os::win32::getLastErrorAsString(s_errorBuffer, errorBufferSize);
+    std::string_view view{s_errorBuffer, length};
+    return view;
+}
+
 namespace dmt::os {
     // ChunkedFileReader ----------------------------------------------------------------------------------------------
     inline constexpr uint8_t bufferFree     = 0;
@@ -23,9 +33,6 @@ namespace dmt::os {
         // A number is a power of 2 if it has only one bit set
         return (num & (num - 1)) == 0;
     }
-
-    inline constexpr uint32_t                              sErrorBufferSize = 256;
-    static thread_local std::array<char, sErrorBufferSize> sErrorBuffer{};
 
     struct ExtraData
     {
@@ -119,18 +126,14 @@ namespace dmt::os {
                                  nullptr);
         if (data.hFile == INVALID_HANDLE_VALUE)
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
             if (ctx.isValid())
-                ctx.error("CreateFileA failed: {}", std::make_tuple(view));
+                ctx.error("CreateFileA failed: {}", std::make_tuple(getLastWin32Error()));
             return false;
         }
         if (!GetFileSizeEx(data.hFile, &fileSize))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
             if (ctx.isValid())
-                ctx.error("CreateFileA failed: {}", std::make_tuple(view));
+                ctx.error("CreateFileA failed: {}", std::make_tuple(getLastWin32Error()));
             return false;
         }
         data.fileSize = fileSize.QuadPart;
@@ -240,10 +243,8 @@ namespace dmt::os {
 
         if (!ReadFileEx(data.hFile, chunkBuffer, data.chunkSize, &data.u.uData.overlapped, completionRoutine))
         {
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
             if (ctx.isValid())
-                ctx.error("CreateFileA failed: {}", std::make_tuple(view));
+                ctx.error("ReadFileEx failed: {}", std::make_tuple(getLastWin32Error()));
             return false;
         }
         return true;
@@ -280,10 +281,8 @@ namespace dmt::os {
         if (DWORD err = GetLastError(); err != ERROR_SUCCESS && err != ERROR_IO_PENDING)
         {
             SetLastError(err);
-            uint32_t         length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-            std::string_view view{sErrorBuffer.data(), length};
             if (ctx.isValid())
-                ctx.error("Read Operation failed: {}", std::make_tuple(view));
+                ctx.error("Read Operation failed: {}", std::make_tuple(getLastWin32Error()));
             return false;
         }
 
@@ -406,6 +405,7 @@ namespace dmt::os {
     ChunkedFileReader::InputIterator& ChunkedFileReader::InputIterator::operator++()
     {
         Win32ChunkedFileReader& data = *reinterpret_cast<Win32ChunkedFileReader*>(m_pData);
+        Context                 ctx;
         if (!inRange())
         {
             return *this;
@@ -446,9 +446,9 @@ namespace dmt::os {
 
                         if (!ReadFileEx(data.hFile, ptr, data.chunkSize, pOverlapped, completionRoutine))
                         {
-                            // TODO handle better
-                            uint32_t length = win32::getLastErrorAsString(sErrorBuffer.data(), sErrorBufferSize);
-                            StrBuf   view{sErrorBuffer.data(), static_cast<int32_t>(length)};
+                            if (ctx.isValid())
+                                ctx.error("ReadFileEx error: {}", std::make_tuple(getLastWin32Error()));
+
                             m_current = m_chunkNum + m_numChunks;
                             return *this;
                         }

@@ -533,32 +533,12 @@ namespace dmt::os {
         }
     } // namespace lib
 
-    // not exported utils --------------------------------------------------------------------------------------------
-    void* reserveVirtualAddressSpace(size_t size)
-    {
-        void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
-        return address; // to check whether it is different than nullptr
-    }
-
     size_t systemAlignment()
     {
         SYSTEM_INFO sysInfo{};
         GetSystemInfo(&sysInfo);
         return static_cast<size_t>(sysInfo.dwAllocationGranularity);
     }
-
-    bool commitPhysicalMemory(void* address, size_t size)
-    {
-        void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
-        return committed != nullptr;
-    }
-
-    bool freeVirtualAddressSpace(void* address, size_t size) // true if success
-    {
-        return VirtualFree(address, 0, MEM_RELEASE);
-    }
-
-    void decommitPage(void* pageAddress, size_t pageSize) { VirtualFree(pageAddress, pageSize, MEM_DECOMMIT); }
 
     void* allocate(size_t _bytes, size_t _align) { return _aligned_malloc(_bytes, _align); }
 

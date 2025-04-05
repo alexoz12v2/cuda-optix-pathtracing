@@ -8,13 +8,13 @@
 #include <strsafe.h>
 
 namespace dmt::os::win32 {
-    uint32_t utf16le_From_utf8(char8_t const* DMT_RESTRICT _u8str,
-                               uint32_t                    _u8NumBytes,
-                               wchar_t* DMT_RESTRICT       _mediaBuf,
-                               uint32_t                    _mediaMaxBytes,
-                               wchar_t* DMT_RESTRICT       _outBuf,
-                               uint32_t                    _maxBytes,
-                               uint32_t*                   _outBytesWritten)
+    uint32_t utf16le_From_utf8(char const* DMT_RESTRICT _u8str,
+                               uint32_t                 _u8NumBytes,
+                               wchar_t* DMT_RESTRICT    _mediaBuf,
+                               uint32_t                 _mediaMaxBytes,
+                               wchar_t* DMT_RESTRICT    _outBuf,
+                               uint32_t                 _maxBytes,
+                               uint32_t*                _outBytesWritten)
     {
         if (_outBytesWritten)
             *_outBytesWritten = static_cast<uint32_t>(sizeof(wchar_t));
@@ -44,14 +44,14 @@ namespace dmt::os::win32 {
         std::unique_ptr<wchar_t[]> normBuf  = std::make_unique<wchar_t[]>(numChars);
         std::unique_ptr<wchar_t[]> midBuf   = std::make_unique<wchar_t[]>(numChars - 15);
 
-        uint32_t numOutChars = utf16le_From_utf8(std::bit_cast<char8_t const*>(str),
+        uint32_t numOutChars = utf16le_From_utf8(std::bit_cast<char const*>(str),
                                                  static_cast<uint32_t>(std::strlen(prefix)),
                                                  midBuf.get(),
                                                  (numChars - 15) << 1,
                                                  normBuf.get(),
                                                  numChars << 1,
                                                  nullptr);
-        numOutChars += utf16le_From_utf8(std::bit_cast<char8_t const*>(str),
+        numOutChars += utf16le_From_utf8(std::bit_cast<char const*>(str),
                                          static_cast<uint32_t>(std::strlen(str)),
                                          midBuf.get(),
                                          (numChars - 15) << 1,

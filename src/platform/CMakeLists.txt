@@ -29,12 +29,14 @@ block()
       platform-logging.win32.cpp
       platform-memory.win32.cpp
       platform-utils.win32.cpp
+      platform-threadPool.win32.cpp
   )
   set(platform_linux_private_sources
       platform-file.linux.cpp
       platform-logging.linux.cpp
       platform-memory.linux.cpp
       platform-utils.linux.cpp
+      platform-threadPool.linux.cpp
   )
 
   set(platform_win32_private_headers

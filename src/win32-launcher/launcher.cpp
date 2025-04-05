@@ -17,77 +17,9 @@ static constexpr nullptr_t defaultSecurityAttr = nullptr;
 
 static std::atomic_bool s_terminate = false;
 
-#define USE_NAMED_PIPES
 // TODO: Switch from console API to pseudoconsole https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
 // https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
 
-#if !defined(USE_NAMED_PIPES)
-struct PipePair
-{
-    HANDLE hChildStd_IN_Rd;
-    HANDLE hChildStd_IN_Wr;
-    HANDLE hChildStd_OUT_Rd;
-    HANDLE hChildStd_OUT_Wr;
-};
-
-struct Janitor
-{
-    Janitor() : pipes(reinterpret_cast<PipePair*>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PipePair))))
-    {
-        if (pipes == nullptr)
-            ErrorExit(L"Couldn't allocate Heap Memory for Pipes struct");
-    }
-    Janitor(Janitor const&)                = delete;
-    Janitor(Janitor&&) noexcept            = delete;
-    Janitor& operator=(Janitor const&)     = delete;
-    Janitor& operator=(Janitor&&) noexcept = delete;
-    ~Janitor() noexcept
-    {
-        if (pipes)
-            HeapFree(GetProcessHeap(), 0, pipes);
-    }
-
-    PipePair* pipes = nullptr;
-};
-
-DWORD WINAPI stdinPipeThread(void* params)
-{
-    wchar_t buffer[1024]{};
-    auto*   pipes  = reinterpret_cast<PipePair*>(params);
-    HANDLE  hStdin = GetStdHandle(STD_INPUT_HANDLE);
-    while (true) // TODO until handles are not closed
-    {
-        DWORD numBytes = 0;
-        if (!ReadFile(hStdin, buffer, 1024, &numBytes, nullptr))
-            break;
-        if (!WriteFile(pipes->hChildStd_IN_Wr, buffer, numBytes, nullptr, nullptr))
-            break;
-    }
-
-    if (!CloseHandle(pipes->hChildStd_IN_Wr))
-        ErrorExit(L"Couldn't close write end of the stdin pipe");
-
-    ExitThread(0);
-    return 0;
-}
-
-DWORD WINAPI stdoutPipeThread(void* params)
-{
-    wchar_t buffer[1024]{};
-    auto*   pipes    = reinterpret_cast<PipePair*>(params);
-    HANDLE  hStdout  = GetStdHandle(STD_OUTPUT_HANDLE);
-    HANDLE  hStderr  = GetStdHandle(STD_ERROR_HANDLE);
-    DWORD   numBytes = 0;
-    // TODO integrate stderr
-    while (ReadFile(pipes->hChildStd_OUT_Rd, buffer, 1024, &numBytes, nullptr))
-    {
-        WriteFile(hStdout, buffer, numBytes, nullptr, nullptr);
-    }
-
-    ExitThread(0);
-    return 0;
-}
-#else
 struct StdNamedPipes
 {
     StdNamedPipes(DWORD pid)
@@ -398,7 +330,7 @@ struct MutexJanitor
 };
 
 static constexpr WORD consoleColorMask = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-static constexpr WORD white            = consoleColorMask;
+static constexpr WORD white            = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
 static constexpr WORD red              = FOREGROUND_RED | FOREGROUND_INTENSITY;
 static constexpr WORD yellow           = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
 static constexpr WORD olive            = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
@@ -505,7 +437,6 @@ DWORD WINAPI stdoutPipeThread(void* params)
 
     return 0;
 }
-#endif
 
 // Helper function to get child processes of a parent process
 // https://learn.microsoft.com/en-us/windows/win32/procthread/process-enumeration
@@ -601,6 +532,15 @@ BOOL WINAPI ctrlHandler(DWORD fdwCtrlType)
     }
 }
 
+LONG WINAPI TopLevelExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
+{
+    s_terminate.store(true);
+    TerminateChildProcesses(GetCurrentProcessId());
+    //SetEvent(hShutdownEvent);
+    //RestoreConsole();
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 static std::unique_ptr<wchar_t[]> copyEnvironmentBlock()
 {
     // String of variables of type L"name=value\0"
@@ -644,7 +584,7 @@ int main()
     WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), &emoji[0], 2, nullptr, nullptr);
     WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), &utf8[0], 4, nullptr, nullptr);
 #endif
-
+    SetUnhandledExceptionFilter(TopLevelExceptionHandler);
 
     static constexpr uint32_t BUFSIZE = 4096;
     TCHAR                     moduleName[MAX_PATH];
@@ -664,6 +604,26 @@ int main()
     }
     modulePath.replace(dotComPos, 4, L".exe"); // Replace `.com` with `.exe`
 
+    // create job object
+    // Create job object to handle termination
+    HANDLE hJob = CreateJobObject(nullptr, nullptr);
+    if (hJob == nullptr)
+    {
+        ErrorExit(L"Failed to create job object.");
+    }
+
+    // Set the job object to terminate all processes when the parent terminates
+    JOBOBJECT_BASIC_LIMIT_INFORMATION jobLimit       = {};
+    jobLimit.LimitFlags                              = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobExtLimit = {};
+    jobExtLimit.BasicLimitInformation                = jobLimit;
+
+    if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jobExtLimit, sizeof(jobExtLimit)))
+    {
+        ErrorExit(L"Failed to set job object information.");
+    }
+
+
     // Prepare command line
     std::wstring commandLine = L"\"" + modulePath + L"\" ";
     int32_t      numArgs     = 0;
@@ -680,39 +640,13 @@ int main()
     saAttr.bInheritHandle       = TRUE; // This makes pipe handles to be inherited
     saAttr.lpSecurityDescriptor = nullptr;
 
-#if !defined(USE_NAMED_PIPES)
-    Janitor j;
-
-    // create a pipe for the child process's STDOUT and STDIN
-    if (!CreatePipe(&j.pipes->hChildStd_OUT_Rd, &j.pipes->hChildStd_OUT_Wr, &saAttr, 0))
-        ErrorExit(L"Failed to create STDOUT Pipe");
-
-    if (!CreatePipe(&j.pipes->hChildStd_IN_Rd, &j.pipes->hChildStd_IN_Wr, &saAttr, 0))
-        ErrorExit(L"Failed to create STDIN Pipe");
-
-    // Make sure that child cannot read from stdout and write to stdin
-    if (!SetHandleInformation(j.pipes->hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0))
-        ErrorExit(L"Couldn't Turn off inheritance of the Read end of the STDOUT Pipe");
-
-    if (!SetHandleInformation(j.pipes->hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0))
-        ErrorExit(L"Couldn't turn off inheriance of the Write end of the STDIN Pipe");
-
-    STARTUPINFO startupInfo = {};
-    startupInfo.cb          = sizeof(STARTUPINFO);
-    startupInfo.dwFlags     = STARTF_USESTDHANDLES; // Use redirected stdin/stdout
-    startupInfo.hStdError   = j.pipes->hChildStd_OUT_Wr;
-    startupInfo.hStdOutput  = j.pipes->hChildStd_OUT_Wr;
-    startupInfo.hStdInput   = j.pipes->hChildStd_IN_Rd;
-#else
-
     Janitor     j;
-    STARTUPINFO startupInfo = {};
-    startupInfo.cb          = sizeof(STARTUPINFO);
-    startupInfo.dwFlags     = STARTF_USESTDHANDLES; // Use redirected stdin/stdout
-    startupInfo.hStdError   = j.data->hStdErr_Wr;
-    startupInfo.hStdOutput  = j.data->hStdOut_Wr;
-    startupInfo.hStdInput   = j.data->hStdIn_Rd;
-#endif
+    STARTUPINFO startupInfo   = {};
+    startupInfo.cb            = sizeof(STARTUPINFO);
+    startupInfo.dwFlags       = STARTF_USESTDHANDLES; // Use redirected stdin/stdout
+    startupInfo.hStdError     = j.data->hStdErr_Wr;
+    startupInfo.hStdOutput    = j.data->hStdOut_Wr;
+    startupInfo.hStdInput     = j.data->hStdIn_Rd;
     DWORD const creationFlags = CREATE_SUSPENDED              // use `ResumeThread` to manally start
                                 | CREATE_UNICODE_ENVIRONMENT; // lpEnvironment will use unicode characters
 
@@ -731,11 +665,16 @@ int main()
                         &startupInfo,
                         &processInfo))
         ErrorExit(L"ERROR: Failed to create process");
+
+    // Assign child process to job object
+    if (!AssignProcessToJobObject(hJob, processInfo.hProcess))
+    {
+        ErrorExit(L"Failed to assign process to job object.");
+    }
+
     atexit([]() { TerminateChildProcesses(GetCurrentProcessId()); });
 
-#if defined(USE_NAMED_PIPES)
     j.data->pipes.connectPipes();
-#endif
 
     if (!SetConsoleCtrlHandler(ctrlHandler, true))
         ErrorExit(L"SetConsoleCtrlHandler");
@@ -743,18 +682,10 @@ int main()
     // Start IO Listener threads
     DWORD  tids[2];
     HANDLE hThreads[2];
-#if !defined(USE_NAMED_PIPES)
-    hThreads[0] = CreateThread(nullptr, 0, stdoutPipeThread, j.pipes, 0, &tids[0]);
-#else
     hThreads[0] = CreateThread(nullptr, 0, stdoutPipeThread, j.data, 0, &tids[0]);
-#endif
     if (!hThreads[0])
         ErrorExit(L"Couldn't create stdout listener thread");
-#if !defined(USE_NAMED_PIPES)
-    hThreads[1] = CreateThread(nullptr, 0, stdinPipeThread, j.pipes, 0, &tids[1]);
-#else
     hThreads[1] = CreateThread(nullptr, 0, stdinPipeThread, j.data, 0, &tids[1]);
-#endif
     if (!hThreads[1])
         ErrorExit(L"Couldn't create stdin listener thread");
 
@@ -772,9 +703,7 @@ int main()
         TerminateThread(hThreads[1], 0);
     }
 
-#if defined(USE_NAMED_PIPES)
     j.data->closeHandles();
-#endif
 
     // Retrieve the exit code
     DWORD exitCode;
@@ -783,11 +712,12 @@ int main()
     // Clean up
     CloseHandle(processInfo.hThread);
     CloseHandle(processInfo.hProcess);
+    CloseHandle(hJob); // Close job object handle
 
     return static_cast<int>(exitCode);
 }
 
-
+// TO REMOVE
 // Format a readable error message, display a message box,
 // and exit from the application.
 [[noreturn]] void ErrorExit(wchar_t const* lpszFunction)

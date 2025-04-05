@@ -1,9 +1,11 @@
 # Introduction
 
 ## Glossary
+
 - **Program**: executable device come, termed shader by Graphics APIs like Vulkan (I'll call them shaders anyways)
 
 Programs in the Ray Tracing Pipeline defined by OptiX
+
 - **Ray Generation**: Entry point to the ray tracing pipeline, invoked in parallel for each pixel, sample or other user-defined work assignment (like Rays) (page 107)
 - **Intersection**: Implements a ray-primitive intersection test, invoked dureing traversal (page 118)
 - **Any Hit**: Called when a traced ray finds a new, potentially closest, intersection point, such as for shadow computation (page 118)
@@ -17,8 +19,10 @@ Programs in the Ray Tracing Pipeline defined by OptiX
 
 **Shader Binding Table**: Connects geometric data to programs. A *Record* a is a component of the table which is selected at runtime by using 
 offsets specified when acceleration structures are created. A record is broken up into
+
 - *Record Header*: Used to identify programmatic behaviour. A primitive, for example, would identify an intersection
 - *Record Data*: Any data you need at program execution (example, a color)
+
 ```cpp
 // 0. OptixDeviceContext context already created
 // 1. Create program groups for each type of program you need
@@ -61,7 +65,8 @@ barycentric coordinates (U, V).
 **Buffer**: Optix's lingo for a `CUdeviceptr`
 
 **Acceleration Structures**: Bounding Volume Hierarchy. There are 2 types
-- *Geometry Acceleration Structure*: Built over primitive (triangle, curve, sphere or user-defined) 
+
+- *Geometry Acceleration Structure*: Built over primitive (triangle, curve, sphere or user-defined)
 (called bottom-level acceleration structure in Vulkan)
 - *Instance Acceleration Structure*: Built over Motion Transform Nodes (which reference other geometry), allowing for instancing 
 (called top-level acceleration structure in Vulkan)
@@ -69,7 +74,9 @@ barycentric coordinates (U, V).
 **Opacity Micromaps**: records opacity information for a triangle (page 41)
 
 ## Traversing the Scene Graph
+
 Optix Defines a scene as a Graph whose nodes are called *Traversables*. There are 5 types of Traversables:
+
 - *Instance Acceleration Structure*
 - *Geometry Acceleration Structure* (can only have 1 child of type geometry (page 33))
 - *Static Transform* (There can be only one in any path, and their effect is nullified when there are motion transforms?)
@@ -80,11 +87,14 @@ Transform nodes are applied to all children
 ![Scene Graph Example](resources/scene_graph.png)
 
 ## Accessing the OptiX Libary
+
 Accessing any OptiX function is done through `OptixFunctionTable`, which is recovered by looking at some DLL (`nvoptix.dll` windows, `libnvoptix.so.1` on linux). On 
 linux, the file must be present in the search path, while on windows you can look into the OpenGL related registry values. Anyways, you shouldn't do this yourself, OptiX
 ships with the function `optixInit` in the header `optix_stubs.h`, which 
+
 - contains the `optixInit` function to ease the loading of the optix library
 - Contains inlined function which directly call their counterparts from the global function table
+
 ```cpp
 inline OptixResult optixDeviceContextCreate( CUcontext fromContext, const OptixDeviceContextOptions* options, OptixDeviceContext* context )
 {
@@ -92,19 +102,23 @@ inline OptixResult optixDeviceContextCreate( CUcontext fromContext, const OptixD
 }
 ```
 
-# Context (page 21)
+## Context (page 21)
 
 Manages a single GPU. Created with `optixDeviceContextCreate` and `optixDeviceContextDestroy`.
 
 We can register a *log callback*, of type
+
 ```cpp
 void(*OptixLogCallback)(uint32_t level, char const* tag, char const* message, void* data);
 ```
+
 with the function `optixDeviceContextSetLogCallback`. This function is multithreaded and therefore must be thread-safe.
+
 - TODO: Look in the debugger which thread calls this callback
 
 **Compilation Caching**: When creating an `OptixModule`, `OptixProgramGruop`, `OptixPipeline`, their artifacts will be cached on disk. Functions 
 to control the cache's behaviour
+
 - `optixDeviceContextSetCacheEnabled`: Enables or disables caching on disk (*Lock the directory if enabled*). Note: The Environment Variable `OPTIX_CACHE_MAXSIZE`,
 if set to 0, will effectively disable the cache, overriding this function
 - `optixDeviceContextSetCacheLocation`: Sets the directory for the cache. Can be overridden by the environment variable `OPTIX_CACHE_PATH`
@@ -114,8 +128,10 @@ the environment variable `OPTIX_CACHE_MAXSIZE`, which, if set, it is used as hig
 
 **Validation Mode**: Validation Layers are additional, opt-in, controls done in the library routines. They reduce performance but help catching errors during tests
 and debug. They are set by enabling them at context creation
+
 ```cpp
 OptixDeviceContextOptions options = {}
 options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
 ```
+
 Validation mode implicitly adds an Exception Program which reports all exceptions.

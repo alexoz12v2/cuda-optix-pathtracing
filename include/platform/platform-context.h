@@ -52,8 +52,8 @@ namespace dmt {
             uint32_t numHandlers = 0;
 
             // 1 byte aligned
-            char8_t logBuffer[logBufferNumBytes]{};
-            char8_t argLogBuffer[argLogBufferNumBytes]{};
+            char logBuffer[logBufferNumBytes]{};
+            char argLogBuffer[argLogBufferNumBytes]{};
         };
 
         Common common;

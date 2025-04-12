@@ -50,6 +50,8 @@ namespace dmt {
 
             // 4 byte aligned
             uint32_t numHandlers = 0;
+            uint32_t lastLogTid  = 0;
+            SpinLock mtx;
 
             // 1 byte aligned
             char logBuffer[logBufferNumBytes]{};
@@ -187,13 +189,20 @@ namespace dmt {
                    LogLocation const&          _pysLoc,
                    std::source_location const& loc)
         {
+            std::lock_guard lk{m_pimpl->common.mtx};
             if (!m_pimpl->anyHandlerEnabledFor(_level))
                 return;
 
+            uint32_t const tid = os::threadId();
+            if (m_pimpl->common.lastLogTid != tid)
+            {
+                flush();
+                m_pimpl->common.lastLogTid = tid;
+            }
 
 #if defined(__CUDA_ARCH__)
-                // on the GPU, take a free buffer from common.gpuLogBuffers, if not nullptr,
-                // create a record using those buffers, (each buffer contains 2 char buffers, a log record, and a bool to say whether it is being used)
+            // on the GPU, take a free buffer from common.gpuLogBuffers, if not nullptr,
+            // create a record using those buffers, (each buffer contains 2 char buffers, a log record, and a bool to say whether it is being used)
 #else
             auto record = createRecord(_fmt,
                                        _level,

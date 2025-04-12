@@ -106,21 +106,28 @@ namespace dmt {
         ThreadPoolV2& operator=(ThreadPoolV2&&) noexcept = delete;
         DMT_PLATFORM_API ~ThreadPoolV2() noexcept;
 
-        DMT_PLATFORM_API void addJob(Job const& job, EJobLayer layer);
+        DMT_PLATFORM_API bool addJob(Job const& job, EJobLayer layer);
         DMT_PLATFORM_API void cleanup();
         DMT_PLATFORM_API void kickJobs();
         DMT_PLATFORM_API void pauseJobs();
         DMT_PLATFORM_API bool otherLayerActive(EJobLayer& layer) const;
         DMT_PLATFORM_API bool isValid() const;
+        DMT_PLATFORM_API std::pmr::string debugPrintLayerJobs(
+            EJobLayer                  layer,
+            std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const;
+
+
+        DMT_PLATFORM_API uint32_t numJobs(EJobLayer layer) const;
 
     private:
         static constexpr uint32_t layerCardinality = 20;
 
         struct JobBlob
         {
-            std::array<Job, 15> jobs;
-            uint64_t            counter;
-            JobBlob*            next;
+            static constexpr uint32_t     maxBlobCount = 15;
+            std::array<Job, maxBlobCount> jobs;
+            uint64_t                      counter;
+            JobBlob*                      next;
         };
         static_assert(std::is_standard_layout_v<JobBlob> && std::is_trivial_v<JobBlob>);
 
@@ -138,7 +145,10 @@ namespace dmt {
         };
 
     private:
-        Job nextJob(bool& otherJobsRemaining, EJobLayer& outLayer);
+        Job              nextJob(bool& otherJobsRemaining, EJobLayer& outLayer);
+        std::pmr::string debugPrintLayerJobsUnlocked(
+            EJobLayer                  layer,
+            std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const;
 
         std::pmr::memory_resource* m_resource;
 

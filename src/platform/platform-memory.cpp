@@ -191,6 +191,8 @@ namespace dmt {
 
         if (void* ptr = scrollAndTagBlocks(oldNumBlock, numBlocksRequired); ptr)
             return ptr;
+
+        return nullptr;
     }
 
     void* SyncPoolAllocator::scrollAndTagBlocks(size_t startBlkIdx, size_t numBlocksRequired)

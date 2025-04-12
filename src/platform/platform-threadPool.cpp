@@ -1,4 +1,4 @@
-#include "platform-threadPool.h"
+﻿#include "platform-threadPool.h"
 
 #include "platform-context.h"
 
@@ -28,6 +28,7 @@ namespace dmt {
         // forever
         while (true)
         {
+            // Context ctx;
             // wait for a job to become available
             {
                 std::unique_lock<decltype(threadPool->m_mtx)> lk{threadPool->m_mtx};
@@ -49,17 +50,27 @@ namespace dmt {
                 // copy the next job
                 copy = threadPool->nextJob(otherRemaining, currentLayer);
 
-                if (activeLayer != currentLayer)
-                {
-                    threadPool->m_activeLayer = currentLayer;
-                }
+                threadPool->m_activeLayer = currentLayer;
             }
 
+            // uncomment to debug
+            // static std::mutex mtx;
             if (copy.func)
             {
+                //if (ctx.isValid() && ctx.isTraceEnabled())
+                //    ctx.trace("number of jobs remaining {}, func: {}",
+                //              std::make_tuple(threadPool->numJobs(currentLayer), copy.func));
+                //std::lock_guard lk{mtx};
                 threadPool->m_jobsInFlight.test_and_set();
+                //if (ctx.isValid() && ctx.isTraceEnabled())
+                //    ctx.trace("index: {}", std::make_tuple(index));
                 copy.func(copy.data, index);
-                if (!otherRemaining)
+                copy.func = nullptr;
+                if (otherRemaining)
+                {
+                    threadPool->m_cv.notify_all(); // 👈 Wake up another worker if more work is pending
+                }
+                else
                 {
                     threadPool->m_jobsInFlight.clear();
                 }
@@ -97,7 +108,9 @@ namespace dmt {
         for (uint32_t i = 0; i != layerCardinality; ++i)
         {
             // TODO maybe: alternative: allocate them all at once?
-            m_index->ptrs[i]          = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+            m_index->ptrs[i] = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+            memset(m_index->ptrs[i], 0, sizeof(JobBlob));
+            std::construct_at(m_index->ptrs[i]);
             m_index->ptrs[i]->next    = nullptr;
             m_index->ptrs[i]->counter = 0;
         }
@@ -117,7 +130,7 @@ namespace dmt {
             std::lock_guard<decltype(m_mtx)> lk{m_mtx};
             m_ready = true;
         }
-        m_cv.notify_one();
+        m_cv.notify_all();
     }
 
     void ThreadPoolV2::pauseJobs()
@@ -169,78 +182,53 @@ namespace dmt {
 
     ThreadPoolV2::~ThreadPoolV2() noexcept { cleanup(); }
 
-    void ThreadPoolV2::addJob(Job const& job, EJobLayer layer)
+    bool ThreadPoolV2::addJob(Job const& job, EJobLayer layer)
     {
         std::lock_guard<SpinLock> lk{m_mtx};
         if (!m_index)
-            return;
+            return false;
 
-        // Search for the layer in the current index
-        int insertPos   = -1;
-        int existingPos = -1;
-        for (uint32_t i = 0; i < layerCardinality; ++i)
+        auto layerIndex             = toUnderlying(layer);
+        m_index->layers[layerIndex] = layer;
+
+        JobBlob*& head = m_index->ptrs[layerIndex];
+        if (!head)
         {
-            if (m_index->layers[i] == layer)
+            head = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+            if (!head)
+                return false;
+
+            memset(head, 0, sizeof(JobBlob));
+            std::construct_at(head);
+        }
+
+        JobBlob* blob = head;
+        while (blob)
+        {
+            for (uint32_t l = 0; l < JobBlob::maxBlobCount; ++l)
             {
-                existingPos = static_cast<int>(i);
-                break;
+                if (!blob->jobs[l].func) // unused slot
+                {
+                    blob->jobs[l] = job;
+                    ++blob->counter;
+                    return true;
+                }
             }
 
-            if (m_index->layers[i] == EJobLayer::eEmpty || m_index->layers[i] > layer)
-            {
-                insertPos = static_cast<int>(i);
-                break;
-            }
-        }
-
-        // Insert layer if not found
-        int layerIndex = 0;
-        if (existingPos >= 0)
-        {
-            layerIndex = existingPos;
-        }
-        else if (insertPos >= 0)
-        {
-            // Shift elements to make room
-            for (int i = layerCardinality - 1; i > insertPos; --i)
-            {
-                m_index->layers[i] = m_index->layers[i - 1];
-                m_index->ptrs[i]   = m_index->ptrs[i - 1];
-            }
-
-            m_index->layers[insertPos] = layer;
-
-            // Allocate new JobBlob
-            m_index->ptrs[insertPos] = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
-            std::construct_at(m_index->ptrs[insertPos]);
-            m_index->ptrs[insertPos]->counter = 0;
-            m_index->ptrs[insertPos]->next    = nullptr;
-
-            layerIndex = insertPos;
-        }
-        else
-        {
-            // No space to insert layer
-            return;
-        }
-
-        JobBlob* blob = m_index->ptrs[layerIndex];
-        while (blob->counter >= blob->jobs.size())
-        {
             if (!blob->next)
             {
                 blob->next = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+                if (!blob->next)
+                    return false;
+
+                memset(blob->next, 0, sizeof(JobBlob));
                 std::construct_at(blob->next);
-                blob->next->counter = 0;
-                blob->next->next    = nullptr;
             }
+
             blob = blob->next;
         }
 
-        // Insert the job
-        blob->jobs[blob->counter++] = job;
-
-        ++m_numJobs;
+        return false; // Should never happen
     }
 
     Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
@@ -251,35 +239,47 @@ namespace dmt {
         for (uint32_t i = 0; i < layerCardinality; ++i)
         {
             JobBlob* blob = m_index->ptrs[i];
-            if (!blob || blob->counter == 0)
-                continue;
+            JobBlob* prev = nullptr;
 
-            // Found a job to return
-            result   = blob->jobs[0];
-            outLayer = m_index->layers[i];
-
-            // Shift remaining jobs in this blob forward
-            for (uint64_t j = 1; j < blob->counter; ++j)
+            while (blob)
             {
-                blob->jobs[j - 1] = blob->jobs[j];
-            }
-
-            blob->counter--;
-
-            // Check for any remaining jobs in any layer
-            for (uint32_t j = 0; j < layerCardinality; ++j)
-            {
-                if (m_index->ptrs[j] && m_index->ptrs[j]->counter > 0)
+                for (size_t j = 0; j < blob->jobs.size(); ++j)
                 {
-                    otherJobsRemaining = true;
-                    break;
-                }
-            }
+                    if (blob->jobs[j].func != nullptr)
+                    {
+                        result   = blob->jobs[j];
+                        outLayer = m_index->layers[i];
 
-            return result;
+                        blob->jobs[j].func = nullptr;
+                        --blob->counter;
+                        --m_numJobs;
+
+                        // Optional: compact blob if needed
+
+                        // Check if other jobs exist
+                        for (uint32_t k = 0; k < layerCardinality; ++k)
+                        {
+                            JobBlob* check = m_index->ptrs[k];
+                            while (check)
+                            {
+                                if (check->counter > 0 || check->next)
+                                {
+                                    otherJobsRemaining = true;
+                                    return result;
+                                }
+                                check = check->next;
+                            }
+                        }
+
+                        return result;
+                    }
+                }
+
+                prev = blob;
+                blob = blob->next;
+            }
         }
 
-        // Nothing to do
         outLayer = EJobLayer::eEmpty;
         return result;
     }
@@ -301,5 +301,78 @@ namespace dmt {
     }
 
     bool ThreadPoolV2::isValid() const { return m_resource != nullptr && m_index != nullptr && m_threads != nullptr; }
+
+    std::pmr::string ThreadPoolV2::debugPrintLayerJobs(EJobLayer layer, std::pmr::memory_resource* resource) const
+    {
+        std::lock_guard<SpinLock> lk{m_mtx};
+
+        return debugPrintLayerJobsUnlocked(layer, resource);
+    }
+
+    DMT_PLATFORM_API uint32_t ThreadPoolV2::numJobs(EJobLayer layer) const
+    {
+        if (!m_index)
+            return 0;
+
+        uint32_t counter = 0;
+        for (uint32_t l = 0; l < layerCardinality; ++l)
+        {
+            if (m_index->layers[l] == layer)
+            {
+                JobBlob* blob = m_index->ptrs[l];
+                while (blob)
+                {
+                    counter += blob->counter;
+                    blob = blob->next;
+                }
+            }
+        }
+
+        return counter;
+    }
+
+    std::pmr::string ThreadPoolV2::debugPrintLayerJobsUnlocked(EJobLayer layer, std::pmr::memory_resource* resource) const
+    {
+        std::pmr::string result(resource);
+
+
+        int layerIndex = -1;
+        for (uint32_t i = 0; i < layerCardinality; ++i)
+        {
+            if (m_index->layers[i] == layer)
+            {
+                layerIndex = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (layerIndex < 0)
+        {
+            result += "Layer not found.\n";
+            return result;
+        }
+
+        JobBlob* blob      = m_index->ptrs[layerIndex];
+        uint32_t blobIndex = 0;
+
+        while (blob)
+        {
+            result += std::format("Blob {}: counter = {}\n", blobIndex, blob->counter);
+
+            for (size_t i = 0; i < blob->jobs.size(); ++i)
+            {
+                Job const& job = blob->jobs[i];
+                if (job.func)
+                    result += std::format("  [{}] func = {}\n", i, reinterpret_cast<void*>(job.func));
+                else
+                    result += std::format("  [{}] <null>\n", i);
+            }
+
+            blob = blob->next;
+            ++blobIndex;
+        }
+
+        return result;
+    }
 
 } // namespace dmt

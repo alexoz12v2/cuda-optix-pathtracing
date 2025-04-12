@@ -223,43 +223,42 @@ namespace dmt::jobs {
         uint32_t tilesPerCol = dmt::ceilDiv(data->height, data->tileHeight);
         uint32_t totalTiles  = tilesPerRow * tilesPerCol;
 
-        while (true)
+        uint32_t tileIdx = data->tilesDone.fetch_add(1, std::memory_order_acquire);
+        ctx.trace("TID: {}, Tile Index: {}", std::make_tuple(tid, tileIdx));
+        if (tileIdx >= totalTiles)
+            return;
+
+        uint32_t tileRow = tileIdx / tilesPerRow;
+        uint32_t tileCol = tileIdx % tilesPerRow;
+
+        uint32_t rowStart = tileRow * data->tileHeight;
+        uint32_t colStart = tileCol * data->tileWidth;
+
+        for (uint32_t r = 0; r < data->tileHeight; ++r)
         {
-            uint32_t tileIdx = data->tilesDone.fetch_add(1, std::memory_order_acquire);
-            if (tileIdx >= totalTiles)
-                break;
+            uint32_t imgRow = rowStart + r;
+            if (imgRow >= data->height)
+                continue;
 
-            uint32_t tileRow = tileIdx / tilesPerRow;
-            uint32_t tileCol = tileIdx % tilesPerRow;
+            float rowNorm = float(imgRow) / float(data->height - 1);
 
-            uint32_t rowStart = tileRow * data->tileHeight;
-            uint32_t colStart = tileCol * data->tileWidth;
-
-            for (uint32_t r = 0; r < data->tileHeight; ++r)
+            for (uint32_t c = 0; c < data->tileWidth; ++c)
             {
-                uint32_t imgRow = rowStart + r;
-                if (imgRow >= data->height)
+                uint32_t imgCol = colStart + c;
+                if (imgCol >= data->width)
                     continue;
 
-                float rowNorm = float(imgRow) / float(data->height - 1);
+                float colNorm = float(imgCol) / float(data->width - 1);
 
-                for (uint32_t c = 0; c < data->tileWidth; ++c)
-                {
-                    uint32_t imgCol = colStart + c;
-                    if (imgCol >= data->width)
-                        continue;
+                Color pixel = gradientColor(rowNorm, colNorm, GradientDirection::DiagonalDown, data->start, data->end);
 
-                    float colNorm = float(imgCol) / float(data->width - 1);
-
-                    Color pixel = gradientColor(rowNorm, colNorm, GradientDirection::DiagonalDown, data->start, data->end);
-
-                    uint32_t idx           = dmt::img::encodeMorton2D(imgRow, imgCol);
-                    data->mortonImage[idx] = pixel;
-                }
+                uint32_t idx           = dmt::img::encodeMorton2D(imgRow, imgCol);
+                data->mortonImage[idx] = pixel;
             }
-
-            ctx.log("Wrote tile {{{}, {}}}", std::make_tuple(tileRow, tileCol));
         }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ctx.log("Wrote tile {{{}, {}}}", std::make_tuple(tileRow, tileCol));
     }
 
 } // namespace dmt::jobs
@@ -444,7 +443,7 @@ int guardedMain()
         for (uint32_t tilesDone = jobData.tilesDone.load(std::memory_order_acquire); tilesDone < numTiles;
              tilesDone          = jobData.tilesDone.load(std::memory_order_acquire))
         {
-            ctx.log("Progress: {} of {} tiles", std::make_tuple(tilesDone, numTiles));
+            //ctx.log("Progress: {} of {} tiles", std::make_tuple(tilesDone, numTiles));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         threadPool.pauseJobs();

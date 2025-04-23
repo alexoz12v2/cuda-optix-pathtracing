@@ -23,6 +23,8 @@
 #include <compare>
 #include <cstdint>
 
+// Note: Don't include platform-utils here!
+
 namespace dmt {
     /**
      * Memory tags for meaningful object allocation tracking. Whenever you add something here, make sure to add a string representation

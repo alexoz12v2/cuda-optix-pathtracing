@@ -12,7 +12,7 @@
     "nvrtcGetLoweredName": "nvrtcResult (*)(nvrtcProgram prog, const char *const name_expression, const char** lowered_name)",
     "nvrtcGetNumSupportedArchs": "nvrtcResult (*)(int* numArchs)",
     "nvrtcGetOptiXIR": "nvrtcResult (*)(nvrtcProgram prog, char *optixir)",
-    "nvrtcGetOptiXIRSize": "nvrtcResult (*)(nvrtcProgram prog, char *LTOIR)",
+    "nvrtcGetOptiXIRSize": "nvrtcResult (*)(nvrtcProgram prog, size_t* optixirSizeRet)",
     "nvrtcGetPTX": "nvrtcResult (*)(nvrtcProgram prog, char *ptx)",
     "nvrtcGetPTXSize": "nvrtcResult (*)(nvrtcProgram prog, size_t *ptxSizeRet)",
     "nvrtcGetProgramLog": "nvrtcResult (*)(nvrtcProgram prog, char *log)",

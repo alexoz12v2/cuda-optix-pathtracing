@@ -50,6 +50,17 @@ namespace dmt::os {
                                               std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     } // namespace env
 
+    struct DMT_PLATFORM_API FileStat
+    {
+        bool     valid       = false;
+        bool     isDirectory = false;
+        uint64_t size        = 0;
+
+        uint64_t accessTime   = 0; // POSIX: atime, Windows: ftLastAccessTime
+        uint64_t modifiedTime = 0; // POSIX: mtime, Windows: ftLastWriteTime
+        uint64_t creationTime = 0; // POSIX: birthtime (or ctime), Windows: ftCreationTime
+    };
+
     class DMT_PLATFORM_API Path
     {
     public:
@@ -63,6 +74,8 @@ namespace dmt::os {
 
         static Path executableDir(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
+        FileStat stat() const;
+
         void parent_();
         Path parent() const;
 
@@ -72,8 +85,8 @@ namespace dmt::os {
         // uses the same memory reosurce
         Path operator/(char const* pathComponent) const;
 
-        bool isDirectory() const { return m_isDir; }
-        bool isFile() const { return !m_isDir; }
+        bool isDirectory() const { return m_valid && m_isDir; }
+        bool isFile() const { return m_valid && !m_isDir; }
         // synonym to "is valid and exists in the filesystem"
         bool isValid() const { return m_valid; }
 
@@ -140,6 +153,10 @@ namespace dmt::os {
         uint32_t                   m_searchPathsCapacity = 0;
         bool                       m_canGrow;
     };
+
+    DMT_PLATFORM_API std::pmr::string readFileContents(
+        Path const&                path,
+        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
     namespace lib {
         DMT_PLATFORM_API void* getFunc(void* library, char const* funcName);

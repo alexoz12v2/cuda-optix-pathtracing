@@ -1,6 +1,7 @@
 #include "platform-utils.h"
 
 #include "platform-os-utils.win32.h"
+#include "platform-memory.h"
 
 #pragma comment(lib, "mincore")
 #pragma comment(lib, "Shlwapi.lib")
@@ -284,6 +285,7 @@ namespace dmt::os {
     {
         m_data = m_resource->allocate(m_capacity);
         memcpy(m_data, other.m_data, m_dataSize);
+        memset(static_cast<char*>(m_data) + other.m_dataSize, 0, 2);
     }
 
     // Copy Assignment
@@ -293,6 +295,7 @@ namespace dmt::os {
         {
             void* newData = m_resource->allocate(other.m_capacity);
             memcpy(newData, other.m_data, other.m_dataSize);
+            memset(static_cast<char*>(m_data) + other.m_dataSize, 0, 2);
 
             // Free old memory
             m_resource->deallocate(m_data, m_capacity);
@@ -360,7 +363,7 @@ namespace dmt::os {
             return; // Don't modify root path (e.g., \\?\C:\)
 
         // Handle UNC root case (\\Server\Share)
-        if (path[0] == L'\\' && path[1] == L'\\')
+        if (path[0] == L'\\' && path[1] == L'\\' && path[2] != L'?')
         {
             int slashCount = 0;
             for (int i = 2; i < len; ++i)
@@ -381,6 +384,7 @@ namespace dmt::os {
             {
                 path[i]    = L'\0';               // Null-terminate
                 m_dataSize = i * sizeof(wchar_t); // Update byte size
+                m_isDir    = true;
                 return;
             }
         }
@@ -411,8 +415,9 @@ namespace dmt::os {
         if (compLen == 0)
             return; // Invalid input
 
-        wchar_t* compBuffer = new wchar_t[compLen];
-        MultiByteToWideChar(CP_UTF8, 0, pathComponent, -1, compBuffer, compLen);
+        auto compBuffer = dmt::makeUniqueRef<wchar_t[]>(m_resource, compLen);
+
+        MultiByteToWideChar(CP_UTF8, 0, pathComponent, -1, compBuffer.get(), compLen);
 
         // Compute new size needed
         size_t additionalSize = compLen * sizeof(wchar_t);
@@ -438,17 +443,17 @@ namespace dmt::os {
             *pathEnd++ = L'\\';
 
         // Append new component
-        memcpy(pathEnd, compBuffer, additionalSize);
+        memcpy(pathEnd, compBuffer.get(), additionalSize);
         m_dataSize += additionalSize - sizeof(wchar_t); // Exclude null terminator
 
         // Ensure null termination
         pathEnd[compLen - 1] = L'\0';
 
         // Update validity
-        m_isDir = true; // Assume directory until checked
-        m_valid = PathFileExistsW(reinterpret_cast<wchar_t*>(m_data));
-
-        delete[] compBuffer;
+        pathStart = reinterpret_cast<wchar_t*>(m_data);
+        m_valid   = PathFileExistsW(pathStart);
+        if (m_valid)
+            m_isDir = PathIsDirectoryW(pathStart);
     }
 
     // Returns a new Path object with an appended component
@@ -458,6 +463,71 @@ namespace dmt::os {
         copy /= pathComponent;
         return copy;
     }
+
+    FileStat Path::stat() const
+    {
+        FileStat info;
+        if (!m_valid)
+            return info;
+
+        wchar_t const*            wpath = static_cast<wchar_t const*>(m_data);
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        if (!GetFileAttributesExW(wpath, GetFileExInfoStandard, &data))
+            return info;
+
+        info.valid       = true;
+        info.isDirectory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        info.size        = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+
+        ULARGE_INTEGER t;
+
+        t.LowPart       = data.ftLastAccessTime.dwLowDateTime;
+        t.HighPart      = data.ftLastAccessTime.dwHighDateTime;
+        info.accessTime = (t.QuadPart - 116444736000000000ULL) / 10000000ULL;
+
+        t.LowPart         = data.ftLastWriteTime.dwLowDateTime;
+        t.HighPart        = data.ftLastWriteTime.dwHighDateTime;
+        info.modifiedTime = (t.QuadPart - 116444736000000000ULL) / 10000000ULL;
+
+        t.LowPart         = data.ftCreationTime.dwLowDateTime;
+        t.HighPart        = data.ftCreationTime.dwHighDateTime;
+        info.creationTime = (t.QuadPart - 116444736000000000ULL) / 10000000ULL;
+
+        return info;
+    }
+
+    // Basic File Management -----------------------------------------------------------------------------------------
+    std::pmr::string readFileContents(Path const& path, std::pmr::memory_resource* resource)
+    {
+        std::pmr::string str{resource};
+        if (!path.isFile())
+            return str;
+
+        FileStat stats    = path.stat();
+        uint64_t fileSize = stats.size;
+        if (fileSize == 0)
+            return str;
+
+        str.resize(static_cast<size_t>(fileSize));
+        wchar_t const* wpath = static_cast<wchar_t const*>(path.internalData());
+
+        HANDLE hFile = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+        if (hFile == INVALID_HANDLE_VALUE)
+            return std::pmr::string{resource};
+
+        DWORD bytesRead = 0;
+        if (!ReadFile(hFile, str.data(), static_cast<DWORD>(fileSize), &bytesRead, nullptr))
+        {
+            CloseHandle(hFile);
+            return std::pmr::string{resource};
+        }
+
+        CloseHandle(hFile);
+
+        return str;
+    }
+
 
     // Library Loader ------------------------------------------------------------------------------------------------
     void* LibraryLoader::loadLibrary(std::string_view name, bool useSystemPaths, Path const* pathOverride) const

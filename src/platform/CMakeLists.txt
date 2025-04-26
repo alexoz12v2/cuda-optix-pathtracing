@@ -10,6 +10,7 @@ block()
       ${HEADER_DIR}/platform-logging.h
       ${HEADER_DIR}/platform-macros.h
       ${HEADER_DIR}/platform-memory.h
+      ${HEADER_DIR}/platform-memory-stackAllocator.h
       ${HEADER_DIR}/platform-threadPool.h
       ${HEADER_DIR}/platform-utils.h
       ${HEADER_DIR}/platform.h
@@ -20,6 +21,7 @@ block()
       platform-launch.cpp
       platform-logging.cpp
       platform-memory.cpp
+      platform-memory-stackAllocator.cpp
       platform-threadPool.cpp
       platform-utils.cpp
       platform.cpp
@@ -27,8 +29,8 @@ block()
   set(platform_win32_private_sources
       platform-file.win32.cpp
       platform-logging.win32.cpp
-      platform-memory.win32.cpp
       platform-utils.win32.cpp
+      platform-memory.win32.cpp
       platform-threadPool.win32.cpp
   )
   set(platform_linux_private_sources
@@ -36,7 +38,6 @@ block()
       platform-logging.linux.cpp
       platform-memory.linux.cpp
       platform-utils.linux.cpp
-      platform-threadPool.linux.cpp
   )
 
   set(platform_win32_private_headers

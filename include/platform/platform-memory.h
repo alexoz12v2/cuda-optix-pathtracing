@@ -212,6 +212,7 @@ namespace dmt {
      */
     enum class EPageSize : uint32_t
     {
+        e0KB  = 0,
         e4KB  = 1u << 12u,
         e2MB  = 1u << 21u,
         e1GB  = 1u << 30u,
@@ -370,6 +371,75 @@ namespace dmt {
         uint32_t         m_blockSize;
         mutable SpinLock m_mtx;
     };
+
+    //-------------VirtualMemoryBlock-----------------------------
+    class BasicVirtualMemoryBlock
+    {
+    protected:
+        void*    Ptr;
+        uint32_t VMSizeDivVirtualSizeAlignment;
+
+    public:
+        BasicVirtualMemoryBlock() : Ptr(nullptr), VMSizeDivVirtualSizeAlignment(0) {}
+
+        BasicVirtualMemoryBlock(void* InPtr, uint32_t InVMSizeDivVirtualSizeAlignment) :
+        Ptr(InPtr),
+        VMSizeDivVirtualSizeAlignment(InVMSizeDivVirtualSizeAlignment)
+        {
+        }
+
+        BasicVirtualMemoryBlock(BasicVirtualMemoryBlock const& Other)            = default;
+        BasicVirtualMemoryBlock& operator=(BasicVirtualMemoryBlock const& Other) = default;
+
+        DMT_FORCEINLINE uint32_t GetActualSizeInPages() const { return VMSizeDivVirtualSizeAlignment; }
+
+        DMT_FORCEINLINE void* GetVirtualPointer() const { return Ptr; }
+    };
+
+    //-------------GenericPlatformMemory--------------------------
+
+    struct GenericPlatformMemoryConstants
+    {
+        /** The amount of actual physical memory, in bytes (needs to handle >4GB for 64-bit devices running 32-bit code). */
+        uint64_t TotalPhysical = 0;
+
+        /** The amount of virtual memory, in bytes. */
+        uint64_t TotalVirtual = 0;
+
+        /** The size of a physical page, in bytes. This is also the granularity for PageProtect(), commitment and properties (e.g. ability to access) of the physical RAM. */
+        size_t PageSize = 0;
+
+        /**
+         * Some platforms have advantages if memory is allocated in chunks larger than PageSize (e.g. VirtualAlloc() seems to have 64KB granularity as of now).
+         * This value is the minimum allocation size that the system will use behind the scenes.
+         */
+        size_t OsAllocationGranularity = 0;
+
+        /** The size of a "page" in Binned2 malloc terms, in bytes. Should be at least 64KB. BinnedMalloc expects memory returned from BinnedAllocFromOS() to be aligned on BinnedPageSize boundary. */
+        size_t BinnedPageSize = 0;
+
+        /** This is the "allocation granularity" in Binned malloc terms, i.e. BinnedMalloc will allocate the memory in increments of this value. If zero, Binned will use BinnedPageSize for this value. */
+        size_t BinnedAllocationGranularity = 0;
+
+        /**
+         * Starting address for the available virtual address space.
+         * Can be used with AddressLimit to determine address space range for binned allocators
+         */
+        uint64_t AddressStart = 0;
+
+        /**
+         * An estimate of the range of addresses expected to be returned by BinnedAllocFromOS(). Binned
+         * Malloc will adjust its internal structures to make lookups for memory allocations O(1) for this range.
+         * It is ok to go outside this range, lookups will just be a little slower
+         */
+        uint64_t AddressLimit = (uint64_t)0xffffffff + 1;
+
+        /** Approximate physical RAM in GB; 1 on everything except PC. Used for "course tuning", like FPlatformMisc::NumberOfCores(). */
+        uint32_t TotalPhysicalGB = 1;
+    };
+
+    typedef GenericPlatformMemoryConstants PlatformMemoryConstants;
+
 } // namespace dmt
 
 /** @} */

@@ -15,6 +15,7 @@
 #include <platform/platform-memory.h>
 #include <platform/platform-threadPool.h>
 #include <platform/platform-file.h>
+#include <platform/platform-memory-stackAllocator.h>
 
 // group 5: generated
 #include <platform/cuda-wrapper.h>

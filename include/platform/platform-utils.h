@@ -493,6 +493,224 @@ namespace dmt {
 #endif
     }
 
+    //----------TIsIntegral------------------------------
+    template <typename T>
+    struct TIsIntegral
+    {
+        enum
+        {
+            Value = false
+        };
+    };
+
+    template <>
+    struct TIsIntegral<bool>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<char>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<signed char>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned char>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<char16_t>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<char32_t>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<wchar_t>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<short>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned short>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<int>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned int>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<long long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned long long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+
+    template <typename T>
+    struct TIsIntegral<T const>
+    {
+        enum
+        {
+            Value = TIsIntegral<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsIntegral<volatile T>
+    {
+        enum
+        {
+            Value = TIsIntegral<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsIntegral<volatile T const>
+    {
+        enum
+        {
+            Value = TIsIntegral<T>::Value
+        };
+    };
+
+    //------------TIsPointer-------------------------
+    template <typename T>
+    struct TIsPointer
+    {
+        enum
+        {
+            Value = false
+        };
+    };
+
+    template <typename T>
+    struct TIsPointer<T*>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+
+    template <typename T>
+    struct TIsPointer<T const>
+    {
+        enum
+        {
+            Value = TIsPointer<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsPointer<volatile T>
+    {
+        enum
+        {
+            Value = TIsPointer<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsPointer<volatile T const>
+    {
+        enum
+        {
+            Value = TIsPointer<T>::Value
+        };
+    };
+
+    //Align with template
+    template <typename T>
+    DMT_FORCEINLINE constexpr T Align(T Val, uint64_t Alignment)
+    {
+        static_assert(TIsIntegral<T>::Value || TIsPointer<T>::Value, "Align expects an integer or pointer type");
+
+        return (T)(((uint64_t)Val + Alignment - 1) & ~(Alignment - 1));
+    }
+
+    //IsAligned with template
+    template <typename T>
+    DMT_FORCEINLINE constexpr bool IsAligned(T Val, uint64_t Alignment)
+    {
+        static_assert(TIsIntegral<T>::Value || TIsPointer<T>::Value, "IsAligned expects an integer or pointer type");
+
+        return !((uint64_t)Val & (Alignment - 1));
+    }
+
     inline void* alignTo(void* address, size_t alignment)
     {
         // Ensure alignment is a power of two (required for bitwise operations).
@@ -864,4 +1082,22 @@ namespace dmt {
             }
         }
     }
+
+    static DMT_FORCEINLINE uint64_t CountLeadingZeros64(uint64_t Value)
+    {
+        // return 64 if value if was 0
+        unsigned long BitIndex;
+        if (!_BitScanReverse64(&BitIndex, Value))
+            BitIndex = -1;
+        return 63 - BitIndex;
+    }
+
+    static DMT_FORCEINLINE uint64_t CeilLogTwo64(uint64_t Arg)
+    {
+        // if Arg is 0, change it to 1 so that we return 0
+        Arg = Arg ? Arg : 1;
+        return 64 - CountLeadingZeros64(Arg - 1);
+    }
+
+    static DMT_FORCEINLINE uint64_t RoundUpToPowerOfTwo64(uint64_t Arg) { return uint64_t(1) << CeilLogTwo64(Arg); }
 } // namespace dmt

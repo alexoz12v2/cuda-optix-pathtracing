@@ -99,8 +99,8 @@ block()
     ${CMAKE_SOURCE_DIR}/scripts/generate_dll_wrapper_file.py 
     "{ \"Windows\": \"C:\\\\Windows\\\\System32\\\\nvcuda.dll\", \"Linux\": \"\" }"
     -i cuda.h 
+    -mf "_v2"
     -v "_v{n}" 
-    -l 
     -j ${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_driver.json 
     --cpp-file ${cuda_driver_cpp_file}
     --header-file ${cuda_driver_h_file}

@@ -95,7 +95,7 @@ namespace dmt {
         void* NextAllocationStart = nullptr;
 
         size_t       TotalReservationSize;
-        const size_t PageSize;
+        size_t const PageSize;
 
         EVirtualStackAllocatorDecommitMode DecommitMode        = EVirtualStackAllocatorDecommitMode::AllOnDestruction;
         void*                              RecentHighWaterMark = nullptr;

@@ -2,6 +2,8 @@ include(FetchContent)
 include(FindPackageHandleStandardArgs)
 
 macro(dmt_setup_dependencies)
+  set(IMATH_INSTALL OFF)
+
   # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
   find_package(OpenGL REQUIRED)
   find_package(CUDAToolkit REQUIRED)

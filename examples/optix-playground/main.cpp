@@ -7,7 +7,7 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 
-#include <optix.h>
+#include "optixSphere.h"
 #include <optix_stack_size.h>
 // maybe to remove
 #include <optix_stubs.h>
@@ -156,36 +156,6 @@ struct SbtRecord
     T data;
 };
 
-// TODO move to a header which is shared betewen device and host (hence copied in the build)
-struct Params
-{
-    unsigned char*         image;
-    unsigned int           image_width;
-    unsigned int           image_height;
-    int                    origin_x;
-    int                    origin_y;
-    OptixTraversableHandle handle;
-};
-
-
-struct RayGenData
-{
-    float cam_eye[3];
-    float camera_u[3], camera_v[3], camera_w[3];
-};
-
-
-struct MissData
-{
-    float r, g, b;
-};
-
-
-struct HitGroupData
-{
-    // No data needed
-};
-
 using RayGenSbtRecord   = SbtRecord<RayGenData>;
 using MissSbtRecord     = SbtRecord<MissData>;
 using HitGroupSbtRecord = SbtRecord<HitGroupData>;
@@ -267,20 +237,18 @@ int32_t guardedMain()
         OptixDeviceContextOptions const options{
             .logCallbackFunction = [](unsigned int level, char const* tag, char const* message, void* cbdata) {
                 dmt::Context ctx;
-                static std::mutex mtx;
                 if (ctx.isValid())
                 {
-                    std::lock_guard lk{mtx};
                     std::string_view sTag(tag, strlen(tag));
                     std::string_view sMessage(message, strlen(message));
                     if (sTag.length() > 0 && sMessage.length())
                     {
                         if (level <= 2)
-                            ctx.error("{}: {}", std::make_tuple(sTag, sMessage));
+                            ctx.error("{}: {}\n\0", std::make_tuple(sTag, sMessage));
                         else if (level == 3)
-                            ctx.warn("{}: {}", std::make_tuple(sTag, sMessage));
+                            ctx.warn("{}: {}\n\0", std::make_tuple(sTag, sMessage));
                         else
-                            ctx.log("{}: {}", std::make_tuple(sTag, sMessage));
+                            ctx.log("{}: {}\n\0", std::make_tuple(sTag, sMessage));
                     }
                 }
             },
@@ -292,6 +260,7 @@ int32_t guardedMain()
 
         // Disable caching just for the moment
         dmt::os::env::set("OPTIX_CACHE_MAXSIZE", "0");
+        dmt::os::env::set("OPTIX_FORCE_DEPRECATED_LAUNCHER", "1"); // printf in OptiX kernels
         if (!dmt::optixCall(optixDeviceContextCreate(j.cuCtx, &options, &j.optixContext)))
             return 1;
 
@@ -429,6 +398,7 @@ int32_t guardedMain()
             OptixPipelineCompileOptions pipelineCompileOptions{};
             {
                 dmt::os::Path optixSpherePath        = dmt::os::Path::executableDir() / "shaders" / "optixSphere.cu";
+                dmt::os::Path optixSphereHeaderDir   = dmt::os::Path::executableDir() / "shaders";
                 dmt::os::Path optixHeaderDir         = dmt::os::Path::executableDir().parent() / "shaders";
                 dmt::os::Path optixHeaderInternalDir = optixHeaderDir / "internal";
 
@@ -451,6 +421,7 @@ int32_t guardedMain()
                     "-arch",
                     "compute_60",
                     "-optix-ir",
+                    "-lineinfo",
                     "-G",
                     "--use_fast_math",
                     "-default-device",
@@ -461,6 +432,12 @@ int32_t guardedMain()
                         optixHeaderDir.toUnderlying().substr(4),
 #else
                         optixHeaderDir.toUnderlying(),
+#endif
+                    "--include-path=" +
+#if defined(_WIN32)
+                        optixSphereHeaderDir.toUnderlying().substr(4),
+#else
+                        optixSphereHeaderDir.toUnderlying(),
 #endif
                 };
 
@@ -662,8 +639,10 @@ int32_t guardedMain()
                 configureCamera(cam, width, height);
 
                 RayGenSbtRecord rgSbt{};
-                memcpy(rgSbt.data.cam_eye, cam.eye, 3 * sizeof(float));
-                cam.uvwFrame(rgSbt.data.camera_u, rgSbt.data.camera_v, rgSbt.data.camera_w);
+                memcpy(reinterpret_cast<float*>(&rgSbt.data.cam_eye), cam.eye, 3 * sizeof(float));
+                cam.uvwFrame(reinterpret_cast<float*>(&rgSbt.data.camera_u),
+                             reinterpret_cast<float*>(&rgSbt.data.camera_v),
+                             reinterpret_cast<float*>(&rgSbt.data.camera_w));
 
                 if (!dmt::optixCall(optixSbtRecordPackHeader(raygenProgGroup, &rgSbt)))
                     return 1;
@@ -709,12 +688,14 @@ int32_t guardedMain()
             // -- 6: prepare output buffer --
             CUdeviceptr                     d_outputBuffer = 0;
             dmt::UniqueRef<unsigned char[]> outputBuffer   = nullptr;
+            static uint32_t constexpr numChannels = 4;
+            uint32_t const outputNumBytes = width * height * numChannels * sizeof(unsigned char);
             {
                 if (!dmt::cudaDriverCall(j.cudaApi.get(),
-                                         j.cudaApi->cuMemAlloc(&d_outputBuffer, width * height * 4 * sizeof(unsigned char))))
+                                         j.cudaApi->cuMemAlloc(&d_outputBuffer, outputNumBytes)))
                     return 1;
 
-                outputBuffer = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), width * height);
+                outputBuffer = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), numChannels * width * height);
                 if (!outputBuffer)
                 {
                     ctx.error("Couldn't allocate host memory for output image", {});
@@ -743,6 +724,9 @@ int32_t guardedMain()
                     return 1;
 
                 ctx.log("Launching Optix Kernel", {});
+                if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize()))
+                    return 1;
+
                 if (!dmt::optixCall(
                         optixLaunch(pipeline, stream, d_params, sizeof(Params), &sbt, width, height, /*depth*/ 1)))
                 {
@@ -766,10 +750,14 @@ int32_t guardedMain()
                 j.cudaApi->cuMemFree(d_params);
                 j.cudaApi->cuStreamDestroy(stream);
 
+                if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyDtoH(outputBuffer.get(), d_outputBuffer, outputNumBytes)))
+                    return 1;
+
                 dmt::os::Path imagePath    = dmt::os::Path::executableDir() / "image.png";
                 auto          imagePathStr = imagePath.toUnderlying();
                 ctx.log("Saving image to {}", std::make_tuple(imagePathStr));
-                if (!stbi_write_png(imagePathStr.c_str(), width, height, 3, outputBuffer.get(), width * 3))
+                printf("Saving image to %s", imagePathStr.c_str());
+                if (!stbi_write_png(imagePathStr.c_str(), width, height, numChannels, outputBuffer.get(), width * numChannels))
                 {
                     ctx.error("Couldn't save image", {});
                     return 1;

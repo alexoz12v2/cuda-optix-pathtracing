@@ -1,30 +1,4 @@
-#include <optix.h>
-
-struct Params
-{
-    uchar4*                image;
-    unsigned int           image_width;
-    unsigned int           image_height;
-    int                    origin_x;
-    int                    origin_y;
-    OptixTraversableHandle handle;
-};
-
-struct RayGenData
-{
-    float3 cam_eye;
-    float3 camera_u, camera_v, camera_w;
-};
-
-struct MissData
-{
-    float r, g, b;
-};
-
-struct HitGroupData
-{
-    // no data needed
-};
+#include "optixSphere.h"
 
 extern "C"
 {
@@ -73,6 +47,10 @@ static __forceinline__ __device__ float3 getPayload()
 }
 
 // TODO define vector device operators for convenience (https://github.com/NVIDIA/cuda-samples/blob/master/Common/helper_math.h)
+__forceinline__ __device__ float2 operator*(float f, float2 v) { return make_float2(f * v.x, f * v.y); }
+
+__forceinline__ __device__ float2 operator*(float2 v, float f) { return make_float2(f * v.x, f * v.y); }
+
 __forceinline__ __device__ float3 operator*(float f, float3 v) { return make_float3(f * v.x, f * v.y, f * v.z); }
 
 __forceinline__ __device__ float3 operator*(float3 v, float f) { return make_float3(f * v.x, f * v.y, f * v.z); }
@@ -81,7 +59,7 @@ __forceinline__ __device__ float3 operator+(float3 v, float f) { return make_flo
 
 __forceinline__ __device__ float3 operator+(float3 v0, float3 v1)
 {
-    return make_float3(v0.x * v1.x, v0.y * v1.y, v0.z * v1.z);
+    return make_float3(v0.x + v1.x, v0.y + v1.y, v0.z + v1.z);
 }
 
 __forceinline__ __device__ float dot(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
@@ -128,6 +106,10 @@ __forceinline__ __device__ uchar4 make_color(float3 const& c)
 
 __forceinline__ __device__ float3 operator-(float3 a, float3 b) { return make_float3(a.x - b.x, a.y - b.y, a.z - b.z); }
 
+__forceinline__ __device__ float2 operator-(float2 a, float b) { return make_float2(a.x - b, a.y - b); }
+
+__forceinline__ __device__ float2 operator-(float2 a, float2 b) { return make_float2(a.x - b.x, a.y - b.y); }
+
 __forceinline__ __device__ float3 operator/(float3 v, float f) { return make_float3(v.x / f, v.y / f, v.z / f); }
 
 // __raygen__ is responsible to write generated rays in the shader binding table
@@ -146,17 +128,16 @@ extern "C" __global__ void __raygen__rg()
     float3 const V = rtData->camera_v;
     float3 const W = rtData->camera_w;
 
-    // camera sample coordinates normalized
-    float2 d = make_float2(static_cast<float>(idx.x) / static_cast<float>(dim.x),
-                           static_cast<float>(idx.y) / static_cast<float>(dim.y));
-    d.x -= 1.f;
-    d.y -= 1.f;
+    // camera sample coordinates normalized (remap from [0, width]x[0, height] to [-1, 1]^2)
+    float2 d = 2.f * make_float2(static_cast<float>(idx.x) / static_cast<float>(dim.x),
+                                 static_cast<float>(idx.y) / static_cast<float>(dim.y)) -
+               1.f;
 
     // copute direction and origin of a single ray
     float3 const origin    = rtData->cam_eye;
     float3 const direction = normalize(d.x * U + d.y * V + W);
 
-    float3 payload_rgb = make_float3(0.5f, 0.5f, 0.5f);
+    float3 payload_rgb = make_float3(1.0f, 0.f, 0.f);
     trace(params.handle, origin, direction, 0.f, 1e16f, &payload_rgb);
     params.image[idx.y * params.image_width + idx.x] = make_color(payload_rgb);
 }

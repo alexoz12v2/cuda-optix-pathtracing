@@ -446,7 +446,7 @@ function `optixMicromapIndexToBaseBarycentrics` (`optix_micromap.h`)
 
 ### Displaced Micro Meshes
 
-Opacity MicroMaps can also serve a second purpose: Displacement of the tessellated mesh. Works only on RTX cards
+Displacement MicroMaps are another mesh subdivision mechanism aimed to add displacement to a tessellated mesh. Works only on RTX cards
 
 ```cpp
 unsigned int RTCoresVersion = 0;
@@ -489,4 +489,283 @@ There are some flags requirements while compiling modules to be used with OptiX
 - (Optional) `--use_fast_math` will trigger usage of `.approx` math instructions, which are faster but less numerically accurate, and avoids accidental usage of double precision floating points
 - To profile code with **Nsight Compute**, enable `--generate-line-info` and specify `debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MODERATE` in your `OptixModuleCompileOptions`
 
-*Programming Model*:
+*Programming Model*: OptiX supports the MIMD subset of instructions of CUDA. **Given that execution must be independent from other threads, Shared Memory,
+warp-wide/block-wide synchronizations are not allowed**. CUDA instructions allowed:
+
+- math
+- texture
+- atomic
+- control flow
+- loading data to memory
+- *some* special warp-wide instructions, i.e. `vote` and `ballot` are allowed (eg warp-wide reduction)
+
+Of the [PTX Special Registers](https://docs.nvidia.com/cuda/parallel-thread-execution/#special-registers), only some of them are valid in a OptiX execution context
+and have predefined values (check for more details) (CTA = cooperative thread array = block).
+
+Memory is consistent only within the same launch index. (Translated: *If explicit synchronization through atomnic ops is absent, a thread cannot see write
+operations performed by other threads*). Atomic ops can be used to enforce synchronizations and share data between launch indexes.
+
+There are 8 types of OptiX programs, each of which have an entry function whose exported name should have a predefined prefix
+
+- Ray Generation: `__raygen__`
+- Intersection: `__intersection__`
+- Any Hit: `__anyhit__`
+- Closest Hit: `__closesthit__`
+- Miss: `__miss__`
+- Direct Callable: `__direct_callable__`
+- Continuation Callable: `__continuation_callable__`
+- Exception: `__exception__`
+
+Each of these call `__device__` functions, either specified by the OptiX library or by the programmer.
+
+### Module Creation
+
+A module may include multiple programs of any program type. Two options sturcts controls the compilation process
+
+- `OptixPipelineCompileOptions`: must be identical for all modules used to create *Program Groups* linked in a single pipeline
+- `OptixModuleCompileOptions`: may vary across the modules within the same pipeline
+
+```cpp
+struct OptixPipelineCompileOptions {
+  int          usesMotionBlur;                   // boolean indicating whether to use motion blur
+  unsigned int traversableGraphFlags;            // `OptixTraversableGraphFlags` (below)
+  int          numPayloadValues;                 // how many 32B words for the payload (see `optixTrace`) [0..32]. Must be 0 if numPayloadTypes is 0
+  int          numAttributeValues;               // how many 32B words for *Attributes* (see later) [2..8]
+  unsigned int exceptionFlags;                   // bitmask of `OptixExceptionFlags` to see which exceptions are enabled
+  const char*  pipelineLaunchParamsVariableName; // name of pipeline parameter variable
+  unsigned int usesPrimitiveTypeFlags;           // `OptixPrimitiveTypeFlags` enabled primitives. 0 means custom and triangle
+  int          allowOpacityMicromaps;            // boolean indicating whether to allow opacity micromaps
+  int          allowClusteredGeometry;           // boolean indicating whether cluster acceleration structures may be used (OptiX 9 only) https://developer.nvidia.com/blog/fast-ray-tracing-of-dynamic-scenes-using-nvidia-optix-9-and-nvidia-rtx-mega-geometry/
+}
+// OptixTraversableGraphFlags
+//   OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY       = everything valid (cannot be used with others)
+//   OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINLE_GAS = only a single GAS without transforms is valid
+//   OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING = only IAS directly connected with GASes without any transform traverables inbetween is valid
+// OptixExceptionFlags
+//   OPTIX_EXCEPTION_FLAG_NONE = no exceptions enabled
+//   OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW = stack overflow during execution
+//   OPTIX_EXCEPTION_FLAG_TRACE_DEPTH = exception related to overflows of maxTraceDepth
+//   OPTIX_EXCEPTION_FLAG_USER - `optixThrowException` related
+//   OPTIX_EXCEPTION_FLAG_DEBUG = various exceptions for development
+
+struct OptixModuleCompileOptions {
+  int                           maxRegisterCount; // max register count (0 if no limit) when compiling to SASS
+  OptixCompileOptimizationLevel optLevel;         // `OptixCompileOptimizationLevel` may vary within pipeline
+  OptixCompileDebugLevel        debugLevel;       // `OptixCompileDebugLevel` how much debug information
+  const OptixModuleCompileBoundValueEntry* boundValues; //  host array[numBoundValues]
+  unsigned int                  numBoundValues;   // 0 if unused
+  unsigned int                  numPayloadTypes;  // 0 if pipeline compile options num payload values is zero, otherwise number of different payload types in this module
+  const OptixPayloadType*       payloadTypes;     // host array[numPayloadTypes]
+}
+// nested structs of OptixModuleCompileOptions:
+
+// (Parameter Specialization Below)
+// struct to specify specializations for pipeline params specified through 
+// `OptixPipelineCompileOptions::pipelineLaunchParamsVariableName`. Used when OptiX cannot locate all the loads from pipelineParams and correlate them to the 
+// appropriate bound value
+struct OptixModuleCompileBoundValueEntry {
+  size_t      pipelineParamOffsetInBytes; // typically offsetof something
+  size_t      sizeInBytes;                // typically sizeof something
+  const void* boundValuePtr;              // address of constant value to be used
+  const char* annotation;                 // arbitrary string
+};
+
+// specifies a payload type
+struct OptixPayloadType {
+  unsigned int        numPayloadValues; // number of 32B words the payload of this type holds
+  const unsigned int* payloadSemantics; // host array of payload word semantics
+};
+// payload semantic is a feature to help cut down *register usage* (https://forums.developer.nvidia.com/t/two-questions-1-payloadtype-semantics-2-ray-triangle-intersection/227569):
+// similiar to the same feature in HLSL, payload semantics is a mechanism for the programmer to tag each 
+// 32B-wide word of the payload, *per program type*, to know how is that particular payload acessed
+// - NONE: not specified
+// - READ: read only
+// - WRITE: write only
+// - READ_WRITE: read write
+// list of payload semantics (`OptixPayloadSemantics`)
+// OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_NONE
+// OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ
+// OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_CH_NONE
+// OPTIX_PAYLOAD_SEMANTICS_CH_READ
+// OPTIX_PAYLOAD_SEMANTICS_CH_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_CH_READ_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_MS_NONE
+// OPTIX_PAYLOAD_SEMANTICS_MS_READ
+// OPTIX_PAYLOAD_SEMANTICS_MS_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_MS_READ_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_AH_NONE
+// OPTIX_PAYLOAD_SEMANTICS_AH_READ
+// OPTIX_PAYLOAD_SEMANTICS_AH_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_AH_READ_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_IS_NONE
+// OPTIX_PAYLOAD_SEMANTICS_IS_READ
+// OPTIX_PAYLOAD_SEMANTICS_IS_WRITE
+// OPTIX_PAYLOAD_SEMANTICS_IS_READ_WRITE 
+```
+
+ it's necessary to specify boundValues if:
+
+- Your shader code accesses pipeline parameters in a way that the compiler can't statically analyze.
+  - For example: passing params pointer to external functions, using it inside non-trivial loops, making dynamic memory accesses
+    (like indexing through pointers), or doing type punning.
+- **You expect the compiler to optimize based on known parameter values.**:
+  If you know some parameters are fixed for a module (for example, a constant camera matrix, or a flag that toggles behavior), and you want
+  OptiX to bake those values into the generated PTX for better optimization (constant folding, dead code removal, etc.).
+- *Cross-module parameter assumptions.*: If you split your code across multiple modules and expect certain parameter layouts/values to be consistent,
+  but the modules cannot see each other’s layouts directly, OptiX can’t automatically ensure the pipeline parameters match unless boundValues is used.
+
+the **Attributes** referred by `OptixPipelineCompileOptions::numAttributeValues` (in 32B words) corresponds to the attribute definition in
+`optixReportIntersection` (page 117)
+
+the **Payload** referred by `OptixPipelineCompileOptions::numPayloadValues` (in 32B words) (and detailed in the various `OptixModuleCompileOptions`) corresponds
+to the ray paylaod (page 129)
+
+### Pipeline Launch Parameter
+
+launch-varying parameters acessible from any module are specified through `OptixPipelineCompileOptions`. Then, they are **defined in each module** as
+`extern "C" __constant__` struct (standard layout, trivial). These are shared through all launch indexes, and can host matrix/array structures accessed through
+the launch index itself or constants.
+
+**Parameter Spacialization**:
+In some cases modules should be specialized to toggle some features on/off. (eg enable/disable shadow rays: either compile multiple versions of the program or switch
+based on a parameter).
+Optix Provides a mechanism to *Specialize* pipeline launch parameters: during module compilation, OptiX will attempt to find load instructions to the pipeline launch
+parameters specified through the `OptixPipelineCompileOptions::pipelineLaunchParamsVariableName`. **These loads are then replaced with a value**.
+This effect is achieved by specifying, for a given offset and size inside the pipeline parameter, a value with `OptixModuleCOmpileBoundValueEntry`.
+Example:
+
+```cpp
+// stating device code
+struct LP { bool useShadows; }
+
+extern "C" { __constant__ LP params; }
+
+extern "C" __global__ void __closesthit__ch() {
+  float3 shadowColor = make_float3(1.f, 1.f, 1.f);
+  if (params.useShadows) { // instead of being a load from constant memory, this will be a load value
+    shadowColor = traceShadowRay(...);
+  }
+  ...
+}
+```
+
+Inside the cpp configuration
+
+```cpp
+LP launchParams{};
+launchParams.useShadows = false;
+
+OptixModuleCompileBoundValueEntry useShadow{};
+useShadow.pipelineParamsOffsetInBytes = offsetof(LP, useShadows);
+useShadow.sizeInBytes = sizeof(LP::useShadows);
+useShadow.boundValuePtr = &launchParams.useShadows;
+
+OptixModuleCompileOptions moduleCompileOptions{};
+moduleCompileOptions.boundValues = &useShadow;
+moduleCompileOptions.numBoundValues = 1;
+...
+optixModuleCreate(..., moduleCompileOptions, ...);
+```
+
+Such configuration will compile into a `if (false)`, which will be optimized away removing the branch all together, which is beneficial for warp execution.
+
+*Cases in which parameters specialization is necessary and not an optimization:*
+
+- pipeline params accessed in a `__device__` function (not directly in the `__global__` entry point)
+- pipeline params accessed in a non unrolled loop
+
+### Program Group Creation
+
+`OptixProgramGroup` objects are created from one to three `OptixModule` (3 different types) objects and are used to fill the *header* of *Shader Binding Table*
+records (page 77). There are 5 types of program groups
+
+- `OPTIX_PROGRAM_GROUP_KIND_RAYGEN`: contains a raygen (RG) program
+- `OPTIX_PROGRAM_GROUP_KIND_MISS`: contains a miss (MS) program
+- `OPTIX_PROGRAM_GROUP_KIND_EXCEPTION`: contiains an exception (EX) program
+- `OPTIX_PROGRAM_GROUP_KIND_HITGROUP`: contains an intersection (IS), any hit (AH) or closest hit (CH) program
+- `OPTIX_PROGRAM_GROUP_KIND_CALLABLES`: contains a direct callable (DC) or continuation callable (CC) program
+
+Modules can contain more than 1 program. For each of them, we specify its entry function through `entryFunctionName`
+thorugh the `OptixProgramGroupDesc` passed to the `optixProgramGroupCreate` function.
+
+Program groups can be used to fill in any number of SBT records and can be used across pipelines as long as compilation flags match.
+
+A hitgroup program group specifies an intersection program which describes how a ray intersects a primitive. For built-in primitives, such function should be obtained
+from `optixBuiltinISModuleGet`. Special Case: Triangle GAS using Displacement Micromap ignore the specified intersection program.
+
+When you use a built-in intersection module `entryFunctionNameIS` should be `nullptr`.  Example:
+
+```cpp
+OptixModule shadingModule = ..., intersectionModule = 0;
+OptixBuiltinISOptions builtinISoptions{};
+builtinISoptions.builtinISModuleTYpe = OPTIX_PRIMITIVE_TYPE_TRIANGLE;
+optixBuiltinISModuleGet(optixContext, &moduloeCompileOptions, &pipelineCompileOptions, &builtinISOptions, &intersectionModule);
+
+OptixProgramGroupDesc pgDesc{}; // kind + union
+pgDesc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+pgDesc.hitgroup.moduleCH = shadingModule;
+pgDesc.hitgroup.entryFunctionNameCH = "__closesthit__shadow";
+pgDesc.hitgroup.moduleAH = shadingModule;
+pgDesc.hitgroup.entryFunctionNameAH = "__anyhit__shadow";
+pgDesc.moduleIS = intersectionModule;
+pgDesc.entryFunctionNameIS = nullptr; // builtin IS module
+
+OptixProgramGroupOptions pgOptions{};
+OptixProgramGroup pg = nullptr;
+optixProgramGroupCreate(optixContext, &pgDesc, 1, &pgOptions, logString, sizeof(logString), &pg);
+```
+
+### Pipeline Linking
+
+After all Program Gruops have been defined, they need to be linked together in an `OptixPipeline`, which will then be used to issue a *ray generation launch*.
+
+Some **Fixed function components** are selected during pipeline linknig through `OptixPipelineLinkOptions` and `OptixPipelineCompileOptions`. The Pipeline compile options must be
+consistent with the options used to compile each module contained in the program groups used to create the pipeline. (See [Module Creation](#module-creation))
+
+```cpp
+struct OptixPipelineLinkOptions {
+  unsigned int maxTraceDepth; // maximum trace recursion depth [0..31]. 0 means can't trace rays (max also affected by limits)
+};
+// example usage
+OptixPipeline pipeline = nullptr;
+
+OptixProgramGroup pgs[3] = { raygenPg, missPg, hitgroupPg };
+
+OptixPipelineLinkOptions pipelineLinkOptions{};
+pipelineLinkOptions.maxTraceDepth = 1;
+
+optixPipelineCreate(optixContext, &pipelineCompileOptions, &pipelineLinkOptions, pgs, 3, logstr, sizeof(logstr), &pipeline);
+```
+
+### Pipeline Stack Size
+
+The programs in a module may consume **2 types of stack structure**:
+
+- **Direct Stack**
+- **Continuation Stack**
+
+The total stack space needed by a pipeline depends on the resulting call graph.
+
+**Direct Stack** requirements from raygen, miss, exception, closest-hit, any-hit, intersection programs are to be configured, while direct callables are calculated internally
+
+**Continuation Stack** requirements from raygen, miss, exception, closest-hit, any-hit, intersection programs are to be configured, while continuation callables are calculated internally
+
+To query individual program groups for their direct stack requirements, use `optixProgramGroupGetStackSize`, while to set the stack size *of a pipeline*, use
+`optixPipelineSetStackSize`. The formulas are in the guide, page 73 and already implemented in the stack size utils.
+
+A **Simple Path Tracer** has 2 ray types
+
+- camera rays
+- shadow rays
+
+therefore there will be raygen, miss, closesthit, (no anyhit, intersection, continuation-callable, direct-callable) programs. The camera rays will invoke only miss and programs, and
+the closesthit can trace shadow rays which will, in turn, call closesthit and miss (maximum trace depth here is 2)
+
+### Compilation Cache
+
+Compilation is trigeered during calls to `optixModuleCreate`, `optixProgramGroupCreate`, `optixPipelineCreate`. The products of these compilations can be cached to disk as described in
+the [Context Section](#context-page-21)
+
+## Shader Binding Table

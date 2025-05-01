@@ -769,3 +769,655 @@ Compilation is trigeered during calls to `optixModuleCreate`, `optixProgramGroup
 the [Context Section](#context-page-21)
 
 ## Shader Binding Table
+
+The **Shader Binding Table** is an *array* that contains information about the location of programs and their parameters. It resides in device memory
+
+### Records
+
+A **record** consists of *Header* and *Data*. The *header* is opaque to the application and is used by OptiX to identify a program, store traversal execution information and is
+32 byte wide. The *data* is an arbitrary program-specific information not used by OptiX.
+
+The function `optixSbtRecordPackHeader` fills the initial header of an SBT Record from a given `OptixProgramGroup`. Example:
+
+```cpp
+template <typename T> struct Record { alignas(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE]; T data; };
+using RayGenSbtRecord = Record<RayGenData>;
+
+OptixProgramGroup raygenPg;
+...
+RayGenSbtRecord rgSbt{ ... };
+optixSbtRecordPackHeader(raygenPg, &rgSbt);
+Cudeviceptr d_rgSbt;
+cuMemAlloc(&d_rgSbt, sizeof(RayGenSbtRecord));
+cuMemcpyHtoD(d_rgSbt, &rgSbt, sizeof(RayGenSbtRecord));
+```
+
+SBT Headers can be reused with multiple pipelines as long as compile options for the modules match.
+
+You can retrieve the data section of a SBT record with the device function `optixGetSbtDataPointer`
+
+### Layout
+
+*A Shader Binding Table is split into 5 section*, 1 per program group type
+
+| Group | Program Types in group | Value of enum `OptixProgramGroupKind` |
+| --- | --- | --- |
+| Ray Generation | ray-generation                         | `OPTIX_PROGRAM_GROUP_KIND_RAYGEN`    |
+| Exception      | exception                              | `OPTIX_PROGRAM_GROUP_KIND_EXCEPTION` |
+| Miss           | miss                                   | `OPTIX_PROGRAM_GROUP_MISS`           |
+| Hit            | intersection, any-hit, closest-hit     | `OPTIX_PROGRAM_GROUP_KIND_HITGROUP`  |
+| Callable       | direct-callable, continuation-callable | `OPTIX_PROGRAM_GROUP_KIND_CALLABLES` |
+
+In fact, here's the OptiX Shader binding table, which is given at launch time, with pointers to each relevant section
+
+```cpp
+struct OptixShaderBindingTable {
+  // SBT record for the ray gen program to start launch at
+  CUdeviceptr  raygenRecord;
+
+  // SBT record for the exception program
+  Cudeviceptr  exceptionRecord;
+
+  // required array of SBT records for miss programs
+  CUdeviceptr  missRecordBase;
+  unsigned int missRecordStrideInBytes;
+  unsigned int missRecordCount;
+
+  // required array of SBT records for hit groups
+  CUdeviceptr  hitgroupRecordBase;
+  unsigned int hitgroupRecordStrideInBytes;
+  unsigned int hitgroupRecordCount;
+
+  // optional array of SBT records for callable programs
+  CUdeviceptr  callablesRecordBase;
+  unsigned int callablesRecordStrideInBytes;
+  unsigned int callablesRecordCount;
+};
+```
+
+All SBT records are 16 bytes aligned (`OPTIX_SBT_RECORD_ALIGNMENT`) and the stride must be a multiple of the alignment. `optixGetSbtDataPointer` retrieves
+**the currently active SBT record**.
+
+- *base pointer* is selected according to the program group kind.
+- *index*, for (miss, callables, hitgroup) is obtained in different ways depending on the program group kind
+
+  - *Miss*: SBT index is determined by the `missSBTIndex` of the `optixTrace` device function
+  - *Callables*: SBT index is taken as a parameter when invoking `optixDirectCall` (direct-callable) and `optixContinuationCall` (continuation-callable)
+  - *Any hit, closest hit, intersection*: Computation of the SBT index is done during **Acceleration Structure Traversal**, formula (later explained)
+
+  ```mathjax
+  sbt-index = 
+    sbt-instance-offset 
+    + (sbt-geometry-acceleration-structure-index * sbt-stride-from-trace-call) 
+    + sbt-offset-from-trace-call
+  ```
+
+### Acceleration Structures
+
+```mathjax
+sbt-index =
+sbt-instance-offset
++ (sbt-geometry-acceleration-structure-index * sbt-stride-from-trace-call)
++ sbt-offset-from-trace-call
+```
+
+The index calculation for an SBT hitgroup record is determined by the above index calculation formula, which depends on 4 factors
+
+- Instance offset
+- Geometry Acceleration Structure Index
+- Trace Offset
+- Trace Stride
+
+**SBT InstanceOffset**: each `OptixInstance` stores an SBT offset (28 bits) applied during traversal
+
+**SBT GAS index**: Each GAS build input references at least one SBT record. Example for `OptixBuildInputTriangleArray`:
+
+```cpp
+// there is 1 sbt GAS index  for each triangle
+unsigned int numSbtRecords = // max value + 1 which can be contained in the sbt index array
+CUdeviceptr  sbtIndexOffsetBuffer = //  per primitive local sbt index buffer (count is `numIndexTriplets`)
+unsigned int sbtIndexOffsetStrideInBytes = // 0 if GAS sbt indices tighly packed, otherwise bytes between indices
+```
+
+per primitive Index Offsets specified in the build input are local to the build input (hence dependent on the other parameters of the formula)
+
+**SBT trace offset**: the `optixTrace` function takesa a parameter `SBTOffset`, which is directly added as an offset into the SBT for a specific ray, and this is
+required to implement different types of rays (eg. camera rays vs shadow rays)
+
+**SBT Trace Stride**: parameter `SBTStride` given to the `optixTrace` function, which is multiplied with the SBT GAS index. Required to implement different ray types
+
+Full example of an SBT on pages 81-82. Notes on example:
+
+- IAS -> 2 instances -> both point to same GAS -> GAS contains 2 triangle meshes, 1st with 1 SBT record, 2nd with 2 SBT records
+- we have 2 ray types: forward and shadow
+- SBT needs:
+
+  - 2 miss records = number of ray types = 2
+  - 12 hit group records = sum(GAS num records) \* number of ray types \* number of instances = 3 \* 2 \* 2 = 12
+
+- `optixTrace`: SBT stride is equal to number of ray types
+- `optixTrace`: SBT offset is equal to ray index
+- `optixTrace`: Miss SBT index is equal to ray index
+
+## Ray Generation Launches
+
+Ray generation Launch `optixLaunch` is the way in which OptiX invokes a 1D/2D/3D array of threads and invokes ray generation programs for each thread.
+
+When the ray generation program invokes `optixTrace`, other programs are invoked to execute the traversal. In particular
+
+- intersection, any-hit, closest-hit, miss, exception
+
+until the invocations are complete.
+
+- Launches use CUDA streams and events
+
+In addition to pipeline object, CUDA stream, launch state, we specify the SBT layout through the `OptixShaderBindingTable` struct.
+
+The value of the pipeline launch parameter is specified by the `OptixPipelineCompileOptions::pipelineLaunchParamsVariableName` and provided to `optixLaunch` through a `CUdeviceptr`.
+Modifications to the pipeline parameter device buffer are not seen during a ray generation launch, as `optixLaunch` creates a copy of the launch parameters.
+
+The specified dimensions of a launch specify `width`, `height`, `depth`, which must be 1 if 1 dimension is not needed.
+
+## Device-Side Functions
+
+functions to get/set ray tracding state and trace new rays from within user programs. Some of these are available only in specific program types. Here are the abbreviations:
+
+- RG: Ray Generation
+- IS: Intersection
+- AH: Any Hit
+- CH: Closest Hit
+- MS: Miss
+- EX: Exception
+- DC: Direct Callable
+- CC: Continuation Callable
+
+All OptiX enabled functions (`__device__` functions, not inlined, called by an optix program (page 134)) support the same set of features as direct callables (except
+`optixGetSbtDataPointer`)
+
+| Function                                        | RG | IS | AH | CH | MS | EX | CC | DC |
+|-------------------------------------------------|----|----|----|----|----|----|----|----|
+| `optixGetSbtDataPointer`                        | RG | IS | AH | CH | MS | EX |    | DC |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixThrowException`                           | RG | IS | AH | CH | MS |    | CC | DC |
+| `optixDirectCalll`                              | RG | IS | AH | CH | MS |    | CC | DC |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixTrace`                                    | RG |    |    | CH | MS |    | CC | DC |
+| `optixTraverse`                                 | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectIsHit`                           | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectIsMiss`                          | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitOjbectIsNop`                           | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetSbtRrecordIndex`              | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetWorldRayOrigin`               | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetWorldRayDirection`            | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetRayTmin`                      | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetRayTmax`                      | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetTransformListSize`            | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitOjbectGetTransformListHandle`          | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetTransformTypeFromHandle`               | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetStaticTransformFromHandle`             | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetSTMotionTransrofmFromHandle`           | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetMatrixMotionTransformFromHandle`       | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetInstanceIdFromHandle`                  | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetInstanceChiidFromHandle`               | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetInstanceTransformFromHandle`           | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetInstanceInverseTransformFromHandle`    | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetPrimitiveIndex`               | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetSbtGASIndex`                  | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitOjbectGetInstanceId`                   | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetInstanceId`                   | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetHitKind`                      | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetPrimitiveType`                         | RG |    |    | CH | MS |    | CC | DC |
+| `optixIfFrontFaceHit`                           | RG |    |    | CH | MS |    | CC | DC |
+| `optixIsBackFaceHit`                            | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetSbtDataPointer`               | RG |    |    | CH | MS |    | CC | DC |
+| `optixSetPayload_0...31`                        | RG |    |    | CH | MS |    | CC | DC |
+| `optixGetPayload_0...31`                        | RG |    |    | CH | MS |    | CC | DC |
+| `optixHitObjectGetAttribute_0...7`              | RG |    |    | CH | MS |    | CC | DC |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixInvoke`                                   | RG |    |    | CH | MS |    | CC |    |
+| `optixMakeHitObject`                            | RG |    |    | CH | MS |    | CC |    |
+| `optixMakeHitObjectWithRecord`                  | RG |    |    | CH | MS |    | CC |    |
+| `optixMakeMissHitObject`                        | RG |    |    | CH | MS |    | CC |    |
+| `optixMakeNopHitObject`                         | RG |    |    | CH | MS |    | CC |    |
+| `optixContinuationCall`                         | RG |    |    | CH | MS |    | CC |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixSetPayloadTypes`                          |    | IS | AH | CH | MS |    |    |    |
+| `optixUndefinedValue`                           |    | IS | AH | CH | MS |    |    |    |
+| `optixGetWorldRayOrigin`                        |    | IS | AH | CH | MS |    |    |    |
+| `optixGetWorldRayDirection`                     |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRayTmin`                               |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRayTmax`                               |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRayTime`                               |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRayFlags`                              |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRayVisibilityMask`                     |    | IS | AH | CH | MS |    |    |    |
+| `optixGetInstanceTraversableFromIAS`            |    | IS | AH | CH | MS |    |    |    |
+| `optixGetTriangleVertexData`                    |    | IS | AH | CH | MS |    |    |    |
+| `optixGetMicroTriangleVertexData`               |    | IS | AH | CH | MS |    |    |    |
+| `optixGetMicroTriangleBarycentricsData`         |    | IS | AH | CH | MS |    |    |    |
+| `optixGetLInearCurveVertexData`                 |    | IS | AH | CH | MS |    |    |    |
+| `optixGetQuadraticBSplineVertexData`            |    | IS | AH | CH | MS |    |    |    |
+| `optixGetCubicBSplineVertexData`                |    | IS | AH | CH | MS |    |    |    |
+| `optixGetCatmullRomVertexData`                  |    | IS | AH | CH | MS |    |    |    |
+| `optixGetCubicBezierVertexData`                 |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRibbonVertexData`                      |    | IS | AH | CH | MS |    |    |    |
+| `optixGetRibbonNormal`                          |    | IS | AH | CH | MS |    |    |    |
+| `optixGetSphereData`                            |    | IS | AH | CH | MS |    |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixGetTransformListSize`                     |    | IS | AH | CH |    | EX |    |    |
+| `optixGetTransformListHandle`                   |    | IS | AH | CH |    | EX |    |    |
+| `optixGetPrimitiveIndex`                        |    | IS | AH | CH |    | EX |    |    |
+| `optixGetSbtGASIndex`                           |    | IS | AH | CH |    | EX |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixGetGASTraversableHandle`                  |    | IS | AH | CH |    |    |    |    |
+| `optixGetGASMotionTimeBegin`                    |    | IS | AH | CH |    |    |    |    |
+| `optixGetGASMotionTimeEnd`                      |    | IS | AH | CH |    |    |    |    |
+| `optixGetGASMotionStepCount`                    |    | IS | AH | CH |    |    |    |    |
+| `optixGetWorldToObjectTransformMatrix`          |    | IS | AH | CH |    |    |    |    |
+| `optixGetObjectToWorldTransformMatrix`          |    | IS | AH | CH |    |    |    |    |
+| `optixTransformPointFromWOrldToObjectSpace`     |    | IS | AH | CH |    |    |    |    |
+| `optixTransformVectorFromWorldToObjectSpace`    |    | IS | AH | CH |    |    |    |    |
+| `optixTransformNormalFromWorldToObjectSpace`    |    | IS | AH | CH |    |    |    |    |
+| `optixTransformPointFromObjectToWorldSpace`     |    | IS | AH | CH |    |    |    |    |
+| `optixTransformVectorFromObjectToWorldSpace`    |    | IS | AH | CH |    |    |    |    |
+| `optixTransformNormalFromObjectToWorldSpace`    |    | IS | AH | CH |    |    |    |    |
+| `optixGetInstanceId`                            |    | IS | AH | CH |    |    |    |    |
+| `optixGetInstanceIndex`                         |    | IS | AH | CH |    |    |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixGetPrimitiveType`                         |    |    | AH | CH |    |    |    |    |
+| `optixIsFrontFaceHit`                           |    |    | AH | CH |    |    |    |    |
+| `optixIsBackFaceHit`                            |    |    | AH | CH |    |    |    |    |
+| `optixIsTriangleHit`                            |    |    | AH | CH |    |    |    |    |
+| `optixIsTriangleFrontFaceHit`                   |    |    | AH | CH |    |    |    |    |
+| `optixIsTriangleBackFaceHit`                    |    |    | AH | CH |    |    |    |    |
+| `optixIsDisplacedMicromeshTriangleHit`          |    |    | AH | CH |    |    |    |    |
+| `optixIsDisplacedMicromeshTriangleFrontFaceHit` |    |    | AH | CH |    |    |    |    |
+| `optixIsDisplacedMicromeshTriangleBackFaceHit`  |    |    | AH | CH |    |    |    |    |
+| `optixGetTriangleBarycentrics`                  |    |    | AH | CH |    |    |    |    |
+| `optixGetCurveParameter`                        |    |    | AH | CH |    |    |    |    |
+| `optixGetRibbonParameters`                      |    |    | AH | CH |    |    |    |    |
+| `optixGetAttribute_0...7`                       |    |    | AH | CH |    |    |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixReorder`                                  | RG |    |    |    |    |    |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixGetObjectRayOrigin`                       |    | IS |    |    |    |    |    |    |
+| `optixGetObjectRayDirection`                    |    | IS |    |    |    |    |    |    |
+| `optixReportIntersection`                       |    | IS |    |    |    |    |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixTerminateRay`                             |    |    | AH |    |    |    |    |    |
+| `optixIgnoreIntersection`                       |    |    | AH |    |    |    |    |    |
+| `optixGetHitKind`                               |    |    | AH |    |    |    |    |    |
+|                                                 |    |    |    |    |    |    |    |    |
+| `optixGetExceptionCode`                         |    |    |    |    |    | EX |    |    |
+| `optixGetExceptionInvalidTraversable`           |    |    |    |    |    | EX |    |    |
+| `optixGetExceptionInvalidSbtOffset`             |    |    |    |    |    | EX |    |    |
+| `optixGetExceptionInvalidRay`                   |    |    |    |    |    | EX |    |    |
+| `optixGetExceptionParameterMismatch`            |    |    |    |    |    | EX |    |    |
+| `optixGetExceptionLIneInfo`                     |    |    |    |    |    | EX |    |    |
+| `optiGetExceptionDetail_0...7`                  |    |    |    |    |    | EX |    |    |
+
+**Any function in the module that calls an OptiX device-side function is inlined with the called** (with exceptions) until you reach the `__global__`.
+Therefore, recursive functions which call OptiX device-side functions will trigger an error. Exceptions:
+
+- `optixTexFootprint2D`
+- `optixGetInstanceChildFromHandle`
+- `optixTexFootprint2DGrad`
+- `optixTexFootprint2DLod`
+
+### Launch Index
+
+```cpp
+uint3 optixGetLaunchIndex();
+```
+
+The launch index identifies the current thread within thje launch dimensions specified by `optixLaunch` on the host. Available in all programs.
+
+Ray Generation is launched once per index.
+
+**In contrast to the CUDA programming model, neighboring launch indices doesn't mean same warp or block** (Coherency can be improved with Shader Execution Reordering)
+
+### Trace
+
+`optixTrace` function initiates a ray tracing query starting from the given `OptixTraversableHandle` (if null, miss program is called directly).
+
+- The `tmin` and `tmax` (both positive with max bigger) arguments set the range associated to the current ray, and any intersection outside of it is ignored.
+- An arbitrary payload is associated with the call and is passed to all any-hit, closest-hit, miss programs which are executed with the current trace (page 129)
+- `rayTime` sets the time allocated from motion-aware traversal and material evaluation. With motion disabled, `optixGetRayTime` always returns `0`
+- `rayFlags` combination of `OptixRayFlags` influencing tracing behaviour. Possible options:
+
+  - `OPTIX_RAY_FLAG_NONE`: default behaviour for the given acceleration structures
+  - `OPTIX_RAY_FLAG_DISABLE_ANYHIT`: disable any-hit programs. Overrides `OPTIX_INSTANCE_FLAG_ENFORCE_ANYHIT`. Mutually exclusive with
+    `OPTIX_RAY_FLAG_ENFORCE_ANYHIT`, `OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT`, `OPTIX_RAY_FLAG_CULLL_ENFORCED_ANYHIT`
+  - `OPTIX_RAY_FLAG_ENFORCE_ANYHIT`: forces any-hit program execution. Overrides `OPTIX_INSTANCE_FLAG_DISABLE_ANYHIT` and `OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT`
+  - `OTPIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT`: Terminate the ray after first hit and executes the closest-hit program of that hit
+  - `OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT`: disasble closest-hit programs for the ray (still executes miss in case of miss)
+  - `OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES`: prevents intersection of triangle backfaces (works also with `OPTIX_INSTANCE_FLAG_FLIP_TRIANGLE_FACING`). Mutually exclusive
+    with `OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES`
+  - `OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES`: prevents intersection of triangle front faces (works also with `OPTIX_INSTANCE_FLAG_FLIP_TRIANGLE_FACING`). Mutually exclusive
+    with `OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES`
+  - `OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT`: prevents intersection of geometry which disables any-hit programs. Mutually exclusive with `OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT`,
+    `OPTIX_RAY_FLAG_ENFORCE_ANYHIT`, `OPTIX_RAY_FLAG_DISABLE_ANYHIT`
+  - `OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT`: prevents intersection of geometry which enables any-hit program. Mutually exclusive with `OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT`,
+    `OPTIX_RAY_FLAG_ENFORCE_ANYHIT`, `OPTIX_RAY_FLAG_DISABLE_ANYHIT`
+
+The **Visibility Mask** controls intersection against configurable masks of instances. Intersections are computed if bitwise and of the ray mask and instance mask is not zero.
+
+**SBT Offset and SBT Stride** adjust SBT indexing when selecting SBT record for a ray intersection (see [SBT Index](#shader-binding-table))
+
+### Payload Access
+
+Intersection, any-hit, closest-hit use payload to communicate values from the `optixTrace`. There are **up to 32 32-bit payload values available**, and we have device side
+getters and setters for each payload value
+
+```cpp
+__device__ void optixSetPayload_0(unsigned int p);
+__device__ unsigned int optixGetPayload_0();
+```
+
+The payload is configured with `OptixModuleCompileOptions::numPayloadTypes` and `OptixModuleCompileOptions::payloadTypes`. Then, the device side
+function `optixSetPayloadTypes(mask)` (see payload page 129)
+
+### Reporting intersections and attribute access
+
+To report an intersection with the current traversable, the intersection program uses the `optixReportIntersecton` function, in which the `hitKind` parameter determines
+is communicated to the any-hit program and closest-hit program. **Hit Kind can be an arbitrary 7-bit value** whose interpretation is up to the program themselves.
+Furthermore, the function also takes **up to 8 primitive attribute values**
+
+```cpp
+__device__ bool optixReportIntersection(
+  float hitT,
+  unsigned int hitKind,
+  unsigned int a0, ..., unsigned int a7);
+
+// AH, CH
+__device__ unsigned int optixGetAttribute_0();
+```
+
+To reject an intersection, a any-hit program can call
+
+attributes can only be integer data, therefore if we want to pass float values, like we do with the payload, we need to use `__int_as_float` and `__float_as_int`.
+
+**Triangle intersections (Builtin IS module) return 2 attributes**: barycentrinc coordinates (uv) of the hit, (`optixGetAttribute_n` here is wrapped with the convenience function
+`optixGetTriangleBarycentrics`). All the other builtin primitives also have wrappers around attribute retrieval
+
+- Triangle: 2 attributes, u, v, barycentric coordinates of the intersection, `optixGetTriangleBarycentrics`
+- Ribbon: 2 attributes, u, v of the intersection, read with `optixGetRibbonParameter`
+- Curve: 1 attribute, u of the intersection, read with `optixGetCurveParameter`
+
+Unlike the ray payload, which can contain pointers to device memory, attributes must be values.
+
+### Ray Information
+
+To query properties of the currently active ray, use:
+
+- `optixGetWorldRayOrigin`, `optiGetWorldRayDirection`: raturn ray's origin and direction passed into `optixTrace`. During traversal (any-hit, intersection) they are more
+  expensive than their object space counterparts
+- `optixGetObjectRayOrigin`, `optixGetObjectRayDirection`: return ray's origin and direction based on the current transfornmation stack
+- `optixGetRayTmin`, `optixGetRayTmax`: return respectively minimum and maximum extend associated to the current ray, passed through `optixTrace`. Note:
+
+  - in intersection and closest-hit programs, `tmax` is the smallest reported hit, otherwise the value passed as `tmax` in `optixTrace`
+  - in any-hit programs, `tmax` is the value passed to `optixReportIntersection`
+  - in miss programs, `tmax` is the value passed into `optixTrace`
+
+- `optixGetRayTime`: time value passed to `optixTrace`. `0` if motion disabled for the pipeline
+- `optixGetFlags`: ray flags passed to `optixTrace`
+- `optixGetRayVisibilityMask`: visibility mask passed to `optixTrace`
+
+### Undefined Values
+
+To reduce register usage in heavy intersect and anyhit programs we can use the space allocated to the payload by providing to some payload slots the value
+
+```cpp
+__device__ unsigned int optixUndefinedValue();
+```
+
+### Intersection information
+
+- `optixGetPrimitiveIndex` recovers the primitive index local to its built input
+- `optixGetSbtGASIndex` retrieves the SBT index, local to the build input, of the passed GAS handle
+- `optixGetHitKind` retrieves the hit kind passed to `optixReportIntersection`, the hit kind can be analysed by first calling `optixGetPrimitiveType`, and then parse the hit kind
+  in a primitive-specific way. For builtin primitives with their builtin intersection module:
+
+  - All primitives report whether a front face or a backface was hit, and you can extract that from the hit kind with the convenience functions `optixIsFrontFaceHit`
+    and `optixIsBackFaceHit`. Note: For triangle meshes, a front face is defined by the counter-clockwise winding of vertices, which can be flipped with the instance flag
+    `OPTIX_INSTANCE_FLAG_FLIP_TRIANGLE`.
+
+It is more efficient having hit programs switching on the primitive type than having multiple hit programs. Hit programs should differ only with the ray type.
+
+When traversing scene with instances (ie with Instance acceleration structure objects), two properties of the most recently visited instance (`optixReportIntersection`)
+can be queried:
+
+- `optixGetInstanceId`: value supplied to `OptixInstance::instanceId`. If no instance has been visited, it returns `~0u`
+- `optixGetInstanceIndex`: zero-based index within the instance acceleration structure instance list
+
+### SBT Record Data
+
+the SBT record (index computed with formula detailed previously) can be retrieved with `optixGetSbtDataPointer`
+
+### Vertex Random Access
+
+Triangle vertices are **baked** into the triangle data structure of the geometry acceleration structure (GAS). When a triangle acceleration structure is built with the flag
+`OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS`, **then the application can query in object space the triangle index vertex data of any triangle in the GAS**.
+
+Since the geometry acceleration structure contains a copy of triangle vertex data, the application can release the original. The function
+`optixGetTriangleVertexData` returns the 3 triangle vertices at the passed `rayTime`. **Motion interpolation** is poerformed if motion is enabled both in the GAS and Pipeline
+
+```cpp
+OptixTraversableHandle gas = optiGetGASTraversableHandle();
+unsigned int primIdx = optixGetPrimitiveIndex();
+unsigned int sbtIdx = optixGetSbtGASIndex();
+float time = optixGetRayTime();
+
+float3 data[3]
+optixGetTriangleVertexData(gas, primIdx, sbtIdx, time, data);
+```
+
+OptiX may remove triangle data associated with degenerate (not intersectable, eg 3 aligned vertices) triangles, and therefore return `NaN`.
+
+Page 121 explains rules when you use a primitive index other than `optixGetPrimitiveIndex()` and the get data function for other types of built-in primitives.
+
+### Displaced micro-mesh triangle vertices
+
+IF a displaced micro=mesh triangle is hit, the application can query its intersected micro triangle with `optixGetMicroTriangleVertexData` (AH, CH) and
+`optixGetMicroTriangleBarycentricsData` return the barycentric coordinates of the micro triangle
+
+### Geometry Acceleration Structure motion options
+
+In addition to motion vertex interpolation performed by `optixGetTTriangleVertexData`, interpolation may be desired in user-managed (triangle) data, eg *interpolating
+user provided shading normals*. This can be achieved with the functions to query motion options for a GAS: `optixGetGASMotionTimeBegin`, `optixGetGASMotionTimeEnd`,
+`optixGetGASMotionStepCount`.
+
+If the number of motion keys for user vertex data is equal to the number of motion keys in the geometry acceleration structure, then the left key and intra-key interpolation time
+can be computed as follows:
+
+- Left Key: Nearest keyframe in time, floored
+- Intra-key interpolation time: delta time from left key
+
+```cpp
+OptixTraversableHandle gas = optixGetGASTraversableHandle();
+
+float currentTime = optiGetRayTime();
+float timeBegin = optixGetGASMotionTimeBegin(gas);
+float timeEnd = optixGetGASMotionTimeEnd(gas);
+int   numIntervals = optixGetGASMotionStepCount(gas) - 1;
+
+float time = (globalt - timeBegin) * numIntervals / (timeEnd - timeBegin);
+time = max(0.f, min(numIntervals, time)); // time \in [0, numIntervals]
+float fltKey = floorf(time);
+
+float intraKeyTime = time - fltKey;
+int   leftKey = (int)fltKey;
+```
+
+### Transform List
+
+In a multi-level/IAS scene graph, one or more transformations are applied to each instanced primitive.
+
+The **transform list** contains all transforms on the path through the scene graph from the root traversable (passed to `optixTrace`) to the current primitive.
+
+- `optixGetTransformListSize()`: queries the number of entries in the transform list
+- `optixGetTransformListHandle(i)`: returns the traversable handle of the transform entries
+
+From the returned handle associated to the transform list, you can call `optixGetTransformTypeFromHAndle`, which can be one of
+
+- `OPTIX_TRANFORM_TYPE_INSTANCE`: an instance in the IAS. `optixGetInstanceIdFromHandle` retrieves the instance id, while `optixGetInstanceTransformFromHandle` and
+  `optixGetInstanceInverseTransformFromHandle` retrieve respecrively the instance transform and its inverse. Furthermore, `optixGetInstaceChildFromHandle` returns the tranversable
+  handle the instance is "instancing", as specified in `OptixInstance::traversableHandle`
+- `OPTIX_TRANSFORM_TYPE_STATIC_)TRANSFORM`: transform associated with a `OptixStaticTransform` traversable. `optixGetStaticTransformFromHandle` returns a pointer to the
+  traversable (which contains the transform matrix)
+- `OPTIX_TRANFORM_TYPE_MATRIX_MOTION_TRANFORM`: transform associated with a `OptixMatrixMotionTransform` traversable. `optixGetMatrixMotionTransformFromHandle` returns
+  a pointer to the traversable (which contains the matrix transform motion keys)
+- `OPTIX_TRANFORM_TYPE_SRT_MOTION_TRANSFORM`: transform associated with a `OptixSRTMotionTransform` traversable. `optixGetSRTMotionTransformFromHandle` returns a pointer to
+  the traversable (which contains the SRT motion keys)
+
+Example for reading the transform is found at page 124-125.
+
+These intrinsics can be exploited to write a world-to-object tranformation matrix getter function customized from your particular scene graph (instead of using 
+`optixGetObjectToWorldTransformationMatrix`, which is available only in AH, IS, CH programs). Furthermore, features which are
+not used should be turned off, as this allows OptiX to remove unused code branches from its intrinsics implementations (we are referring to
+`OptixPipelineCompileOptions::usesMotionBlur` and `OptixPipelineCompileOptions::traversableGraphFlags`)
+
+Handles returned by `optixGetTransformListHandle` can be stored and used at a later stage to fetch transformations from previously stored handles.
+
+### Instance Random Access
+
+Transform list are the default way to access an instance associated with the current intersection. However, if the user requires access to another instance in the IAS, then
+we need to supply `OPTIX_BUILD_FLAG_ALOW_RANDOM_INSTANCE_ACCESS`, such that the programs can use the `optixGetInstanceTraversableFromIAS(ias, instIdx)`. Then you can apply all
+usual operations on the instance handle, such as `opitxGetInstanceTransformFromHandle(instanceHandle)`
+
+### Termination or ignoring traversal
+
+In any-hit programs, we can use 2 functions, `optixTerminateRay` and `optixIgnoreIntersection` to control traversal:
+
+- `optixTerminateRay`: used to terminate traversal execution associated with the ray, and therefore, after this, the closest-hit program associated with this ray is called
+
+  - Examples: opaque surface hit, russian roulette termination
+
+- `optixIgnoreIntersection`: Causes the current potential intersection to be discarded
+
+### Exceptions
+
+To enable exceptions, you need to supply to `OptixPipelineCompileOptions::exceptionFlags` any bitwise combination different than `OPTIX_EXCEPTION_FLAG_NONE`. there are several
+kind of exceptions, and they should be enabled for debug/internal builds
+
+- `OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW`: check for overflow in the **Continuation stack** (stack which holds ray tracing state information, in fact it's used only by programs
+  invoking `optixTrace` (this is my theory)) with respect to the `continuationStackSize` set with `optixPipelineSetStackSize`
+- `OPTIX_EXCEPTION_FLAG_TRACE_DEPTH`: Before tracing a new ray, check if `OptixPipelineLinkOptions::maxTraceDepth` is exceeded
+- `OPTIX_EXCEPTION_FLAG_USER`: Enables the usage of `optixThrowException()` (otherwise it's no op?)
+- `OPTIX_EXCEPTION_FLAG_DEBUG`: Enables a number of runtime checks
+
+If an exception ocurs, the exception program is invoked. The exception program is specified with an SBT record in `OptixShaderBindingTable::exceptionRecord`. If no exception
+program is provided, optix generates a default one which prints the first 5 exceptions occurred
+
+The kind of exceptions can be queried in exception programs with `optixGetExceptionCode`. Optix predefined 2 exception codes `OPTIX_EXCEPTION_CODE_STACK_OVERFLOW` and
+`OPTIX_EXCEPTION_CODE_TRACE_DEPTH_EXCEEDED` which use the highest 2 bits of the 32-bit wide exception code, leaving $0$ to $2^{30}-1$ free to use
+
+`optixThrowException` also takes up to 8 `unsigned int` exception details, whihch can be queried with `optixGetExceptionDetail_0..7()`
+
+## Payload
+
+The **ray payload** is used to pass data from `optixTrace` to the programs invoked during ray traversal. They follow a **copy-in/copy-out semantic**.
+Each of the 32 32-bit payload component can be written using  its `optixSetPayload_N` function.
+
+**Payload values are held in registers** whenever possible. To hold more data, 2 payload values can encode a pointer to global memory or pointers to stack based variables.
+
+Then number of payload values used is specified with `OptixPipelineCompileOptions::numPayloadValues`. *More values means increased register usage*
+
+We can fine-tune the semantics of each payload value (eg, which kind of program can read/write which payload values). These semantics
+
+- limit the payload value lifetime, hence reducing register usage
+- limit read/write for some types of programs
+
+Each `optixTrace` call is associated with **a sigle payload type**. Each intersection, any-hit, closest-hit, miss (hitgroup) programs can be associated with 1 or more
+payload types. Up to 8 payload types can be specified inside `OptixModuleCompileOptions`
+
+- Example semantic for a value written by an `optixTrace` caller and read by closest-hit: `OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_WRITE | OPTIX_PAYLOAD_SEMANTICS_CH_READ`
+
+To enable payload type usage, you need to set `PipelineCompileOptions::numPayloadValues = 0`
+
+Within a module a payload type is referenced by ID, where the ID is its index inside the array of payload types specified at module creation. Each program in a module specified
+one or more supported payload types using `opitxSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_1 | ...)` as its first line. If not called, the program supports all payload types specified
+in its module
+
+```cpp
+// supports types 1 and 3
+extern "C" __global__ void __anyhit__ah() {
+  optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_1 | OPTIX_PAYLOAD_TYPE_3); // must be compile time constant
+  ...
+}
+```
+
+All programs invoked during the execution of an `optixTrace` call must be associated with the payload type passed to that `optixTrace`.
+
+`optixTrace` has an overload which takes as first parameter the payload type
+
+Programs associated with more than 1 payload type will be compiled once fore each type. The user configures the target type for a program group within a module with
+`OptixProgramGroupOptions::payloadType`. This can be left to zero if there is only one unique payload type supported by all programs.
+
+## Callables
+
+Callable programs are invoked using their index in the *Shader Binding Table*. Calling a function through its index in the SBT table allows the function to change at runtime
+without causing pipeline recompilation, which can be used, for example, to use custom shading effects in response to some GUI events.
+
+Two types of callable programs exist in OptiX:
+
+- **Direct Callable**: Uused for function dispatch where you want to select among multiple implementations at runtime (eg different BRDFs, textures, lights). Common Use cases:
+
+  - **material system**: call different BRDF for different materials
+  - **procedural textures**: call into a texture function with different behaviour per object
+  - **light sampling**: different light functions per emitter
+
+  Direct Callables are like function pointers to a vtable
+
+- **Continuation Callable**: for **recursive-like dispatch** during **Call stack unwinding after an `optixTrace` call** (called **Continuation**) such as shading, light transport.
+  Callable during the *continuation phase*, meaning from hit/miss programs. Common Use cases:
+
+  - **Shading Trees**: decouple material shading logic per object
+  - **Post-trace evaluation**: Once the trace hits/misses, invoke a continuation function for further processing (e.g. evaluating a B**S**DF)
+  - **Material Components**: noise functions, complex bitmap network
+
+  Continuation Callables are like callbacks that run after a trace, and can substitute a divergent path execution, leading to more performance.
+
+  - Continuation Callables can be called from other Continuation Callables, creating a network-like shader
+
+There are 3 parts into calling a continuation program
+
+- Implementatiuon: `__direct_callable__` or `__continuation_callable__`
+
+```cpp
+extern "C" __device__ float3 __direct_callable__normal_shade(float3 hit_point, float3 ray_dir, float3 normal) { 
+  return normalize(normal) * 0.5f + 0.5f; 
+}
+```
+
+- Shader Binding Table Record for the callable program inserted in the program group that contains the callable program
+
+- `optixDirectCall` or `optixContinuationCall` (templated on return type and argument, and they expect `sbtIndex` followed by parameters)
+
+```cpp
+extern "C" __global__ void __miss__raydir_shade() {
+  const float3 ray_dir = optixGetWorldRayDirection();
+
+  float3 result = optixContinuationCall<float3, float3>( 0, ray_dir );
+  whitted::setPayloadResult( result );
+}
+```
+
+### non-inlined device functions
+
+By Default, OptiX inlines all function calls, which is fine for performance, but increases compilation time if long functions are continuously inlined (and it leads to
+code duplication, more registers etcetera).
+
+To disable automatic inlining, device functions must have the `__optix_enabled__` prefix. **OptiX Enabled Functions do not have SBT entries**. Optix Enabled Functions cannot
+use the OptiX device side API and cannot be called from exception programs.
+
+## Curves and Spheres
+
+TODO
+
+## Shader Execution Reordering
+
+TODO (supported from Ada Lovelace)
+
+## NVIDIA AI Denoiser
+
+TODO (we won't make it in time for post processing)

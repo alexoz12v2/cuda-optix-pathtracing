@@ -266,6 +266,13 @@ int32_t guardedMain()
 
         ctx.log("OptiX Context Created", {});
 
+        uint32_t serFlags = 0;
+        optixDeviceContextGetProperty(j.optixContext, ::OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING, &serFlags, sizeof(uint32_t));
+        if (serFlags == ::OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING_FLAG_NONE)
+            ctx.warn("Device does not support Shader Execution Reordering", {});
+        else
+            ctx.log("Device supports Shader Execution Reordering", {});
+
         // OptixProgramJanitor scope
         {
             struct OptixProgramJanitor

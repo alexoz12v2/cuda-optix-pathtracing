@@ -74,10 +74,26 @@ namespace dmt {
      */
     enum class EJobLayer : uint32_t
     {
-        eDefault = 0,
-        eTest0   = 0,
-        eTest1   = 1,
-        eEmpty   = static_cast<uint32_t>(-1),
+        eDefault    = 0,
+        eTest0      = 0,
+        eTest1      = 1,
+        eEmpty      = static_cast<uint32_t>(-1),
+        ePriority0  = 0,
+        ePriority1  = 1,
+        ePriority2  = 2,
+        ePriority3  = 3,
+        ePriority4  = 4,
+        ePriority5  = 5,
+        ePriority6  = 6,
+        ePriority7  = 7,
+        ePriority8  = 8,
+        ePriority9  = 9,
+        ePriority10 = 10,
+        ePriority11 = 11,
+        ePriority12 = 12,
+        ePriority13 = 13,
+        ePriority14 = 14,
+        ePriority15 = 15,
     };
 
     constexpr std::strong_ordering operator<=>(EJobLayer a, EJobLayer b) { return toUnderlying(a) <=> toUnderlying(b); }

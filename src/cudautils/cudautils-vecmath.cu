@@ -630,7 +630,7 @@ namespace dmt {
 
     __host__ __device__ Vector3f Bounds3f::diagonal() const { return pMax - pMin; }
 
-    __host__ __device__ float Bounds3f::surfaceAraa() const
+    __host__ __device__ float Bounds3f::surfaceArea() const
     {
         Vector3f const d = diagonal();
         return 2 * (d.x * d.y + d.x * d.z + d.y * d.z);

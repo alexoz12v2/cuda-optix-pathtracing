@@ -20,6 +20,33 @@
 // must be defined in only one translation unit if stubs is included
 OptixFunctionTable g_optixFunctionTable = {};
 namespace dmt {
+    CUresult waitForStreamWithTimeout(NvcudaLibraryFunctions* cudaApi, CUstream stream, int timeout_ms, int sleep_interval_ms = 1)
+    {
+        int waited_ms = 0;
+
+        while (true)
+        {
+            CUresult res = cudaApi->cuStreamQuery(stream);
+            if (res == CUDA_SUCCESS)
+            {
+                return CUDA_SUCCESS; // Stream has completed.
+            }
+            else if (res != CUDA_ERROR_NOT_READY)
+            {
+                return res; // Some other error occurred.
+            }
+
+            if (waited_ms >= timeout_ms)
+            {
+                return CUDA_ERROR_NOT_READY; // Timed out.
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleep_interval_ms));
+
+            waited_ms += sleep_interval_ms;
+        }
+    }
+
     // TODO 2 versions: one with library loaded, hence can get you the error string, another without it
     bool optixCall(OptixResult result)
     {
@@ -267,7 +294,10 @@ int32_t guardedMain()
         ctx.log("OptiX Context Created", {});
 
         uint32_t serFlags = 0;
-        optixDeviceContextGetProperty(j.optixContext, ::OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING, &serFlags, sizeof(uint32_t));
+        optixDeviceContextGetProperty(j.optixContext,
+                                      ::OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING,
+                                      &serFlags,
+                                      sizeof(uint32_t));
         if (serFlags == ::OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING_FLAG_NONE)
             ctx.warn("Device does not support Shader Execution Reordering", {});
         else
@@ -695,14 +725,14 @@ int32_t guardedMain()
             // -- 6: prepare output buffer --
             CUdeviceptr                     d_outputBuffer = 0;
             dmt::UniqueRef<unsigned char[]> outputBuffer   = nullptr;
-            static uint32_t constexpr numChannels = 4;
-            uint32_t const outputNumBytes = width * height * numChannels * sizeof(unsigned char);
+            static constexpr uint32_t       numChannels    = 4;
+            uint32_t const                  outputNumBytes = width * height * numChannels * sizeof(unsigned char);
             {
-                if (!dmt::cudaDriverCall(j.cudaApi.get(),
-                                         j.cudaApi->cuMemAlloc(&d_outputBuffer, outputNumBytes)))
+                if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc(&d_outputBuffer, outputNumBytes)))
                     return 1;
 
-                outputBuffer = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), numChannels * width * height);
+                outputBuffer = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(),
+                                                                   numChannels * width * height);
                 if (!outputBuffer)
                 {
                     ctx.error("Couldn't allocate host memory for output image", {});
@@ -750,14 +780,42 @@ int32_t guardedMain()
                     return 1;
                 }
 
+#ifdef _WIN32
+                // Doesn't work, as CUDA printf writes directly to host stdout
+                HANDLE              hRead, hWrite;
+                SECURITY_ATTRIBUTES sa{sizeof(SECURITY_ATTRIBUTES), nullptr, true};
+                char                buffer[1024];
+                // create pipe
+                if (!CreatePipe(&hRead, &hWrite, &sa, 0))
+                    return 1;
+                // redirect stdout to pipe
+                if (!SetStdHandle(STD_OUTPUT_HANDLE, hWrite))
+                    return 1;
+
+                do
+                {
+                    DWORD bytesAvailable;
+                    DWORD bytesRead;
+                    if (PeekNamedPipe(hRead, nullptr, 0, nullptr, &bytesAvailable, nullptr) && bytesAvailable > 0)
+                    {
+                        if (ReadFile(hRead, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0)
+                            ctx.log("%s", std::make_tuple(std::string_view(buffer, bytesRead)));
+                    }
+                } while (dmt::waitForStreamWithTimeout(j.cudaApi.get(), stream, 10) == ::CUDA_ERROR_NOT_READY);
+
+                CloseHandle(hRead);
+                CloseHandle(hWrite);
+#else
                 if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream)))
                     return 1;
+#endif
 
                 ctx.log("Optix Kernel Completed", {});
                 j.cudaApi->cuMemFree(d_params);
                 j.cudaApi->cuStreamDestroy(stream);
 
-                if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyDtoH(outputBuffer.get(), d_outputBuffer, outputNumBytes)))
+                if (!dmt::cudaDriverCall(j.cudaApi.get(),
+                                         j.cudaApi->cuMemcpyDtoH(outputBuffer.get(), d_outputBuffer, outputNumBytes)))
                     return 1;
 
                 dmt::os::Path imagePath    = dmt::os::Path::executableDir() / "image.png";

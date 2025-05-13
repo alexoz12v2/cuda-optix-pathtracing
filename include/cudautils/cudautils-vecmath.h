@@ -439,6 +439,17 @@ namespace dmt {
     }
 
     template <Vector T>
+    DMT_CPU_GPU inline typename T::value_type maxComponent(T v)
+    {
+        int32_t max = 0;
+        for (int32_t i = 1; i < T::numComponents(); ++i)
+            if (v[max] < v[i])
+                max = i;
+
+        return v[max];
+    }
+
+    template <Vector T>
     DMT_CPU_GPU inline int32_t minComponentIndex(T v)
     {
         int32_t min = 0;
@@ -447,6 +458,17 @@ namespace dmt {
                 min = i;
 
         return min;
+    }
+
+    template <Vector T>
+    DMT_CPU_GPU inline typename T::value_type minComponent(T v)
+    {
+        int32_t min = 0;
+        for (int32_t i = 1; i < T::numComponents(); ++i)
+            if (v[min] > v[i])
+                min = i;
+
+        return v[min];
     }
 
     template <Vector T>
@@ -645,10 +667,11 @@ namespace dmt {
         DMT_CPU_GPU Point3f const& operator[](int32_t i) const;
         DMT_CPU_GPU Point3f        corner(EBoundsCorner corner) const;
         DMT_CPU_GPU Vector3f       diagonal() const;
-        DMT_CPU_GPU float          surfaceAraa() const;
+        DMT_CPU_GPU float          surfaceArea() const;
         DMT_CPU_GPU float          volume() const;
         DMT_CPU_GPU int32_t        maxDimention() const;
         DMT_CPU_GPU Point3f        lerp(Point3f t) const;
+        DMT_CPU_GPU Point3f        centroid() const { return .5f * pMin + .5f * pMax; }
         DMT_CPU_GPU Vector3f       offset(Point3f p) const;
         DMT_CPU_GPU void           boundingSphere(Point3f& outCenter, float& outRadius) const;
         DMT_CPU_GPU bool           isEmpty() const;

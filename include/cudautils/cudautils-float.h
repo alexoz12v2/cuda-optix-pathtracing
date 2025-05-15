@@ -19,6 +19,7 @@
 // TODO: If you want to rely to link time optimization, split definition and declaration and remove inline linkage
 namespace dmt::fl {
     using namespace dmt;
+    DMT_CPU_GPU inline constexpr float infinity() { return std::numeric_limits<float>::infinity(); }
     DMT_CPU_GPU inline constexpr float eqTol() { return std::numeric_limits<float>::epsilon(); }
     DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
     DMT_CPU_GPU inline constexpr float pi() { return std::numbers::pi_v<float>; }

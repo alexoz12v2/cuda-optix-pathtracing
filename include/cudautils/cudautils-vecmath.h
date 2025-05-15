@@ -688,6 +688,7 @@ namespace dmt {
         Point3f pMax;
     };
 
+    DMT_CPU_GPU Bounds3f bbEmpty();
     DMT_CPU_GPU bool     inside(Point3f p, Bounds3f const& b);
     DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b);
     DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& b, Point3f p);

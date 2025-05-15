@@ -590,6 +590,12 @@ namespace dmt {
                 p.z <= b.pMax.z);
     }
 
+    __host__ __device__ Bounds3f bbEmpty()
+    {
+        return {.pMin = {{fl::infinity(), fl::infinity(), fl::infinity()}},
+                .pMax = {{-fl::infinity(), -fl::infinity(), -fl::infinity()}}};
+    }
+
     __host__ __device__ Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b)
     {
         Bounds3f bRet;

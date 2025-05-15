@@ -198,6 +198,7 @@ namespace dmt {
         constexpr void operator++() { advance(); }
         constexpr bool finished() const { return m_numBytes == 0 && m_dirty; }
         constexpr bool isFormatSpecifier() const { return m_insideArg; }
+        constexpr uint32_t totalBytes() const { return m_numBytes + m_lastBytes; }
 
     private:
         constexpr void advance()
@@ -432,7 +433,7 @@ namespace dmt {
 
     /** Shortcut to write `std::make_tuple` */
 
-    template <typename... Ts>
+template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char*, uint32_t&, uint32_t&> && ...)
     inline constexpr LogRecord createRecord(
         FormatString<>              fmt,
@@ -449,28 +450,49 @@ namespace dmt {
         char*     argBufPtr     = _argBuffer;
         uint32_t  totalArgBytes = 0;
 
-        std::apply([&](auto&&... args) {
-            ((UTF8Formatter<std::decay_t<decltype(args)>>{}(args, argBufPtr, totalArgBytes, _argBufferSize)), ...);
-        }, _params);
+        constexpr size_t tupleSize = sizeof...(Ts);
 
-        while (!fmt.finished())
+        // If tuple is not empty, apply formatters
+        if constexpr (tupleSize > 0)
         {
-            if (fmt.isFormatSpecifier() && argBufPtr < _argBuffer + (totalArgBytes - _argBufferSize))
+            std::apply([&](auto&&... args) {
+                ((UTF8Formatter<std::decay_t<decltype(args)>>{}(args, argBufPtr, totalArgBytes, _argBufferSize)), ...);
+            }, _params);
+        }
+
+        uint32_t usedArgs = 0;
+        bool     earlyExit = false;
+
+        while (!fmt.finished() && !earlyExit)
+        {
+            if (fmt.isFormatSpecifier() && usedArgs < tupleSize)
             {
-                uint32_t numBytes = *reinterpret_cast<uint32_t*>(argBufPtr);
-                uint32_t len      = *reinterpret_cast<uint32_t*>(argBufPtr + sizeof(uint32_t));
-                memcpy(_buffer, argBufPtr + 2 * sizeof(uint32_t), numBytes);
-                _buffer += numBytes;
-                _bufferSize -= numBytes;
-                record.len += len;
-                record.numBytes += numBytes;
-                argBufPtr += numBytes + 2 * sizeof(uint32_t);
+                // There's an argument to format
+                if (argBufPtr < _argBuffer + _argBufferSize)
+                {
+                    uint32_t numBytes = *reinterpret_cast<uint32_t*>(argBufPtr);
+                    uint32_t len      = *reinterpret_cast<uint32_t*>(argBufPtr + sizeof(uint32_t));
+
+                    if (_bufferSize >= numBytes)
+                    {
+                        memcpy(_buffer, argBufPtr + 2 * sizeof(uint32_t), numBytes);
+                        _buffer += numBytes;
+                        _bufferSize -= numBytes;
+                        record.len += len;
+                        record.numBytes += numBytes;
+                    }
+
+                    argBufPtr += numBytes + 2 * sizeof(uint32_t);
+                    ++usedArgs;
+                }
             }
             else
             {
+                // Not a format specifier OR ran out of args — treat as literal
+                earlyExit             = tupleSize == 0 || usedArgs >= tupleSize;
                 CharRangeU8 portion   = *fmt;
                 char const* src       = portion.data;
-                uint32_t    remaining = portion.numBytes;
+                uint32_t    remaining = earlyExit ? fmt.totalBytes() : portion.numBytes;
 
                 while (remaining > 0 && _bufferSize > 0)
                 {
@@ -479,38 +501,32 @@ namespace dmt {
                         *_buffer++ = '{';
                         src += 2;
                         remaining -= 2;
-                        _bufferSize--;
-                        record.len += 1;
-                        record.numBytes += 1;
                     }
                     else if (remaining >= 2 && src[0] == '}' && src[1] == '}')
                     {
                         *_buffer++ = '}';
                         src += 2;
                         remaining -= 2;
-                        _bufferSize--;
-                        record.len += 1;
-                        record.numBytes += 1;
                     }
                     else
                     {
                         *_buffer++ = *src++;
                         remaining--;
-                        _bufferSize--;
-                        record.len += 1;
-                        record.numBytes += 1;
                     }
+                    _bufferSize--;
+                    record.len++;
+                    record.numBytes++;
                 }
             }
-            ++fmt;
+
+            if (!earlyExit)
+                ++fmt;
         }
 
-        if (record.numBytes < _bufferSize)
-        {
-            _buffer[0] = '\n';
-            record.numBytes++;
-            record.len++;
-        }
+        _buffer[record.numBytes < _bufferSize ? 0 : -1] = '\n';
+        record.numBytes++;
+        record.len++;
+
         return record;
     }
 
@@ -574,7 +590,21 @@ namespace dmt {
                 return; // Not enough space for metadata
 
             char* writePos     = reinterpret_cast<char*>(_buffer + _offset + 2 * sizeof(uint32_t));
-            int   bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%d", value);
+            int   bytesWritten = 0;
+            if constexpr (std::is_signed_v<T>)
+            {
+                if constexpr (sizeof(T) == 4)
+                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%d", value);
+                else
+                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%zd", value);
+            }
+            else
+            {
+                if constexpr (sizeof(T) == 4)
+                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%u", value);
+                else
+                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%zu", value);
+            }
 
             if (bytesWritten > 0 && static_cast<uint32_t>(bytesWritten) <= (_bufferSize - _offset - 2 * sizeof(uint32_t)))
             {
@@ -603,13 +633,19 @@ namespace dmt {
             std::string_view strView = value;
 
             if (_bufferSize < _offset + 2 * sizeof(uint32_t))
+            {
+                assert(false && "string exceeds maximum size");
                 return; // Not enough space for metadata
+            }
 
             uint32_t numBytes = static_cast<uint32_t>(strView.size());
             uint32_t len = static_cast<uint32_t>(strView.size()); // Assuming valid UTF-8 input where each character is 1 byte
 
             if (_bufferSize < _offset + 2 * sizeof(uint32_t) + numBytes)
+            {
+                assert(false && "String exceeds maximum size");
                 return; // Insufficient space for the string
+            }
 
             *std::bit_cast<uint32_t*>(_buffer + _offset)                    = numBytes; // Store `numBytes`
             *std::bit_cast<uint32_t*>(_buffer + _offset + sizeof(uint32_t)) = len;      // Store `len`

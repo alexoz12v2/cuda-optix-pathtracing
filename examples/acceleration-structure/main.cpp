@@ -47,6 +47,50 @@ namespace dmt {
         uint32_t count;
     };
 
+    namespace bvh_debug {
+        uint32_t leafCount(BVHBuildNode const* node)
+        {
+            Context ctx;
+            if (!node)
+                return 0;
+
+            // If the node has no children, it's a leaf
+            if (node->childCount == 0)
+            {
+                ctx.log("bounds: {{ min: [{} {} {}], max: [{} {} {}] }}",
+                        std::make_tuple(node->bounds.pMin.x,
+                                        node->bounds.pMin.y,
+                                        node->bounds.pMin.z,
+                                        node->bounds.pMax.x,
+                                        node->bounds.pMax.y,
+                                        node->bounds.pMax.z));
+                return 1;
+            }
+
+            uint32_t count = 0;
+            for (uint32_t i = 0; i < node->childCount; ++i)
+            {
+                count += leafCount(node->children[i]);
+            }
+            return count;
+        }
+    } // namespace bvh_debug
+
+    void cleanupBuildBVH(BVHBuildNode* node, std::pmr::memory_resource* alloc = std::pmr::get_default_resource())
+    {
+        if (node->childCount == 0)
+        {
+            alloc->deallocate(node, sizeof(BVHBuildNode));
+        }
+        else
+        {
+            for (uint32_t i = 0; i < node->childCount; ++i)
+            {
+                cleanupBuildBVH(node->children[i], alloc);
+            }
+        }
+    }
+
     BVHBuildNode* buildBVH(std::span<Bounds3f>        primitives,
                            std::pmr::memory_resource* alloc = std::pmr::get_default_resource())
     {
@@ -98,18 +142,22 @@ namespace dmt {
             {
                 // 8-way split using 3 SAH passes (2^3 = 8)
                 std::pmr::deque<StackFrame> childrenStack{alloc};
+                std::pmr::deque<StackFrame> singletonStack{alloc};
                 childrenStack.push_back({node, beg, end, frame.bounds});
 
                 int splitCount = 0;
-                while (childrenStack.size() < BranchingFactor && splitCount < BranchingFactor)
+                while (!childrenStack.empty() && childrenStack.size() < BranchingFactor && splitCount < BranchingFactor)
                 {
                     StackFrame current = childrenStack.front();
                     childrenStack.pop_front();
 
                     Iter cbeg = current.beg, cend = current.end;
                     if (cend - cbeg <= 1)
-                        childrenStack.push_back(current);
-                    else
+                    {
+                        assert(!current.node);
+                        singletonStack.push_back(current);
+                    }
+                    if (cend - cbeg > 1)
                     {
                         uint32_t splitDim = current.bounds.maxDimention();
                         std::sort(cbeg, cend, [splitDim](Bounds3f const& a, Bounds3f const& b) {
@@ -127,8 +175,8 @@ namespace dmt {
                         }
 
                         std::array<float, NumSplits> costs{};
-                        int                          leftCount = 0;
-                        Bounds3f                     leftBounds{};
+                        int                          leftCount  = 0;
+                        Bounds3f                     leftBounds = bbEmpty();
                         for (int i = 0; i < NumSplits; ++i)
                         {
                             leftBounds = bbUnion(leftBounds, bins[i].bounds);
@@ -136,8 +184,8 @@ namespace dmt {
                             costs[i] += leftCount * leftBounds.surfaceArea();
                         }
 
-                        int      rightCount = 0;
-                        Bounds3f rightBounds{};
+                        int      rightCount  = 0;
+                        Bounds3f rightBounds = bbEmpty();
                         for (int i = NumSplits; i > 0; --i)
                         {
                             rightBounds = bbUnion(rightBounds, bins[i].bounds);
@@ -146,34 +194,30 @@ namespace dmt {
                         }
 
                         int   bestSplit = std::min_element(costs.begin(), costs.end()) - costs.begin();
-                        float splitVal  = float(bestSplit + 1) / NumBins;
+                        float splitVal  = static_cast<float>(bestSplit + 1) / NumBins;
 
                         Iter mid = std::partition(cbeg, cend, [&](Bounds3f const& b) {
                             return current.bounds.offset(b.centroid())[splitDim] < splitVal;
                         });
 
-                        if (mid == cbeg || mid == cend)
-                        {
-                            // Fallback if degenerate
-                            childrenStack.push_back(current);
-                            // Prevent retrying this node again by incrementing splitCount
-                            ++splitCount;
-                        }
-                        else
+                        if (mid != cbeg && mid != cend)
                         {
                             // Push both halves
-                            Bounds3f leftB{}, rightB{};
+                            Bounds3f leftB = bbEmpty(), rightB = bbEmpty();
                             for (auto it = cbeg; it != mid; ++it)
                                 leftB = bbUnion(leftB, *it);
                             for (auto it = mid; it != cend; ++it)
                                 rightB = bbUnion(rightB, *it);
 
-                            childrenStack.push_back({nullptr, cbeg, mid, leftB});
-                            childrenStack.push_back({nullptr, mid, cend, rightB});
-                            splitCount++;
+                            childrenStack.emplace_back(nullptr, cbeg, mid, leftB);
+                            childrenStack.emplace_back(nullptr, mid, cend, rightB);
+                            ++splitCount;
                         }
                     }
                 }
+
+                for (auto const& frame : singletonStack)
+                    childrenStack.push_back(frame);
 
                 // Finalize 8 children
                 node->childCount = childrenStack.size();
@@ -187,6 +231,8 @@ namespace dmt {
                 }
             }
         }
+
+        assert(bvh_debug::leafCount(root) == primitives.size());
 
         return root;
     }
@@ -204,6 +250,7 @@ namespace dmt {
 
         void serializeBVHNode(std::ostringstream& oss, BVHBuildNode const* node)
         {
+            assert(node);
             oss << "{ \"bounds\": " << boundsToJson(node->bounds);
 
             if (node->childCount > 0)
@@ -213,6 +260,7 @@ namespace dmt {
                 {
                     if (i > 0)
                         oss << ", ";
+                    assert(node->children[i]);
                     serializeBVHNode(oss, node->children[i]);
                 }
                 oss << "] }";
@@ -278,12 +326,15 @@ int32_t guardedMain()
             dmt::Bounds3f({{3, 4, 0}}, {{4, 5, 0}})  // Triangle 20
         };
 
-        // memory leak (TODO)
         auto* rootNode = dmt::buildBVH(primitives);
-        ctx.log("child count root: {}", std::make_tuple(rootNode->childCount));
 
-        std::string json = dmt::bvh_debug::bvhToJson(rootNode);
-        ctx.log("{}", std::make_tuple(json));
+        if (ctx.isLogEnabled())
+        {
+            std::string json = dmt::bvh_debug::bvhToJson(rootNode);
+            ctx.log(std::string_view{json}, {});
+        }
+
+        dmt::cleanupBuildBVH(rootNode);
     }
 
     return 0;

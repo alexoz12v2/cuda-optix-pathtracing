@@ -91,6 +91,25 @@ namespace dmt {
         }
     }
 
+    namespace bvh::detail {
+        std::array<uint32_t, 3> axesFromSelected(uint32_t used)
+        {
+            std::array<uint32_t, 3> axes;
+            axes[0] = used;
+
+            uint32_t idx = 1;
+            for (uint32_t i = 0; i < 3; ++i)
+            {
+                if (i != used)
+                {
+                    axes[idx++] = i;
+                }
+            }
+
+            return axes;
+        }
+    } // namespace bvh::detail
+
     BVHBuildNode* buildBVH(std::span<Bounds3f>        primitives,
                            std::pmr::memory_resource* alloc = std::pmr::get_default_resource())
     {
@@ -146,7 +165,7 @@ namespace dmt {
                 childrenStack.push_back({node, beg, end, frame.bounds});
 
                 int splitCount = 0;
-                while (!childrenStack.empty() && childrenStack.size() < BranchingFactor && splitCount < BranchingFactor)
+                while (!childrenStack.empty() && childrenStack.size() < BranchingFactor && splitCount < BranchingFactor - 1)
                 {
                     StackFrame current = childrenStack.front();
                     childrenStack.pop_front();
@@ -159,59 +178,94 @@ namespace dmt {
                     }
                     if (cend - cbeg > 1)
                     {
-                        uint32_t splitDim = current.bounds.maxDimention();
-                        std::sort(cbeg, cend, [splitDim](Bounds3f const& a, Bounds3f const& b) {
-                            return a.centroid()[splitDim] < b.centroid()[splitDim];
-                        });
-
-                        std::array<NodeState, NumBins> bins{};
-                        for (auto it = cbeg; it != cend; ++it)
+                        auto splitDims = bvh::detail::axesFromSelected(current.bounds.maxDimention());
+                        bool splitDone = false;
+                        for (uint32_t i = 0; i < 3 && !splitDone; ++i)
                         {
-                            int b = std::clamp(static_cast<int>(NumBins * current.bounds.offset(it->centroid())[splitDim]),
-                                               0,
-                                               NumBins - 1);
-                            bins[b].count++;
-                            bins[b].bounds = bbUnion(bins[b].bounds, *it);
+                            uint32_t splitDim = current.bounds.maxDimention();
+                            std::sort(cbeg, cend, [splitDim](Bounds3f const& a, Bounds3f const& b) {
+                                return a.centroid()[splitDim] < b.centroid()[splitDim];
+                            });
+
+                            std::array<NodeState, NumBins> bins{};
+                            for (auto it = cbeg; it != cend; ++it)
+                            {
+                                int b = std::clamp(static_cast<int>(NumBins * current.bounds.offset(it->centroid())[splitDim]),
+                                                   0,
+                                                   NumBins - 1);
+                                bins[b].count++;
+                                bins[b].bounds = bbUnion(bins[b].bounds, *it);
+                            }
+
+                            std::array<float, NumSplits> costs{};
+                            int                          leftCount  = 0;
+                            Bounds3f                     leftBounds = bbEmpty();
+                            for (int i = 0; i < NumSplits; ++i)
+                            {
+                                leftBounds = bbUnion(leftBounds, bins[i].bounds);
+                                leftCount += bins[i].count;
+                                costs[i] += leftCount * leftBounds.surfaceArea();
+                            }
+
+                            int      rightCount  = 0;
+                            Bounds3f rightBounds = bbEmpty();
+                            for (int i = NumSplits; i > 0; --i)
+                            {
+                                rightBounds = bbUnion(rightBounds, bins[i].bounds);
+                                rightCount += bins[i].count;
+                                costs[i - 1] += rightCount * rightBounds.surfaceArea();
+                            }
+
+                            int   bestSplit = std::min_element(costs.begin(), costs.end()) - costs.begin();
+                            float splitVal  = static_cast<float>(bestSplit + 1) / NumBins;
+
+                            Iter mid = std::partition(cbeg, cend, [&](Bounds3f const& b) {
+                                return current.bounds.offset(b.centroid())[splitDim] < splitVal;
+                            });
+
+                            if (mid != cbeg && mid != cend)
+                            {
+                                // Push both halves
+                                Bounds3f leftB = bbEmpty(), rightB = bbEmpty();
+                                for (auto it = cbeg; it != mid; ++it)
+                                    leftB = bbUnion(leftB, *it);
+                                for (auto it = mid; it != cend; ++it)
+                                    rightB = bbUnion(rightB, *it);
+
+                                childrenStack.emplace_back(nullptr, cbeg, mid, leftB);
+                                childrenStack.emplace_back(nullptr, mid, cend, rightB);
+                                ++splitCount;
+                                splitDone = true;
+                            }
                         }
 
-                        std::array<float, NumSplits> costs{};
-                        int                          leftCount  = 0;
-                        Bounds3f                     leftBounds = bbEmpty();
-                        for (int i = 0; i < NumSplits; ++i)
+                        if (!splitDone)
                         {
-                            leftBounds = bbUnion(leftBounds, bins[i].bounds);
-                            leftCount += bins[i].count;
-                            costs[i] += leftCount * leftBounds.surfaceArea();
-                        }
+                            // fallback to equal count splitting
+                            uint32_t fallbackDim = current.bounds.maxDimention(); // could reuse `splitDim` from earlier
 
-                        int      rightCount  = 0;
-                        Bounds3f rightBounds = bbEmpty();
-                        for (int i = NumSplits; i > 0; --i)
-                        {
-                            rightBounds = bbUnion(rightBounds, bins[i].bounds);
-                            rightCount += bins[i].count;
-                            costs[i - 1] += rightCount * rightBounds.surfaceArea();
-                        }
+                            std::sort(cbeg, cend, [fallbackDim](Bounds3f const& a, Bounds3f const& b) {
+                                return a.centroid()[fallbackDim] < b.centroid()[fallbackDim];
+                            });
 
-                        int   bestSplit = std::min_element(costs.begin(), costs.end()) - costs.begin();
-                        float splitVal  = static_cast<float>(bestSplit + 1) / NumBins;
+                            Iter mid = cbeg + (cend - cbeg) / 2;
 
-                        Iter mid = std::partition(cbeg, cend, [&](Bounds3f const& b) {
-                            return current.bounds.offset(b.centroid())[splitDim] < splitVal;
-                        });
+                            if (mid != cbeg && mid != cend)
+                            {
+                                Bounds3f leftB = bbEmpty(), rightB = bbEmpty();
+                                for (auto it = cbeg; it != mid; ++it)
+                                    leftB = bbUnion(leftB, *it);
+                                for (auto it = mid; it != cend; ++it)
+                                    rightB = bbUnion(rightB, *it);
 
-                        if (mid != cbeg && mid != cend)
-                        {
-                            // Push both halves
-                            Bounds3f leftB = bbEmpty(), rightB = bbEmpty();
-                            for (auto it = cbeg; it != mid; ++it)
-                                leftB = bbUnion(leftB, *it);
-                            for (auto it = mid; it != cend; ++it)
-                                rightB = bbUnion(rightB, *it);
-
-                            childrenStack.emplace_back(nullptr, cbeg, mid, leftB);
-                            childrenStack.emplace_back(nullptr, mid, cend, rightB);
-                            ++splitCount;
+                                childrenStack.emplace_back(nullptr, cbeg, mid, leftB);
+                                childrenStack.emplace_back(nullptr, mid, cend, rightB);
+                                ++splitCount;
+                            }
+                            else
+                            {
+                                assert(false && "Equal Count splitting shouldn't fail with more than 1 primitive");
+                            }
                         }
                     }
                 }
@@ -237,6 +291,89 @@ namespace dmt {
         return root;
     }
 
+    bool slabTest(Point3f rayOrigin, Vector3f rayDirection, Bounds3f const& box, float* outTmin = nullptr, float* outTmax = nullptr)
+    {
+        float tmin = -std::numeric_limits<float>::infinity();
+        float tmax = std::numeric_limits<float>::infinity();
+
+        for (int i = 0; i < 3; ++i)
+        {
+            float invD = 1.0f / rayDirection[i];
+            float t0   = (box.pMin[i] - rayOrigin[i]) * invD;
+            float t1   = (box.pMax[i] - rayOrigin[i]) * invD;
+
+            if (invD < 0.0f)
+                std::swap(t0, t1);
+
+            tmin = std::max(tmin, t0);
+            tmax = std::min(tmax, t1);
+
+            if (tmax < tmin)
+                return false; // No intersection
+        }
+
+        if (outTmin)
+            *outTmin = tmin;
+        if (outTmax)
+            *outTmax = tmax;
+
+        return true; // Intersection occurred
+    }
+
+    BVHBuildNode* traverseBVHBuild(Ray                        ray,
+                                   BVHBuildNode*              bvh,
+                                   std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+    {
+        std::pmr::vector<BVHBuildNode*> activeNodeStack;
+        activeNodeStack.reserve(64);
+        activeNodeStack.push_back(bvh);
+
+        BVHBuildNode* intersection = nullptr;
+        while (!activeNodeStack.empty())
+        {
+            BVHBuildNode* current = activeNodeStack.back();
+            activeNodeStack.pop_back();
+
+            if (current->childCount > 0)
+            {
+                // children order of traversal: 1) Distance Heuristic: from smallest to highest tmin - ray origin 2) Sign Heuristic
+                // start with distance heuristic
+                struct
+                {
+                    uint32_t i = static_cast<uint32_t>(-1);
+                    float    d = fl::infinity();
+                } tmins[BranchingFactor];
+                uint32_t currentIndex = 0;
+
+                for (uint32_t i = 0; i < current->childCount; ++i)
+                {
+                    float tmin = fl::infinity();
+                    if (slabTest(ray.o, ray.d, current->children[i]->bounds, &tmin))
+                    {
+                        tmins[currentIndex].d = tmin;
+                        tmins[currentIndex].i = i;
+                        ++currentIndex;
+                    }
+                }
+
+                std::sort(std::begin(tmins), std::begin(tmins) + currentIndex, [](auto const& a, auto const& b) {
+                    return a.d > b.d;
+                });
+
+                for (uint32_t i = 0; i < currentIndex; ++i)
+                    activeNodeStack.push_back(current->children[tmins[i].i]);
+            }
+            else
+            {
+                // TODO handle any-hit, closest-hit, ...
+                // for now, stop at the first leaf intersection
+                intersection = current;
+                break;
+            }
+        }
+
+        return intersection;
+    }
 
     namespace bvh_debug {
         std::string boundsToJson(Bounds3f const& bounds)
@@ -295,35 +432,37 @@ int32_t guardedMain()
 
         // Sample AABBs for the scene
         std::vector<dmt::Bounds3f> primitives = {
-            // Row 1
-            dmt::Bounds3f({{0, 0, 0}}, {{1, 1, 0}}), // Triangle 1 (quad made up of 4 triangles)
-            dmt::Bounds3f({{1, 0, 0}}, {{2, 1, 0}}), // Triangle 2
-            dmt::Bounds3f({{2, 0, 0}}, {{3, 1, 0}}), // Triangle 3
-            dmt::Bounds3f({{3, 0, 0}}, {{4, 1, 0}}), // Triangle 4
+            // Ground layer
+            dmt::Bounds3f({{0, 0, 0}}, {{1, 1, 1}}),
+            dmt::Bounds3f({{1, 0.5, 0.5}}, {{2, 1.5, 1.5}}),     // overlaps with previous
+            dmt::Bounds3f({{3, 0, 0}}, {{4, 1, 1}}),             // separated
+            dmt::Bounds3f({{2.5, 0.2, 0.2}}, {{3.5, 1.2, 1.2}}), // overlaps with above
 
-            // Row 2
-            dmt::Bounds3f({{0, 1, 0}}, {{1, 2, 0}}), // Triangle 5
-            dmt::Bounds3f({{1, 1, 0}}, {{2, 2, 0}}), // Triangle 6
-            dmt::Bounds3f({{2, 1, 0}}, {{3, 2, 0}}), // Triangle 7
-            dmt::Bounds3f({{3, 1, 0}}, {{4, 2, 0}}), // Triangle 8
+            // Mid-layer
+            dmt::Bounds3f({{0, 1, 1}}, {{1, 2, 2}}),
+            dmt::Bounds3f({{0.8, 1.5, 1.5}}, {{1.8, 2.5, 2.5}}), // partial overlap
+            dmt::Bounds3f({{2, 1, 1}}, {{3, 2, 2}}),
+            dmt::Bounds3f({{2.1, 1.1, 1.1}}, {{2.9, 1.9, 1.9}}), // completely inside previous
 
-            // Row 3
-            dmt::Bounds3f({{0, 2, 0}}, {{1, 3, 0}}), // Triangle 9
-            dmt::Bounds3f({{1, 2, 0}}, {{2, 3, 0}}), // Triangle 10
-            dmt::Bounds3f({{2, 2, 0}}, {{3, 3, 0}}), // Triangle 11
-            dmt::Bounds3f({{3, 2, 0}}, {{4, 3, 0}}), // Triangle 12
+            // Upper layer
+            dmt::Bounds3f({{0, 2, 2}}, {{1, 3, 3}}),
+            dmt::Bounds3f({{1.5, 2.5, 2.5}}, {{2.5, 3.5, 3.5}}), // isolated
+            dmt::Bounds3f({{3, 2, 2}}, {{4, 3, 3}}),
+            dmt::Bounds3f({{3.5, 2.5, 2.5}}, {{4.5, 3.5, 3.5}}), // overlaps with previous
 
-            // Row 4
-            dmt::Bounds3f({{0, 3, 0}}, {{1, 4, 0}}), // Triangle 13
-            dmt::Bounds3f({{1, 3, 0}}, {{2, 4, 0}}), // Triangle 14
-            dmt::Bounds3f({{2, 3, 0}}, {{3, 4, 0}}), // Triangle 15
-            dmt::Bounds3f({{3, 3, 0}}, {{4, 4, 0}}), // Triangle 16
+            // Random floating boxes
+            dmt::Bounds3f({{1, 3, 4}}, {{2, 4, 5}}),
+            dmt::Bounds3f({{2.2, 3.2, 4.2}}, {{3.2, 4.2, 5.2}}), // overlaps slightly
+            dmt::Bounds3f({{3.5, 3, 4}}, {{4.5, 4, 5}}),         // isolated
 
-            // Row 5
-            dmt::Bounds3f({{0, 4, 0}}, {{1, 5, 0}}), // Triangle 17
-            dmt::Bounds3f({{1, 4, 0}}, {{2, 5, 0}}), // Triangle 18
-            dmt::Bounds3f({{2, 4, 0}}, {{3, 5, 0}}), // Triangle 19
-            dmt::Bounds3f({{3, 4, 0}}, {{4, 5, 0}})  // Triangle 20
+            // Diagonal stack
+            dmt::Bounds3f({{0, 0, 2}}, {{1, 1, 3}}),
+            dmt::Bounds3f({{1, 1, 3}}, {{2, 2, 4}}),
+            dmt::Bounds3f({{2, 2, 4}}, {{3, 3, 5}}),
+            dmt::Bounds3f({{3, 3, 5}}, {{4, 4, 6}}), // all stacked touching corners
+
+            // One inside another
+            dmt::Bounds3f({{0.5, 0.5, 0.5}}, {{3.5, 3.5, 3.5}}) // wraps several smaller boxes
         };
 
         auto* rootNode = dmt::buildBVH(primitives);
@@ -332,6 +471,50 @@ int32_t guardedMain()
         {
             std::string json = dmt::bvh_debug::bvhToJson(rootNode);
             ctx.log(std::string_view{json}, {});
+        }
+
+        // make tests with some rays
+        std::vector<dmt::Ray> testRays = {
+            // Straight through center of scene
+            dmt::Ray({{0.5f, 0.5f, -1.0f}}, {{0, 0, 1}}),
+            dmt::Ray({{1.5f, 1.5f, -1.0f}}, {{0, 0, 1}}),
+            dmt::Ray({{2.5f, 2.5f, -1.0f}}, {{0, 0, 1}}),
+            dmt::Ray({{3.5f, 3.5f, -1.0f}}, {{0, 0, 1}}),
+
+            // Grazing edges
+            dmt::Ray({{1.0f, 1.0f, -1.0f}}, {{0, 0, 1}}),
+            dmt::Ray({{4.0f, 4.0f, -1.0f}}, {{0, 0, 1}}),
+
+            // Missing all
+            dmt::Ray({{5.0f, 5.0f, -1.0f}}, {{0, 0, 1}}),
+            dmt::Ray({{-1.0f, -1.0f, -1.0f}}, {{0, 0, 1}}),
+
+            // Diagonal through stack
+            dmt::Ray({{-1.0f, -1.0f, 1.0f}}, {{1, 1, 1}}),
+            dmt::Ray({{0.5f, 0.5f, 0.5f}}, {{1, 1, 1}}),
+
+            // Through nested box
+            dmt::Ray({{1.0f, 1.0f, 1.0f}}, {{0, 1, 0}}),
+        };
+
+        for (size_t i = 0; i < testRays.size(); ++i)
+        {
+            dmt::BVHBuildNode* hit = dmt::traverseBVHBuild(testRays[i], rootNode);
+            if (hit)
+            {
+                ctx.log("Ray {} hit leaf bounding box: min = ({}, {}, {}), max = ({}, {}, {})",
+                        std::make_tuple(i,
+                                        hit->bounds.pMin.x,
+                                        hit->bounds.pMin.y,
+                                        hit->bounds.pMin.z,
+                                        hit->bounds.pMax.x,
+                                        hit->bounds.pMax.y,
+                                        hit->bounds.pMax.z));
+            }
+            else
+            {
+                ctx.log("Ray {} missed the scene.", std::make_tuple(i));
+            }
         }
 
         dmt::cleanupBuildBVH(rootNode);

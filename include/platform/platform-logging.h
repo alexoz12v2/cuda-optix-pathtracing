@@ -195,9 +195,9 @@ namespace dmt {
 
         constexpr value_type operator*() const { return {m_start, m_len, m_lastBytes}; }
 
-        constexpr void operator++() { advance(); }
-        constexpr bool finished() const { return m_numBytes == 0 && m_dirty; }
-        constexpr bool isFormatSpecifier() const { return m_insideArg; }
+        constexpr void     operator++() { advance(); }
+        constexpr bool     finished() const { return m_numBytes == 0 && m_dirty; }
+        constexpr bool     isFormatSpecifier() const { return m_insideArg; }
         constexpr uint32_t totalBytes() const { return m_numBytes + m_lastBytes; }
 
     private:
@@ -433,7 +433,7 @@ namespace dmt {
 
     /** Shortcut to write `std::make_tuple` */
 
-template <typename... Ts>
+    template <typename... Ts>
         requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char*, uint32_t&, uint32_t&> && ...)
     inline constexpr LogRecord createRecord(
         FormatString<>              fmt,
@@ -460,7 +460,7 @@ template <typename... Ts>
             }, _params);
         }
 
-        uint32_t usedArgs = 0;
+        uint32_t usedArgs  = 0;
         bool     earlyExit = false;
 
         while (!fmt.finished() && !earlyExit)

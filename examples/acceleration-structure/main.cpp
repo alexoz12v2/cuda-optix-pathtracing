@@ -32,6 +32,7 @@ namespace dmt {
     inline constexpr int LogBranchingFactor = 3;
     inline constexpr int BranchingFactor    = 1 << LogBranchingFactor;
     inline constexpr int TrianglesPerLeaf   = 4;
+    inline constexpr int maxPrimsInNode = 8;
 
     struct BVHBuildNode
     {
@@ -46,6 +47,115 @@ namespace dmt {
         Bounds3f bounds;
         uint32_t count;
     };
+
+    namespace bvh2 {
+        DMT_FORCEINLINE float evaluateSAH(std::span<Bounds3f> nodePrims, int32_t axis, float splitPos)
+        {
+            Bounds3f leftBounds = bbEmpty(), rightBounds = bbEmpty();
+            int32_t leftCount = 0, rightCount = 0;
+
+            for (auto const &prim : nodePrims) 
+            {
+                if (prim.centroid()[axis] < splitPos)
+                {
+                    ++leftCount;
+                    leftBounds = bbUnion(leftBounds, prim);
+                }
+                else
+                {
+                    ++rightCount;
+                    rightBounds = bbUnion(rightBounds, prim);
+                }
+            }
+
+            float const cost = leftCount * leftBounds.surfaceArea() + rightCount * rightBounds.surfaceArea(); 
+            return cost > 0.f ? cost : 1e30f;
+        }
+
+        DMT_FORCEINLINE int32_t chooseAxisMaximumWidth(std::span<Bounds3f> nodePrims)
+        {
+            Bounds3f space = std::reduce(nodePrims.begin(), nodePrims.end(), bbEmpty(), [](auto const &a, auto const &b) {
+                return bbUnion(a, b);
+            });
+
+            return space.maxDimention();
+        }
+
+        struct Return_binningBestSplit
+        {
+            Return_binningBestSplit(float splitPosition, std::pmr::memory_resource* memory) : m_memory(memory), leftIndices(memory), rightIndices(memory), splitPosition(splitPosition) {
+                leftIndices.reserve(32);
+                rightIndices.reserve(32);
+            }
+
+            std::pmr::memory_resource* m_memory;
+            std::pmr::vector<int32_t> leftIndices;
+            std::pmr::vector<int32_t> rightIndices;
+            float splitPosition;
+        };
+
+        DMT_FORCEINLINE Return_binningBestSplit binningBestSplit(std::span<Bounds3f> nodePrims, int32_t axis, int32_t numSplits, std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+        {
+            //static int32_t constexpr initialBinCap = 32;
+
+            assert(numSplits > 1);
+            assert(nodePrims.size() > maxPrimsInNode);
+
+            Return_binningBestSplit ret{0.f, memory};
+            Bounds3f const space = std::reduce(nodePrims.begin(), nodePrims.end(), bbEmpty(), [](auto const &a, auto const &b) {
+                return bbUnion(a, b);
+            });
+            float const splitLength = (space.pMax[axis] - space.pMin[axis]) / numSplits;
+            //std::pmr::vector<std::pmr::vector<int32_t>> bins{memory};
+            // each element is associated with a split. Eg. Element 1 means bin 0 and 1 are on the left, while the other are on the right
+            //std::pmr::vector<float> splitCosts{memory};
+            // binning function
+            // y\left(x\right)=\max\left(\min\left(\operatorname{floor}\left(\frac{x-m}{l}\right),\ n-1\right),\ 0\right)
+            //auto constexpr computeBin = [](float x, float min, float len, int32_t num) -> int32_t DMT_FORCEINLINE {
+            //    return static_cast<int32_t>(glm::max(0.f, glm::min<float>(num - 1, glm::floor((x - min) / len))));
+            //};
+            float minimumSplitCost = std::numeric_limits<float>::infinity();
+            float minimumSplitPosition = 0.f;
+
+            //bins.resize(numSplits);
+            //splitCosts.resize(numSplits - 1);
+            //for (auto &bin : bins)
+            //    bin.reserve(initialBinCap);
+
+            //for (auto &cost : splitCosts)
+            //    cost = std::numeric_limits<float>::infinity();
+
+            //for (uint64_t i = 0; i < nodePrims.size(); ++i)
+            //{
+            //    auto const& prim = nodePrims[i];
+            //    bins[computeBin(prim.centroid()[axis], space.pMin[axis], splitLength, numSplits)].push_back(i);
+            //}
+
+            for (uint64_t i = 0; i < numSplits - 1; ++i)
+            {
+                float const splitPosition = space.pMin[axis] + (i + 1) * splitLength;
+                float const splitCost = evaluateSAH(nodePrims, axis, splitPosition);
+                if (splitCost < minimumSplitCost)
+                {
+                    minimumSplitCost = splitCost;
+                    minimumSplitPosition = splitPosition;
+                }
+            }
+
+            ret.splitPosition = minimumSplitPosition;
+
+            for (uint64_t i = 0; i < nodePrims.size(); ++i)
+            {
+                auto const &prim = nodePrims[i];
+                if (prim.centroid()[axis] < ret.splitPosition)
+                    ret.leftIndices.push_back(i);
+                else
+                    ret.rightIndices.push_back(i);
+            }
+
+            return ret;
+        }
+    }
 
     namespace bvh_debug {
         uint32_t leafCount(BVHBuildNode const* node)

@@ -230,33 +230,46 @@ namespace dmt {
     }
 
     // Custom deleter that uses std::pmr::memory_resource
-    template <typename T>
-        requires(!std::is_array_v<T> || std::is_trivially_destructible_v<std::remove_extent_t<T>>)
     struct PmrDeleter
     {
-        std::pmr::memory_resource* resource;
-        std::size_t                size = 1; // Default to single object; for arrays, this stores the element count
+        using DestroyFn = void (*)(void*);
 
-        void operator()(std::conditional_t<std::is_array_v<T>, std::decay_t<T>, T*> ptr) const
+        std::pmr::memory_resource* resource  = nullptr;
+        std::size_t                size      = 0;
+        std::size_t                alignment = 0;
+        DestroyFn                  destroy   = [](void*) {};
+
+
+        template <typename T>
+            requires(!std::is_array_v<T> || std::is_trivially_destructible_v<std::remove_extent_t<T>>)
+        static PmrDeleter create(std::pmr::memory_resource* r, std::size_t count = 1)
         {
-            if (!ptr)
-                return;
+            PmrDeleter d;
+            using Elem  = std::conditional_t<std::is_array_v<T>, std::remove_extent_t<T>, T>;
+            d.resource  = r;
+            d.size      = sizeof(Elem) * count;
+            d.alignment = alignof(Elem);
 
-            if constexpr (!std::is_array_v<T>)
-            { // Single object
-                ptr->~T();
-                resource->deallocate(ptr, sizeof(T), alignof(T));
-            }
-            else
-            { // Array case
-                resource->deallocate(ptr, sizeof(std::remove_extent_t<T>) * size, alignof(std::remove_extent_t<T>));
-            }
+            // array case: trivial destructors only (enforced by concept)
+            if constexpr (!std::is_array_v<T> && !std::is_trivially_destructible_v<T>)
+                d.destroy = [](void* ptr) { static_cast<T*>(ptr)->~T(); };
+
+            return d;
+        }
+
+        void operator()(void* raw) const
+        {
+            if (!raw)
+                return;
+            destroy(raw);
+            resource->deallocate(raw, size, alignment);
         }
     };
 
+
     template <typename T>
         requires(!std::is_array_v<T> || std::is_trivially_destructible_v<std::remove_extent_t<T>>)
-    using UniqueRef = std::unique_ptr<T, PmrDeleter<T>>;
+    using UniqueRef = std::unique_ptr<T, PmrDeleter>;
 
     // clang-format off
     struct NullptrTag { };
@@ -270,34 +283,34 @@ namespace dmt {
     {
         void* mem = resource->allocate(sizeof(T), alignof(T));
         T*    obj = new (mem) T(std::forward<Args>(args)...);
-        return UniqueRef<T>(obj, PmrDeleter<T>{resource});
+        return UniqueRef<T>(obj, PmrDeleter::create<T>(resource));
     }
 
     // For an array (without construction)
     template <typename T>
         requires(std::is_trivially_destructible_v<std::remove_extent_t<T>> && std::is_array_v<T>)
-    std::unique_ptr<T, PmrDeleter<T>> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size)
+    UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size)
     {
         using ElementType = std::remove_extent_t<T>;
         void*        mem  = resource->allocate(sizeof(ElementType) * size, alignof(ElementType));
         ElementType* arr  = static_cast<ElementType*>(mem); // Memory allocated, but elements NOT constructed
 
-        return UniqueRef<T>(arr, PmrDeleter<T>{resource, size});
+        return UniqueRef<T>(arr, PmrDeleter::create<T>(resource, size));
     }
 
     template <typename T>
         requires(!std::is_array_v<T>)
     UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource, NullptrTag const)
     {
-        return UniqueRef<T>(nullptr, PmrDeleter<T>{resource});
+        return UniqueRef<T>(nullptr, PmrDeleter::create<T>(resource));
     }
 
     // For an array (without construction)
     template <typename T>
         requires(std::is_trivially_destructible_v<std::remove_extent_t<T>> && std::is_array_v<T>)
-    std::unique_ptr<T, PmrDeleter<T>> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size, NullptrTag const)
+    UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size, NullptrTag const)
     {
-        return UniqueRef<T>(nullptr, PmrDeleter<T>{resource, size});
+        return UniqueRef<T>(nullptr, PmrDeleter::create<T>(resource, size));
     }
 
     namespace os {

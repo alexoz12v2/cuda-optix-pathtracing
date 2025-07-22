@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #include <cudautils/cudautils-vecmath.h>
 
@@ -12,8 +12,8 @@ namespace dmt::sampling {
      * @param sampled wavelength
      * @returns PDF value at the given wavelength
      */
-    DMT_CPU_GPU float    visibleWavelengthsPDF(float lambda);
-    DMT_CPU_GPU Vector4f visibleWavelengthsPDF(Vector4f lambda);
+    DMT_CORE_API DMT_CPU_GPU float    visibleWavelengthsPDF(float lambda);
+    DMT_CORE_API DMT_CPU_GPU Vector4f visibleWavelengthsPDF(Vector4f lambda);
 
     /**
      * Sample a wavelength value by means of the <a href="https://en.wikipedia.org/wiki/Inverse_transform_sampling">Inverse Transform Method</a>
@@ -23,8 +23,8 @@ namespace dmt::sampling {
      * @param u uniformly distributed float in the [0, 1] range
      * @returns sampled wavelength according to the approximated V lambda PDF
      */
-    DMT_CPU_GPU float    sampleVisibleWavelengths(float u);
-    DMT_CPU_GPU Vector4f sampleVisibleWavelengths(Vector4f u);
+    DMT_CORE_API DMT_CPU_GPU float    sampleVisibleWavelengths(float u);
+    DMT_CORE_API DMT_CPU_GPU Vector4f sampleVisibleWavelengths(Vector4f u);
 } // namespace dmt::sampling
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_NUMBERS_IMPL)

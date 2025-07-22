@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #include "cudautils/cudautils-enums.h"
 #include "cudautils/cudautils-float.h"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 #include <platform/platform-utils.h>
 // #include <platform/platform-cuda-utils.h>
 
@@ -10,7 +10,7 @@ namespace dmt {
     /** https://www.desmos.com/calculator/e0arbln6ip
      * @note This has a very low accuracy and I don't know why.
      */
-    DMT_CPU_GPU float blackbody(float lambdaNanometers, float TKelvin);
+    DMT_CORE_API DMT_CPU_GPU float blackbody(float lambdaNanometers, float TKelvin);
 
     DMT_CPU_GPU inline constexpr float    lambdaMin() { return 360.f; }
     DMT_CPU_GPU inline constexpr float    lambdaMax() { return 830.f; }
@@ -22,7 +22,7 @@ namespace dmt {
 
     // TODO move elsewhere
     /** type which encapsulates a real values function with up to two float parameters  */
-    class FloatFunction2
+    class DMT_CORE_API FloatFunction2
     {
     public:
         using Func = float (*)(float _t, float _param0, float _param1);
@@ -39,7 +39,7 @@ namespace dmt {
     };
 
     // Sampled Spectrum and Sampled Wavelengths: Class Definitions ----------------------------------------------------
-    struct SampledSpectrum
+    struct DMT_CORE_API SampledSpectrum
     {
         friend struct SOA<SampledSpectrum>;
 
@@ -49,7 +49,7 @@ namespace dmt {
         float values[numSpectrumSamples()]{};
     };
 
-    struct SampledWavelengths
+    struct DMT_CORE_API SampledWavelengths
     {
         friend struct SOA<SampledWavelengths>;
 
@@ -66,31 +66,32 @@ namespace dmt {
         float pdf[numSpectrumSamples()]{};
     };
 
-    struct ValueIndex
+    struct DMT_CORE_API ValueIndex
     {
         float   value;
         int32_t index;
     };
 
     // Sampled Spectrum and Sampled Wavelengths: Boilerplate ----------------------------------------------------------
-    DMT_CPU_GPU SampledSpectrum  operator+(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum  operator-(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum  operator*(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum  operator/(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum& operator+=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum& operator-=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum& operator*=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
-    DMT_CPU_GPU SampledSpectrum& operator/=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum  operator+(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum  operator-(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum  operator*(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum  operator/(SampledSpectrum const& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum& operator+=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum& operator-=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum& operator*=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum& operator/=(SampledSpectrum& spec0, SampledSpectrum const& spec1);
 
-    DMT_CPU_GPU bool       hasNaN(SampledSpectrum const& spec);
-    DMT_CPU_GPU ValueIndex max(SampledSpectrum const& spec);
-    DMT_CPU_GPU ValueIndex min(SampledSpectrum const& spec);
-    DMT_CPU_GPU float      average(SampledSpectrum const& spec);
+    DMT_CORE_API DMT_CPU_GPU bool       hasNaN(SampledSpectrum const& spec);
+    DMT_CORE_API DMT_CPU_GPU ValueIndex max(SampledSpectrum const& spec);
+    DMT_CORE_API DMT_CPU_GPU ValueIndex min(SampledSpectrum const& spec);
+    DMT_CORE_API DMT_CPU_GPU float      average(SampledSpectrum const& spec);
 
     // Sampled Spectrum and Sampled Wavelengths: Functions ------------------------------------------------------------
-    DMT_CPU_GPU SampledWavelengths sampleUniforms(float u, float _lambdaMin = lambdaMin(), float _lambdaMax = lambdaMax());
-    DMT_CPU_GPU SampledWavelengths sampleVisible(float u);
-    DMT_CPU_GPU SampledSpectrum    PDF(SampledWavelengths& wavelengths);
+    DMT_CORE_API DMT_CPU_GPU SampledWavelengths
+        sampleUniforms(float u, float _lambdaMin = lambdaMin(), float _lambdaMax = lambdaMax());
+    DMT_CORE_API DMT_CPU_GPU SampledWavelengths sampleVisible(float u);
+    DMT_CORE_API DMT_CPU_GPU SampledSpectrum    PDF(SampledWavelengths& wavelengths);
 
     // Spectrum Concept -----------------------------------------------------------------------------------------------
     // clang-format off
@@ -106,7 +107,7 @@ namespace dmt {
     /**
      * represents a constant spectrum. not strictly necessary as we could store directly the float value, but who cares
      */
-    struct ConstantSpectrum
+    struct DMT_CORE_API ConstantSpectrum
     {
     public:
         DMT_CPU_GPU                 ConstantSpectrum(float value);

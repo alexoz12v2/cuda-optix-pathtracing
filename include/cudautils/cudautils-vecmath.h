@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #if defined(__NVCC__)
 #pragma nv_diag_suppress 20012         // both eigen and glm
@@ -195,25 +195,25 @@ namespace dmt {
 
     struct Normalized { struct normalized { }; };
 
-    struct Vector2i : public Tuple2i { Vector2i() = default; DMT_CPU_GPU Vector2i(Tuple2i t) : Tuple2i(t) {} };
-    struct Vector2f : public Tuple2f { Vector2f() = default; DMT_CPU_GPU Vector2f(Tuple2f t) : Tuple2f(t) {} };
-    struct Vector3i : public Tuple3i { Vector3i() = default; DMT_CPU_GPU Vector3i(Tuple3i t) : Tuple3i(t) {} };
-    struct Vector3f : public Tuple3f { Vector3f() = default; DMT_CPU_GPU Vector3f(Tuple3f t) : Tuple3f(t) {} };
-    struct Vector4i : public Tuple4i { Vector4i() = default; DMT_CPU_GPU Vector4i(Tuple4i t) : Tuple4i(t) {} };
-    struct Vector4f : public Tuple4f { Vector4f() = default; DMT_CPU_GPU Vector4f(Tuple4f t) : Tuple4f(t) {} };
+    struct DMT_CORE_API Vector2i : public Tuple2i { Vector2i() = default; DMT_CPU_GPU Vector2i(Tuple2i t) : Tuple2i(t) {} };
+    struct DMT_CORE_API Vector2f : public Tuple2f { Vector2f() = default; DMT_CPU_GPU Vector2f(Tuple2f t) : Tuple2f(t) {} };
+    struct DMT_CORE_API Vector3i : public Tuple3i { Vector3i() = default; DMT_CPU_GPU Vector3i(Tuple3i t) : Tuple3i(t) {} };
+    struct DMT_CORE_API Vector3f : public Tuple3f { Vector3f() = default; DMT_CPU_GPU Vector3f(Tuple3f t) : Tuple3f(t) {} };
+    struct DMT_CORE_API Vector4i : public Tuple4i { Vector4i() = default; DMT_CPU_GPU Vector4i(Tuple4i t) : Tuple4i(t) {} };
+    struct DMT_CORE_API Vector4f : public Tuple4f { Vector4f() = default; DMT_CPU_GPU Vector4f(Tuple4f t) : Tuple4f(t) {} };
 
-    struct Point2i : public Tuple2i { Point2i() = default; DMT_CPU_GPU Point2i(Tuple2i t) : Tuple2i(t) {} explicit DMT_CPU_GPU operator Vector2i(); };
-    struct Point2f : public Tuple2f { Point2f() = default; DMT_CPU_GPU Point2f(Tuple2f t) : Tuple2f(t) {} explicit DMT_CPU_GPU operator Vector2f(); };
-    struct Point3i : public Tuple3i { Point3i() = default; DMT_CPU_GPU Point3i(Tuple3i t) : Tuple3i(t) {} explicit DMT_CPU_GPU operator Vector3i(); };
-    struct Point3f : public Tuple3f { Point3f() = default; DMT_CPU_GPU Point3f(Tuple3f t) : Tuple3f(t) {} explicit DMT_CPU_GPU operator Vector3f(); };
-    struct Point4i : public Tuple4i { Point4i() = default; DMT_CPU_GPU Point4i(Tuple4i t) : Tuple4i(t) {} explicit DMT_CPU_GPU operator Vector4i(); };
-    struct Point4f : public Tuple4f { Point4f() = default; DMT_CPU_GPU Point4f(Tuple4f t) : Tuple4f(t) {} explicit DMT_CPU_GPU operator Vector4f(); };
+    struct DMT_CORE_API Point2i : public Tuple2i { Point2i() = default; DMT_CPU_GPU Point2i(Tuple2i t) : Tuple2i(t) {} explicit DMT_CPU_GPU operator Vector2i(); };
+    struct DMT_CORE_API Point2f : public Tuple2f { Point2f() = default; DMT_CPU_GPU Point2f(Tuple2f t) : Tuple2f(t) {} explicit DMT_CPU_GPU operator Vector2f(); };
+    struct DMT_CORE_API Point3i : public Tuple3i { Point3i() = default; DMT_CPU_GPU Point3i(Tuple3i t) : Tuple3i(t) {} explicit DMT_CPU_GPU operator Vector3i(); };
+    struct DMT_CORE_API Point3f : public Tuple3f { Point3f() = default; DMT_CPU_GPU Point3f(Tuple3f t) : Tuple3f(t) {} explicit DMT_CPU_GPU operator Vector3f(); };
+    struct DMT_CORE_API Point4i : public Tuple4i { Point4i() = default; DMT_CPU_GPU Point4i(Tuple4i t) : Tuple4i(t) {} explicit DMT_CPU_GPU operator Vector4i(); };
+    struct DMT_CORE_API Point4f : public Tuple4f { Point4f() = default; DMT_CPU_GPU Point4f(Tuple4f t) : Tuple4f(t) {} explicit DMT_CPU_GPU operator Vector4f(); };
 
     // https://eater.net/quaternions
-    struct Quaternion : public Tuple4f { Quaternion() = default; DMT_CPU_GPU Quaternion(Tuple4f t) : Tuple4f(t) {} };
+    struct DMT_CORE_API Quaternion : public Tuple4f { Quaternion() = default; DMT_CPU_GPU Quaternion(Tuple4f t) : Tuple4f(t) {} };
     // clang-format on
 
-    struct Normal2f : public Tuple2f, public Normalized
+    struct DMT_CORE_API Normal2f : public Tuple2f, public Normalized
     {
         Normal2f() = default;
         DMT_CPU_GPU                        Normal2f(Tuple2f t) : Tuple2f(t) {}
@@ -221,7 +221,7 @@ namespace dmt {
         DMT_CPU_GPU inline Vector2f const& asVec() const { return *std::bit_cast<Vector2f const*>(this); }
     };
 
-    struct Normal3f : public Tuple3f, public Normalized
+    struct DMT_CORE_API Normal3f : public Tuple3f, public Normalized
     {
         Normal3f() = default;
         DMT_CPU_GPU                        Normal3f(Tuple3f t) : Tuple3f(t) {}
@@ -229,8 +229,8 @@ namespace dmt {
         DMT_CPU_GPU inline Vector3f const& asVec() const { return *std::bit_cast<Vector3f const*>(this); }
     };
 
-    DMT_CPU_GPU Normal2f normalFrom(Vector2f v);
-    DMT_CPU_GPU Normal3f normalFrom(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU Normal2f normalFrom(Vector2f v);
+    DMT_CORE_API DMT_CPU_GPU Normal3f normalFrom(Vector3f v);
 
     /**
      * Triplet of orthonormal vectors, representing a coordinate system
@@ -238,7 +238,7 @@ namespace dmt {
      * is a orthonormal matrix, meaning its inverse is equal to its transpose. Since normals are applied the inverse transpose of a given matrix
      * the staring orthonormal matrix is already its own inverse transpose
      */
-    struct Frame
+    struct DMT_CORE_API Frame
     {
         Frame() = default;
         DMT_CPU_GPU              Frame(Normal3f x, Normal3f y, Normal3f z);
@@ -262,37 +262,37 @@ namespace dmt {
 
 
     // Vector Types: Fundamental Operations ---------------------------------------------------------------------------
-    DMT_CPU_GPU Point2i    operator+(Point2i a, Vector2i b);
-    DMT_CPU_GPU Point2f    operator+(Point2f a, Vector2f b);
-    DMT_CPU_GPU Point3i    operator+(Point3i a, Vector3i b);
-    DMT_CPU_GPU Point3f    operator+(Point3f a, Vector3f b);
-    DMT_CPU_GPU Point4i    operator+(Point4i a, Vector4i b);
-    DMT_CPU_GPU Point4f    operator+(Point4f a, Vector4f b);
-    DMT_CPU_GPU Vector2i   operator+(Vector2i a, Vector2i b);
-    DMT_CPU_GPU Vector2f   operator+(Vector2f a, Vector2f b);
-    DMT_CPU_GPU Vector3i   operator+(Vector3i a, Vector3i b);
-    DMT_CPU_GPU Vector3f   operator+(Vector3f a, Vector3f b);
-    DMT_CPU_GPU Vector4i   operator+(Vector4i a, Vector4i b);
-    DMT_CPU_GPU Vector4f   operator+(Vector4f a, Vector4f b);
-    DMT_CPU_GPU Normal2f   operator+(Normal2f a, Normal2f b);
-    DMT_CPU_GPU Normal3f   operator+(Normal3f a, Normal3f b);
-    DMT_CPU_GPU Quaternion operator+(Quaternion a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU Point2i    operator+(Point2i a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Point2f    operator+(Point2f a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Point3i    operator+(Point3i a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Point3f    operator+(Point3f a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Point4i    operator+(Point4i a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Point4f    operator+(Point4f a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator+(Vector2i a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator+(Vector2f a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator+(Vector3i a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator+(Vector3f a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator+(Vector4i a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator+(Vector4f a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Normal2f   operator+(Normal2f a, Normal2f b);
+    DMT_CORE_API DMT_CPU_GPU Normal3f   operator+(Normal3f a, Normal3f b);
+    DMT_CORE_API DMT_CPU_GPU Quaternion operator+(Quaternion a, Quaternion b);
 
-    DMT_CPU_GPU Vector2i   operator-(Point2i a, Point2i b);
-    DMT_CPU_GPU Vector2f   operator-(Point2f a, Point2f b);
-    DMT_CPU_GPU Vector3i   operator-(Point3i a, Point3i b);
-    DMT_CPU_GPU Vector3f   operator-(Point3f a, Point3f b);
-    DMT_CPU_GPU Vector4i   operator-(Point4i a, Point4i b);
-    DMT_CPU_GPU Vector4f   operator-(Point4f a, Point4f b);
-    DMT_CPU_GPU Vector2i   operator-(Vector2i a, Vector2i b);
-    DMT_CPU_GPU Vector2f   operator-(Vector2f a, Vector2f b);
-    DMT_CPU_GPU Vector3i   operator-(Vector3i a, Vector3i b);
-    DMT_CPU_GPU Vector3f   operator-(Vector3f a, Vector3f b);
-    DMT_CPU_GPU Vector4i   operator-(Vector4i a, Vector4i b);
-    DMT_CPU_GPU Vector4f   operator-(Vector4f a, Vector4f b);
-    DMT_CPU_GPU Normal2f   operator-(Normal2f a, Normal2f b);
-    DMT_CPU_GPU Normal3f   operator-(Normal3f a, Normal3f b);
-    DMT_CPU_GPU Quaternion operator-(Quaternion a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator-(Point2i a, Point2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator-(Point2f a, Point2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator-(Point3i a, Point3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator-(Point3f a, Point3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator-(Point4i a, Point4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator-(Point4f a, Point4f b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator-(Vector2i a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator-(Vector2f a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator-(Vector3i a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator-(Vector3f a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator-(Vector4i a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator-(Vector4f a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Normal2f   operator-(Normal2f a, Normal2f b);
+    DMT_CORE_API DMT_CPU_GPU Normal3f   operator-(Normal3f a, Normal3f b);
+    DMT_CORE_API DMT_CPU_GPU Quaternion operator-(Quaternion a, Quaternion b);
 
     DMT_CPU_GPU Vector2i   operator-(Point2i v);
     DMT_CPU_GPU Vector2f   operator-(Point2f v);
@@ -529,78 +529,78 @@ namespace dmt {
 
     // Vector Types: Generic Tuple Operations -------------------------------------------------------------------------
     // If any of these are used to initialize a Normal, it has to be manually normalized
-    DMT_CPU_GPU Tuple2f abs(Tuple2f v);
-    DMT_CPU_GPU Tuple2i abs(Tuple2i v);
-    DMT_CPU_GPU Tuple3f abs(Tuple3f v);
-    DMT_CPU_GPU Tuple3i abs(Tuple3i v);
-    DMT_CPU_GPU Tuple4f abs(Tuple4f v);
-    DMT_CPU_GPU Tuple4i abs(Tuple4i v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f abs(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2i abs(Tuple2i v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f abs(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3i abs(Tuple3i v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f abs(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4i abs(Tuple4i v);
 
-    DMT_CPU_GPU Tuple2f ceil(Tuple2f v);
-    DMT_CPU_GPU Tuple3f ceil(Tuple3f v);
-    DMT_CPU_GPU Tuple4f ceil(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f ceil(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f ceil(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f ceil(Tuple4f v);
 
-    DMT_CPU_GPU Tuple2f floor(Tuple2f v);
-    DMT_CPU_GPU Tuple3f floor(Tuple3f v);
-    DMT_CPU_GPU Tuple4f floor(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f floor(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f floor(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f floor(Tuple4f v);
 
-    DMT_CPU_GPU Tuple2f lerp(float t, Tuple2f zero, Tuple2f one);
-    DMT_CPU_GPU Tuple3f lerp(float t, Tuple3f zero, Tuple3f one);
-    DMT_CPU_GPU Tuple4f lerp(float t, Tuple4f zero, Tuple4f one);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f lerp(float t, Tuple2f zero, Tuple2f one);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f lerp(float t, Tuple3f zero, Tuple3f one);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f lerp(float t, Tuple4f zero, Tuple4f one);
 
-    DMT_CPU_GPU Tuple2f fma(Tuple2f mult0, Tuple2f mult1, Tuple2f add);
-    DMT_CPU_GPU Tuple2i fma(Tuple2i mult0, Tuple2i mult1, Tuple2i add);
-    DMT_CPU_GPU Tuple3f fma(Tuple3f mult0, Tuple3f mult1, Tuple3f add);
-    DMT_CPU_GPU Tuple3i fma(Tuple3i mult0, Tuple3i mult1, Tuple3i add);
-    DMT_CPU_GPU Tuple4f fma(Tuple4f mult0, Tuple4f mult1, Tuple4f add);
-    DMT_CPU_GPU Tuple4i fma(Tuple4i mult0, Tuple4i mult1, Tuple4i add);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f fma(Tuple2f mult0, Tuple2f mult1, Tuple2f add);
+    DMT_CORE_API DMT_CPU_GPU Tuple2i fma(Tuple2i mult0, Tuple2i mult1, Tuple2i add);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f fma(Tuple3f mult0, Tuple3f mult1, Tuple3f add);
+    DMT_CORE_API DMT_CPU_GPU Tuple3i fma(Tuple3i mult0, Tuple3i mult1, Tuple3i add);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f fma(Tuple4f mult0, Tuple4f mult1, Tuple4f add);
+    DMT_CORE_API DMT_CPU_GPU Tuple4i fma(Tuple4i mult0, Tuple4i mult1, Tuple4i add);
 
-    DMT_CPU_GPU Tuple2f min(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple2i min(Tuple2i a, Tuple2i b);
-    DMT_CPU_GPU Tuple3f min(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple3i min(Tuple3i a, Tuple3i b);
-    DMT_CPU_GPU Tuple4f min(Tuple4f a, Tuple4f b);
-    DMT_CPU_GPU Tuple4i min(Tuple4i a, Tuple4i b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f min(Tuple2f a, Tuple2f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2i min(Tuple2i a, Tuple2i b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f min(Tuple3f a, Tuple3f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3i min(Tuple3i a, Tuple3i b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f min(Tuple4f a, Tuple4f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4i min(Tuple4i a, Tuple4i b);
 
-    DMT_CPU_GPU Tuple2f max(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple2i max(Tuple2i a, Tuple2i b);
-    DMT_CPU_GPU Tuple3f max(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple3i max(Tuple3i a, Tuple3i b);
-    DMT_CPU_GPU Tuple4f max(Tuple4f a, Tuple4f b);
-    DMT_CPU_GPU Tuple4i max(Tuple4i a, Tuple4i b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f max(Tuple2f a, Tuple2f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2i max(Tuple2i a, Tuple2i b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f max(Tuple3f a, Tuple3f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3i max(Tuple3i a, Tuple3i b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f max(Tuple4f a, Tuple4f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4i max(Tuple4i a, Tuple4i b);
 
-    DMT_CPU_GPU bool near(Tuple2f a, Tuple2f b, float tolerance = fl::eqTol());
-    DMT_CPU_GPU bool near(Tuple2i a, Tuple2i b);
-    DMT_CPU_GPU bool near(Tuple3f a, Tuple3f b, float tolerance = fl::eqTol());
-    DMT_CPU_GPU bool near(Tuple3i a, Tuple3i b);
-    DMT_CPU_GPU bool near(Tuple4f a, Tuple4f b, float tolerance = fl::eqTol());
-    DMT_CPU_GPU bool near(Tuple4i a, Tuple4i b);
+    DMT_CORE_API DMT_CPU_GPU bool near(Tuple2f a, Tuple2f b, float tolerance = fl::eqTol());
+    DMT_CORE_API DMT_CPU_GPU bool near(Tuple2i a, Tuple2i b);
+    DMT_CORE_API DMT_CPU_GPU bool near(Tuple3f a, Tuple3f b, float tolerance = fl::eqTol());
+    DMT_CORE_API DMT_CPU_GPU bool near(Tuple3i a, Tuple3i b);
+    DMT_CORE_API DMT_CPU_GPU bool near(Tuple4f a, Tuple4f b, float tolerance = fl::eqTol());
+    DMT_CORE_API DMT_CPU_GPU bool near(Tuple4i a, Tuple4i b);
 
-    DMT_CPU_GPU Tuple2f::value_type dot(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple3f::value_type dot(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple4f::value_type dot(Tuple4f a, Tuple4f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type dot(Tuple2f a, Tuple2f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type dot(Tuple3f a, Tuple3f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type dot(Tuple4f a, Tuple4f b);
 
-    DMT_CPU_GPU Tuple2f::value_type absDot(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple3f::value_type absDot(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple4f::value_type absDot(Tuple4f a, Tuple4f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type absDot(Tuple2f a, Tuple2f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type absDot(Tuple3f a, Tuple3f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type absDot(Tuple4f a, Tuple4f b);
 
-    DMT_CPU_GPU Tuple3f cross(Tuple3f a, Tuple3f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f cross(Tuple3f a, Tuple3f b);
 
-    DMT_CPU_GPU Tuple2f normalize(Tuple2f v);
-    DMT_CPU_GPU Tuple3f normalize(Tuple3f v);
-    DMT_CPU_GPU Tuple4f normalize(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f normalize(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f normalize(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f normalize(Tuple4f v);
 
-    DMT_CPU_GPU Tuple2f::value_type normL2(Tuple2f v);
-    DMT_CPU_GPU Tuple3f::value_type normL2(Tuple3f v);
-    DMT_CPU_GPU Tuple4f::value_type normL2(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type normL2(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type normL2(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type normL2(Tuple4f v);
 
-    DMT_CPU_GPU Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b);
-    DMT_CPU_GPU Tuple3f::value_type distanceL2(Tuple3f a, Tuple3f b);
-    DMT_CPU_GPU Tuple4f::value_type distanceL2(Tuple4f a, Tuple4f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type distanceL2(Tuple3f a, Tuple3f b);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type distanceL2(Tuple4f a, Tuple4f b);
 
-    DMT_CPU_GPU Tuple2f::value_type dotSelf(Tuple2f v);
-    DMT_CPU_GPU Tuple3f::value_type dotSelf(Tuple3f v);
-    DMT_CPU_GPU Tuple4f::value_type dotSelf(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type dotSelf(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type dotSelf(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type dotSelf(Tuple4f v);
 
     // Vector Types: Geometric Functions ------------------------------------------------------------------------------
     template <VectorNormalized N, Vector V>
@@ -610,8 +610,8 @@ namespace dmt {
         return (dot(direction, vector) < 0.f) ? -direction : direction;
     }
 
-    DMT_CPU_GPU float angleBetween(Normal3f a, Normal3f b);
-    DMT_CPU_GPU float angleBetween(Quaternion a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU float angleBetween(Normal3f a, Normal3f b);
+    DMT_CORE_API DMT_CPU_GPU float angleBetween(Quaternion a, Quaternion b);
 
     template <Vector V>
     DMT_CPU_GPU inline V gramSchmidt(V v, V w)
@@ -620,30 +620,30 @@ namespace dmt {
         return v * dt * w;
     }
 
-    DMT_CPU_GPU Frame coordinateSystem(Normal3f xAxis);
+    DMT_CORE_API DMT_CPU_GPU Frame coordinateSystem(Normal3f xAxis);
 
-    DMT_CPU_GPU Quaternion slerp(float t, Quaternion zero, Quaternion one);
+    DMT_CORE_API DMT_CPU_GPU Quaternion slerp(float t, Quaternion zero, Quaternion one);
 
     // Vector Types: Spherical Geometry Functions ---------------------------------------------------------------------
-    DMT_CPU_GPU float    sphericalTriangleArea(Vector3f edge0, Vector3f edge1, Vector3f edge2);
-    DMT_CPU_GPU float    sphericalQuadArea(Vector3f edge0, Vector3f edge1, Vector3f edge2, Vector3f edge3);
-    DMT_CPU_GPU Vector3f sphericalDirection(float sinTheta, float cosTheta, float phi);
-    DMT_CPU_GPU float    sphericalTheta(Vector3f v);
-    DMT_CPU_GPU float    sphericalPhi(Vector3f v);
-    DMT_CPU_GPU float    cosTheta(Vector3f v);
-    DMT_CPU_GPU float    cos2Theta(Vector3f v);
-    DMT_CPU_GPU float    absCosTheta(Vector3f v);
-    DMT_CPU_GPU float    sinTheta(Vector3f v);
-    DMT_CPU_GPU float    sin2Theta(Vector3f v);
-    DMT_CPU_GPU float    tanTheta(Vector3f v);
-    DMT_CPU_GPU float    tan2Theta(Vector3f v);
-    DMT_CPU_GPU float    cosPhi(Vector3f v);
-    DMT_CPU_GPU float    sinPhi(Vector3f v);
-    DMT_CPU_GPU float    cosDPhi(Vector3f wa, Vector3f wb);
-    DMT_CPU_GPU bool     sameHemisphere(Vector3f w, Normal3f ap);
+    DMT_CORE_API DMT_CPU_GPU float    sphericalTriangleArea(Vector3f edge0, Vector3f edge1, Vector3f edge2);
+    DMT_CORE_API DMT_CPU_GPU float    sphericalQuadArea(Vector3f edge0, Vector3f edge1, Vector3f edge2, Vector3f edge3);
+    DMT_CORE_API DMT_CPU_GPU Vector3f sphericalDirection(float sinTheta, float cosTheta, float phi);
+    DMT_CORE_API DMT_CPU_GPU float    sphericalTheta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    sphericalPhi(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    cosTheta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    cos2Theta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    absCosTheta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    sinTheta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    sin2Theta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    tanTheta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    tan2Theta(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    cosPhi(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    sinPhi(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU float    cosDPhi(Vector3f wa, Vector3f wb);
+    DMT_CORE_API DMT_CPU_GPU bool     sameHemisphere(Vector3f w, Normal3f ap);
 
     // Vector Types: Axis Aligned Bounding Boxes ----------------------------------------------------------------------
-    enum EBoundsCorner : int32_t
+    enum DMT_CORE_API EBoundsCorner : int32_t
     {
         eBottom  = 0,
         eLeft    = eBottom,
@@ -661,7 +661,7 @@ namespace dmt {
         eLeftBottomForward  = eLeft | eBottom | eForward,
         eLeftBottomBack     = eLeft | eBottom | eBack,
     };
-    struct Bounds3f
+    struct DMT_CORE_API Bounds3f
     {
         DMT_CPU_GPU Point3f&       operator[](int32_t i);
         DMT_CPU_GPU Point3f const& operator[](int32_t i) const;
@@ -688,18 +688,18 @@ namespace dmt {
         Point3f pMax;
     };
 
-    DMT_CPU_GPU Bounds3f bbEmpty();
-    DMT_CPU_GPU bool     inside(Point3f p, Bounds3f const& b);
-    DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b);
-    DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& b, Point3f p);
+    DMT_CORE_API DMT_CPU_GPU Bounds3f bbEmpty();
+    DMT_CORE_API DMT_CPU_GPU bool     inside(Point3f p, Bounds3f const& b);
+    DMT_CORE_API DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b);
+    DMT_CORE_API DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& b, Point3f p);
 
     // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------
-    struct Index2
+    struct DMT_CORE_API Index2
     {
         int32_t row, col;
     };
 
-    DMT_CPU_GPU inline constexpr Index2 sym(Index2 i)
+    DMT_CORE_API DMT_CPU_GPU inline constexpr Index2 sym(Index2 i)
     {
         Index2 const j{
             .row = i.col,
@@ -709,7 +709,7 @@ namespace dmt {
     }
 
     // Column Major Order
-    struct Matrix4f
+    struct DMT_CORE_API Matrix4f
     {
         // clang-format off
         static DMT_CPU_GPU inline constexpr Matrix4f zero()
@@ -743,54 +743,54 @@ namespace dmt {
     };
     static_assert(std::is_trivial_v<Matrix4f> && std::is_standard_layout_v<Matrix4f>);
 
-    struct SVD
+    struct DMT_CORE_API SVD
     {
         Matrix4f unitary;
         Vector4f singularValues;
         Matrix4f vunitary;
     };
 
-    struct QR
+    struct DMT_CORE_API QR
     {
         Matrix4f qOrthogonal;
         Matrix4f rUpper;
     };
 
     // define a rotation in the plane defined by two axes
-    DMT_CPU_GPU Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta);
-    DMT_CPU_GPU QR       qr(Matrix4f const& m, int32_t numIter = 10);
-    DMT_CPU SVD          svd(Matrix4f const& m);
-    DMT_CPU bool         isSingular(Matrix4f const& m, float tolerance = 1e-6f);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta);
+    DMT_CORE_API DMT_CPU_GPU QR       qr(Matrix4f const& m, int32_t numIter = 10);
+    DMT_CORE_API DMT_CPU SVD          svd(Matrix4f const& m);
+    DMT_CORE_API DMT_CPU bool         isSingular(Matrix4f const& m, float tolerance = 1e-6f);
 
-    DMT_CPU_GPU Matrix4f operator+(Matrix4f const& a, Matrix4f const& b);
-    DMT_CPU_GPU Matrix4f operator-(Matrix4f const& a, Matrix4f const& b);
-    DMT_CPU_GPU Matrix4f operator*(Matrix4f const& a, Matrix4f const& b);
-    DMT_CPU_GPU Matrix4f operator*(float v, Matrix4f const& m);
-    DMT_CPU_GPU Matrix4f operator*(Matrix4f const& m, float v);
-    DMT_CPU_GPU Matrix4f operator/(Matrix4f const& m, float v);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f operator+(Matrix4f const& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f operator-(Matrix4f const& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f operator*(Matrix4f const& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f operator*(float v, Matrix4f const& m);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f operator*(Matrix4f const& m, float v);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f operator/(Matrix4f const& m, float v);
 
-    DMT_CPU_GPU Matrix4f& operator+=(Matrix4f& a, Matrix4f const& b);
-    DMT_CPU_GPU Matrix4f& operator-=(Matrix4f& a, Matrix4f const& b);
-    DMT_CPU_GPU Matrix4f& operator*=(Matrix4f& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f& operator+=(Matrix4f& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f& operator-=(Matrix4f& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f& operator*=(Matrix4f& a, Matrix4f const& b);
 
-    DMT_CPU_GPU Matrix4f fromDiag(Tuple4f v);
-    DMT_CPU_GPU Matrix4f fromQuat(Quaternion q);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f fromDiag(Tuple4f v);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f fromQuat(Quaternion q);
 
-    DMT_CPU_GPU bool     near(Matrix4f const& a, Matrix4f const& b);
-    DMT_CPU_GPU float    determinant(Matrix4f const& m);
-    DMT_CPU_GPU Matrix4f inverse(Matrix4f const& m);
-    DMT_CPU_GPU Matrix4f transpose(Matrix4f const& m);
-    DMT_CPU_GPU Vector4f mul(Matrix4f const& m, Vector4f v);
-    DMT_CPU_GPU Vector3f mul(Matrix4f const& m, Vector3f const& v);
-    DMT_CPU_GPU Normal3f mul(Matrix4f const& m, Normal3f const& v);
-    DMT_CPU_GPU Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v);
-    DMT_CPU_GPU Point3f  mul(Matrix4f const& m, Point3f const& p);
+    DMT_CORE_API DMT_CPU_GPU bool     near(Matrix4f const& a, Matrix4f const& b);
+    DMT_CORE_API DMT_CPU_GPU float    determinant(Matrix4f const& m);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f inverse(Matrix4f const& m);
+    DMT_CORE_API DMT_CPU_GPU Matrix4f transpose(Matrix4f const& m);
+    DMT_CORE_API DMT_CPU_GPU Vector4f mul(Matrix4f const& m, Vector4f v);
+    DMT_CORE_API DMT_CPU_GPU Vector3f mul(Matrix4f const& m, Vector3f const& v);
+    DMT_CORE_API DMT_CPU_GPU Normal3f mul(Matrix4f const& m, Normal3f const& v);
+    DMT_CORE_API DMT_CPU_GPU Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v);
+    DMT_CORE_API DMT_CPU_GPU Point3f  mul(Matrix4f const& m, Point3f const& p);
 
     // Vector Types: Interval -----------------------------------------------------------------------------------------
 #if !defined(DMT_ARCH_X86_64)
 #error "Point3fi (__host__) is currently using SSE"
 #endif
-    struct Point3fi
+    struct DMT_CORE_API Point3fi
     {
         Point3fi() = default;
         DMT_CPU_GPU Point3fi(Point3f);
@@ -811,7 +811,7 @@ namespace dmt {
 
     // Ray and RayDifferentials ---------------------------------------------------------------------------------------
     // TODO compress direction when you write compressed normal
-    struct Ray
+    struct DMT_CORE_API Ray
     {
         Ray() = default;
         DMT_CPU_GPU Ray(Point3f o, Vector3f d, float time = 0.f, uintptr_t medium = 0);
@@ -825,7 +825,7 @@ namespace dmt {
         float     time = 0;
     };
 
-    struct RayDifferential : public Ray
+    struct DMT_CORE_API RayDifferential : public Ray
     {
         RayDifferential() = default;
         DMT_CPU_GPU RayDifferential(Point3f o, Vector3f d, float time = 0.f, uintptr_t medium = 0);
@@ -837,7 +837,9 @@ namespace dmt {
         Point3f  rxOrigin, ryOrigin;
         Vector3f rxDirection, ryDirection;
     };
+} // namespace dmt
 
+namespace dstd {
     // TODO Move somewhere else
     template <typename T, int N>
     class array
@@ -1028,7 +1030,7 @@ namespace dmt {
         bool                                          set = false;
     };
 
-} // namespace dmt
+} // namespace dstd
 
 namespace dmt {
     inline __host__ __device__ glm::vec4 glmZero() { return glm::vec4{0.f}; }

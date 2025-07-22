@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #include <algorithm>
 #include <bit>
@@ -254,20 +254,20 @@ namespace dmt::fl {
 #endif
     }
 
-    DMT_CPU_GPU float rcp(float x);
+    DMT_CORE_API DMT_CPU_GPU float rcp(float x);
 
-    DMT_CPU_GPU bool nearZero(float x);
-    DMT_CPU_GPU bool near(float x, float y);
+    DMT_CORE_API DMT_CPU_GPU bool nearZero(float x);
+    DMT_CORE_API DMT_CPU_GPU bool near(float x, float y);
     // Helper to compute (a^2 + b^2)^1/2 without overflow or underflow
-    DMT_CPU_GPU float pythag(float a, float b);
+    DMT_CORE_API DMT_CPU_GPU float pythag(float a, float b);
 
 } // namespace dmt::fl
 
 namespace dmt {
     // TODO SOA
-    struct Intervalf
+    struct DMT_CORE_API Intervalf
     {
-        struct SOA
+        struct DMT_CORE_API SOA
         {
         };
 

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #include "cudautils/cudautils-enums.h"
 #include "cudautils/cudautils-vecmath.h"
 
 namespace dmt {
     // Transform, AnimatedTransform, CameraTransform ------------------------------------------------------------------
-    class Transform
+    class DMT_CORE_API Transform
     {
     public:
         Matrix4f m;    // Transformation matrix
@@ -70,7 +70,7 @@ namespace dmt {
         DMT_CPU_GPU bool swapsHandedness() const;
     };
 
-    class AnimatedTransform
+    class DMT_CORE_API AnimatedTransform
     {
     public:
         AnimatedTransform() = default;
@@ -119,7 +119,7 @@ namespace dmt {
         float     endTime   = 1;
 
     private:
-        struct DerivativeTerm
+        struct DMT_CORE_API DerivativeTerm
         {
             DMT_CPU_GPU       DerivativeTerm();
             DMT_CPU_GPU       DerivativeTerm(float c, float x, float y, float z);
@@ -128,7 +128,7 @@ namespace dmt {
             float kc, kx, ky, kz;
         };
 
-        enum EState : int32_t
+        enum DMT_CORE_API EState : int32_t
         {
             eNone        = 0,
             eAnimated    = 1,
@@ -144,11 +144,11 @@ namespace dmt {
         EState         m_state = eNone;
     };
 
-    struct CameraTransform
+    struct DMT_CORE_API CameraTransform
     {
         // requires initialized context
         CameraTransform() = default;
-        DMT_CPU_GPU           CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys);
+        DMT_CPU_GPU           CameraTransform(AnimatedTransform const& worldFromCamera, int renderCoordSys);
         DMT_CPU_GPU Transform renderFromWorld() const;
 
         AnimatedTransform renderFromCamera;

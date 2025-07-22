@@ -1040,21 +1040,20 @@ namespace dmt {
     }
 
     // CameraTransform ------------------------------------------------------------------------------------------------
-    __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys)
+    __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, int renderCoordSys)
     {
         switch (renderCoordSys)
         {
-            using enum ERenderCoordSys;
-            case eCameraWorld:
+            case 0:
             {
 
                 break;
             }
-            case eCamera:
+            case 1:
             {
                 break;
             }
-            case eWorld:
+            case 2:
             {
                 break;
             }

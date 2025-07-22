@@ -2,7 +2,7 @@
 # Project
 BasedOnStyle: LLVM
 Standard: c++20
-ColumnLimit: 120
+ColumnLimit: 140
 
 # Indentation
 AccessModifierOffset: -4
@@ -11,7 +11,7 @@ ContinuationIndentWidth: 4
 IndentCaseLabels: true
 IndentCaseBlocks: false
 IndentExternBlock: Indent
-IndentPPDirectives: None
+IndentPPDirectives: BeforeHash
 IndentWidth: 4
 IndentWrappedFunctionNames: true
 TabWidth: 4

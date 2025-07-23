@@ -368,12 +368,26 @@ namespace dmt {
         return dmt::fl::lerp(delta, cdf[offset], cdf[offset + 1]);
     }
 
+    static int32_t findIntervalLessThan(int32_t sz, std::span<float const> cdf, float u)
+    {
+        int32_t size = sz - 2, first = 1;
+        while (size > 0)
+        {
+            // Evaluate predicate at midpoint and update _first_ and _size_
+            size_t half = (size_t)size >> 1, middle = first + half;
+            bool   predResult = cdf[middle] <= u;
+            first             = predResult ? middle + 1 : first;
+            size              = predResult ? size - (half + 1) : half;
+        }
+        return std::clamp(first - 1, 0, sz - 2);
+    }
+
     float PiecewiseConstant1D::sample(float u, float* pdf, int32_t* offset) const
     {
         auto cdf  = CDF();
         auto func = absFunc();
 
-        int32_t const off = -1; // TODO SIMD part
+        int32_t const off = findIntervalLessThan(m_funcCount, cdf, u);
         if (offset)
             *offset = off;
 

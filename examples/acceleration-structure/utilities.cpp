@@ -6,7 +6,7 @@
     #error "what"
 #endif
 
-#include <emmintrin.h> // SSE2
+#include <immintrin.h>
 
 namespace dmt {
     bool DMT_FASTCALL slabTest(Point3f rayOrigin, Vector3f rayDirection, Bounds3f const& box, float* outTmin, float* outTmax)
@@ -172,6 +172,221 @@ namespace dmt {
         });
     }
 
+    ScanlineRange2D::Iterator::Iterator() : m_p({{-1, -1}}), m_res({{-2, -2}}) {}
+
+    ScanlineRange2D::Iterator::Iterator(Point2i p, Point2i res) : m_p(p), m_res(res) {}
+
+    ScanlineRange2D::Iterator::value_type ScanlineRange2D::Iterator::operator*() const { return m_p; }
+
+    ScanlineRange2D::Iterator& ScanlineRange2D::Iterator::operator++()
+    {
+        ++m_p.x;
+        if (m_p.x >= m_res.x)
+        {
+            m_p.x = 0;
+            ++m_p.y;
+            if (m_p.y >= m_res.y)
+                m_p.x = -1;
+        }
+
+        return *this;
+    }
+
+    ScanlineRange2D::Iterator ScanlineRange2D::Iterator::operator++(int)
+    {
+        Iterator temp = *this;
+        ++*this;
+        return temp;
+    }
+
+    bool ScanlineRange2D::Iterator::operator==(End) const { return m_p.x == -1; }
+    bool ScanlineRange2D::Iterator::operator==(Iterator const& other) const
+    {
+        return m_p == other.m_p && m_res == other.m_res;
+    }
+
+    ScanlineRange2D::ScanlineRange2D(Point2i resolution) : m_resolution(resolution)
+    {
+        assert(m_resolution.x > 0 && m_resolution.y > 0 && "Invalid Resolution");
+    }
+
+    ScanlineRange2D::Iterator ScanlineRange2D::begin() const { return Iterator({{0, 0}}, m_resolution); }
+
+    ScanlineRange2D::End ScanlineRange2D::end() const { return {}; }
+
+    /// TODO test
+    PiecewiseConstant1D::PiecewiseConstant1D(std::span<float const> func, float min, float max, std::pmr::memory_resource* memory) :
+    m_buffer{makeUniqueRef<float[]>(memory, func.size() << 1)},
+    m_funcCount(static_cast<decltype(m_funcCount)>(func.size())),
+    m_min(min),
+    m_max(max)
+    {
+        assert(isPOT(func.size()) && "PiecewiseConstant1D requires its source sampled function to have POT samples");
+        assert(func.size() == m_funcCount && "narrowing conversion of size lost values");
+
+        // First step: copy absolute value of function
+        float const* fPtr      = func.data();
+        float*       fDest     = m_buffer.get();
+        uint32_t     remaining = m_funcCount;
+
+        __m256 const nzero8 = _mm256_set1_ps(-0.f);
+        __m128 const nzero4 = _mm_set1_ps(-0.f);
+        while (remaining > 8)
+        { // store abs
+            _mm256_storeu_ps(fDest, _mm256_andnot_ps(nzero8, _mm256_loadu_ps(fPtr)));
+            fPtr += 8;
+            fDest += 8;
+            remaining -= 8;
+        }
+
+        while (remaining > 4)
+        {
+            _mm_storeu_ps(fDest, _mm_andnot_ps(nzero4, _mm_loadu_ps(fPtr)));
+            fPtr += 4;
+            fDest += 4;
+            remaining -= 4;
+        }
+
+        while (remaining != 0)
+            *fDest++ = *fPtr++;
+
+        // Second Step: CDF Computation https://en.algorithmica.org/hpc/algorithms/prefix/
+        // split the array into blocks of 8 (remaining later)
+        uint32_t const numBlocksTimes8 = m_funcCount & ~0x7u;
+        fPtr                           = func.data();
+        float* cdf                     = m_buffer.get() + m_funcCount;
+        float  carry                   = 0.f;
+
+        for (uint32_t i = 0; i < numBlocksTimes8; ++i)
+        {
+            __m256 x = _mm256_loadu_ps(fPtr);
+
+            // In-lane prefix sum (lane 0: [0–3], lane 1: [4–7])
+            __m256 t;
+
+            t = _mm256_castsi256_ps(_mm256_slli_si256(_mm256_castps_si256(x), 4));
+            x = _mm256_add_ps(x, t);
+
+            t = _mm256_castsi256_ps(_mm256_slli_si256(_mm256_castps_si256(x), 8));
+            x = _mm256_add_ps(x, t);
+
+            // Extract lane 0 sum (last element of lane 0)
+            __m128 low       = _mm256_castps256_ps128(x);
+            float  lane0_sum = _mm_cvtss_f32(_mm_shuffle_ps(low, low, _MM_SHUFFLE(3, 3, 3, 3)));
+
+            // Broadcast lane0_sum to a vector
+            __m256 lane0_sum_vec = _mm256_set1_ps(lane0_sum);
+
+            // Create mask to zero out lane 0, keep lane 1
+            __m256 mask = _mm256_castsi256_ps(_mm256_setr_epi32(0, 0, 0, 0, -1, -1, -1, -1));
+
+            // Add lane0_sum only to lane 1 elements
+            x = _mm256_blendv_ps(x, _mm256_add_ps(x, lane0_sum_vec), mask);
+
+            // Step 2: Add carry from previous block
+            __m256 carryVec = _mm256_set1_ps(carry);
+            x               = _mm256_add_ps(x, carryVec);
+
+            _mm256_storeu_ps(cdf, x); // store result
+
+            // Step 3: Extract last value from x to use as carry for next block
+            // The last element in x is the total sum of this block
+            // To get it, extract the high 128-bit lane, then extract element 3
+
+            __m128 high = _mm256_extractf128_ps(x, 1);                              // get elements 4–7
+            float  last = _mm_cvtss_f32(_mm_shuffle_ps(high, high, 0b11'11'11'11)); // get element 7
+
+            carry = last;
+            fPtr += 8;
+            cdf += 8;
+        }
+        // handle remainder with carry and scalar ops
+        remaining = m_funcCount - numBlocksTimes8;
+        while (remaining != 0)
+        {
+            *cdf = *(cdf - 1) + *fPtr;
+            ++cdf;
+            ++fPtr;
+            --remaining;
+        }
+
+        // step 3: normalize CDF
+        //   funcInt = cdf[n];
+        //   if (funcInt == 0) for (size_t i = 1; i < n + 1; ++i) cdf[i] = Float(i) / Float(n);
+        //   else              for (size_t i = 1; i < n + 1; ++i) cdf[i] /= funcInt;
+        m_integral        = CDF().back();
+        float const  fac  = dmt::fl::rcp(dmt::fl::nearZero(m_integral) ? m_funcCount : m_integral);
+        __m256 const vFac = _mm256_set1_ps(fac);
+
+        cdf       = m_buffer.get() + m_funcCount;
+        remaining = m_funcCount - numBlocksTimes8;
+
+        if (dmt::fl::nearZero(m_integral))
+        {
+            alignas(alignof(__m256)) float base[8]{0, 1, 2, 3, 4, 5, 6, 7};
+
+            __m256       vNum    = _mm256_load_ps(base);
+            __m256 const vOffset = _mm256_set1_ps(8.f);
+            for (uint32_t i = 0; i < numBlocksTimes8; ++i)
+            {
+                _mm256_storeu_ps(cdf, _mm256_mul_ps(vNum, vFac));
+                vNum = _mm256_add_ps(vNum, vOffset);
+                cdf += 8;
+            }
+
+            // Handle remainder scalars
+            for (size_t i = 0; i < remaining; ++i)
+                cdf[i] = static_cast<float>(numBlocksTimes8 + i) * fac;
+        }
+        else
+        {
+            for (uint32_t i = 0; i < numBlocksTimes8; ++i)
+            {
+                _mm256_storeu_ps(cdf, _mm256_mul_ps(_mm256_loadu_ps(cdf), vFac));
+                cdf += 8;
+            }
+
+            // Handle remainder scalars
+            for (size_t i = 0; i < remaining; ++i)
+                cdf[i] *= fac;
+        }
+    }
+
+    float PiecewiseConstant1D::integral() const { return m_integral; }
+
+    uint32_t PiecewiseConstant1D::size() const { return m_funcCount; }
+
+    float PiecewiseConstant1D::invert(float x) const
+    {
+        if (x < m_min || x > m_max)
+            return std::numeric_limits<double>::quiet_NaN();
+        float const   c      = (x - m_min) / (m_max - m_min) * m_funcCount;
+        int32_t const offset = dmt::fl::clamp(static_cast<int32_t>(c), 0, static_cast<int32_t>(m_funcCount - 1));
+
+        float const delta = c - offset;
+        auto        cdf   = CDF();
+        return dmt::fl::lerp(delta, cdf[offset], cdf[offset + 1]);
+    }
+
+    float PiecewiseConstant1D::sample(float u, float* pdf, int32_t* offset) const
+    {
+        auto cdf  = CDF();
+        auto func = absFunc();
+
+        int32_t const off = -1; // TODO SIMD part
+        if (offset)
+            *offset = off;
+
+        // compute offset along CDF segment (linear interp formula)
+        float du = u - cdf[off];
+        if (cdf[off + 1] - cdf[off] > 0)
+            du /= cdf[off + 1] - cdf[off];
+
+        if (pdf)
+            *pdf = m_integral > 0 ? func[off] / m_integral : 0;
+
+        return dmt::fl::lerp((off + du) / m_funcCount, m_min, m_max);
+    }
 } // namespace dmt
 
 namespace dmt::test {

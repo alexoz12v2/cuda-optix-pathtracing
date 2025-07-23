@@ -26,6 +26,85 @@ namespace dmt {
     uint32_t morton3D(float x, float y, float z);
 
     void reorderByMorton(std::span<TriangleData> tris);
+
+    class ScanlineRange2D
+    {
+    public:
+        struct End
+        {
+        };
+        class Iterator
+        {
+        public:
+            using difference_type   = std::ptrdiff_t;
+            using value_type        = Point2i;
+            using iterator_category = std::forward_iterator_tag;
+
+            Iterator();
+            Iterator(Point2i p, Point2i res);
+
+            value_type operator*() const;
+
+            Iterator& operator++();
+            Iterator  operator++(int);
+
+            bool operator==(End) const;
+            bool operator==(Iterator const& other) const;
+
+        private:
+            Point2i m_p;
+            Point2i m_res;
+        };
+        static_assert(std::forward_iterator<Iterator>, "Failed");
+
+    public:
+        explicit ScanlineRange2D(Point2i resolution);
+
+        Iterator begin() const;
+        End      end() const;
+
+    private:
+        Point2i m_resolution;
+    };
+
+    /**
+     * @brief class to represent a PDF and its CDF functions as
+     * <ul>
+     *  <li>PDF -> constant interpolated piecewise function</li>
+     *  <li>CDF -> linearly interpolated piecewise function</li>
+     * </ul>
+     * We store the absolute value of the sampled function and its CDF computed with a normalized running sum
+     * TODO: If necessary, define copy-control, otherwise, just avoid it and pass them with const&
+     */
+    class PiecewiseConstant1D
+    {
+    public:
+        PiecewiseConstant1D(std::span<float const>     func,
+                            float                      min,
+                            float                      max,
+                            std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+
+        float    integral() const;
+        uint32_t size() const;
+
+        /// @warning returns nan if x outside range min, max
+        float invert(float x) const;
+
+        float sample(float u, float* pdf = nullptr, int32_t* offset = nullptr) const;
+
+    private:
+        DMT_FORCEINLINE std::span<float> absFunc() { return {m_buffer.get(), m_funcCount}; }
+        DMT_FORCEINLINE std::span<float const> absFunc() const { return {m_buffer.get(), m_funcCount}; }
+
+        DMT_FORCEINLINE std::span<float> CDF() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+        DMT_FORCEINLINE std::span<float const> CDF() const { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+
+    private:
+        UniqueRef<float[]> m_buffer;    // first half abs(func), second half CDF
+        uint32_t           m_funcCount; // half the count of floats in buffer
+        float              m_min, m_max;
+        float              m_integral;
+    };
 } // namespace dmt
 
 namespace dmt::test {

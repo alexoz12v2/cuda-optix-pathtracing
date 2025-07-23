@@ -25,6 +25,15 @@ namespace dmt {
     static_assert(VectorScalable<Point4f>);
 
     // Vector Types: Basic Operations ---------------------------------------------------------------------------------
+    __host__ __device__ bool operator==(Point2i a, Point2i b) { return a.x == b.x && a.y == b.y; }
+
+    __host__ __device__ bool operator==(Point3i a, Point3i b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+
+    __host__ __device__ bool operator==(Point4i a, Point4i b)
+    {
+        return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+    }
+
     __host__ __device__ Point2i::operator Vector2i() { return *std::bit_cast<Vector2i const*>(this); }
     __host__ __device__ Point2f::operator Vector2f() { return *std::bit_cast<Vector2f const*>(this); }
     __host__ __device__ Point3i::operator Vector3i() { return *std::bit_cast<Vector3i const*>(this); }

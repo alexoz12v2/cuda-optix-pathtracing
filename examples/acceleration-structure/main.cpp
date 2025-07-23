@@ -437,7 +437,7 @@ namespace dmt::sampling {
             m_multInvs[1] = multiplicativeInverse(m_baseScales[0], m_baseScales[1]);
         }
 
-        void startPixelSample(Point2i p, int32_t sampleIndex, int32_t dim)
+        void startPixelSample(Point2i p, int32_t sampleIndex, int32_t dim = 0)
         {
             int32_t const sampleStride = m_baseScales[0] * m_baseScales[1];
             m_haltonIndex              = 0;
@@ -531,6 +531,56 @@ namespace dmt::sampling {
 
 } // namespace dmt::sampling
 
+namespace dmt::filtering {
+    // imagine placing a 2D filter function over each pixel center coordinate (index + 0.5). Instead of using
+    // directly samples computed from a given pixel, we use inverse transform method to repurpose the sample
+    // according to the PDF associated to the filter function. Such strategy is equivalent to applying the low pass filter
+    // to the reconstructed signal, which is then computed with a weighted sum of all contributions on the pixel. The weight
+    // is directly proportional to the PDF value of the repurposed sample
+    struct FilterSample
+    {
+        Point2f p;
+        float   weight;
+    };
+
+    class Mitchell
+    {
+    public:
+        Mitchell(Vector2f                   radius,
+                 float                      b      = 1.f / 3.f,
+                 float                      c      = 1.f / 3.f,
+                 std::pmr::memory_resource* memory = std::pmr::get_default_resource()) :
+        m_radius(radius),
+        m_b(b),
+        m_c(c)
+        {
+        }
+
+        // domain, for the x axis and y axis, in which the filter is != 0 starting from 0 (low pass filter)
+        Vector2f radius() const { return m_radius; }
+
+        // 2D integral of the filter
+        float integral() const { return m_radius.x * m_radius.y / 4; }
+
+    private:
+        static inline float mitchell1D(float x, float b, float c)
+        {
+            x = std::abs(x);
+            if (x <= 1)
+                return ((12 - 9 * b - 6 * c) * x * x * x + (-18 + 12 * b + 6 * c) * x * x + (6 - 2 * b)) * (1.f / 6.f);
+            else if (x <= 2)
+                return ((-b - 6 * c) * x * x * x + (6 * b + 30 * c) * x * x + (-12 * b - 48 * c) * x + (8 * b + 24 * c)) *
+                       (1.f / 6.f);
+            else
+                return 0;
+        }
+
+    private:
+        Vector2f m_radius;
+        float    m_b, m_c;
+    };
+} // namespace dmt::filtering
+
 namespace dmt {
     void runMainProgram(std::span<TriangleData>     scene,
                         std::span<Primitive const*> primsView,
@@ -538,19 +588,31 @@ namespace dmt {
                         unsigned char*              scratchBuffer)
     {
         // primsView primitive coordinates defined in world space
-        static constexpr uint32_t            Width = 1280, Height = 720, NumChannels = 3;
+        static constexpr uint32_t Width = 1280, Height = 720, NumChannels = 3;
+        static constexpr int32_t  samplesPerPixel = 4;
+
         std::pmr::synchronized_pool_resource pool;
         ThreadPoolV2                         threadpool{std::thread::hardware_concurrency(), &pool};
         auto                                 image = makeUniqueRef<uint8_t[]>(&pool, Width * Height * NumChannels);
+        dmt::sampling::HaltonOwen            sampler{samplesPerPixel, {{Width, Height}}, 123432};
 
         // define camera (image plane physical dims, resolution given by image)
         Vector3f const cameraPosition{{0.f, -4.f, 2.f}};
         Normal3f const cameraDirection = normalFrom({{0.f, 1.f, 0.3f}});
-        float const    pixelLength     = 13e-6f; // 169 um^2 square pixel
         float const    focalLength     = 35e-3f; // 35 mm
+        // instead of pixelLength, use fovRadians
+        float const pixelLength = 13e-6f; // 169 um^2 square pixel
 
         // for each pixel, for each sample within the pixel (halton + owen scrambling)
-        // shoot ray, register intersection
+        for (Point2i pixel : dmt::ScanlineRange2D({{Width, Height}}))
+        {
+            for (int32_t sampleIndex = 0; sampleIndex < samplesPerPixel; ++sampleIndex)
+            {
+                sampler.startPixelSample(pixel, sampleIndex);
+                Point2f sample = sampler.getPixel2D();
+                // shoot ray, register intersection
+            }
+        }
     }
 } // namespace dmt
 

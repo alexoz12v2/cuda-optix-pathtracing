@@ -262,6 +262,10 @@ namespace dmt {
 
 
     // Vector Types: Fundamental Operations ---------------------------------------------------------------------------
+    DMT_CORE_API DMT_CPU_GPU bool operator==(Point2i a, Point2i b);
+    DMT_CORE_API DMT_CPU_GPU bool operator==(Point3i a, Point3i b);
+    DMT_CORE_API DMT_CPU_GPU bool operator==(Point4i a, Point4i b);
+
     DMT_CORE_API DMT_CPU_GPU Point2i    operator+(Point2i a, Vector2i b);
     DMT_CORE_API DMT_CPU_GPU Point2f    operator+(Point2f a, Vector2f b);
     DMT_CORE_API DMT_CPU_GPU Point3i    operator+(Point3i a, Vector3i b);

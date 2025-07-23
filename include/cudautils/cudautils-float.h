@@ -157,6 +157,26 @@ namespace dmt::fl {
 #endif
     }
 
+    DMT_CPU_GPU inline float lerp(float delta, float a, float b)
+    {
+        if (delta == 0.f)
+            return a;
+
+#if defined(__CUDA_ARCH__)
+        // On CUDA, just use fused multiply-add for better precision
+        return __fmaf_rn(b - a, delta, a);
+#else
+    // On CPU: compute (b - a) * delta + a with FMA if available
+    // But to guarantee exact return of `a` when delta == 0,
+    // we do the if check above.
+    #if defined(__FMA__)
+        return std::fma(b - a, delta, a);
+    #else
+        return a + (b - a) * delta;
+    #endif
+#endif
+    }
+
     DMT_CPU_GPU inline float mulRoundDown(float a, float b)
     {
 #if defined(__CUDA_ARCH__)

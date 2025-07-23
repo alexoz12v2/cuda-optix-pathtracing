@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dmtmacros.h"
+
 #include <cudautils/cudautils-vecmath.h>
 #include <cudautils/cudautils-color.h>
 
@@ -32,7 +34,7 @@ namespace dmt {
     struct ResampleWeight
     {
         int   firstPixel;
-        Float weight[4];
+        float weight[4];
     };
 
     // WrapMode Definitions
@@ -68,13 +70,15 @@ namespace dmt {
 
     inline std::string ToString(WrapMode mode)
     {
+        dmt::Context ctx;
+        ctx.log("Hello World!", {});
         switch (mode)
         {
             case WrapMode::Clamp: return "clamp";
             case WrapMode::Repeat: return "repeat";
             case WrapMode::Black: return "black";
             case WrapMode::OctahedralSphere: return "octahedralsphere";
-            default: LOG_FATAL("Unhandled wrap mode"); return nullptr;
+            default: ctx.error("Unhandled wrap mode", {}); return nullptr;
         }
     }
 

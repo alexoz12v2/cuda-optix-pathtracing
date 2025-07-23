@@ -140,6 +140,8 @@ namespace dmt {
     // Inequality comparison
     __host__ __device__ bool Transform::operator!=(Transform const& other) const { return !(*this == other); }
 
+    __host__ __device__ Transform Transform::operator*(Transform const& t2) const { return Transform(m * t2.m); }
+
     __host__ __device__ bool Transform::hasScale(float tolerance) const
     {
         // compute the length of the three reference unit vectors after being transformed. if any of these has been
@@ -178,7 +180,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
         ret.o = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
-        if (ray.hasDifferentials())
+        if (ray.HasDifferentials())
         {
             ret.rxOrigin    = applyInverse(ray.rxOrigin);
             ret.ryOrigin    = applyInverse(ray.ryOrigin);
@@ -223,7 +225,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
         ret.o = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
-        if (ray.hasDifferentials())
+        if (ray.HasDifferentials())
         {
             ret.rxOrigin    = operator()(ray.rxOrigin);
             ret.ryOrigin    = operator()(ray.ryOrigin);
@@ -237,6 +239,14 @@ namespace dmt {
     {
         glm::mat3 const linearPart{toGLMmat(m)};
         return glm::determinant(linearPart) < 0.f;
+    }
+
+
+    DMT_CPU_GPU Transform Translate(Vector3f delta)
+    {
+        Matrix4f m(1, 0, 0, delta.x, 0, 1, 0, delta.y, 0, 0, 1, delta.z, 0, 0, 0, 1);
+
+        return Transform(m);
     }
 
     // AnimatedTransform ----------------------------------------------------------------------------------------------
@@ -1040,36 +1050,37 @@ namespace dmt {
     }
 
     // CameraTransform ------------------------------------------------------------------------------------------------
-    __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys)
-    {
-        switch (renderCoordSys)
+    /*
+        __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys)
         {
-            using enum ERenderCoordSys;
-            case eCameraWorld:
+            switch (renderCoordSys)
             {
+                using enum ERenderCoordSys;
+                case eCameraWorld:
+                {
 
-                break;
+                    break;
+                }
+                case eCamera:
+                {
+                    break;
+                }
+                case eWorld:
+                {
+                    break;
+                }
+                default: // should be never reached
+    #if !defined(__CUDA_ARCH__)
+                    std::abort();
+    #else
+                    // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated
+                    __threadfence();
+                    asm("trap;");
+    #endif
+                    break;
             }
-            case eCamera:
-            {
-                break;
-            }
-            case eWorld:
-            {
-                break;
-            }
-            default: // should be never reached
-#if !defined(__CUDA_ARCH__)
-                std::abort();
-#else
-                // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated
-                __threadfence();
-                asm("trap;");
-#endif
-                break;
         }
-    }
-
+    */
     __host__ __device__ Transform dmt::CameraTransform::renderFromWorld() const
     {
         Transform t = worldFromRender;

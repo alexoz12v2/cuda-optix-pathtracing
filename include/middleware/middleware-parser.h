@@ -395,7 +395,7 @@ namespace dmt {
         eCount
     };
 
-    float defaultRadiusFromFilterType(EFilterType e);
+    float                     defaultRadiusFromFilterType(EFilterType e);
     struct DMT_MIDDLEWARE_API FilterSpec
     {
         struct DMT_MIDDLEWARE_API Gaussian
@@ -1131,7 +1131,7 @@ namespace dmt {
 
         virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-        virtual ~IParserTarget() {};
+        virtual ~IParserTarget(){};
 
         virtual void Option(sid_t name, ParamPair const& value) = 0;
 

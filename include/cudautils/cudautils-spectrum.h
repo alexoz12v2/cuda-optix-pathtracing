@@ -45,7 +45,11 @@ namespace dmt {
 
         SampledSpectrum() = default;
         DMT_CPU_GPU SampledSpectrum(ArrayView<float> values);
-
+        DMT_CPU_GPU explicit SampledSpectrum(float c)
+        {
+            for (int i = 0; i < numSpectrumSamples(); i++)
+                values[i] = c;
+        };
         float values[numSpectrumSamples()]{};
     };
 

@@ -155,6 +155,8 @@ namespace dmt {
             assert(i >= 0 && i < 3);
             return *(std::bit_cast<S const*>(this) + i);
         }
+        Tuple3() = default;
+        Tuple3(S x, S y, S z) : x(x), y(y), z(x) {}
         S x, y, z;
     };
 
@@ -197,15 +199,18 @@ namespace dmt {
 
     struct Vector2i : public Tuple2i { Vector2i() = default; DMT_CPU_GPU Vector2i(Tuple2i t) : Tuple2i(t) {} };
     struct Vector2f : public Tuple2f { Vector2f() = default; DMT_CPU_GPU Vector2f(Tuple2f t) : Tuple2f(t) {} };
-    struct Vector3i : public Tuple3i { Vector3i() = default; DMT_CPU_GPU Vector3i(Tuple3i t) : Tuple3i(t) {} };
-    struct Vector3f : public Tuple3f { Vector3f() = default; DMT_CPU_GPU Vector3f(Tuple3f t) : Tuple3f(t) {} };
+    struct Vector3i : public Tuple3i { Vector3i() = default; DMT_CPU_GPU Vector3i(Tuple3i t) : Tuple3i(t) {} 
+                                        Vector3i(int x, int y, int z) : Tuple3i(x, y, z) {}};
+    struct Vector3f : public Tuple3f { Vector3f() = default; DMT_CPU_GPU Vector3f(Tuple3f t) : Tuple3f(t) {} 
+                                       Vector3f(float x, float y, float z) : Tuple3f(x, y, z) {}};
     struct Vector4i : public Tuple4i { Vector4i() = default; DMT_CPU_GPU Vector4i(Tuple4i t) : Tuple4i(t) {} };
     struct Vector4f : public Tuple4f { Vector4f() = default; DMT_CPU_GPU Vector4f(Tuple4f t) : Tuple4f(t) {} };
 
     struct Point2i : public Tuple2i { Point2i() = default; DMT_CPU_GPU Point2i(Tuple2i t) : Tuple2i(t) {} explicit DMT_CPU_GPU operator Vector2i(); };
     struct Point2f : public Tuple2f { Point2f() = default; DMT_CPU_GPU Point2f(Tuple2f t) : Tuple2f(t) {} explicit DMT_CPU_GPU operator Vector2f(); };
     struct Point3i : public Tuple3i { Point3i() = default; DMT_CPU_GPU Point3i(Tuple3i t) : Tuple3i(t) {} explicit DMT_CPU_GPU operator Vector3i(); };
-    struct Point3f : public Tuple3f { Point3f() = default; DMT_CPU_GPU Point3f(Tuple3f t) : Tuple3f(t) {} explicit DMT_CPU_GPU operator Vector3f(); };
+    struct Point3f : public Tuple3f { Point3f() = default; DMT_CPU_GPU Point3f(Tuple3f t) : Tuple3f(t) {} explicit DMT_CPU_GPU operator Vector3f(); 
+                                      Point3f(float x, float y, float z) : Tuple3f(x, y, z) {} explicit DMT_CPU_GPU operator Vector3f();};
     struct Point4i : public Tuple4i { Point4i() = default; DMT_CPU_GPU Point4i(Tuple4i t) : Tuple4i(t) {} explicit DMT_CPU_GPU operator Vector4i(); };
     struct Point4f : public Tuple4f { Point4f() = default; DMT_CPU_GPU Point4f(Tuple4f t) : Tuple4f(t) {} explicit DMT_CPU_GPU operator Vector4f(); };
 
@@ -547,6 +552,8 @@ namespace dmt {
     DMT_CPU_GPU Tuple2f lerp(float t, Tuple2f zero, Tuple2f one);
     DMT_CPU_GPU Tuple3f lerp(float t, Tuple3f zero, Tuple3f one);
     DMT_CPU_GPU Tuple4f lerp(float t, Tuple4f zero, Tuple4f one);
+    //to move in a math class
+    DMT_CPU_GPU inline float lerp(float x, float a, float b) { return (1 - x) * a + x * b; }
 
     DMT_CPU_GPU Tuple2f fma(Tuple2f mult0, Tuple2f mult1, Tuple2f add);
     DMT_CPU_GPU Tuple2i fma(Tuple2i mult0, Tuple2i mult1, Tuple2i add);
@@ -623,6 +630,7 @@ namespace dmt {
     DMT_CPU_GPU Frame coordinateSystem(Normal3f xAxis);
 
     DMT_CPU_GPU Quaternion slerp(float t, Quaternion zero, Quaternion one);
+    inline float           Dot(Vector3f const& a, Vector3f const& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
     // Vector Types: Spherical Geometry Functions ---------------------------------------------------------------------
     DMT_CPU_GPU float    sphericalTriangleArea(Vector3f edge0, Vector3f edge1, Vector3f edge2);
@@ -818,11 +826,11 @@ namespace dmt {
 
         DMT_CPU_GPU bool      hasNaN() const;
         DMT_CPU_GPU uintptr_t getMedium() const;
-
-        uintptr_t medium = 0; // information about hasDifferentials embedded in the low bit
-        Point3f   o{};
-        Vector3f  d{{0, 0, 1}};
-        float     time = 0;
+        DMT_CPU_GPU Point3f   operator()(float t) const { return o * d * time; }
+        uintptr_t             medium = 0; // information about hasDifferentials embedded in the low bit
+        Point3f               o{};
+        Vector3f              d{{0, 0, 1}};
+        float                 time = 0;
     };
 
     struct RayDifferential : public Ray
@@ -830,10 +838,11 @@ namespace dmt {
         RayDifferential() = default;
         DMT_CPU_GPU RayDifferential(Point3f o, Vector3f d, float time = 0.f, uintptr_t medium = 0);
         DMT_CPU_GPU explicit RayDifferential(Ray const& ray);
-        DMT_CPU_GPU void setDifferentials(Point3f _rxOrigin, Vector3f _rxDirection, Point3f _ryOrigin, Vector3f _ryDirection);
-        DMT_CPU_GPU void scaleDifferentials(float s);
-        DMT_CPU_GPU bool hasDifferentials() const;
+        DMT_CPU_GPU void SetDifferentials(Point3f _rxOrigin, Vector3f _rxDirection, Point3f _ryOrigin, Vector3f _ryDirection);
+        DMT_CPU_GPU void ScaleDifferentials(float s);
+        DMT_CPU_GPU bool HasDifferentials() const;
 
+        bool     hasDifferentials = false;
         Point3f  rxOrigin, ryOrigin;
         Vector3f rxDirection, ryDirection;
     };
@@ -1161,6 +1170,8 @@ namespace dmt {
     {
         return *std::bit_cast<Matrix4f const*>(&m);
     }
+
+
 } // namespace dmt
 
 /**

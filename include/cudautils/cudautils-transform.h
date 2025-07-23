@@ -52,6 +52,8 @@ namespace dmt {
         // Inequality comparison
         DMT_CPU_GPU bool operator!=(Transform const& other) const;
 
+        DMT_CPU_GPU Transform operator*(Transform const& t2) const;
+
         DMT_CPU_GPU bool            hasScale(float tolerance = 1e-3f) const;
         DMT_CPU_GPU Vector3f        applyInverse(Vector3f v) const;
         DMT_CPU_GPU Point3f         applyInverse(Point3f v) const;
@@ -70,6 +72,33 @@ namespace dmt {
         DMT_CPU_GPU bool swapsHandedness() const;
     };
 
+    // Transform Function Declarations
+    DMT_CPU_GPU Transform        Translate(Vector3f delta);
+    DMT_CPU_GPU inline Transform RotateFromTo(Vector3f from, Vector3f to)
+    {
+        // Compute intermediate vector for vector reflection
+        Vector3f refl;
+        if (std::abs(from.x) < 0.72f && std::abs(to.x) < 0.72f)
+            refl = Vector3f(1, 0, 0);
+        else if (std::abs(from.y) < 0.72f && std::abs(to.y) < 0.72f)
+            refl = Vector3f(0, 1, 0);
+        else
+            refl = Vector3f(0, 0, 1);
+
+        // Initialize matrix _r_ for rotation
+        Vector3f u = refl - from, v = refl - to;
+        Matrix4f r;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                // Initialize matrix element _r[i][j]_
+                r[i][j] = ((i == j) ? 1 : 0) - 2 / Dot(u, u) * u[i] * u[j] - 2 / Dot(v, v) * v[i] * v[j] +
+                          4 * Dot(u, v) / (Dot(u, u) * Dot(v, v)) * v[i] * u[j];
+
+        return Transform(r);
+    }
+    // Transform Inline Functions
+    DMT_CPU_GPU inline Transform Inverse(Transform const& t) { return Transform(t.m); }
+
     class AnimatedTransform
     {
     public:
@@ -86,8 +115,8 @@ namespace dmt {
 
 
         // ray encapsulates time
-        DMT_CPU_GPU Ray             operator()(Ray const& ray, float* optInOut_tMax) const;
-        DMT_CPU_GPU RayDifferential operator()(RayDifferential const& ray, float* optInOut_tMax) const;
+        DMT_CPU_GPU Ray             operator()(Ray const& ray, float* optInOut_tMax = nullptr) const;
+        DMT_CPU_GPU RayDifferential operator()(RayDifferential const& ray, float* optInOut_tMax = nullptr) const;
         DMT_CPU_GPU Ray             applyInverse(Ray const& ray, float* optInOut_tMax) const;
         DMT_CPU_GPU RayDifferential applyInverse(RayDifferential const& ray, float* optInOut_tMax) const;
         // TODO: Interaction methods

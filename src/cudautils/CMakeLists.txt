@@ -4,7 +4,7 @@ block()
     cudautils.cu cudautils-float.cu cudautils-vecmath.cu cudautils-light.cu
     cudautils-transform.cu cudautils-camera.cu cudautils-media.cu cudautils-lightsampler.cu
     cudautils-texture.cu cudautils-material.cu cudautils-sampler.cu cudautils-film.cu cudautils-filter.cu
-    cudautils-bxdf.cu cudautils-spectrum.cu cudautils-color.cu cudautils-numbers.cu
+    cudautils-bxdf.cu cudautils-spectrum.cu cudautils-color.cu cudautils-numbers.cu cudautils-image.cu
   )
   target_sources(dmt-cudautils
     INTERFACE
@@ -27,6 +27,7 @@ block()
               ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-spectrum.h
               ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-color.h
               ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-numbers.h
+              ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-image.h
               ${implementation_files}
   )
   source_group("Implementation Units" FILES ${implementation_files})

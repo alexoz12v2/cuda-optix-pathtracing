@@ -2,7 +2,7 @@
 # Project
 BasedOnStyle: LLVM
 Standard: c++20
-ColumnLimit: 140
+ColumnLimit: 120
 
 # Indentation
 AccessModifierOffset: -4

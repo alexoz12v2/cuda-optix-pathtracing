@@ -17,11 +17,11 @@
 #include <cstdio>
 
 #if defined(_WIN32)
-#include <windows.h>
-#define STRICT_TYPED_ITEMIDS // Better type safety for IDLists
-#include <commdlg.h>
-#include <shobjidl.h> // For IFileDialog
-#include <shlobj.h>   // For SHGetPathFromIDListW
+    #include <windows.h>
+    #define STRICT_TYPED_ITEMIDS // Better type safety for IDLists
+    #include <commdlg.h>
+    #include <shobjidl.h> // For IFileDialog
+    #include <shlobj.h>   // For SHGetPathFromIDListW
 #endif
 
 static void worker(void* unused)

@@ -196,5 +196,5 @@ namespace dmt {
 } // namespace dmt
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_SPECTRUM_IMPL)
-#include "cudautils-spectrum.cu"
+    #include "cudautils-spectrum.cu"
 #endif

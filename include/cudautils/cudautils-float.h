@@ -12,13 +12,15 @@
 
 // a present from Windows.h
 #if defined(DMT_OS_WINDOWS)
-#pragma push_macro("near")
-#undef near
+    #pragma push_macro("near")
+    #undef near
 #endif
 
 // TODO: If you want to rely to link time optimization, split definition and declaration and remove inline linkage
 namespace dmt::fl {
     using namespace dmt;
+    /** largest possible floating point less than 1 */
+    DMT_CPU_GPU inline constexpr float oneMinusEps() { return 0x1.fffffep-1; }
     DMT_CPU_GPU inline constexpr float infinity() { return std::numeric_limits<float>::infinity(); }
     DMT_CPU_GPU inline constexpr float eqTol() { return std::numeric_limits<float>::epsilon(); }
     DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
@@ -302,9 +304,9 @@ inline constexpr DMT_CPU_GPU float arg(float f)
 }
 
 #if defined(DMT_OS_WINDOWS)
-#pragma pop_macro("near")
+    #pragma pop_macro("near")
 #endif
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_FLOAT_IMPL)
-#include "cudautils-float.cu"
+    #include "cudautils-float.cu"
 #endif

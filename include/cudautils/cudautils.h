@@ -21,5 +21,5 @@
 #include "cudautils/cudautils-numbers.h"
 
 #if defined(DMT_CUDAUTILS_IMPL)
-#include "cudautils.cu"
+    #include "cudautils.cu"
 #endif

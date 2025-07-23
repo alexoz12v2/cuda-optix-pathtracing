@@ -18,7 +18,7 @@ namespace dmt {
     public:
         virtual ~Primitive() {};
 
-        virtual Bounds3f                  bounds() const                              = 0;
+        virtual Bounds3f     bounds() const                              = 0;
         virtual Intersection intersect(Ray const& ray, float tMax) const = 0;
     };
 
@@ -26,7 +26,7 @@ namespace dmt {
     class DMT_CORE_API Triangle : public Primitive
     {
     public:
-        Bounds3f                  bounds() const override;
+        Bounds3f     bounds() const override;
         Intersection intersect(Ray const& ray, float tMax) const override;
 
         TriangleData tri;
@@ -35,7 +35,7 @@ namespace dmt {
     class DMT_CORE_API Triangles2 : public Primitive
     {
     public:
-        Bounds3f                  bounds() const override;
+        Bounds3f     bounds() const override;
         Intersection intersect(Ray const& ray, float tMax) const override;
 
         static constexpr int32_t numTriangles = 2;
@@ -47,7 +47,7 @@ namespace dmt {
     public:
         static constexpr int32_t numTriangles = 4;
 
-        Bounds3f                  bounds() const override;
+        Bounds3f     bounds() const override;
         Intersection intersect(Ray const& ray, float tMax) const override;
 
         float xs[3 * numTriangles], ys[3 * numTriangles], zs[3 * numTriangles];
@@ -58,7 +58,7 @@ namespace dmt {
     public:
         static constexpr int32_t numTriangles = 8;
 
-        Bounds3f                  bounds() const override;
+        Bounds3f     bounds() const override;
         Intersection intersect(Ray const& ray, float tMax) const override;
 
         // x_triangle0_vertex0 | x_triangle0_vertex1 | x_triangle0_vertex2 | x_triangle1_vertex0 | ...

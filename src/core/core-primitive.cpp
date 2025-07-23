@@ -203,7 +203,8 @@ namespace dmt {
         __m128 const sz = _mm_sub_ps(oz, v0z);
 
         // first barycentric coord with Cramer's: u = invA * dot(s, h); check if in [0, 1]
-        __m128 const u     = _mm_mul_ps(invA, _mm_add_ps(_mm_add_ps(_mm_mul_ps(sx, hx), _mm_mul_ps(sy, hy)), _mm_mul_ps(sz, hz)));
+        __m128 const u     = _mm_mul_ps(invA,
+                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(sx, hx), _mm_mul_ps(sy, hy)), _mm_mul_ps(sz, hz)));
         __m128 const uMask = _mm_and_ps(_mm_cmpge_ps(u, zero), _mm_cmple_ps(u, one));
 
         // q = cross(s, e1)
@@ -212,11 +213,13 @@ namespace dmt {
         __m128 const qz = _mm_sub_ps(_mm_mul_ps(sx, e1y), _mm_mul_ps(sy, e1x));
 
         // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
-        __m128 const v     = _mm_mul_ps(invA, _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
+        __m128 const v     = _mm_mul_ps(invA,
+                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
         __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(v, one));
 
         // invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
-        __m128 const t     = _mm_mul_ps(invA, _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, qx), _mm_mul_ps(e2y, qy)), _mm_mul_ps(e2z, qz)));
+        __m128 const t     = _mm_mul_ps(invA,
+                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, qx), _mm_mul_ps(e2y, qy)), _mm_mul_ps(e2z, qz)));
         __m128 const tMask = _mm_and_ps(_mm_cmpgt_ps(t, eps), _mm_cmplt_ps(t, tMaxV));
 
         // and all masks and, where mask on put t, where mask off put infinity
@@ -300,7 +303,8 @@ namespace dmt {
         __m128 const sz = _mm_sub_ps(oz, v0z);
 
         // first barycentric coord with Cramer's: u = invA * dot(s, h); check if in [0, 1]
-        __m128 const u     = _mm_mul_ps(invA, _mm_add_ps(_mm_add_ps(_mm_mul_ps(sx, hx), _mm_mul_ps(sy, hy)), _mm_mul_ps(sz, hz)));
+        __m128 const u     = _mm_mul_ps(invA,
+                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(sx, hx), _mm_mul_ps(sy, hy)), _mm_mul_ps(sz, hz)));
         __m128 const uMask = _mm_and_ps(_mm_cmpge_ps(u, zero), _mm_cmple_ps(u, one));
 
         // q = cross(s, e1)
@@ -309,11 +313,13 @@ namespace dmt {
         __m128 const qz = _mm_sub_ps(_mm_mul_ps(sx, e1y), _mm_mul_ps(sy, e1x));
 
         // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
-        __m128 const v     = _mm_mul_ps(invA, _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
+        __m128 const v     = _mm_mul_ps(invA,
+                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
         __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(v, one));
 
         // t = invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
-        __m128 const t     = _mm_mul_ps(invA, _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, qx), _mm_mul_ps(e2y, qy)), _mm_mul_ps(e2z, qz)));
+        __m128 const t     = _mm_mul_ps(invA,
+                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, qx), _mm_mul_ps(e2y, qy)), _mm_mul_ps(e2z, qz)));
         __m128 const tMask = _mm_and_ps(_mm_cmpgt_ps(t, eps), _mm_cmplt_ps(t, tMaxV));
 
         // and all masks and, where mask on put t, where mask off put infinity
@@ -397,7 +403,8 @@ namespace dmt {
         __m256 const hz = _mm256_sub_ps(_mm256_mul_ps(dx, e2y), _mm256_mul_ps(dy, e2x));
 
         // determinant a = dot(e1, h)
-        __m256 const a = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e1x, hx), _mm256_mul_ps(e1y, hy)), _mm256_mul_ps(e1z, hz));
+        __m256 const a = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e1x, hx), _mm256_mul_ps(e1y, hy)),
+                                       _mm256_mul_ps(e1z, hz));
 
         // if (std::abs(a) < 1e-8f)
         __m256 const mask = _mm256_cmp_ps(_mm256_andnot_ps(_mm256_set1_ps(-0.f), a), eps, _CMP_GT_OQ);
@@ -409,7 +416,9 @@ namespace dmt {
         __m256 const sz = _mm256_sub_ps(oz, v0z);
 
         // first barycentric coord with Cramer's: u = invA * dot(s, h); check if in [0, 1]
-        __m256 const u = _mm256_mul_ps(invA, _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(sx, hx), _mm256_mul_ps(sy, hy)), _mm256_mul_ps(sz, hx)));
+        __m256 const u     = _mm256_mul_ps(invA,
+                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(sx, hx), _mm256_mul_ps(sy, hy)),
+                                                     _mm256_mul_ps(sz, hx)));
         __m256 const uMask = _mm256_and_ps(_mm256_cmp_ps(u, zero, _CMP_GE_OQ), _mm256_cmp_ps(u, one, _CMP_LE_OQ));
 
         // q = cross(s, e1)
@@ -418,12 +427,15 @@ namespace dmt {
         __m256 const qz = _mm256_sub_ps(_mm256_mul_ps(sx, e1y), _mm256_mul_ps(sy, e1x));
 
         // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
-        __m256 const v = _mm256_mul_ps(invA, _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx, qx), _mm256_mul_ps(dy, qy)), _mm256_mul_ps(dz, qz)));
+        __m256 const v     = _mm256_mul_ps(invA,
+                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx, qx), _mm256_mul_ps(dy, qy)),
+                                                     _mm256_mul_ps(dz, qz)));
         __m256 const vMask = _mm256_and_ps(_mm256_cmp_ps(v, zero, _CMP_GE_OQ), _mm256_cmp_ps(v, one, _CMP_LE_OQ));
 
         // t = invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
         __m256 const t     = _mm256_mul_ps(invA,
-                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e2x, qx), _mm256_mul_ps(e2y, qy)), _mm256_mul_ps(e2z, qz)));
+                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e2x, qx), _mm256_mul_ps(e2y, qy)),
+                                                     _mm256_mul_ps(e2z, qz)));
         __m256 const tMask = _mm256_and_ps(_mm256_cmp_ps(t, eps, _CMP_GT_OQ), _mm256_cmp_ps(t, tMaxV, _CMP_LT_OQ));
 
         // and all masks and, where mask on put t, where mask off put infinity

@@ -468,5 +468,5 @@ namespace dmt {
 */
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_IMAGE_IMPL)
-#include "cudautils-image.cu"
+    #include "cudautils-image.cu"
 #endif

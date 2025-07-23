@@ -3,9 +3,9 @@
 #include "cudautils/cudautils-macro.h"
 
 #if defined(__NVCC__)
-#pragma nv_diag_suppress 20012         // both eigen and glm
-#pragma nv_diag_suppress 3012          // glm
-#define diag_suppress nv_diag_suppress // eigen uses old syntax?
+    #pragma nv_diag_suppress 20012         // both eigen and glm
+    #pragma nv_diag_suppress 3012          // glm
+    #define diag_suppress nv_diag_suppress // eigen uses old syntax?
 #endif
 #define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
@@ -26,8 +26,8 @@
 
 #include <Eigen/Dense>
 #if defined(__NVCC__)
-#pragma nv_diag_default 20012
-#pragma nv_diag_default 3012
+    #pragma nv_diag_default 20012
+    #pragma nv_diag_default 3012
 #endif
 #undef diag_suppress
 
@@ -41,8 +41,8 @@
 #include <cmath>
 
 #if defined(DMT_OS_WINDOWS)
-#pragma push_macro("near")
-#undef near
+    #pragma push_macro("near")
+    #undef near
 #endif
 
 namespace dmt {
@@ -788,7 +788,7 @@ namespace dmt {
 
     // Vector Types: Interval -----------------------------------------------------------------------------------------
 #if !defined(DMT_ARCH_X86_64)
-#error "Point3fi (__host__) is currently using SSE"
+    #error "Point3fi (__host__) is currently using SSE"
 #endif
     struct DMT_CORE_API Point3fi
     {
@@ -1197,9 +1197,9 @@ namespace dmt {
 }
 
 #if defined(DMT_OS_WINDOWS)
-#pragma pop_macro("near")
+    #pragma pop_macro("near")
 #endif
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_VECMATH_IMPL)
-#include "cudautils-vecmath.cu"
+    #include "cudautils-vecmath.cu"
 #endif

@@ -1,3 +1,4 @@
+#include "utilities.h"
 
 #define DMT_ENTRY_POINT
 #include "platform/platform.h"
@@ -11,438 +12,147 @@
 #include <string>
 #include <iomanip>
 
-namespace dmt {
-    std::pmr::vector<dmt::UniqueRef<Primitive>> makeSinglePrimitivesFromTriangles(
-        std::span<TriangleData const> tris,
-        std::pmr::memory_resource*    memory = std::pmr::get_default_resource())
+namespace dmt::ddbg {
+    std::string printBVHToString(BVHBuildNode* node, int depth = 0, std::string const& prefix = "")
     {
-        std::pmr::vector<dmt::UniqueRef<Primitive>> out(memory);
-        for (uint64_t i = 0; i < tris.size(); ++i)
-        {
-            Triangle group{};
-            group.tri = tris[i];
-            out.push_back(dmt::makeUniqueRef<Triangle>(memory, std::move(group)));
-        }
+        std::string result;
+        if (depth == 0)
+            result += "\n";
 
-        return out;
-    }
-
-    std::pmr::vector<dmt::UniqueRef<Primitive>> makePrimitivesFromTriangles(
-        std::span<TriangleData const> tris,
-        std::pmr::memory_resource*    memory = std::pmr::get_default_resource())
-    {
-        std::pmr::vector<dmt::UniqueRef<Primitive>> out(memory);
-        size_t                                      i = 0;
-
-        // Pass 1: Triangles8
-        for (; i + 8 <= tris.size(); i += 8)
-        {
-            Triangles8 group{};
-            for (int j = 0; j < 8; ++j)
-            {
-                group.xs[3 * j + 0] = tris[i + j].v0.x;
-                group.xs[3 * j + 1] = tris[i + j].v1.x;
-                group.xs[3 * j + 2] = tris[i + j].v2.x;
-
-                group.ys[3 * j + 0] = tris[i + j].v0.y;
-                group.ys[3 * j + 1] = tris[i + j].v1.y;
-                group.ys[3 * j + 2] = tris[i + j].v2.y;
-
-                group.zs[3 * j + 0] = tris[i + j].v0.z;
-                group.zs[3 * j + 1] = tris[i + j].v1.z;
-                group.zs[3 * j + 2] = tris[i + j].v2.z;
-            }
-            out.push_back(dmt::makeUniqueRef<Triangles8>(memory, std::move(group)));
-        }
-
-        // Pass 2: Triangles4
-        for (; i + 4 <= tris.size(); i += 4)
-        {
-            Triangles4 group{};
-            for (int j = 0; j < 4; ++j)
-            {
-                group.xs[3 * j + 0] = tris[i + j].v0.x;
-                group.xs[3 * j + 1] = tris[i + j].v1.x;
-                group.xs[3 * j + 2] = tris[i + j].v2.x;
-
-                group.ys[3 * j + 0] = tris[i + j].v0.y;
-                group.ys[3 * j + 1] = tris[i + j].v1.y;
-                group.ys[3 * j + 2] = tris[i + j].v2.y;
-
-                group.zs[3 * j + 0] = tris[i + j].v0.z;
-                group.zs[3 * j + 1] = tris[i + j].v1.z;
-                group.zs[3 * j + 2] = tris[i + j].v2.z;
-            }
-            out.push_back(dmt::makeUniqueRef<Triangles4>(memory, std::move(group)));
-        }
-
-        // Pass 3: Triangles2
-        for (; i + 2 <= tris.size(); i += 2)
-        {
-            Triangles2 group{};
-            for (int j = 0; j < 2; ++j)
-            {
-                group.xs[3 * j + 0] = tris[i + j].v0.x;
-                group.xs[3 * j + 1] = tris[i + j].v1.x;
-                group.xs[3 * j + 2] = tris[i + j].v2.x;
-
-                group.ys[3 * j + 0] = tris[i + j].v0.y;
-                group.ys[3 * j + 1] = tris[i + j].v1.y;
-                group.ys[3 * j + 2] = tris[i + j].v2.y;
-
-                group.zs[3 * j + 0] = tris[i + j].v0.z;
-                group.zs[3 * j + 1] = tris[i + j].v1.z;
-                group.zs[3 * j + 2] = tris[i + j].v2.z;
-            }
-            out.push_back(dmt::makeUniqueRef<Triangles2>(memory, std::move(group)));
-        }
-
-        // Pass 4: Individual Triangle
-        for (; i < tris.size(); ++i)
-        {
-            Triangle group{};
-            group.tri = tris[i];
-            out.push_back(dmt::makeUniqueRef<Triangle>(memory, std::move(group)));
-        }
-
-        return out;
-    }
-
-    uint32_t morton3D(float x, float y, float z)
-    {
-        constexpr auto expandBits = [](uint32_t v) -> uint32_t {
-            // Expands 10 bits into 30 bits by inserting 2 zeros between each bit
-            v = (v * 0x00010001u) & 0xFF0000FFu;
-            v = (v * 0x00000101u) & 0x0F00F00Fu;
-            v = (v * 0x00000011u) & 0xC30C30C3u;
-            v = (v * 0x00000005u) & 0x49249249u;
-            return v;
-        };
-        // Assumes x, y, z are ∈ [0, 1]
-        x = std::clamp(x * 1024.0f, 0.0f, 1023.0f);
-        y = std::clamp(y * 1024.0f, 0.0f, 1023.0f);
-        z = std::clamp(z * 1024.0f, 0.0f, 1023.0f);
-
-        uint32_t xx = expandBits(static_cast<uint32_t>(x));
-        uint32_t yy = expandBits(static_cast<uint32_t>(y));
-        uint32_t zz = expandBits(static_cast<uint32_t>(z));
-
-        return (xx << 2) | (yy << 1) | zz;
-    }
-
-    void reorderByMorton(std::span<TriangleData> tris)
-    {
-        Bounds3f bounds = bbEmpty();
-        for (auto& t : tris)
-            bounds = bbUnion(bounds,
-                             dmt::Bounds3f{dmt::min(dmt::min(t.v0, t.v1), t.v2), dmt::max(dmt::max(t.v0, t.v1), t.v2)});
-
-        auto const getMortonIndex = [bounds](TriangleData const& t) -> uint32_t {
-            Point3f  c = (t.v0 + t.v1 + t.v2) / 3;
-            Point3f  n = bounds.offset(c); // Normalize to [0,1]
-            uint32_t m = morton3D(n.x, n.y, n.z);
-            return m;
+        constexpr auto boundsToString = [](Bounds3f const& b) -> std::string {
+            std::ostringstream oss;
+            oss << "Bounds[( " << b.pMin.x << ", " << b.pMin.y << ", " << b.pMin.z << " ) - ( " << b.pMax.x << ", "
+                << b.pMax.y << ", " << b.pMax.z << " )]";
+            return oss.str();
         };
 
-        std::sort(tris.begin(), tris.end(), [&getMortonIndex](auto const& a, auto const& b) {
-            return getMortonIndex(a) < getMortonIndex(b);
-        });
-    }
-
-
-    namespace ddbg {
-        std::string printBVHToString(BVHBuildNode* node, int depth = 0, std::string const& prefix = "")
-        {
-            std::string result;
-            if (depth == 0)
-                result += "\n";
-
-            constexpr auto boundsToString = [](Bounds3f const& b) -> std::string {
-                std::ostringstream oss;
-                oss << "Bounds[( " << b.pMin.x << ", " << b.pMin.y << ", " << b.pMin.z << " ) - ( " << b.pMax.x << ", "
-                    << b.pMax.y << ", " << b.pMax.z << " )]";
-                return oss.str();
-            };
-
-            if (!node)
-                return result;
-
-            std::string indent(depth * 2, ' ');
-
-            if (node->childCount == 0 && node->primitiveCount > 0)
-            {
-                result += indent + prefix + "Leaf [count: " + std::to_string(node->primitiveCount) + ", ";
-                result += boundsToString(node->bounds) + "]\n";
-            }
-            else
-            {
-                result += indent + prefix + "Internal [children: " + std::to_string(node->childCount) + ", ";
-                result += boundsToString(node->bounds) + "]\n";
-
-                for (uint32_t i = 0; i < node->childCount; ++i)
-                {
-                    bool        isLast      = (i == node->childCount - 1);
-                    std::string childPrefix = isLast ? "└─ " : "├─ ";
-                    result += printBVHToString(node->children[i], depth + 1, childPrefix);
-                }
-            }
-
+        if (!node)
             return result;
-        }
 
-        std::vector<TriangleData> makeCubeTriangles()
+        std::string indent(depth * 2, ' ');
+
+        if (node->childCount == 0 && node->primitiveCount > 0)
         {
-            std::vector<TriangleData> tris;
-
-            float const                  s        = 1.0f;
-            std::array<Point3f, 8> const vertices = {
-                {{{-s, -s, -s}}, {{s, -s, -s}}, {{s, s, -s}}, {{-s, s, -s}}, {{-s, -s, s}}, {{s, -s, s}}, {{s, s, s}}, {{-s, s, s}}}};
-
-            std::array<std::array<int, 3>, 12> const indices = {{
-                // Front face
-                {0, 1, 2},
-                {2, 3, 0},
-                // Back face
-                {4, 7, 6},
-                {6, 5, 4},
-                // Left face
-                {0, 3, 7},
-                {7, 4, 0},
-                // Right face
-                {1, 5, 6},
-                {6, 2, 1},
-                // Top face
-                {3, 2, 6},
-                {6, 7, 3},
-                // Bottom face
-                {0, 4, 5},
-                {5, 1, 0},
-            }};
-
-            for (auto const& idx : indices)
-            {
-                tris.push_back({{{vertices[idx[0]].x, vertices[idx[0]].y, vertices[idx[0]].z}},
-                                {{vertices[idx[1]].x, vertices[idx[1]].y, vertices[idx[1]].z}},
-                                {{vertices[idx[2]].x, vertices[idx[2]].y, vertices[idx[2]].z}}});
-            }
-
-            return tris;
-        }
-
-        std::vector<TriangleData> makePlaneTriangles(float size = 1.0f)
-        {
-            std::vector<TriangleData> tris;
-
-            float const s = size * 0.5f;
-
-            Point3f const v0{{-s, 0.0f, -s}};
-            Point3f const v1{{s, 0.0f, -s}};
-            Point3f const v2{{s, 0.0f, s}};
-            Point3f const v3{{-s, 0.0f, s}};
-
-            // Triangle 1: v0, v1, v2
-            tris.emplace_back(v0, v1, v2);
-
-            // Triangle 2: v2, v3, v0
-            tris.emplace_back(v2, v3, v0);
-
-            return tris;
-        }
-
-        std::pmr::vector<TriangleData> debugScene(std::pmr::memory_resource* memory = std::pmr::get_default_resource())
-        {
-            std::pmr::vector<TriangleData> scene{memory};
-
-            auto cube  = makeCubeTriangles();
-            auto plane = makePlaneTriangles(4.0f); // Large ground plane
-
-            scene.insert(scene.end(), cube.begin(), cube.end());
-            scene.insert(scene.end(), plane.begin(), plane.end());
-            return scene;
-        }
-
-        std::pmr::vector<Primitive const*> rawPtrsCopy(std::pmr::vector<dmt::UniqueRef<Primitive>> const& ownedPrimitives,
-                                                       std::pmr::memory_resource* memory = std::pmr::get_default_resource())
-        {
-            std::pmr::vector<Primitive const*> rawPtrs{memory};
-            rawPtrs.reserve(ownedPrimitives.size());
-
-            for (auto const& ref : ownedPrimitives)
-                rawPtrs.push_back(ref.get());
-
-            return rawPtrs;
-        }
-    } // namespace ddbg
-
-    bool slabTest(Point3f rayOrigin, Vector3f rayDirection, Bounds3f const& box, float* outTmin = nullptr, float* outTmax = nullptr)
-    {
-        float tmin = -std::numeric_limits<float>::infinity();
-        float tmax = std::numeric_limits<float>::infinity();
-
-        for (int i = 0; i < 3; ++i)
-        {
-            float invD = 1.0f / rayDirection[i];
-            float t0   = (box.pMin[i] - rayOrigin[i]) * invD;
-            float t1   = (box.pMax[i] - rayOrigin[i]) * invD;
-
-            if (invD < 0.0f)
-                std::swap(t0, t1);
-
-            tmin = std::max(tmin, t0);
-            tmax = std::min(tmax, t1);
-
-            if (tmax < tmin)
-                return false; // No intersection
-        }
-
-        if (outTmin)
-            *outTmin = tmin;
-        if (outTmax)
-            *outTmax = tmax;
-
-        return true; // Intersection occurred
-    }
-
-    BVHBuildNode* traverseBVHBuild(Ray                        ray,
-                                   BVHBuildNode*              bvh,
-                                   std::pmr::memory_resource* memory = std::pmr::get_default_resource())
-    {
-        std::pmr::vector<BVHBuildNode*> activeNodeStack;
-        activeNodeStack.reserve(64);
-        activeNodeStack.push_back(bvh);
-
-        BVHBuildNode* intersection = nullptr;
-        while (!activeNodeStack.empty())
-        {
-            BVHBuildNode* current = activeNodeStack.back();
-            activeNodeStack.pop_back();
-
-            if (current->childCount > 0)
-            {
-                // children order of traversal: 1) Distance Heuristic: from smallest to highest tmin - ray origin 2) Sign Heuristic
-                // start with distance heuristic
-                struct
-                {
-                    uint32_t i = static_cast<uint32_t>(-1);
-                    float    d = fl::infinity();
-                } tmins[BranchingFactor];
-                uint32_t currentIndex = 0;
-
-                for (uint32_t i = 0; i < current->childCount; ++i)
-                {
-                    float tmin = fl::infinity();
-                    if (slabTest(ray.o, ray.d, current->children[i]->bounds, &tmin))
-                    {
-                        tmins[currentIndex].d = tmin;
-                        tmins[currentIndex].i = i;
-                        ++currentIndex;
-                    }
-                }
-
-                std::sort(std::begin(tmins), std::begin(tmins) + currentIndex, [](auto const& a, auto const& b) {
-                    return a.d > b.d;
-                });
-
-                for (uint32_t i = 0; i < currentIndex; ++i)
-                    activeNodeStack.push_back(current->children[tmins[i].i]);
-            }
-            else
-            {
-                // TODO handle any-hit, closest-hit, ...
-                // for now, stop at the first leaf intersection
-                intersection = current;
-                break;
-            }
-        }
-
-        return intersection;
-    }
-} // namespace dmt
-
-void bvhTestRays(dmt::BVHBuildNode* rootNode)
-{
-    dmt::Context ctx;
-    assert(ctx.isValid() && "Invalid context");
-    std::vector<dmt::Ray> testRays = {
-        // Straight through center of scene
-        dmt::Ray({{0.5f, 0.5f, -1.0f}}, {{0, 0, 1}}),
-        dmt::Ray({{1.5f, 1.5f, -1.0f}}, {{0, 0, 1}}),
-        dmt::Ray({{2.5f, 2.5f, -1.0f}}, {{0, 0, 1}}),
-        dmt::Ray({{3.5f, 3.5f, -1.0f}}, {{0, 0, 1}}),
-
-        // Grazing edges
-        dmt::Ray({{1.0f, 1.0f, -1.0f}}, {{0, 0, 1}}),
-        dmt::Ray({{4.0f, 4.0f, -1.0f}}, {{0, 0, 1}}),
-
-        // Missing all
-        dmt::Ray({{5.0f, 5.0f, -1.0f}}, {{0, 0, 1}}),
-        dmt::Ray({{-1.0f, -1.0f, -1.0f}}, {{0, 0, 1}}),
-
-        // Diagonal through stack
-        dmt::Ray({{-1.0f, -1.0f, 1.0f}}, {{1, 1, 1}}),
-        dmt::Ray({{0.5f, 0.5f, 0.5f}}, {{1, 1, 1}}),
-
-        // Through nested box
-        dmt::Ray({{1.0f, 1.0f, 1.0f}}, {{0, 1, 0}}),
-    };
-
-    for (size_t i = 0; i < testRays.size(); ++i)
-    {
-        dmt::BVHBuildNode* hit = dmt::traverseBVHBuild(testRays[i], rootNode);
-        if (hit)
-        {
-            ctx.log("Ray {} hit leaf bounding box: min = ({}, {}, {}), max = ({}, {}, {})",
-                    std::make_tuple(i,
-                                    hit->bounds.pMin.x,
-                                    hit->bounds.pMin.y,
-                                    hit->bounds.pMin.z,
-                                    hit->bounds.pMax.x,
-                                    hit->bounds.pMax.y,
-                                    hit->bounds.pMax.z));
+            result += indent + prefix + "Leaf [count: " + std::to_string(node->primitiveCount) + ", ";
+            result += boundsToString(node->bounds) + "]\n";
         }
         else
         {
-            ctx.log("Ray {} missed the scene.", std::make_tuple(i));
+            result += indent + prefix + "Internal [children: " + std::to_string(node->childCount) + ", ";
+            result += boundsToString(node->bounds) + "]\n";
+
+            for (uint32_t i = 0; i < node->childCount; ++i)
+            {
+                bool        isLast      = (i == node->childCount - 1);
+                std::string childPrefix = isLast ? "└─ " : "├─ ";
+                result += printBVHToString(node->children[i], depth + 1, childPrefix);
+            }
         }
+
+        return result;
     }
-}
 
-int32_t guardedMain()
-{
-    dmt::Ctx::init();
-    class Janitor
+    std::vector<TriangleData> makeCubeTriangles()
     {
-    public:
-        ~Janitor() { dmt::Ctx::destroy(); }
-    } j;
+        std::vector<TriangleData> tris;
 
+        float const                  s        = 1.0f;
+        std::array<Point3f, 8> const vertices = {
+            {{{-s, -s, -s}}, {{s, -s, -s}}, {{s, s, -s}}, {{-s, s, -s}}, {{-s, -s, s}}, {{s, -s, s}}, {{s, s, s}}, {{-s, s, s}}}};
+
+        std::array<std::array<int, 3>, 12> const indices = {{
+            // Front face
+            {0, 1, 2},
+            {2, 3, 0},
+            // Back face
+            {4, 7, 6},
+            {6, 5, 4},
+            // Left face
+            {0, 3, 7},
+            {7, 4, 0},
+            // Right face
+            {1, 5, 6},
+            {6, 2, 1},
+            // Top face
+            {3, 2, 6},
+            {6, 7, 3},
+            // Bottom face
+            {0, 4, 5},
+            {5, 1, 0},
+        }};
+
+        for (auto const& idx : indices)
+        {
+            tris.push_back({{{vertices[idx[0]].x, vertices[idx[0]].y, vertices[idx[0]].z}},
+                            {{vertices[idx[1]].x, vertices[idx[1]].y, vertices[idx[1]].z}},
+                            {{vertices[idx[2]].x, vertices[idx[2]].y, vertices[idx[2]].z}}});
+        }
+
+        return tris;
+    }
+
+    std::vector<TriangleData> makePlaneTriangles(float size = 1.0f)
     {
-        dmt::Context ctx;
-        ctx.log("Hello Cruel World", {});
+        std::vector<TriangleData> tris;
 
-        // Sample scene
-        std::unique_ptr<unsigned char[]> bufferPtr    = std::make_unique<unsigned char[]>(2048);
-        auto                             bufferMemory = std::pmr::monotonic_buffer_resource(bufferPtr.get(), 2048);
-        auto                             scene        = dmt::ddbg::debugScene();
-        dmt::reorderByMorton(scene);
-        auto prims     = dmt::makeSinglePrimitivesFromTriangles(scene);
-        auto primsView = dmt::ddbg::rawPtrsCopy(prims);
+        float const s = size * 0.5f;
 
-        std::span<dmt::Primitive const*> spanPrims{primsView};
+        Point3f const v0{{-s, 0.0f, -s}};
+        Point3f const v1{{s, 0.0f, -s}};
+        Point3f const v2{{s, 0.0f, s}};
+        Point3f const v3{{-s, 0.0f, s}};
 
-        // check that prims bounds equal scene bounds
-        dmt::Bounds3f const
-            sceneBounds = std::transform_reduce(scene.begin(), scene.end(), dmt::bbEmpty(), [](dmt::Bounds3f a, dmt::Bounds3f b) {
-            return dmt::bbUnion(a, b);
-        }, [](dmt::TriangleData const& t) {
-            return dmt::Bounds3f{dmt::min(dmt::min(t.v0, t.v1), t.v2), dmt::max(dmt::max(t.v0, t.v1), t.v2)};
-        });
-        dmt::Bounds3f const primsBounds = std::transform_reduce( //
+        // Triangle 1: v0, v1, v2
+        tris.emplace_back(v0, v1, v2);
+
+        // Triangle 2: v2, v3, v0
+        tris.emplace_back(v2, v3, v0);
+
+        return tris;
+    }
+
+    std::pmr::vector<TriangleData> debugScene(std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+    {
+        std::pmr::vector<TriangleData> scene{memory};
+
+        auto cube  = makeCubeTriangles();
+        auto plane = makePlaneTriangles(4.0f); // Large ground plane
+
+        scene.insert(scene.end(), cube.begin(), cube.end());
+        scene.insert(scene.end(), plane.begin(), plane.end());
+        return scene;
+    }
+
+    std::pmr::vector<Primitive const*> rawPtrsCopy(std::pmr::vector<dmt::UniqueRef<Primitive>> const& ownedPrimitives,
+                                                   std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+    {
+        std::pmr::vector<Primitive const*> rawPtrs{memory};
+        rawPtrs.reserve(ownedPrimitives.size());
+
+        for (auto const& ref : ownedPrimitives)
+            rawPtrs.push_back(ref.get());
+
+        return rawPtrs;
+    }
+} // namespace dmt::ddbg
+
+namespace dmt::test {
+    void testBoundsEquality(std::span<TriangleData> scene, std::span<dmt::Primitive const*> spanPrims)
+    {
+        Context ctx;
+        assert(ctx.isValid() && "Need valid context");
+
+        Bounds3f const
+            sceneBounds = std::transform_reduce(scene.begin(), scene.end(), bbEmpty(), [](dmt::Bounds3f a, dmt::Bounds3f b) {
+            return bbUnion(a, b);
+        }, [](TriangleData const& t) { return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)}; });
+
+        Bounds3f const primsBounds = std::transform_reduce( //
             spanPrims.begin(),
             spanPrims.end(),
-            dmt::bbEmpty(),
-            [](dmt::Bounds3f a, dmt::Bounds3f b) { return dmt::bbUnion(a, b); },
-            [](dmt::Primitive const* p) { return p->bounds(); });
+            bbEmpty(),
+            [](Bounds3f a, Bounds3f b) { return bbUnion(a, b); },
+            [](Primitive const* p) { return p->bounds(); });
 
         if (sceneBounds != primsBounds)
         {
@@ -473,7 +183,402 @@ int32_t guardedMain()
                                     primsBounds.pMax.y,
                                     primsBounds.pMax.z));
         }
+    }
+} // namespace dmt::test
 
+namespace dmt::sampling {
+    inline constexpr uint32_t                        NumPrimes = 16;
+    inline constexpr std::array<uint32_t, NumPrimes> Primes{2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53};
+
+    struct DigitPermutation
+    {
+        uint16_t const* perms;
+        uint32_t        nDigits;
+        uint32_t        base;
+
+        uint32_t permsCount() const { return nDigits * base; }
+        int32_t  permute(int32_t digitIndex, int32_t digitValue) const { return perms[digitIndex * base + digitValue]; }
+    };
+    static_assert(std::is_standard_layout_v<DigitPermutation> && std::is_trivial_v<DigitPermutation>);
+
+    class DigitPermutations
+    {
+    public:
+        DigitPermutations(uint32_t maxPrimeIndex, uint32_t seed, std::pmr::memory_resource* _memory) :
+        m_memory{_memory},
+        m_maxPrimeIndex{maxPrimeIndex}
+        {
+            assert(maxPrimeIndex <= NumPrimes);
+
+            m_buffer = reinterpret_cast<unsigned char*>(
+                m_memory->allocate(m_maxPrimeIndex * (sizeof(UniqueRef<uint16_t[]>) + sizeof(uint8_t))));
+            if (!m_buffer)
+                return;
+
+            for (uint32_t i = 0; i < maxPrimeIndex; ++i)
+            {
+                // compute number of digits for the base
+                uint32_t const base     = Primes[i];
+                float const    invBase  = dmt::fl::rcp(base);
+                uint8_t        nDigits  = 0;
+                float          invBaseM = 1.f;
+                // until floating point subtracton of the current power has an effect
+                while (1 - (base - 1) * invBaseM < 1)
+                {
+                    ++nDigits;
+                    invBaseM *= invBase;
+                }
+
+                nDigitsBuffer()[i] = nDigits;
+                std::construct_at(&permBuffer()[i], makeUniqueRef<uint16_t[]>(m_memory, nDigits * base));
+
+                // compute permutations for all digits
+                uint16_t* permutations = permBuffer()[i].get();
+                for (int32_t digitIndex = 0; digitIndex < nDigits; ++digitIndex)
+                {
+                    uint64_t const dseed = dmt::numbers::hashIntegers(base, static_cast<uint32_t>(digitIndex), seed);
+                    for (int32_t digitValue = 0; digitValue < base; ++digitValue)
+                    {
+                        int32_t const index = digitIndex * base + digitValue;
+                        // only one?
+                        permutations[index] = dmt::numbers::permutationElement(digitValue, digitValue, base, dseed);
+                    }
+                }
+            }
+        }
+
+        // Delete copy constructor and copy assignment
+        DigitPermutations(DigitPermutations const&)            = delete;
+        DigitPermutations& operator=(DigitPermutations const&) = delete;
+
+        // Move constructor
+        DigitPermutations(DigitPermutations&& other) noexcept :
+        m_memory(other.m_memory),
+        m_maxPrimeIndex(other.m_maxPrimeIndex),
+        m_buffer(other.m_buffer)
+        {
+            other.m_memory        = nullptr;
+            other.m_maxPrimeIndex = 0;
+            other.m_buffer        = nullptr;
+        }
+
+        // Move assignment
+        DigitPermutations& operator=(DigitPermutations&& other) noexcept
+        {
+            if (this != &other)
+            {
+                // Free existing buffer
+                destroy();
+
+                // Steal other's resources
+                m_memory        = other.m_memory;
+                m_maxPrimeIndex = other.m_maxPrimeIndex;
+                m_buffer        = other.m_buffer;
+
+                other.m_memory        = nullptr;
+                other.m_maxPrimeIndex = 0;
+                other.m_buffer        = nullptr;
+            }
+            return *this;
+        }
+
+        // Destructor
+        ~DigitPermutations() noexcept { destroy(); }
+
+        bool             isValid() const { return m_buffer; }
+        uint32_t         numPrimes() const { return m_maxPrimeIndex; }
+        DigitPermutation permutation(uint32_t primeIndex) const
+        {
+            return {.perms   = permBuffer()[primeIndex].get(),
+                    .nDigits = nDigitsBuffer()[primeIndex],
+                    .base    = Primes[primeIndex]};
+        }
+
+    private:
+        void destroy() noexcept
+        {
+            if (m_buffer && m_memory)
+            {
+                // Destroy all UniqueRefs explicitly
+                for (uint32_t i = 0; i < m_maxPrimeIndex; ++i)
+                {
+                    std::destroy_at(&permBuffer()[i]);
+                }
+
+                m_memory->deallocate(m_buffer, m_maxPrimeIndex * (sizeof(UniqueRef<uint16_t[]>) + sizeof(uint8_t)));
+            }
+
+            m_buffer = nullptr;
+        }
+
+
+        DMT_FORCEINLINE UniqueRef<uint16_t[]>* permBuffer()
+        {
+            return reinterpret_cast<UniqueRef<uint16_t[]>*>(m_buffer);
+        }
+
+        DMT_FORCEINLINE uint8_t* nDigitsBuffer()
+        { //
+            return reinterpret_cast<uint8_t*>(permBuffer() + m_maxPrimeIndex);
+        }
+
+        DMT_FORCEINLINE UniqueRef<uint16_t[]> const* permBuffer() const
+        {
+            return reinterpret_cast<UniqueRef<uint16_t[]> const*>(m_buffer);
+        }
+
+        DMT_FORCEINLINE uint8_t const* nDigitsBuffer() const
+        {
+            return reinterpret_cast<uint8_t const*>(permBuffer() + m_maxPrimeIndex);
+        }
+
+    private:
+        std::pmr::memory_resource* m_memory        = nullptr; // memory_resource must outlive object
+        uint32_t                   m_maxPrimeIndex = 0;
+        unsigned char*             m_buffer        = nullptr;
+    };
+
+    float radicalInverse(uint32_t primeIndex, uint64_t num)
+    {
+        assert(primeIndex < NumPrimes && "Exceeding number of primes for radical inverse computation");
+
+        uint32_t const base    = Primes[primeIndex];
+        float const    invBase = dmt::fl::rcp(base);
+        float          result  = 0.f;
+        float          factor  = invBase;
+
+        while (num > 0)
+        {
+            uint64_t const digit = num % base;
+
+            result += digit * factor;
+            num /= base;
+            factor *= invBase;
+        }
+
+        return result;
+    }
+
+    uint64_t inverseRadicalInverse(uint64_t inverse, int32_t base, int32_t nDigits)
+    {
+        uint64_t index = 0;
+        for (int32_t i = 0; i < nDigits; ++i)
+        {
+            uint64_t const digit = inverse % base;
+            inverse /= base;
+            index *= base;
+            index += digit;
+        }
+        return index;
+    }
+
+    float scrambledRadicalInverse(DigitPermutation const perm, uint64_t num)
+    {
+        float const invBase       = dmt::fl::rcp(perm.base);
+        int32_t     digitIndex    = 0;
+        float       invBaseM      = 1.f;
+        uint64_t    reverseDigits = 0;
+        while (1 - (perm.base - 1) * invBaseM < 1)
+        {
+            uint64_t const next       = num / perm.base;
+            int32_t const  digitValue = num - next * perm.base; // basically num % perm.base
+            reverseDigits *= perm.base + perm.permute(digitIndex, digitValue);
+            invBaseM *= invBase;
+            ++digitIndex;
+            num = next;
+        }
+
+        return std::min(invBaseM * reverseDigits, dmt::fl::oneMinusEps());
+    }
+
+    float owenScrambledRadicalInverse(int32_t primeIndex, uint64_t num, uint32_t hash)
+    {
+        assert(primeIndex < NumPrimes && "primeIndex too high");
+        namespace dn                 = dmt::numbers;
+        uint32_t const base          = Primes[primeIndex];
+        float const    invBase       = dmt::fl::rcp(base);
+        int32_t        digitIndex    = 0;
+        float          invBaseM      = 1.f;
+        uint64_t       reverseDigits = 0;
+        while (1 - (base - 1) * invBaseM < 1)
+        {
+            uint64_t const next = num / base;
+            // second param ignored. TODO: SIMD
+            int32_t const digitValue = dn::permutationElement(num - next * base, base, base, dn::mixBits(hash ^ reverseDigits));
+            reverseDigits = reverseDigits * base + digitValue;
+            invBaseM *= invBase;
+            ++digitIndex;
+            num = next;
+        }
+
+        return std::min(invBaseM * reverseDigits, dmt::fl::oneMinusEps());
+    }
+
+    class HaltonOwen
+    {
+    public:
+        HaltonOwen(int32_t samplesPerPixel, Point2i resolution, int32_t seed)
+        {
+            for (int32_t i = 0; i < NumDimensions; ++i)
+            {
+                // using smallest primes for the 2 dimensions
+                int32_t const base  = DimPrimes[i];
+                int32_t       scale = 1, exp = 0;
+                while (scale < std::min(resolution[i], MaxHaltonResolution))
+                {
+                    scale *= base;
+                    ++exp;
+                }
+                m_baseScales[i]    = scale;
+                m_baseExponents[i] = exp;
+            }
+
+            m_multInvs[0] = multiplicativeInverse(m_baseScales[1], m_baseScales[0]);
+            m_multInvs[1] = multiplicativeInverse(m_baseScales[0], m_baseScales[1]);
+        }
+
+        void startPixelSample(Point2i p, int32_t sampleIndex, int32_t dim)
+        {
+            int32_t const sampleStride = m_baseScales[0] * m_baseScales[1];
+            m_haltonIndex              = 0;
+
+            if (sampleStride > 1)
+            {
+                // reproject pixel coordinates onto halton grid
+                Point2i pm{{p[0] % MaxHaltonResolution, p[1] % MaxHaltonResolution}};
+                for (int32_t i = 0; i < NumDimensions; ++i)
+                {
+                    // scaling by base^exponent makes it so that the first exponent digits to the right of the . in the radical inverse
+                    // are shifted to the left. Hence, if you scale by base^exponent, the integer part of
+                    // the result will be in [0, base^exponent - 1] -> call it x (or y, depends on dimension)
+                    // let x_r be radical inverse of the last j digits of x (pixel coord), j exponent in dimension 0
+                    // let y_r be radical inverse of the last k digits of y (pixel coord), k exponent in dimension 1
+                    // x_r = (haltonIndex mod 2^j), y_r = (haltonIndex mod 3^k), solve for haltonIndex
+                    uint64_t const dimOffset = inverseRadicalInverse(pm[i], DimPrimes[i], m_baseExponents[i]);
+                    m_haltonIndex += dimOffset * (sampleStride / m_baseScales[i]) * m_multInvs[i];
+                }
+                m_haltonIndex %= sampleStride;
+            }
+
+            m_haltonIndex += sampleIndex * sampleStride;
+            m_dimension = std::max(2, dim);
+        }
+
+        float get1D()
+        {
+            if (m_dimension >= NumPrimes)
+                m_dimension = 2;
+            return sampleDim(m_dimension++, m_haltonIndex);
+        }
+
+        Point2f get2D()
+        {
+            if (m_dimension + 1 >= NumPrimes)
+                m_dimension = 2;
+            int const dim = m_dimension;
+            m_dimension += 2;
+            return {{sampleDim(dim, m_haltonIndex), sampleDim(dim + 1, m_haltonIndex)}};
+        }
+
+        Point2f getPixel2D()
+        {
+            return {{radicalInverse(DimPrimeIndices[0], m_haltonIndex >> m_baseExponents[0]),
+                     radicalInverse(DimPrimeIndices[1], m_haltonIndex / m_baseScales[1])}};
+        }
+
+    private:
+        // GCD(a, b) % b
+        static inline constexpr uint64_t multiplicativeInverse(int64_t a, int64_t n)
+        {
+            constexpr auto extendedGCD = [](auto&& f, uint64_t _a, uint64_t _b, int64_t* _x, int64_t* _y) -> void {
+                if (_b == 0)
+                {
+                    *_x = 1;
+                    *_y = 0;
+                }
+                else
+                {
+                    int64_t d = _a / _b, xp, yp;
+                    f(f, _b, _a & _b, &xp, &yp);
+                    *_x = yp;
+                    *_y = xp - (d * yp);
+                }
+            };
+            int64_t x, y;
+            extendedGCD(extendedGCD, a, n, &x, &y);
+            return x % n;
+        }
+
+        static float sampleDim(int dim, int64_t haltonIndex)
+        {
+            namespace dn = dmt::numbers;
+            return owenScrambledRadicalInverse(dim, haltonIndex, dn::mixBits(1 + dim << 4));
+        }
+
+    private:
+        static constexpr int32_t                            MaxHaltonResolution = 128;
+        static constexpr int32_t                            NumDimensions       = 2; // width, height
+        static constexpr std::array<int32_t, NumDimensions> DimPrimes{2, 3};
+        static constexpr std::array<int32_t, NumDimensions> DimPrimeIndices{0, 1};
+
+        int64_t m_haltonIndex = 0;
+        int32_t m_samplesPerPixel;
+        int32_t m_dimension = 0;
+        int32_t m_multInvs[NumDimensions];
+        int32_t m_baseScales[NumDimensions];
+        int32_t m_baseExponents[NumDimensions];
+    };
+
+} // namespace dmt::sampling
+
+namespace dmt {
+    void runMainProgram(std::span<TriangleData>     scene,
+                        std::span<Primitive const*> primsView,
+                        BVHBuildNode*               bvh,
+                        unsigned char*              scratchBuffer)
+    {
+        // primsView primitive coordinates defined in world space
+        static constexpr uint32_t            Width = 1280, Height = 720, NumChannels = 3;
+        std::pmr::synchronized_pool_resource pool;
+        ThreadPoolV2                         threadpool{std::thread::hardware_concurrency(), &pool};
+        auto                                 image = makeUniqueRef<uint8_t[]>(&pool, Width * Height * NumChannels);
+
+        // define camera (image plane physical dims, resolution given by image)
+        Vector3f const cameraPosition{{0.f, -4.f, 2.f}};
+        Normal3f const cameraDirection = normalFrom({{0.f, 1.f, 0.3f}});
+        float const    pixelLength     = 13e-6f; // 169 um^2 square pixel
+        float const    focalLength     = 35e-3f; // 35 mm
+
+        // for each pixel, for each sample within the pixel (halton + owen scrambling)
+        // shoot ray, register intersection
+    }
+} // namespace dmt
+
+int32_t guardedMain()
+{
+    dmt::Ctx::init();
+    class Janitor
+    {
+    public:
+        ~Janitor() { dmt::Ctx::destroy(); }
+    } j;
+
+    {
+        dmt::Context ctx;
+        ctx.log("Hello Cruel World", {});
+
+        // Sample scene
+        std::unique_ptr<unsigned char[]> bufferPtr    = std::make_unique<unsigned char[]>(2048);
+        auto                             bufferMemory = std::pmr::monotonic_buffer_resource(bufferPtr.get(), 2048);
+        auto                             scene        = dmt::ddbg::debugScene();
+        dmt::reorderByMorton(scene);
+        auto prims     = dmt::makeSinglePrimitivesFromTriangles(scene);
+        auto primsView = dmt::ddbg::rawPtrsCopy(prims);
+
+        std::span<dmt::Primitive const*> spanPrims{primsView};
+        dmt::test::testBoundsEquality(scene, spanPrims);
+
+        // check that prims bounds equal scene bounds
         auto* rootNode = dmt::bvh::build(spanPrims, &bufferMemory);
 
         if (ctx.isLogEnabled())
@@ -483,9 +588,11 @@ int32_t guardedMain()
             ctx.log(std::string_view{tee}, {});
         }
 
-        bvhTestRays(rootNode);
+        dmt::test::bvhTestRays(rootNode);
 
         dmt::bvh::groupTrianglesInBVHLeaves(rootNode, prims, &bufferMemory);
+
+        bufferMemory.release();
 
         if (ctx.isLogEnabled())
         {
@@ -494,7 +601,9 @@ int32_t guardedMain()
             ctx.log(std::string_view{tee}, {});
         }
 
-        bvhTestRays(rootNode);
+        dmt::test::bvhTestRays(rootNode);
+
+        dmt::runMainProgram(scene, spanPrims, rootNode, bufferPtr.get());
 
         dmt::bvh::cleanup(rootNode);
     }

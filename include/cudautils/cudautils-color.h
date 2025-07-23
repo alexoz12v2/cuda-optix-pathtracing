@@ -13,5 +13,5 @@ namespace dmt {
 } // namespace dmt
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_COLOR_IMPL)
-#include "cudautils-color.cu"
+    #include "cudautils-color.cu"
 #endif

@@ -1,7 +1,7 @@
 #include "cudautils-vecmath.h"
 
 #if defined(DMT_ARCH_X86_64)
-#include <immintrin.h>
+    #include <immintrin.h>
 #endif
 
 // TODO generated optimized assembly for x64 uses vectorized instructions for floating point types, like "[v]addps", but integer types

@@ -16,18 +16,18 @@
 #include <lodepng/lodepng.h>
 
 #ifndef PBRT_IS_GPU_CODE
-// Work around conflict with "half".
-#include <ImfChannelList.h>
-#include <ImfChromaticitiesAttribute.h>
-#include <ImfFloatAttribute.h>
-#include <ImfFrameBuffer.h>
-#include <ImfHeader.h>
-#include <ImfInputFile.h>
-#include <ImfIntAttribute.h>
-#include <ImfMatrixAttribute.h>
-#include <ImfOutputFile.h>
-#include <ImfStringAttribute.h>
-#include <ImfStringVectorAttribute.h>
+    // Work around conflict with "half".
+    #include <ImfChannelList.h>
+    #include <ImfChromaticitiesAttribute.h>
+    #include <ImfFloatAttribute.h>
+    #include <ImfFrameBuffer.h>
+    #include <ImfHeader.h>
+    #include <ImfInputFile.h>
+    #include <ImfIntAttribute.h>
+    #include <ImfMatrixAttribute.h>
+    #include <ImfOutputFile.h>
+    #include <ImfStringAttribute.h>
+    #include <ImfStringVectorAttribute.h>
 #endif
 
 #include <algorithm>
@@ -1668,28 +1668,28 @@ namespace pbrt {
      */
 
     static constexpr bool hostLittleEndian =
-#if defined(__BYTE_ORDER__)
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    #if defined(__BYTE_ORDER__)
+        #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
         true
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
         false
-#else
-#error "__BYTE_ORDER__ defined but has unexpected value"
-#endif
-#else
-#if defined(__LITTLE_ENDIAN__) || defined(__i386__) || defined(__x86_64__) || defined(_WIN32) || defined(WIN32)
+        #else
+            #error "__BYTE_ORDER__ defined but has unexpected value"
+        #endif
+    #else
+        #if defined(__LITTLE_ENDIAN__) || defined(__i386__) || defined(__x86_64__) || defined(_WIN32) || defined(WIN32)
         true
-#elif defined(__BIG_ENDIAN__)
+        #elif defined(__BIG_ENDIAN__)
         false
-#elif defined(__sparc) || defined(__sparc__)
+        #elif defined(__sparc) || defined(__sparc__)
         false
-#else
-#error "Can't detect machine endian-ness at compile-time."
-#endif
-#endif
+        #else
+            #error "Can't detect machine endian-ness at compile-time."
+        #endif
+    #endif
         ;
 
-#define BUFFER_SIZE 80
+    #define BUFFER_SIZE 80
 
     static inline int isWhitespace(char c) { return static_cast<int>(c == ' ' || c == '\n' || c == '\t'); }
 

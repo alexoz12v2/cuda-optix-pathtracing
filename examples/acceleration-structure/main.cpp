@@ -499,7 +499,7 @@ namespace dmt::sampling {
                 else
                 {
                     int64_t d = _a / _b, xp, yp;
-                    f(f, _b, _a & _b, &xp, &yp);
+                    f(f, _b, _a % _b, &xp, &yp);
                     *_x = yp;
                     *_y = xp - (d * yp);
                 }
@@ -665,9 +665,13 @@ int32_t guardedMain()
 
         dmt::test::bvhTestRays(rootNode);
 
+        dmt::test::testDistribution1D();
+
         dmt::runMainProgram(scene, spanPrims, rootNode, bufferPtr.get());
 
         dmt::bvh::cleanup(rootNode);
+
+        ctx.log("Goodbye!", {});
     }
 
     return 0;

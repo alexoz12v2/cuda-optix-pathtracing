@@ -440,7 +440,7 @@ namespace dmt {
 
         // and all masks and, where mask on put t, where mask off put infinity
         __m256 const finalMask = _mm256_and_ps(_mm256_and_ps(mask, uMask), _mm256_and_ps(vMask, tMask));
-        __m256 const tResult   = _mm256_or_ps(_mm256_and_ps(finalMask, tResult), _mm256_andnot_ps(finalMask, inf));
+        __m256 const tResult   = _mm256_or_ps(_mm256_and_ps(finalMask, t), _mm256_andnot_ps(finalMask, inf));
 
         alignas(alignof(__m256)) float tVals[8];
         _mm256_store_ps(tVals, tResult);

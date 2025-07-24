@@ -451,6 +451,47 @@ namespace dmt::test {
             }
         }
     }
+
+    void testDistribution1D()
+    {
+        static constexpr uint32_t Size = 64;
+        Context                   ctx;
+        assert(ctx.isValid() && "Invalid Context");
+
+        float const min = 0.f;
+        float const max = 12.f;
+
+        auto const printSpan = [&ctx](std::span<float const> fView, uint32_t lineCount = 16) -> void {
+            ctx.log("Size = {}", std::make_tuple(fView.size()));
+            std::string str;
+            str.reserve(128);
+            str += "\n{ ";
+            uint32_t currentCount = 0;
+            uint32_t index        = 0;
+            for (float f : fView)
+            {
+                str += std::to_string(f);
+                if (++currentCount >= lineCount && index < fView.size() - 1)
+                {
+                    currentCount = 0;
+                    str += "\n  ";
+                }
+                else if (index < fView.size() - 1)
+                    str += " ";
+                ++index;
+            }
+            ctx.log("{} }}", std::make_tuple(str));
+        };
+
+        std::vector<float> linearFunc;
+        linearFunc.reserve(Size);
+
+        for (uint32_t i = 0; i < Size; ++i)
+            linearFunc.push_back((static_cast<float>(i) - min) / Size * (max - min));
+
+        assert(linearFunc.size() == Size);
+        printSpan(linearFunc);
+    }
 } // namespace dmt::test
 
 namespace dmt::bvh {

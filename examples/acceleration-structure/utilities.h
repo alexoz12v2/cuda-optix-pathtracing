@@ -92,12 +92,12 @@ namespace dmt {
 
         float sample(float u, float* pdf = nullptr, int32_t* offset = nullptr) const;
 
+        DMT_FORCEINLINE std::span<float const> absFunc() const { return {m_buffer.get(), m_funcCount}; }
+        DMT_FORCEINLINE std::span<float const> CDF() const { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+
     private:
         DMT_FORCEINLINE std::span<float> absFunc() { return {m_buffer.get(), m_funcCount}; }
-        DMT_FORCEINLINE std::span<float const> absFunc() const { return {m_buffer.get(), m_funcCount}; }
-
         DMT_FORCEINLINE std::span<float> CDF() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
-        DMT_FORCEINLINE std::span<float const> CDF() const { return {m_buffer.get() + m_funcCount, m_funcCount}; }
 
     private:
         UniqueRef<float[]> m_buffer;    // first half abs(func), second half CDF
@@ -109,7 +109,8 @@ namespace dmt {
 
 namespace dmt::test {
     void bvhTestRays(BVHBuildNode* rootNode);
-}
+    void testDistribution1D();
+} // namespace dmt::test
 
 namespace dmt::bvh {
     BVHBuildNode* traverseBVHBuild(Ray                        ray,

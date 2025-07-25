@@ -543,17 +543,101 @@ namespace dmt::filtering {
         float   weight;
     };
 
+    // to be able to sample from a filter function, you need to store its function2D and construct a distribution from it
+    // then, you also need to keep storing its original function to compute a weight associated to the sample with f(sampleIdx) / pdf
+    // note that we need to store f too as it is the signed, unnormalized version of the absFunc from the distirbution
+    /// @note doesn't have copy control, pass around as reference
+    template <typename T>
+    concept Filter = requires(std::remove_cvref_t<T> const& t) {
+        { t.evaluate(std::declval<Point2f>()) } -> std::floating_point;
+        { t.radius() } -> std::same_as<Vector2f>;
+    } && !std::is_pointer_v<std::remove_cvref_t<T>>;
+
+    class FilterSampler
+    {
+    public:
+        static constexpr int32_t NumSamplesPerAxisPerDomainUnit = 32;
+
+    private:
+        template <Filter T>
+        static dstd::Array2D<float> evaluateFunction(T const& filter, Bounds2f domain, std::pmr::memory_resource* memory)
+        {
+            uint32_t xSize = static_cast<uint32_t>(NumSamplesPerAxisPerDomainUnit * filter.radius().x);
+            if (!isPOT(xSize))
+                xSize = nextPOT(xSize);
+            uint32_t ySize = static_cast<uint32_t>(NumSamplesPerAxisPerDomainUnit * filter.radius().y);
+            if (!isPOT(ySize))
+                ySize = nextPOT(ySize);
+
+            dstd::Array2D<float> nrvo{xSize, ySize, memory};
+            // tabularize filter function
+            for (uint32_t y = 0; y < ySize; ++y)
+            {
+                for (uint32_t x = 0; x < xSize; ++x)
+                {
+                    Point2f p  = domain.lerp({{(x + 0.5f) / xSize, (y + 0.5f) / ySize}});
+                    nrvo(x, y) = filter.evaluate(p); // TODO vectorize
+                }
+            }
+
+            return nrvo;
+        }
+
+        template <Filter T>
+        static Bounds2f domainFromFilter(T const& filter)
+        {
+            return {-filter.radius(), filter.radius()};
+        }
+
+    public:
+        template <Filter T>
+        FilterSampler(T const&                   filter,
+                      std::pmr::memory_resource* memory = std::pmr::get_default_resource(),
+                      std::pmr::memory_resource* temp   = std::pmr::get_default_resource()) :
+        m_f(evaluateFunction(filter, domainFromFilter(filter), memory)),
+        m_distrib(m_f, domainFromFilter(filter), memory, temp)
+        {
+        }
+
+        Bounds2f domain() const { return m_distrib.domain(); }
+
+        FilterSample sample(Point2f u) const
+        {
+            FilterSample result;
+            float        pdf;
+            Point2i      pi;
+
+            result.p      = m_distrib.sample(u, &pdf, &pi);
+            result.weight = m_f(pi.x, pi.y) / pdf;
+
+            return result;
+        }
+
+    private:
+        dstd::Array2D<float> m_f;
+        PiecewiseConstant2D  m_distrib;
+    };
+
     class Mitchell
     {
     public:
-        Mitchell(Vector2f                   radius,
+        Mitchell(Vector2f                   radius = {{2.f, 2.f}},
                  float                      b      = 1.f / 3.f,
                  float                      c      = 1.f / 3.f,
-                 std::pmr::memory_resource* memory = std::pmr::get_default_resource()) :
+                 std::pmr::memory_resource* memory = std::pmr::get_default_resource(),
+                 std::pmr::memory_resource* temp   = std::pmr::get_default_resource()) :
         m_radius(radius),
         m_b(b),
-        m_c(c)
+        m_c(c),
+        m_sampler(*this, memory, temp) // needs radius, b and c, cause evaluate and radius needs to work at this point
         {
+        }
+
+        FilterSample sample(Point2f u) const { return m_sampler.sample(u); }
+
+        float evaluate(Point2f p) const
+        {
+            return mitchell1D(2 * p.x / m_radius.x, m_b, m_c) * mitchell1D(2 * p.y / m_radius.y, m_b, m_c);
         }
 
         // domain, for the x axis and y axis, in which the filter is != 0 starting from 0 (low pass filter)
@@ -576,8 +660,9 @@ namespace dmt::filtering {
         }
 
     private:
-        Vector2f m_radius;
-        float    m_b, m_c;
+        Vector2f      m_radius;
+        float         m_b, m_c;
+        FilterSampler m_sampler;
     };
 } // namespace dmt::filtering
 
@@ -666,6 +751,7 @@ int32_t guardedMain()
         dmt::test::bvhTestRays(rootNode);
 
         dmt::test::testDistribution1D();
+        dmt::test::testDistribution2D();
 
         dmt::runMainProgram(scene, spanPrims, rootNode, bufferPtr.get());
 

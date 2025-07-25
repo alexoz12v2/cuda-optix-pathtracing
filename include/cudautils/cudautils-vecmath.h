@@ -647,7 +647,7 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU bool     sameHemisphere(Vector3f w, Normal3f ap);
 
     // Vector Types: Axis Aligned Bounding Boxes ----------------------------------------------------------------------
-    enum DMT_CORE_API EBoundsCorner : int32_t
+    enum class DMT_CORE_API EBoundsCorner : int32_t
     {
         eBottom  = 0,
         eLeft    = eBottom,
@@ -665,6 +665,20 @@ namespace dmt {
         eLeftBottomForward  = eLeft | eBottom | eForward,
         eLeftBottomBack     = eLeft | eBottom | eBack,
     };
+
+    enum class DMT_CORE_API EBoundsCorner2 : int32_t
+    {
+        eLeft   = 0b00,
+        eBottom = eLeft,
+        eTop    = 0b10,
+        eRight  = 0b01,
+        // 4 corners
+        eRightTop    = eRight | eTop,
+        eRightBottom = eRight | eBottom,
+        eLeftTop     = eLeft | eTop,
+        eLeftBottom  = eLeft | eBottom,
+    };
+
     struct DMT_CORE_API Bounds3f
     {
         DMT_CPU_GPU Point3f&       operator[](int32_t i);
@@ -696,6 +710,32 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU bool     inside(Point3f p, Bounds3f const& b);
     DMT_CORE_API DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b);
     DMT_CORE_API DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& b, Point3f p);
+
+    struct DMT_CORE_API Bounds2f
+    {
+        DMT_CPU_GPU Point2f&       operator[](int32_t i);
+        DMT_CPU_GPU Point2f const& operator[](int32_t i) const;
+        DMT_CPU_GPU Point2f        corner(EBoundsCorner2 corner) const;
+        DMT_CPU_GPU Vector2f       diagonal() const;
+        DMT_CPU_GPU float          surfaceArea() const;
+        DMT_CPU_GPU float          volume() const;
+        DMT_CPU_GPU int32_t        maxDimention() const;
+        DMT_CPU_GPU Point2f        lerp(Point2f t) const;
+        DMT_CPU_GPU Point2f        centroid() const { return .5f * pMin + .5f * pMax; }
+        DMT_CPU_GPU Vector2f       offset(Point2f p) const;
+        DMT_CPU_GPU void           boundingCircle(Point2f& outCenter, float& outRadius) const;
+        DMT_CPU_GPU bool           isEmpty() const;
+        DMT_CPU_GPU bool           isDegenerate() const;
+        DMT_CPU_GPU bool           operator==(Bounds2f const& that) const;
+
+        Point2f pMin;
+        Point2f pMax;
+    };
+
+    DMT_CORE_API DMT_CPU_GPU Bounds2f bbEmpty2();
+    DMT_CORE_API DMT_CPU_GPU bool     inside(Point2f p, Bounds2f const& b);
+    DMT_CORE_API DMT_CPU_GPU Bounds2f bbUnion(Bounds2f const& a, Bounds2f const& b);
+    DMT_CORE_API DMT_CPU_GPU Bounds2f bbUnion(Bounds2f const& b, Point2f p);
 
     // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------
     struct DMT_CORE_API Index2

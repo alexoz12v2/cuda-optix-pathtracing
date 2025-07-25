@@ -635,10 +635,11 @@ namespace dmt {
 
     __host__ __device__ Point3f Bounds3f::corner(EBoundsCorner corner) const
     {
+        using enum EBoundsCorner;
         Point3f const ret{{
-            operator[](corner & eRight).x,
-            operator[]((corner & eForward) >> 1).y,
-            operator[]((corner & eTop) >> 2).z,
+            operator[](toUnderlying(corner) & toUnderlying(eRight)).x,
+            operator[]((toUnderlying(corner) & toUnderlying(eForward)) >> 1).y,
+            operator[]((toUnderlying(corner) & toUnderlying(eTop)) >> 2).z,
         }};
         return ret;
     }
@@ -769,6 +770,106 @@ namespace dmt {
             tMax = tzMax;
 
         return (tMin < rayMax) && (tMax > 0);
+    }
+
+    // Bounds2f
+    __host__ __device__ Bounds2f bbEmpty2()
+    {
+        return {.pMin = {{fl::infinity(), fl::infinity()}}, .pMax = {{-fl::infinity(), -fl::infinity()}}};
+    }
+
+    __host__ __device__ bool inside(Point2f p, Bounds2f const& b)
+    {
+        return (p.x >= b.pMin.x && p.x <= b.pMax.x && p.y >= b.pMin.y && p.y <= b.pMax.y);
+    }
+
+    __host__ __device__ Bounds2f bbUnion(Bounds2f const& a, Bounds2f const& b)
+    {
+        Bounds2f bRet;
+        bRet.pMin = min(a.pMin, b.pMin);
+        bRet.pMax = max(a.pMax, b.pMax);
+        return bRet;
+    }
+
+    __host__ __device__ Bounds2f bbUnion(Bounds2f const& b, Point2f p)
+    {
+        Bounds2f bRet;
+        bRet.pMin = min(b.pMin, p);
+        bRet.pMax = max(b.pMax, p);
+        return bRet;
+    }
+
+    __host__ __device__ Point2f& Bounds2f::operator[](int32_t i)
+    {
+        assert(i == 0 || i == 1);
+        return i == 0 ? pMin : pMax;
+    }
+
+    __host__ __device__ Point2f const& Bounds2f::operator[](int32_t i) const
+    {
+        assert(i == 0 || i == 1);
+        return i == 0 ? pMin : pMax;
+    }
+
+    __host__ __device__ Point2f Bounds2f::corner(EBoundsCorner2 corner) const
+    {
+        using enum EBoundsCorner2;
+        Point2f const ret{{
+            operator[](toUnderlying(corner) & toUnderlying(eRight)).x,
+            operator[]((toUnderlying(corner) & toUnderlying(eTop)) >> 1).y,
+        }};
+        return ret;
+    }
+
+    __host__ __device__ Vector2f Bounds2f::diagonal() const { return pMax - pMin; }
+
+    __host__ __device__ float Bounds2f::surfaceArea() const
+    {
+        Vector2f const d = diagonal();
+        return d.x * d.y;
+    }
+
+    __host__ __device__ float Bounds2f::volume() const { return 0; }
+
+    __host__ __device__ int32_t Bounds2f::maxDimention() const
+    {
+        Vector2f const d = diagonal();
+        if (d.x > d.y)
+            return 0;
+        else
+            return 1;
+    }
+
+    __host__ __device__ Point2f Bounds2f::lerp(Point2f t) const
+    {
+        Point2f const ret{{glm::lerp(pMax.x, pMin.x, t.x), glm::lerp(pMax.y, pMin.y, t.y)}};
+        return ret;
+    }
+
+    __host__ __device__ Vector2f Bounds2f::offset(Point2f p) const
+    {
+        Vector2f o = p - pMin;
+        if (pMax.x > pMin.x)
+            o.x /= pMax.x - pMin.x;
+        if (pMax.y > pMin.y)
+            o.y /= pMax.y - pMin.y;
+        return o;
+    }
+
+    __host__ __device__ void Bounds2f::boundingCircle(Point2f& outCenter, float& outRadius) const
+    {
+        outCenter = (pMin + pMax) / 2.f;
+        outRadius = inside(outCenter, *this) ? glm::distance(toGLM(outCenter), toGLM(pMax)) : 0.f;
+    }
+
+    __host__ __device__ bool Bounds2f::isEmpty() const { return pMin.x >= pMax.x || pMin.y >= pMax.y; }
+
+    __host__ __device__ bool Bounds2f::isDegenerate() const { return pMin.x > pMax.x || pMin.y > pMax.y; }
+
+    __host__ __device__ bool Bounds2f::operator==(Bounds2f const& that) const
+    {
+        bool b = near(pMin, that.pMin) && near(pMax, that.pMax);
+        return b;
     }
 
     // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------

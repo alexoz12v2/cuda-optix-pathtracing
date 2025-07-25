@@ -231,7 +231,7 @@ namespace dmt {
 
         __m256 const nzero8 = _mm256_set1_ps(-0.f);
         __m128 const nzero4 = _mm_set1_ps(-0.f);
-        while (remaining > 8)
+        while (remaining >= 8)
         { // store abs
             _mm256_storeu_ps(fDest, _mm256_andnot_ps(nzero8, _mm256_loadu_ps(fPtr)));
             fPtr += 8;
@@ -239,7 +239,7 @@ namespace dmt {
             remaining -= 8;
         }
 
-        while (remaining > 4)
+        while (remaining >= 4)
         {
             _mm_storeu_ps(fDest, _mm_andnot_ps(nzero4, _mm_loadu_ps(fPtr)));
             fPtr += 4;
@@ -248,18 +248,25 @@ namespace dmt {
         }
 
         while (remaining != 0)
+        {
             *fDest++ = *fPtr++;
+            --remaining;
+        }
 
         // Second Step: CDF Computation https://en.algorithmica.org/hpc/algorithms/prefix/
         // split the array into blocks of 8 (remaining later)
+        // cdf[0] = 0;
+        // for (size_t i = 1; i < n + 1; ++i)
+        //     cdf[i] = cdf[i - 1] + func[i - 1] * (max - min) / n;
         uint32_t const numBlocksTimes8 = m_funcCount & ~0x7u;
         fPtr                           = func.data();
-        float* cdf                     = m_buffer.get() + m_funcCount;
-        float  carry                   = 0.f;
+        float*       cdf               = m_buffer.get() + m_funcCount;
+        float        carry             = 0.f;
+        __m256 const normalizeFac      = _mm256_set1_ps((m_max - m_min) / m_funcCount);
 
-        for (uint32_t i = 0; i < numBlocksTimes8; ++i)
+        for (uint32_t i = 0; i < numBlocksTimes8 >> 3u; ++i)
         {
-            __m256 x = _mm256_loadu_ps(fPtr);
+            __m256 x = _mm256_mul_ps(_mm256_loadu_ps(fPtr), normalizeFac);
 
             // In-lane prefix sum (lane 0: [0–3], lane 1: [4–7])
             __m256 t;
@@ -314,7 +321,7 @@ namespace dmt {
         //   funcInt = cdf[n];
         //   if (funcInt == 0) for (size_t i = 1; i < n + 1; ++i) cdf[i] = Float(i) / Float(n);
         //   else              for (size_t i = 1; i < n + 1; ++i) cdf[i] /= funcInt;
-        m_integral        = CDF().back();
+        m_integral        = CDF_().back();
         float const  fac  = dmt::fl::rcp(dmt::fl::nearZero(m_integral) ? m_funcCount : m_integral);
         __m256 const vFac = _mm256_set1_ps(fac);
 
@@ -340,7 +347,7 @@ namespace dmt {
         }
         else
         {
-            for (uint32_t i = 0; i < numBlocksTimes8; ++i)
+            for (uint32_t i = 0; i < numBlocksTimes8 >> 3; ++i)
             {
                 _mm256_storeu_ps(cdf, _mm256_mul_ps(_mm256_loadu_ps(cdf), vFac));
                 cdf += 8;
@@ -359,7 +366,7 @@ namespace dmt {
     float PiecewiseConstant1D::invert(float x) const
     {
         if (x < m_min || x > m_max)
-            return std::numeric_limits<double>::quiet_NaN();
+            return std::numeric_limits<float>::quiet_NaN();
         float const   c      = (x - m_min) / (m_max - m_min) * m_funcCount;
         int32_t const offset = dmt::fl::clamp(static_cast<int32_t>(c), 0, static_cast<int32_t>(m_funcCount - 1));
 
@@ -401,6 +408,103 @@ namespace dmt {
 
         return dmt::fl::lerp((off + du) / m_funcCount, m_min, m_max);
     }
+
+    // PiecewiseConstant2D
+    static std::pmr::vector<PiecewiseConstant1D> makePConditional(dstd::Array2D<float> const& data,
+                                                                  Bounds2f                    domain,
+                                                                  std::pmr::memory_resource*  memory)
+    {
+        std::pmr::vector<PiecewiseConstant1D> nrvo{memory};
+        nrvo.reserve(data.ySize());
+        for (uint32_t i = 0; i < data.ySize(); ++i)
+            nrvo.emplace_back(data.rowSpan(i), domain.pMin[0], domain.pMax[0], memory);
+
+        return nrvo;
+    }
+
+    static std::pmr::vector<float> makeMarginalFunc(std::span<PiecewiseConstant1D> pConditionalV,
+                                                    std::pmr::memory_resource*     memory)
+    {
+        std::pmr::vector<float> marginalFunc{pConditionalV.size(), memory};
+        for (uint32_t i = 0; i < marginalFunc.size(); ++i)
+            marginalFunc[i] = pConditionalV[i].integral();
+        return marginalFunc;
+    }
+
+    PiecewiseConstant2D::PiecewiseConstant2D(dstd::Array2D<float> const& data,
+                                             Bounds2f                    domain,
+                                             std::pmr::memory_resource*  memory,
+                                             std::pmr::memory_resource*  temp) :
+    m_domain(domain),
+    m_pConditionalV(makePConditional(data, domain, memory)),
+    m_pMarginalV(makeMarginalFunc(m_pConditionalV, temp), domain.pMin[1], domain.pMax[1], memory)
+    {
+        assert(isPOT(data.xSize()) && isPOT(data.ySize()) && "We want powers of two");
+    }
+
+    Point2f PiecewiseConstant2D::sample(Point2f u, float* pdf, Point2i* offset) const
+    {
+        float   pdfs[2];
+        Point2i uv;
+        float   d1 = m_pMarginalV.sample(u[1], &pdfs[1], &uv[1]);
+        float   d0 = m_pConditionalV[uv[1]].sample(u[0], &pdfs[0], &uv[0]);
+
+        if (pdf) // p(x,y) = p(x|y) * p(y)
+            *pdf = pdfs[0] * pdfs[1];
+        if (offset)
+            *offset = uv;
+
+        return {{d0, d1}};
+    }
+
+    float PiecewiseConstant2D::pdf(Point2f pr) const
+    {
+        // take the chosen conditional pdf, take its generating, unnormalized function, and divide it by marginal integral.
+        // this is equivalent to doing p(x,y) = p(x|y) * p(y)
+        // project onto domain and take indices to marginal and conditional
+        Point2f const p{{m_domain.offset(pr)}};
+        int32_t const iu = clamp(static_cast<int32_t>(p[0] * m_pConditionalV[0].size()),
+                                 0,
+                                 static_cast<int32_t>(m_pConditionalV[0].size() - 1));
+        int32_t const iv = clamp(static_cast<int32_t>(p[1] * m_pMarginalV.size()),
+                                 0,
+                                 static_cast<int32_t>(m_pMarginalV.size() - 1));
+        // absFunc[iv] stores p(x|y=at(iv)) * p(y=at(iv))
+        // hence absFunc[iv][iu], is the unnormalized p(x|y) * p(y) evaluated for y=at(iv), x=at(iu)
+        // to normalize that, we need to divide by total integral, which is equal to the integral of the marginal
+        return m_pConditionalV[iv].absFunc()[iu] / m_pMarginalV.integral();
+    }
+
+    Point2f PiecewiseConstant2D::invert(Point2f p) const
+    {
+        static Point2f const outside{{std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()}};
+        // first invert the marginal
+        float const mInv = m_pMarginalV.invert(p[1]);
+        if (fl::isNaN(mInv))
+            return outside;
+
+        float const percentageOverMarginalDomain = (p[1] - m_domain.pMin[1]) / (m_domain.pMax[1] - m_domain.pMin[1]);
+        if (percentageOverMarginalDomain < 0.f || percentageOverMarginalDomain > 1.f)
+            return outside;
+
+        int32_t const condIndex = clamp(static_cast<int32_t>(percentageOverMarginalDomain * m_pConditionalV.size()),
+                                        0,
+                                        static_cast<int32_t>(m_pConditionalV.size() - 1));
+        float const   cInv      = m_pConditionalV[condIndex].invert(p[0]);
+        if (fl::isNaN(cInv))
+            return outside;
+
+        return {{cInv, mInv}};
+    }
+
+    Bounds2f PiecewiseConstant2D::domain() const { return m_domain; }
+
+    Point2i PiecewiseConstant2D::resolution() const
+    {
+        return {{static_cast<int32_t>(m_pConditionalV[0].size()), static_cast<int32_t>(m_pMarginalV.size())}};
+    }
+
+    float PiecewiseConstant2D::integral() const { return m_pMarginalV.integral(); }
 } // namespace dmt
 
 namespace dmt::test {
@@ -490,8 +594,129 @@ namespace dmt::test {
             linearFunc.push_back((static_cast<float>(i) - min) / Size * (max - min));
 
         assert(linearFunc.size() == Size);
+
         printSpan(linearFunc);
+        // Create the distribution object
+        PiecewiseConstant1D dist(linearFunc, min, max);
+
+        // Print the absolute value of the input function used internally
+        ctx.log("absFunc:", {});
+        printSpan(dist.absFunc());
+
+        // Print the CDF
+        ctx.log("CDF:", {});
+        printSpan(dist.CDF());
+
+        // Check that the CDF is normalized (i.e., last element == 1.0f)
+        float lastCDF = dist.CDF().back();
+        assert(std::abs(lastCDF - 1.0f) < 1e-4f && "CDF is not normalized");
+
+        // Check that integral() returns the expected total area under the curve
+        float expectedIntegral = 0.f;
+        float dx               = (max - min) / Size;
+        for (float f : linearFunc)
+            expectedIntegral += f * dx;
+
+        float computedIntegral = dist.integral();
+        ctx.log("Expected integral = {}, computed = {}", std::make_tuple(expectedIntegral, computedIntegral));
+        assert(std::abs(expectedIntegral - computedIntegral) < 1e-4f && "Integral mismatch");
+
+        // Sample a few points
+        for (float u : {0.1f, 0.5f, 0.9f})
+        {
+            float   pdf     = 0.f;
+            int32_t offset  = -1;
+            float   sampleX = dist.sample(u, &pdf, &offset);
+            ctx.log("Sample(u = {}) = {}, pdf = {}, offset = {}", std::make_tuple(u, sampleX, pdf, offset));
+        }
     }
+
+    void testDistribution2D()
+    {
+        static constexpr uint32_t X = 8;
+        static constexpr uint32_t Y = 8;
+
+        Context ctx;
+        assert(ctx.isValid() && "Invalid Context");
+
+        float const min = 0.f;
+        float const max = 1.f;
+
+        Bounds2f domain{{{min, min}}, {{max, max}}};
+
+        // Fill the input data with a separable function (e.g., f(x, y) = x + y)
+        dstd::Array2D<float> func(X, Y);
+        for (uint32_t y = 0; y < Y; ++y)
+        {
+            for (uint32_t x = 0; x < X; ++x)
+            {
+                float fx   = static_cast<float>(x) / X;
+                float fy   = static_cast<float>(y) / Y;
+                func(x, y) = fx + fy;
+            }
+        }
+
+        // Print input function
+        auto printRowMajor2D = [&ctx](dstd::Array2D<float> const& arr) {
+            for (uint32_t y = 0; y < arr.ySize(); ++y)
+            {
+                std::string row = "[ ";
+                for (uint32_t x = 0; x < arr.xSize(); ++x)
+                    row += std::to_string(arr(x, y)) + " ";
+                row += "]";
+                ctx.log("{}", std::make_tuple(row));
+            }
+        };
+
+        ctx.log("Input Function:", {});
+        printRowMajor2D(func);
+
+        // Construct the distribution
+        PiecewiseConstant2D dist(func, domain);
+
+        // Check integral
+        float expectedIntegral = 0.f;
+        float dx               = (domain.pMax.x - domain.pMin.x) / X;
+        float dy               = (domain.pMax.y - domain.pMin.y) / Y;
+
+        for (uint32_t y = 0; y < Y; ++y)
+            for (uint32_t x = 0; x < X; ++x)
+                expectedIntegral += func(x, y) * dx * dy;
+
+        float computedIntegral = dist.integral();
+        ctx.log("Expected integral = {}, computed = {}", std::make_tuple(expectedIntegral, computedIntegral));
+        assert(std::abs(expectedIntegral - computedIntegral) < 1e-4f && "Integral mismatch");
+
+        // Sample some points and validate PDF
+        for (Point2f u : {Point2f{{0.1f, 0.1f}}, Point2f{{0.5f, 0.5f}}, Point2f{{0.9f, 0.9f}}})
+        {
+            float   pdf = -1.f;
+            Point2i offset{{-1, -1}};
+            Point2f sample  = dist.sample(u, &pdf, &offset);
+            float   evalPDF = dist.pdf(sample);
+
+            ctx.log("Sample(u = [{}, {}]) = [{}, {}], PDF = {}, EvalPDF = {}, offset = ({}, {})",
+                    std::make_tuple(u.x, u.y, sample.x, sample.y, pdf, evalPDF, offset.x, offset.y));
+
+            // Optional: check PDF value at sampled location is close to reported PDF
+            assert(std::abs(evalPDF - pdf) < 1e-3f && "PDF mismatch at sample point");
+        }
+
+        // Inversion test (maps sample back to uniform distribution)
+        // Strengthened inversion test
+        Point2f uOriginal{{0.25f, 0.25f}}; // uniform sample in [0,1]^2
+        float   pdf = 0.f;
+        Point2i offset{};
+        Point2f pSampled  = dist.sample(uOriginal, &pdf, &offset);
+        Point2f uInverted = dist.invert(pSampled);
+
+        ctx.log("Sample(uOriginal) = [{}, {}], Invert(pSampled) = [{}, {}]",
+                std::make_tuple(uOriginal.x, uOriginal.y, uInverted.x, uInverted.y));
+
+        bool closeEnough = (std::abs(uOriginal.x - uInverted.x) < 1e-4f) && (std::abs(uOriginal.y - uInverted.y) < 1e-4f);
+        assert(closeEnough && "Inversion test failed: inverted value not close to original sample");
+    }
+
 } // namespace dmt::test
 
 namespace dmt::bvh {

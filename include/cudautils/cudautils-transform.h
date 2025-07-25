@@ -70,6 +70,8 @@ namespace dmt {
         DMT_CPU_GPU bool swapsHandedness() const;
     };
 
+    DMT_FORCEINLINE DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b) { return a.combine(b); }
+
     class DMT_CORE_API AnimatedTransform
     {
     public:

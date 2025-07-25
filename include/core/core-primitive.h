@@ -3,6 +3,7 @@
 #include "core/core-macros.h"
 #include "core/core-math.h"
 #include "cudautils/cudautils-vecmath.h"
+#include "cudautils/cudautils-color.h"
 
 namespace dmt {
     struct Intersection
@@ -13,13 +14,42 @@ namespace dmt {
     };
     static_assert(std::is_standard_layout_v<Intersection> && std::is_trivial_v<Intersection>);
 
+    // TODO remove
+    inline RGB randomColorFromTime()
+    {
+        using namespace std::chrono;
+
+        // Get current time in milliseconds
+        auto now = high_resolution_clock::now();
+        auto ms  = duration_cast<milliseconds>(now.time_since_epoch()).count();
+
+        // Use time to seed periodic functions
+        float t = static_cast<float>(ms) * 0.001f; // seconds
+
+        // Use sin-based hash for R, G, B
+        float r = 0.5f * (std::sin(t * 3.0f + 0.0f) + 1.0f);
+        float g = 0.5f * (std::sin(t * 3.0f + 2.0f) + 1.0f);
+        float b = 0.5f * (std::sin(t * 3.0f + 4.0f) + 1.0f);
+
+        return RGB{r, g, b};
+    }
+
     class DMT_CORE_API DMT_INTERFACE Primitive
     {
     public:
+        // TODO remove
+        Primitive() : m_color{randomColorFromTime()} {}
+
         virtual ~Primitive() {};
 
         virtual Bounds3f     bounds() const                              = 0;
         virtual Intersection intersect(Ray const& ray, float tMax) const = 0;
+        RGB                  color() const { return m_color; }
+
+        // TODO remove
+
+    protected:
+        RGB m_color;
     };
 
     // TODO: Indexed variants

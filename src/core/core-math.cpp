@@ -43,3 +43,126 @@ namespace dmt::arch {
         return _mm_cvtss_f32(max2);
     }
 } // namespace dmt::arch
+
+namespace dmt::transforms {
+    Transform DMT_FASTCALL persp(float fovRadians, float aspectRatio, float near, float far)
+    {
+        float const focalLen = fl::rcp(tan(fovRadians * 0.5f));
+
+        float const x = focalLen / aspectRatio;
+        float const y = -focalLen;
+
+        // OpenGL style [z -> -1, 1]
+        float const a = near / (far - near);
+        float const b = far * a;
+
+        // Direct3D style [z -> 0, 1] (PBRT)
+        // float const a = far / (far - near);
+        // float const b = -near * a;
+
+        // clang-format off
+        Matrix4f const m{{
+            x, 0, 0,  0, // first column
+            0, y, 0,  0, // second column
+            0, 0, a, -1, // third column
+            0, 0, b,  0  // fourth column
+        }};
+        // clang-format on
+        return dmt::Transform{m};
+    }
+
+    Transform DMT_FASTCALL scale(Vector3f s)
+    {
+        // clang-format off
+        Matrix4f const m{{
+            s[0], 0,    0,    0, // first column
+            0,    s[1], 0,    0, // second column
+            0,    0,    s[2], 0, // third column
+            0,    0,    0,    1  // fourth column
+        }};
+        // clang-format on
+        return dmt::Transform{m};
+    }
+
+    Transform DMT_FASTCALL translate(Vector3f v)
+    {
+        // clang-format off
+        Matrix4f const m{{
+            1,    0,    0,    0, // first column
+            0,    1,    0,    0, // second column
+            0,    0,    1,    0, // third column
+            v[0], v[1], v[2], 1  // fourth column
+        }};
+        // clang-format on
+        return dmt::Transform{m};
+    }
+
+    Transform DMT_FASTCALL cameraWorldFromCamera(Normal3f cameraDirection)
+    {
+        Normal3f tmpUp{{0, 0, 1}};
+        if (absDot(cameraDirection, tmpUp) > 0.99f)
+            tmpUp = {{0, 1, 0}}; // handle gimbal lock
+
+        // orthonormal basis
+        Normal3f const right = normalFrom(cross(tmpUp, cameraDirection)); // world X
+        Normal3f const up    = normalFrom(cross(cameraDirection, right)); // world Z
+
+        // clang-format off
+        Matrix4f const m{{
+            right.x,  up.x,    cameraDirection.x,  0,
+            right.y,  up.y,    cameraDirection.y,  0,
+            right.z,  up.z,    cameraDirection.z,  0,
+            0,        0,       0,                  1
+        }};
+        // clang-format on
+
+        return dmt::Transform{m};
+    }
+
+    Transform DMT_FASTCALL worldFromCamera(Normal3f cameraDirection, Point3f cameraPosition)
+    {
+        Normal3f tmpUp{{0, 0, 1}};
+        if (absDot(cameraDirection, tmpUp) > 0.99f)
+            tmpUp = {{0, 1, 0}}; // handle gimbal lock
+
+        // orthonormal basis
+        Normal3f const right = normalFrom(cross(tmpUp, cameraDirection)); // world X
+        Normal3f const up    = normalFrom(cross(cameraDirection, right)); // world Z
+
+        // clang-format off
+        Matrix4f const m{{
+            right.x,          up.x,             cameraDirection.x, 0, // note: column
+            right.y,          up.y,             cameraDirection.y, 0,
+            right.z,          up.z,             cameraDirection.z, 0,
+            cameraPosition.x, cameraPosition.y, cameraPosition.z,  1
+        }};
+        // clang-format on
+
+        return dmt::Transform{m};
+    }
+
+    Transform DMT_FASTCALL
+        cameraFromRaster_Perspective(float fovRadians, float aspectRatio, uint32_t xRes, uint32_t yRes, float focalLength)
+    {
+        // Image plane half-height at depth = focalLength
+        float const halfHeight = focalLength * tan(0.5f * fovRadians);
+        float const halfWidth  = halfHeight * aspectRatio;
+
+        float const pixelSizeX = 2.0f * halfWidth / static_cast<float>(xRes);
+        float const pixelSizeY = 2.0f * halfHeight / static_cast<float>(yRes);
+
+        float const tx = -halfWidth + pixelSizeX * 0.5f;
+        float const ty = -halfHeight + pixelSizeY * 0.5f;
+
+        // clang-format off
+        Matrix4f const m{{
+            pixelSizeX, 0,           0,           0,
+            0,          pixelSizeY,  0,           0,
+            0,          0,           0,           0, // We'll set z = focalLength later
+            tx,         ty,          focalLength, 1
+        }};
+        // clang-format on
+
+        return dmt::Transform{m};
+    }
+} // namespace dmt::transforms

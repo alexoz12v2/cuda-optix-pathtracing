@@ -720,9 +720,9 @@ namespace dmt::test {
 } // namespace dmt::test
 
 namespace dmt::bvh {
-    BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* memory)
+    BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* _temp)
     {
-        std::pmr::vector<BVHBuildNode*> activeNodeStack;
+        std::pmr::vector<BVHBuildNode*> activeNodeStack{_temp};
         activeNodeStack.reserve(64);
         activeNodeStack.push_back(bvh);
 
@@ -832,6 +832,7 @@ namespace dmt::numbers {
         return x;
     }
 
+    // doesn't work
     uint16_t permutationElement(int32_t i, int32_t j, uint32_t l, uint64_t p)
     {
         __m128i v   = _mm_set_epi64x(static_cast<uint64_t>(j), static_cast<uint64_t>(i));
@@ -840,5 +841,37 @@ namespace dmt::numbers {
         alignas(16) uint64_t out[2];
         _mm_store_si128(reinterpret_cast<__m128i*>(out), res);
         return static_cast<uint16_t>(out[0]); // or return both if needed
+    }
+
+    uint16_t permutationElement(int32_t i, uint32_t l, uint64_t p)
+    {
+        uint32_t w = l - 1;
+        w |= w >> 1;
+        w |= w >> 2;
+        w |= w >> 4;
+        w |= w >> 8;
+        w |= w >> 16;
+        do
+        {
+            i ^= p;
+            i *= 0xe170893d;
+            i ^= p >> 16;
+            i ^= (i & w) >> 4;
+            i ^= p >> 8;
+            i *= 0x0929eb3f;
+            i ^= p >> 23;
+            i ^= (i & w) >> 1;
+            i *= 1 | p >> 27;
+            i *= 0x6935fa69;
+            i ^= (i & w) >> 11;
+            i *= 0x74dcb303;
+            i ^= (i & w) >> 2;
+            i *= 0x9e501cc3;
+            i ^= (i & w) >> 2;
+            i *= 0xc860a3df;
+            i &= w;
+            i ^= i >> 5;
+        } while (i >= l);
+        return (i + p) % l;
     }
 } // namespace dmt::numbers

@@ -179,4 +179,5 @@ namespace dmt::numbers {
     }
 
     uint16_t permutationElement(int32_t i, int32_t j, uint32_t l, uint64_t p);
+    uint16_t permutationElement(int32_t i, uint32_t l, uint64_t p);
 } // namespace dmt::numbers

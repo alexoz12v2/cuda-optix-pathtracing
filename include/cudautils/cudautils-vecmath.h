@@ -298,77 +298,77 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Normal3f   operator-(Normal3f a, Normal3f b);
     DMT_CORE_API DMT_CPU_GPU Quaternion operator-(Quaternion a, Quaternion b);
 
-    DMT_CPU_GPU Vector2i   operator-(Point2i v);
-    DMT_CPU_GPU Vector2f   operator-(Point2f v);
-    DMT_CPU_GPU Vector3i   operator-(Point3i v);
-    DMT_CPU_GPU Vector3f   operator-(Point3f v);
-    DMT_CPU_GPU Vector4i   operator-(Point4i v);
-    DMT_CPU_GPU Vector4f   operator-(Point4f v);
-    DMT_CPU_GPU Vector2i   operator-(Vector2i v);
-    DMT_CPU_GPU Vector2f   operator-(Vector2f v);
-    DMT_CPU_GPU Vector3i   operator-(Vector3i v);
-    DMT_CPU_GPU Vector3f   operator-(Vector3f v);
-    DMT_CPU_GPU Vector4i   operator-(Vector4i v);
-    DMT_CPU_GPU Vector4f   operator-(Vector4f v);
-    DMT_CPU_GPU Normal2f   operator-(Normal2f v);
-    DMT_CPU_GPU Normal3f   operator-(Normal3f v);
-    DMT_CPU_GPU Quaternion operator-(Quaternion q);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator-(Point2i v);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator-(Point2f v);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator-(Point3i v);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator-(Point3f v);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator-(Point4i v);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator-(Point4f v);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator-(Vector2i v);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator-(Vector2f v);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator-(Vector3i v);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator-(Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator-(Vector4i v);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator-(Vector4f v);
+    DMT_CORE_API DMT_CPU_GPU Normal2f   operator-(Normal2f v);
+    DMT_CORE_API DMT_CPU_GPU Normal3f   operator-(Normal3f v);
+    DMT_CORE_API DMT_CPU_GPU Quaternion operator-(Quaternion q);
 
-    DMT_CPU_GPU Vector2i   operator*(Vector2i a, Vector2i b);
-    DMT_CPU_GPU Vector2f   operator*(Vector2f a, Vector2f b);
-    DMT_CPU_GPU Vector3i   operator*(Vector3i a, Vector3i b);
-    DMT_CPU_GPU Vector3f   operator*(Vector3f a, Vector3f b);
-    DMT_CPU_GPU Vector4i   operator*(Vector4i a, Vector4i b);
-    DMT_CPU_GPU Vector4f   operator*(Vector4f a, Vector4f b);
-    DMT_CPU_GPU Quaternion operator*(Quaternion a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator*(Vector2i a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator*(Vector2f a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator*(Vector3i a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator*(Vector3f a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator*(Vector4i a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator*(Vector4f a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Quaternion operator*(Quaternion a, Quaternion b);
 
-    DMT_CPU_GPU Vector2i operator/(Vector2i a, Vector2i b);
-    DMT_CPU_GPU Vector2f operator/(Vector2f a, Vector2f b);
-    DMT_CPU_GPU Vector3i operator/(Vector3i a, Vector3i b);
-    DMT_CPU_GPU Vector3f operator/(Vector3f a, Vector3f b);
-    DMT_CPU_GPU Vector4i operator/(Vector4i a, Vector4i b);
-    DMT_CPU_GPU Vector4f operator/(Vector4f a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i operator/(Vector2i a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f operator/(Vector2f a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i operator/(Vector3i a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f operator/(Vector3f a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i operator/(Vector4i a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f operator/(Vector4f a, Vector4f b);
 
-    DMT_CPU_GPU Point2i&    operator+=(Point2i& a, Vector2i b);
-    DMT_CPU_GPU Point2f&    operator+=(Point2f& a, Vector2f b);
-    DMT_CPU_GPU Point3i&    operator+=(Point3i& a, Vector3i b);
-    DMT_CPU_GPU Point3f&    operator+=(Point3f& a, Vector3f b);
-    DMT_CPU_GPU Point4i&    operator+=(Point4i& a, Vector4i b);
-    DMT_CPU_GPU Point4f&    operator+=(Point4f& a, Vector4f b);
-    DMT_CPU_GPU Vector2i&   operator+=(Vector2i& a, Vector2i b);
-    DMT_CPU_GPU Vector2f&   operator+=(Vector2f& a, Vector2f b);
-    DMT_CPU_GPU Vector3i&   operator+=(Vector3i& a, Vector3i b);
-    DMT_CPU_GPU Vector3f&   operator+=(Vector3f& a, Vector3f b);
-    DMT_CPU_GPU Vector4i&   operator+=(Vector4i& a, Vector4i b);
-    DMT_CPU_GPU Vector4f&   operator+=(Vector4f& a, Vector4f b);
-    DMT_CPU_GPU Normal2f&   operator+=(Normal2f& a, Normal2f b);
-    DMT_CPU_GPU Normal3f&   operator+=(Normal3f& a, Normal3f b);
-    DMT_CPU_GPU Quaternion& operator+=(Quaternion& a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU Point2i&    operator+=(Point2i& a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Point2f&    operator+=(Point2f& a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Point3i&    operator+=(Point3i& a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Point3f&    operator+=(Point3f& a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Point4i&    operator+=(Point4i& a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Point4f&    operator+=(Point4f& a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i&   operator+=(Vector2i& a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f&   operator+=(Vector2f& a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i&   operator+=(Vector3i& a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f&   operator+=(Vector3f& a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i&   operator+=(Vector4i& a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f&   operator+=(Vector4f& a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Normal2f&   operator+=(Normal2f& a, Normal2f b);
+    DMT_CORE_API DMT_CPU_GPU Normal3f&   operator+=(Normal3f& a, Normal3f b);
+    DMT_CORE_API DMT_CPU_GPU Quaternion& operator+=(Quaternion& a, Quaternion b);
 
-    DMT_CPU_GPU Vector2i&   operator-=(Vector2i& a, Vector2i b);
-    DMT_CPU_GPU Vector2f&   operator-=(Vector2f& a, Vector2f b);
-    DMT_CPU_GPU Vector3i&   operator-=(Vector3i& a, Vector3i b);
-    DMT_CPU_GPU Vector3f&   operator-=(Vector3f& a, Vector3f b);
-    DMT_CPU_GPU Vector4i&   operator-=(Vector4i& a, Vector4i b);
-    DMT_CPU_GPU Vector4f&   operator-=(Vector4f& a, Vector4f b);
-    DMT_CPU_GPU Normal2f&   operator-=(Normal2f& a, Normal2f b);
-    DMT_CPU_GPU Normal3f&   operator-=(Normal3f& a, Normal3f b);
-    DMT_CPU_GPU Quaternion& operator-=(Quaternion& a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i&   operator-=(Vector2i& a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f&   operator-=(Vector2f& a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i&   operator-=(Vector3i& a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f&   operator-=(Vector3f& a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i&   operator-=(Vector4i& a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f&   operator-=(Vector4f& a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Normal2f&   operator-=(Normal2f& a, Normal2f b);
+    DMT_CORE_API DMT_CPU_GPU Normal3f&   operator-=(Normal3f& a, Normal3f b);
+    DMT_CORE_API DMT_CPU_GPU Quaternion& operator-=(Quaternion& a, Quaternion b);
 
-    DMT_CPU_GPU Vector2i&   operator*=(Vector2i& a, Vector2i b);
-    DMT_CPU_GPU Vector2f&   operator*=(Vector2f& a, Vector2f b);
-    DMT_CPU_GPU Vector3i&   operator*=(Vector3i& a, Vector3i b);
-    DMT_CPU_GPU Vector3f&   operator*=(Vector3f& a, Vector3f b);
-    DMT_CPU_GPU Vector4i&   operator*=(Vector4i& a, Vector4i b);
-    DMT_CPU_GPU Vector4f&   operator*=(Vector4f& a, Vector4f b);
-    DMT_CPU_GPU Quaternion& operator*=(Quaternion& a, Quaternion b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i&   operator*=(Vector2i& a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f&   operator*=(Vector2f& a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i&   operator*=(Vector3i& a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f&   operator*=(Vector3f& a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i&   operator*=(Vector4i& a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f&   operator*=(Vector4f& a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Quaternion& operator*=(Quaternion& a, Quaternion b);
 
-    DMT_CPU_GPU Vector2i& operator/=(Vector2i& a, Vector2i b);
-    DMT_CPU_GPU Vector2f& operator/=(Vector2f& a, Vector2f b);
-    DMT_CPU_GPU Vector3i& operator/=(Vector3i& a, Vector3i b);
-    DMT_CPU_GPU Vector3f& operator/=(Vector3f& a, Vector3f b);
-    DMT_CPU_GPU Vector4i& operator/=(Vector4i& a, Vector4i b);
-    DMT_CPU_GPU Vector4f& operator/=(Vector4f& a, Vector4f b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i& operator/=(Vector2i& a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f& operator/=(Vector2f& a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i& operator/=(Vector3i& a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f& operator/=(Vector3f& a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i& operator/=(Vector4i& a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f& operator/=(Vector4f& a, Vector4f b);
 
 
     // Vector Types: Common Inline Methods ----------------------------------------------------------------------------
@@ -706,6 +706,7 @@ namespace dmt {
         Point3f pMax;
     };
 
+    DMT_CORE_API DMT_CPU_GPU Bounds3f makeBounds(Point3f p0, Point3f p1);
     DMT_CORE_API DMT_CPU_GPU Bounds3f bbEmpty();
     DMT_CORE_API DMT_CPU_GPU bool     inside(Point3f p, Bounds3f const& b);
     DMT_CORE_API DMT_CPU_GPU Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b);
@@ -732,6 +733,7 @@ namespace dmt {
         Point2f pMax;
     };
 
+    DMT_CORE_API DMT_CPU_GPU Bounds2f makeBounds(Point2f p0, Point2f p1);
     DMT_CORE_API DMT_CPU_GPU Bounds2f bbEmpty2();
     DMT_CORE_API DMT_CPU_GPU bool     inside(Point2f p, Bounds2f const& b);
     DMT_CORE_API DMT_CPU_GPU Bounds2f bbUnion(Bounds2f const& a, Bounds2f const& b);
@@ -847,11 +849,11 @@ namespace dmt {
         float xLow = 0.f, yLow = 0.f, zLow = 0.f;
         float xHigh = 0.f, yHigh = 0.f, zHigh = 0.f;
     };
-    DMT_CPU_GPU Point3fi operator+(Point3fi const& a, Point3fi const& b);
-    DMT_CPU_GPU Point3fi operator-(Point3fi const& a, Point3fi const& b);
-    DMT_CPU_GPU Point3fi operator*(Point3fi const& a, Point3fi const& b);
-    DMT_CPU_GPU Point3fi operator/(Point3fi const& a, Point3fi const& b);
-    DMT_CPU_GPU Point3fi mul(Matrix4f const& m, Point3fi const& p);
+    DMT_CORE_API DMT_CPU_GPU Point3fi operator+(Point3fi const& a, Point3fi const& b);
+    DMT_CORE_API DMT_CPU_GPU Point3fi operator-(Point3fi const& a, Point3fi const& b);
+    DMT_CORE_API DMT_CPU_GPU Point3fi operator*(Point3fi const& a, Point3fi const& b);
+    DMT_CORE_API DMT_CPU_GPU Point3fi operator/(Point3fi const& a, Point3fi const& b);
+    DMT_CORE_API DMT_CPU_GPU Point3fi mul(Matrix4f const& m, Point3fi const& p);
 
     // Ray and RayDifferentials ---------------------------------------------------------------------------------------
     // TODO compress direction when you write compressed normal

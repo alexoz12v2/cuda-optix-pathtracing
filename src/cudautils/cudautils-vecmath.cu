@@ -599,6 +599,11 @@ namespace dmt {
                 p.z <= b.pMax.z);
     }
 
+    __host__ __device__ Bounds3f makeBounds(Point3f p0, Point3f p1)
+    {
+        return {.pMin = min(p0, p1), .pMax = max(p0, p1)};
+    }
+
     __host__ __device__ Bounds3f bbEmpty()
     {
         return {.pMin = {{fl::infinity(), fl::infinity(), fl::infinity()}},
@@ -773,6 +778,11 @@ namespace dmt {
     }
 
     // Bounds2f
+    __host__ __device__ Bounds2f makeBounds(Point2f p0, Point2f p1)
+    {
+        return {.pMin = min(p0, p1), .pMax = max(p0, p1)};
+    }
+
     __host__ __device__ Bounds2f bbEmpty2()
     {
         return {.pMin = {{fl::infinity(), fl::infinity()}}, .pMax = {{-fl::infinity(), -fl::infinity()}}};

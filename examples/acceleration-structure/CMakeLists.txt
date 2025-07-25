@@ -5,4 +5,4 @@ target_sources(dmt-acceleration-structure
   PRIVATE main.cpp utilities.cpp
 )
 target_include_directories(dmt-acceleration-structure PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(dmt-acceleration-structure PRIVATE dmt::platform dmt::core)
+target_link_libraries(dmt-acceleration-structure PRIVATE dmt::platform dmt::core stb::stb)

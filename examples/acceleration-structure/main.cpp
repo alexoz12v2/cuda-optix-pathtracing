@@ -6,6 +6,9 @@
 #include "core/core-bvh-builder.h"
 #include "core/core-primitive.h"
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+
 #include <numeric>
 #include <span>
 #include <sstream>
@@ -52,59 +55,58 @@ namespace dmt::ddbg {
         return result;
     }
 
-    std::vector<TriangleData> makeCubeTriangles()
+    std::vector<TriangleData> makeCubeTriangles(Point3f centerPosition, float size)
     {
         std::vector<TriangleData> tris;
 
-        float const                  s        = 1.0f;
-        std::array<Point3f, 8> const vertices = {
-            {{{-s, -s, -s}}, {{s, -s, -s}}, {{s, s, -s}}, {{-s, s, -s}}, {{-s, -s, s}}, {{s, -s, s}}, {{s, s, s}}, {{-s, s, s}}}};
+        float const h = size * 0.5f; // half size
+        // Cube in local space
+        std::array<Point3f, 8> const localVerts =
+            {Point3f{{-h, -h, -h}},
+             Point3f{{+h, -h, -h}},
+             Point3f{{+h, +h, -h}},
+             Point3f{{-h, +h, -h}},
+             Point3f{{-h, -h, +h}},
+             Point3f{{+h, -h, +h}},
+             Point3f{{+h, +h, +h}},
+             Point3f{{-h, +h, +h}}};
 
+        // Local to world transform (just offset, no rotation)
+        auto world = [&](Point3f const& p) {
+            return Point3f{{p.x + centerPosition.x, p.y + centerPosition.y, p.z + centerPosition.z}};
+        };
+
+        // Face indices
+        // clang-format off
         std::array<std::array<int, 3>, 12> const indices = {{
-            // Front face
-            {0, 1, 2},
-            {2, 3, 0},
-            // Back face
-            {4, 7, 6},
-            {6, 5, 4},
-            // Left face
-            {0, 3, 7},
-            {7, 4, 0},
-            // Right face
-            {1, 5, 6},
-            {6, 2, 1},
-            // Top face
-            {3, 2, 6},
-            {6, 7, 3},
-            // Bottom face
-            {0, 4, 5},
-            {5, 1, 0},
+            {0, 1, 2}, {2, 3, 0}, // Front (+Y)
+            {5, 4, 7}, {7, 6, 5}, // Back (-Y)
+            {4, 0, 3}, {3, 7, 4}, // Left (-X)
+            {1, 5, 6}, {6, 2, 1}, // Right (+X)
+            {3, 2, 6}, {6, 7, 3}, // Top (+Z)
+            {4, 5, 1}, {1, 0, 4}, // Bottom (-Z)
         }};
+        // clang-format on
 
         for (auto const& idx : indices)
-        {
-            tris.push_back({{{vertices[idx[0]].x, vertices[idx[0]].y, vertices[idx[0]].z}},
-                            {{vertices[idx[1]].x, vertices[idx[1]].y, vertices[idx[1]].z}},
-                            {{vertices[idx[2]].x, vertices[idx[2]].y, vertices[idx[2]].z}}});
-        }
+            tris.push_back({world(localVerts[idx[0]]), world(localVerts[idx[1]]), world(localVerts[idx[2]])});
 
         return tris;
     }
 
-    std::vector<TriangleData> makePlaneTriangles(float size = 1.0f)
+    std::vector<TriangleData> makePlaneTriangles(Point3f centerPosition, float size)
     {
         std::vector<TriangleData> tris;
+        float const               h = size * 0.5f;
 
-        float const s = size * 0.5f;
-
-        Point3f const v0{{-s, 0.0f, -s}};
-        Point3f const v1{{s, 0.0f, -s}};
-        Point3f const v2{{s, 0.0f, s}};
-        Point3f const v3{{-s, 0.0f, s}};
+        // On X-Y plane (Z = 0), +Y is forward
+        Point3f const v0 = {{centerPosition.x - h, centerPosition.y - h, centerPosition.z}};
+        Point3f const v1 = {{centerPosition.x + h, centerPosition.y - h, centerPosition.z}};
+        Point3f const v2 = {{centerPosition.x + h, centerPosition.y + h, centerPosition.z}};
+        Point3f const v3 = {{centerPosition.x - h, centerPosition.y + h, centerPosition.z}};
 
         // Triangle 1: v0, v1, v2
         tris.emplace_back(v0, v1, v2);
-
         // Triangle 2: v2, v3, v0
         tris.emplace_back(v2, v3, v0);
 
@@ -115,11 +117,20 @@ namespace dmt::ddbg {
     {
         std::pmr::vector<TriangleData> scene{memory};
 
-        auto cube  = makeCubeTriangles();
-        auto plane = makePlaneTriangles(4.0f); // Large ground plane
+        // Place cube centered near origin, slightly raised
+        Point3f const cubeCenter{{0.f, 0.f, 0.5f}}; // in front of camera at {0, -4, 2}
+        float const   cubeSize = 1.0f;
 
-        scene.insert(scene.end(), cube.begin(), cube.end());
-        scene.insert(scene.end(), plane.begin(), plane.end());
+        // Place a ground plane large enough under cube
+        Point3f const planeCenter{{0.f, 0.f, 0.f}}; // XY plane at Z=0
+        float const   planeSize = 6.0f;
+
+        auto cubeTris  = makeCubeTriangles(cubeCenter, cubeSize);
+        auto planeTris = makePlaneTriangles(planeCenter, planeSize);
+
+        scene.insert(scene.end(), cubeTris.begin(), cubeTris.end());
+        scene.insert(scene.end(), planeTris.begin(), planeTris.end());
+
         return scene;
     }
 
@@ -241,7 +252,7 @@ namespace dmt::sampling {
                     {
                         int32_t const index = digitIndex * base + digitValue;
                         // only one?
-                        permutations[index] = dmt::numbers::permutationElement(digitValue, digitValue, base, dseed);
+                        permutations[index] = dmt::numbers::permutationElement(digitValue, base, dseed);
                     }
                 }
             }
@@ -404,7 +415,7 @@ namespace dmt::sampling {
         {
             uint64_t const next = num / base;
             // second param ignored. TODO: SIMD
-            int32_t const digitValue = dn::permutationElement(num - next * base, base, base, dn::mixBits(hash ^ reverseDigits));
+            int32_t const digitValue = dn::permutationElement(num - next * base, base, dn::mixBits(hash ^ reverseDigits));
             reverseDigits = reverseDigits * base + digitValue;
             invBaseM *= invBase;
             ++digitIndex;
@@ -413,6 +424,14 @@ namespace dmt::sampling {
 
         return std::min(invBaseM * reverseDigits, dmt::fl::oneMinusEps());
     }
+
+    template <typename T>
+    concept Sampler = requires(std::remove_cvref_t<T>& t) {
+        { t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>()) };
+        { t.get1D() } -> std::floating_point;
+        { t.get2D() } -> std::same_as<Point2f>;
+        { t.getPixel2D() } -> std::same_as<Point2f>;
+    } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class HaltonOwen
     {
@@ -528,6 +547,7 @@ namespace dmt::sampling {
         int32_t m_baseScales[NumDimensions];
         int32_t m_baseExponents[NumDimensions];
     };
+    static_assert(Sampler<HaltonOwen>);
 
 } // namespace dmt::sampling
 
@@ -586,7 +606,7 @@ namespace dmt::filtering {
         template <Filter T>
         static Bounds2f domainFromFilter(T const& filter)
         {
-            return {-filter.radius(), filter.radius()};
+            return makeBounds(-filter.radius(), filter.radius());
         }
 
     public:
@@ -664,40 +684,257 @@ namespace dmt::filtering {
         float         m_b, m_c;
         FilterSampler m_sampler;
     };
+    static_assert(Filter<Mitchell>);
 } // namespace dmt::filtering
 
+namespace dmt::camera {
+    struct CameraSample
+    {
+        /// point on the film to which the generated ray should carry radiance (meaning pixelPosition + random offset)
+        Point2f pFilm;
+
+        /// point on the lens the ray passes through
+        Point2f pLens;
+
+        /// time at which the ray should sample the scene. If the camera itself is in motion,
+        /// the time value determines what camera position to use when generating the ray
+        float time;
+
+        /// scale factor that is applied when the ray’s radiance is added to the image stored by the film;
+        /// it accounts for the reconstruction filter used to filter image samples at each pixel
+        float filterWeight;
+    };
+
+    template <filtering::Filter F, sampling::Sampler S>
+    CameraSample getCameraSample(S& sampler, Point2i pPixel, F const& filter)
+    {
+        filtering::FilterSample const fs = filter.sample(sampler.getPixel2D());
+        Point2f const                 pPixelf{{static_cast<float>(pPixel.x), static_cast<float>(pPixel.y)}};
+        Vector2f const                pixelShift{{0.5f, 0.5f}};
+        CameraSample const            res{.pFilm        = (pPixelf + pixelShift) + fs.p,
+                                          .pLens        = sampler.get2D(),
+                                          .time         = sampler.get1D(),
+                                          .filterWeight = fs.weight};
+        return res;
+    }
+
+    Ray generateRay(CameraSample cs, Transform const& cameraFromRaster, Transform const& renderFromCamera)
+    {
+        Point3f const pxImage{{cs.pFilm.x, cs.pFilm.y, 0}};
+        Point3f const pCamera{{cameraFromRaster(pxImage)}};
+        // TODO add lens?
+        // time should use lerp(cs.time, shutterOpen, shutterClose)
+        Ray const ray{Point3f{{0, 0, 0}}, normalize(pCamera), cs.time};
+        // TODO handle tMax better
+        float tMax = 1e5f;
+        return renderFromCamera(ray, &tMax);
+    }
+} // namespace dmt::camera
+
+namespace dmt::film {
+    template <typename T>
+    concept Film = requires(std::remove_cvref_t<T>& t) {
+        { t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f) };
+    } && !std::is_pointer_v<std::remove_cvref_t<T>>;
+
+    class RGBFilm
+    {
+    private:
+        struct Pixel
+        {
+            double rgbSum[3];
+            double weightSum;
+        };
+
+    public:
+        //RGBFilm(Point2i resolution, float maxComponentValue = fl::infinity(), std::pmr::memory_resource* memory = std::pmr::get_default_resource()):
+        //m_pixels(makeUniqueRef<Pixel[]>(memory, resolution.x * resolution.y), m_resolution(resolution), m_maxComponentValue(maxComponentValue) {}
+        RGBFilm(Point2i                    res,
+                float                      maxComp = fl::infinity(),
+                std::pmr::memory_resource* memory  = std::pmr::get_default_resource()) :
+        m_pixels(makeUniqueRef<Pixel[]>(memory, res.x * res.y)),
+        m_resolution(res),
+        m_maxComponentValue(maxComp)
+        {
+            std::memset(m_pixels.get(), 0, sizeof(Pixel) * res.x * res.y);
+        }
+
+        void writeImage(os::Path const& imagePath, std::pmr::memory_resource* temp = std::pmr::get_default_resource())
+        {
+            using std::uint8_t;
+
+            int const   width     = m_resolution.x;
+            int const   height    = m_resolution.y;
+            int const   numPixels = width * height;
+            int const   channels  = 3; // RGB, 24-bit
+            float const gamma     = 1.0f / 2.2f;
+
+            // Allocate 8-bit per channel RGB image buffer
+            UniqueRef<uint8_t[]> image = makeUniqueRef<uint8_t[]>(temp, numPixels * channels);
+
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    int const    idx = x + width * y;
+                    Pixel const& px  = m_pixels[idx];
+
+                    float const scale = px.weightSum > 0 ? 1.0f / px.weightSum : 0.0f;
+
+                    // basic gamma correction
+                    float const r = std::pow(float(px.rgbSum[0] * scale), gamma);
+                    float const g = std::pow(float(px.rgbSum[1] * scale), gamma);
+                    float const b = std::pow(float(px.rgbSum[2] * scale), gamma);
+
+                    // Clamp and convert to 8-bit
+                    constexpr auto toByte = [](float v) -> uint8_t {
+                        return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
+                    };
+
+                    image[idx * 3 + 0] = toByte(r);
+                    image[idx * 3 + 1] = toByte(g);
+                    image[idx * 3 + 2] = toByte(b);
+                }
+            }
+
+            // Write PNG using stb_image_write
+            stbi_write_png(imagePath.toUnderlying(temp).c_str(), // path
+                           width,
+                           height,          // resolution
+                           channels,        // number of channels (RGB)
+                           image.get(),     // image buffer
+                           width * channels // stride in bytes
+            );
+        }
+
+        void addSample(Point2i pixel, RGB sample, float weight)
+        {
+            float const m = [](RGB rgb) {
+                if (rgb.r > rgb.g && rgb.r > rgb.b)
+                    return rgb.r;
+                else if (rgb.g > rgb.r && rgb.g > rgb.b)
+                    return rgb.g;
+                else
+                    return rgb.b;
+            }(sample);
+            if (m > m_maxComponentValue)
+            {
+                sample.r *= m_maxComponentValue / m;
+                sample.g *= m_maxComponentValue / m;
+                sample.b *= m_maxComponentValue / m;
+            }
+            assert(pixel.x < m_resolution.x && pixel.y < m_resolution.y && "Outside pixel boundaries");
+            Pixel& px = m_pixels[pixel.x + m_resolution.x * pixel.y];
+            for (int32_t c = 0; c < 3; ++c)
+                px.rgbSum[c] += reinterpret_cast<float*>(&sample)[c];
+
+            px.weightSum += weight;
+        }
+
+    private:
+        UniqueRef<Pixel[]> m_pixels;
+        Point2i            m_resolution;
+        float              m_maxComponentValue;
+    };
+    static_assert(Film<RGBFilm>);
+} // namespace dmt::film
+
 namespace dmt {
-    void runMainProgram(std::span<TriangleData>     scene,
-                        std::span<Primitive const*> primsView,
-                        BVHBuildNode*               bvh,
-                        unsigned char*              scratchBuffer)
+    void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
+    {
+        // https://developercommunity.visualstudio.com/t/monotonic_buffer_resourcerelease-does/10624172
+        auto* upstream = resource.upstream_resource();
+        std::destroy_at(&resource);
+        std::construct_at(&resource, ptr, bytes, upstream);
+    }
+
+    // TODO proper path tracing
+    RGB incidentRadiance(Ray const& ray, BVHBuildNode* bvh, sampling::HaltonOwen& sampler, std::pmr::memory_resource* temp)
+    {
+        auto*            leaf = bvh::traverseBVHBuild(ray, bvh, temp);
+        Primitive const* prim = nullptr;
+        if (leaf)
+        {
+            float minDistSoFar = fl::infinity();
+            for (int32_t i = 0; i < leaf->primitiveCount; ++i)
+            {
+                Intersection isect = leaf->primitives[i]->intersect(ray, fl::infinity());
+                if (isect.hit && minDistSoFar > isect.t)
+                {
+                    prim         = leaf->primitives[i];
+                    minDistSoFar = isect.t;
+                }
+            }
+        }
+
+        if (prim)
+        {
+            return prim->color();
+        }
+        else
+        {
+            return {.r = 0.255, .g = 0.102, .b = 0.898};
+        }
+    }
+
+    void runMainProgram(std::span<TriangleData> scene, std::span<Primitive const*> primsView, BVHBuildNode* bvh)
     {
         // primsView primitive coordinates defined in world space
-        static constexpr uint32_t Width = 1280, Height = 720, NumChannels = 3;
-        static constexpr int32_t  samplesPerPixel = 4;
+        static constexpr uint32_t Width              = 128;
+        static constexpr uint32_t Height             = 128;
+        static constexpr uint32_t NumChannels        = 3;
+        static constexpr int32_t  SamplesPerPixel    = 4;
+        static constexpr uint32_t ScratchBufferBytes = 4096;
 
+        Context ctx;
+        assert(ctx.isValid() && "Invalid Context");
+
+        // memory resources (TODO with our allocators)
+        UniqueRef<unsigned char[]> scratchBuffer = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(),
+                                                                                  ScratchBufferBytes);
+        std::pmr::monotonic_buffer_resource  scratch{scratchBuffer.get(),
+                                                    ScratchBufferBytes,
+                                                    std::pmr::null_memory_resource()}; // call release everytime you reset it
         std::pmr::synchronized_pool_resource pool;
-        ThreadPoolV2                         threadpool{std::thread::hardware_concurrency(), &pool};
-        auto                                 image = makeUniqueRef<uint8_t[]>(&pool, Width * Height * NumChannels);
-        dmt::sampling::HaltonOwen            sampler{samplesPerPixel, {{Width, Height}}, 123432};
+
+        ThreadPoolV2         threadpool{std::thread::hardware_concurrency(), &pool};
+        film::RGBFilm        film{{{Width, Height}}, 1e5f, &pool};
+        sampling::HaltonOwen sampler{SamplesPerPixel, {{Width, Height}}, 123432};
+        filtering::Mitchell  filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f, &pool, &scratch};
+        resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
 
         // define camera (image plane physical dims, resolution given by image)
         Vector3f const cameraPosition{{0.f, -4.f, 2.f}};
-        Normal3f const cameraDirection = normalFrom({{0.f, 1.f, 0.3f}});
+        Normal3f const cameraDirection = normalFrom({{0.f, 1.f, -0.5f}});
         float const    focalLength     = 35e-3f; // 35 mm
-        // instead of pixelLength, use fovRadians
-        float const pixelLength = 13e-6f; // 169 um^2 square pixel
+        float const    fovRadians      = fl::pi() / 2;
+        float const    aspectRatio     = Width / Height;
+
+        Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(fovRadians, aspectRatio, Width, Height, focalLength);
+        Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
+
+        // TODO: translate the BVH to be in camera-world (render) space, then switch renderFromCamera to use camera-world
 
         // for each pixel, for each sample within the pixel (halton + owen scrambling)
         for (Point2i pixel : dmt::ScanlineRange2D({{Width, Height}}))
         {
-            for (int32_t sampleIndex = 0; sampleIndex < samplesPerPixel; ++sampleIndex)
+            ctx.log("Starting Pixel {{ {} {} }}", std::make_tuple(pixel.x, pixel.y));
+            for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
             {
+                ctx.log("  Pixel {{ {} {} }}, sample {}", std::make_tuple(pixel.x, pixel.y, sampleIndex));
                 sampler.startPixelSample(pixel, sampleIndex);
-                Point2f sample = sampler.getPixel2D();
-                // shoot ray, register intersection
+                camera::CameraSample const cs = camera::getCameraSample(sampler, pixel, filter);
+                Ray const                  ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
+                RGB const                  radiance = incidentRadiance(ray, bvh, sampler, &scratch);
+                film.addSample(pixel, radiance, cs.filterWeight);
+                resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
             }
         }
+
+        os::Path imagePath = os::Path::executableDir(&pool);
+        imagePath /= "image.png";
+        ctx.log("Writing image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
+        film.writeImage(imagePath);
     }
 } // namespace dmt
 
@@ -739,7 +976,7 @@ int32_t guardedMain()
 
         dmt::bvh::groupTrianglesInBVHLeaves(rootNode, prims, &bufferMemory);
 
-        bufferMemory.release();
+        dmt::resetMonotonicBufferPointer(bufferMemory, bufferPtr.get(), 2048);
 
         if (ctx.isLogEnabled())
         {
@@ -753,7 +990,7 @@ int32_t guardedMain()
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();
 
-        dmt::runMainProgram(scene, spanPrims, rootNode, bufferPtr.get());
+        dmt::runMainProgram(scene, spanPrims, rootNode);
 
         dmt::bvh::cleanup(rootNode);
 

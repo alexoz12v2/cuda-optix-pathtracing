@@ -852,6 +852,7 @@ namespace dmt {
     // TODO proper path tracing
     RGB incidentRadiance(Ray const& ray, BVHBuildNode* bvh, sampling::HaltonOwen& sampler, std::pmr::memory_resource* temp)
     {
+        // TODO: Doesn't work
         auto*            leaf = bvh::traverseBVHBuild(ray, bvh, temp);
         Primitive const* prim = nullptr;
         if (leaf)

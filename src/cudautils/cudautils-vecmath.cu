@@ -1090,7 +1090,7 @@ namespace dmt {
         glm::vec4 w{v.x, v.y, v.z, 0.f};
         w = toGLMmat(m) * w;
         assert(fl::nearZero(w.w));
-        return {{w.x, w.y, w.y}};
+        return {{w.x, w.y, w.z}};
     }
 
     __host__ __device__ Normal3f mul(Matrix4f const& m, Normal3f const& v)
@@ -1099,7 +1099,7 @@ namespace dmt {
         w = toGLMmat(m) * w;
         assert(fl::nearZero(w.w));
         w = glm::normalize(w);
-        return {{w.x, w.y, w.y}};
+        return {{w.x, w.y, w.z}};
     }
 
     __host__ __device__ Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v)
@@ -1118,7 +1118,7 @@ namespace dmt {
         glm::vec4 w{p.x, p.y, p.z, 1.f};
         w = toGLMmat(m) * w;
         w /= w.w;
-        return {{w.x, w.y, w.y}};
+        return {{w.x, w.y, w.z}};
     }
 
     __host__ __device__ Point3fi mul(Matrix4f const& mat, Point3fi const& point)

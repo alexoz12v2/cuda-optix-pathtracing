@@ -2,7 +2,7 @@
 
 // TODO add platform-math
 #if defined(DMT_ARCH_X86_64)
-#include <immintrin.h>
+    #include <immintrin.h>
 #endif
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -13,7 +13,7 @@
 #include <glm/gtc/epsilon.hpp>
 
 #if defined(near)
-#undef near
+    #undef near
 #endif
 
 namespace dmt::fl {

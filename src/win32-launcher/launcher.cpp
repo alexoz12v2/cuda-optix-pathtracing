@@ -39,8 +39,8 @@ struct StdNamedPipes
                                        //PIPE_ACCESS_INBOUND,
                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                                        2,
-                                       1024,
-                                       1024,
+                                       8192,
+                                       8192,
                                        CONNECTIMEOUT,
                                        defaultSecurityAttr);
         if (hStdOutPipe == INVALID_HANDLE_VALUE)
@@ -71,8 +71,8 @@ struct StdNamedPipes
                                        //PIPE_ACCESS_INBOUND,
                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                                        2,
-                                       1024,
-                                       1024,
+                                       8192,
+                                       8192,
                                        CONNECTIMEOUT,
                                        defaultSecurityAttr);
 
@@ -337,10 +337,11 @@ static constexpr WORD olive            = FOREGROUND_BLUE | FOREGROUND_GREEN | FO
 
 DWORD WINAPI stdoutPipeThread(void* params)
 {
-    wchar_t buffer[1024];
-    auto*   data     = reinterpret_cast<Data*>(params);
-    HANDLE  hStdOut  = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD   numBytes = 0;
+    static constexpr uint32_t  BufferBytes = 8192;
+    std::unique_ptr<wchar_t[]> buffer      = std::make_unique<wchar_t[]>(BufferBytes);
+    auto*                      data        = reinterpret_cast<Data*>(params);
+    HANDLE                     hStdOut     = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD                      numBytes    = 0;
     // https://learn.microsoft.com/en-us/windows/console/console-screen-buffers#span-idwin32characterattributesspanspan-idwin32characterattributesspancharacter-attributes
     CONSOLE_SCREEN_BUFFER_INFO consoleInfo{};
     if (!GetConsoleScreenBufferInfo(hStdOut, &consoleInfo))
@@ -373,7 +374,7 @@ DWORD WINAPI stdoutPipeThread(void* params)
             continue;
 
         // each message should end with L'\0'
-        bool completed = ReadFile(data->pipes.hStdOutPipe, buffer, 1024, &numBytes, &ovs);
+        bool completed = ReadFile(data->pipes.hStdOutPipe, buffer.get(), BufferBytes, &numBytes, &ovs);
         if (!completed)
         {
             if (auto err = GetLastError(); err != ERROR_IO_PENDING)
@@ -388,9 +389,9 @@ DWORD WINAPI stdoutPipeThread(void* params)
             }
         }
 
-        wchar_t const* buf        = buffer;
-        uint32_t       numStrings = countNulTerminators(buffer, numBytes);
-
+#if 0
+        wchar_t const* buf        = buffer.get();
+        uint32_t       numStrings = countNulTerminators(buffer.get(), numBytes);
         while (numMsgs != 0 && numStrings != 0)
         {
             --numStrings;
@@ -428,6 +429,63 @@ DWORD WINAPI stdoutPipeThread(void* params)
             if (!GetMailslotInfo(data->hMailslot, nullptr, &numBytesNextMsg, &numMsgs, nullptr))
                 ErrorExit(L"Failed GetMailslotInfo");
         }
+#else
+        wchar_t* buf = buffer.get();
+        assert((numMsgs == 0 || numMsgs == 1) && "Too many messages in stdout pipe mailbox");
+        if (numMsgs != 0)
+        {
+            // fetch current message data (level)
+            uint8_t c = 0;
+            assert(numBytesNextMsg == sizeof(uint8_t));
+            if (!ReadFile(data->hMailslot, &c, sizeof(uint8_t), nullptr, nullptr))
+                ErrorExit(L"ReadFile Mailbos");
+
+            // Write current message
+            FlushFileBuffers(hStdOut);
+            WORD const textAttribute = [attrs = consoleInfo.wAttributes, c = c]() -> WORD {
+                switch (c)
+                {
+                    case 0: return (attrs & ~consoleColorMask) | olive;
+                    case 1: return (attrs & ~consoleColorMask) | white;
+                    case 2: return (attrs & ~consoleColorMask) | yellow;
+                    case 3: return (attrs & ~consoleColorMask) | red;
+                }
+                return 0;
+            }();
+            if (!textAttribute) // todo remove
+                continue;
+            if (!SetConsoleTextAttribute(hStdOut, textAttribute))
+                ErrorExit(L"Couldn't set console attributes to the proper color");
+
+            // estimate message length by finding L'\0'
+            DWORD numCharsCurrent = static_cast<DWORD>(wcsnlen_s(buf, numBytes));
+
+            // Ensure the last visible character is L'\n'
+            if (numCharsCurrent > 0 && buf[numCharsCurrent - 1] != L'\n')
+            {
+                // If there's space, insert L'\n' before null terminator
+                if (numCharsCurrent + 1 < numBytes) // +1 for '\n', +1 for '\0'
+                {
+                    buf[numCharsCurrent]     = L'\n';
+                    buf[numCharsCurrent + 1] = L'\0';
+                    ++numCharsCurrent; // account for added newline
+                }
+                else
+                {
+                    // Handle error or truncation case if no space to insert '\n'
+                    ErrorExit(L"Message too long to insert newline");
+                }
+            }
+
+            WriteConsoleW(hStdOut, buf, numCharsCurrent, nullptr, nullptr);
+            //WriteFile(hStdOut, buf, numCharsCurrent << 1, nullptr, nullptr);
+            buf += numCharsCurrent + 1;
+
+            // fetch next message
+            if (!GetMailslotInfo(data->hMailslot, nullptr, &numBytesNextMsg, &numMsgs, nullptr))
+                ErrorExit(L"Failed GetMailslotInfo");
+        }
+#endif
     }
 
     if (!SetConsoleTextAttribute(hStdOut, (consoleInfo.wAttributes & ~consoleColorMask) | white))

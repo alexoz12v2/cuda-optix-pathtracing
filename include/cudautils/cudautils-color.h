@@ -1,12 +1,12 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 // windows bull*
 #undef RGB
 
 namespace dmt {
-    struct RGB
+    struct DMT_CORE_API RGB
     {
         float r, g, b;
     };
@@ -70,5 +70,5 @@ namespace dmt {
 } // namespace dmt
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_COLOR_IMPL)
-#include "cudautils-color.cu"
+    #include "cudautils-color.cu"
 #endif

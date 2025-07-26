@@ -44,7 +44,7 @@ namespace dmt::os {
             std::pmr::wstring const wValue = dmt::os::win32::utf16FromUtf8(value, resource);
             result                         = SetEnvironmentVariableW(wName.c_str(), wValue.c_str());
 #else
-#error "not done yet"
+    #error "not done yet"
 #endif
             return result;
         }

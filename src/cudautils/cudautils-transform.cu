@@ -1050,37 +1050,35 @@ namespace dmt {
     }
 
     // CameraTransform ------------------------------------------------------------------------------------------------
-    /*
-        __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys)
+    __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, int renderCoordSys)
+    {
+        switch (renderCoordSys)
         {
-            switch (renderCoordSys)
+            case 0:
             {
-                using enum ERenderCoordSys;
-                case eCameraWorld:
-                {
 
-                    break;
-                }
-                case eCamera:
-                {
-                    break;
-                }
-                case eWorld:
-                {
-                    break;
-                }
-                default: // should be never reached
-    #if !defined(__CUDA_ARCH__)
-                    std::abort();
-    #else
-                    // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated
-                    __threadfence();
-                    asm("trap;");
-    #endif
-                    break;
+                break;
             }
+            case 1:
+            {
+                break;
+            }
+            case 2:
+            {
+                break;
+            }
+            default: // should be never reached
+#if !defined(__CUDA_ARCH__)
+                std::abort();
+#else
+                // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated
+                __threadfence();
+                asm("trap;");
+#endif
+                break;
         }
-    */
+    }
+
     __host__ __device__ Transform dmt::CameraTransform::renderFromWorld() const
     {
         Transform t = worldFromRender;

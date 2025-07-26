@@ -14,27 +14,27 @@ int guardedMain();
 
 // to be defined before including this only once, on the entry point
 #if defined(DMT_ENTRY_POINT)
-#if !defined(DMT_WINDOWS_INCLUDED)
-#define DMT_WINDOWS_INCLUDED
-#if defined(DMT_OS_WINDOWS)
-#include <Windows.h>
-#endif
+    #if !defined(DMT_WINDOWS_INCLUDED)
+        #define DMT_WINDOWS_INCLUDED
+        #if defined(DMT_OS_WINDOWS)
+            #include <Windows.h>
+        #endif
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
-#if defined(DMT_DEBUG)
+        #if defined(DMT_DEBUG)
     // Before resuming the process
     MessageBox(nullptr, L"Attach debugger to child process now.", L"Debug Pause", MB_OK);
-#endif
+        #endif
     int returnCode = guardedMain();
     return returnCode;
 }
-#else
+    #else
 // argv is actually UTF-8 (char8_t)
 int main(int argc, char* argv[])
 {
     int returnCode = guardedMain();
     return returnCode;
 }
-#endif
+    #endif
 
 #endif

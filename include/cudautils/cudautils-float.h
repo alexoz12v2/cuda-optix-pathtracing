@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #include <algorithm>
 #include <bit>
@@ -12,13 +12,15 @@
 
 // a present from Windows.h
 #if defined(DMT_OS_WINDOWS)
-#pragma push_macro("near")
-#undef near
+    #pragma push_macro("near")
+    #undef near
 #endif
 
 // TODO: If you want to rely to link time optimization, split definition and declaration and remove inline linkage
 namespace dmt::fl {
     using namespace dmt;
+    /** largest possible floating point less than 1 */
+    DMT_CPU_GPU inline constexpr float oneMinusEps() { return 0x1.fffffep-1; }
     DMT_CPU_GPU inline constexpr float infinity() { return std::numeric_limits<float>::infinity(); }
     DMT_CPU_GPU inline constexpr float eqTol() { return std::numeric_limits<float>::epsilon(); }
     DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
@@ -155,6 +157,26 @@ namespace dmt::fl {
 #endif
     }
 
+    DMT_CPU_GPU inline float lerp(float delta, float a, float b)
+    {
+        if (delta == 0.f)
+            return a;
+
+#if defined(__CUDA_ARCH__)
+        // On CUDA, just use fused multiply-add for better precision
+        return __fmaf_rn(b - a, delta, a);
+#else
+    // On CPU: compute (b - a) * delta + a with FMA if available
+    // But to guarantee exact return of `a` when delta == 0,
+    // we do the if check above.
+    #if defined(__FMA__)
+        return std::fma(b - a, delta, a);
+    #else
+        return a + (b - a) * delta;
+    #endif
+#endif
+    }
+
     DMT_CPU_GPU inline float mulRoundDown(float a, float b)
     {
 #if defined(__CUDA_ARCH__)
@@ -254,20 +276,20 @@ namespace dmt::fl {
 #endif
     }
 
-    DMT_CPU_GPU float rcp(float x);
+    DMT_CORE_API DMT_CPU_GPU float rcp(float x);
 
-    DMT_CPU_GPU bool nearZero(float x);
-    DMT_CPU_GPU bool near(float x, float y);
+    DMT_CORE_API DMT_CPU_GPU bool nearZero(float x);
+    DMT_CORE_API DMT_CPU_GPU bool near(float x, float y);
     // Helper to compute (a^2 + b^2)^1/2 without overflow or underflow
-    DMT_CPU_GPU float pythag(float a, float b);
+    DMT_CORE_API DMT_CPU_GPU float pythag(float a, float b);
 
 } // namespace dmt::fl
 
 namespace dmt {
     // TODO SOA
-    struct Intervalf
+    struct DMT_CORE_API Intervalf
     {
-        struct SOA
+        struct DMT_CORE_API SOA
         {
         };
 
@@ -302,9 +324,9 @@ inline constexpr DMT_CPU_GPU float arg(float f)
 }
 
 #if defined(DMT_OS_WINDOWS)
-#pragma pop_macro("near")
+    #pragma pop_macro("near")
 #endif
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_FLOAT_IMPL)
-#include "cudautils-float.cu"
+    #include "cudautils-float.cu"
 #endif

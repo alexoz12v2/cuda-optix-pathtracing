@@ -449,6 +449,7 @@ TSWLatexianTemp*
 # vscode
 .vscode/
 .vs/
+cuda-optix-pathtracing.code-workspace
 
 # python
 __pycache__/

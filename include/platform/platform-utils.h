@@ -784,7 +784,7 @@ namespace dmt {
     }
 
 #if !defined(DMT_ARCH_X86_64)
-#error "Pointer Tagging relies heavily on x86_64's virtual addreess format"
+    #error "Pointer Tagging relies heavily on x86_64's virtual addreess format"
 #endif
     /** Class managing a pointer aligned to a 32 byte boundary, embedding a 12 bits tag split among its 7 high bits and 5 low bits
      * - x86_64 systems actually use 48 bits for virtual addresses. Actually, scratch that, with the

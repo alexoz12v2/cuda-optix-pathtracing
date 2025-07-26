@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 #include <cudautils/cudautils-spectrum.h>
 #include <cudautils/cudautils-transform.h>
 #include <cudautils/cudautils-vecmath.h>
@@ -222,5 +222,5 @@ namespace dmt {
 } // namespace dmt
 
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_CAMERA_IMPL)
-#include "cudautils-camera.cu"
+    #include "cudautils-camera.cu"
 #endif

@@ -169,11 +169,12 @@ namespace dmt {
         static inline uint32_t printSeparator(wchar_t* DMT_RESTRICT _buf, uint32_t _maxBytes)
         {
             uint32_t maxChars = _maxBytes >> 1;
-            if (maxChars < 3)
+            if (maxChars + 1 < 3)
                 return 0;
             _buf[0] = L' ';
             _buf[1] = L'|';
             _buf[2] = L' ';
+            _buf[3] = L'\0';
             return 3;
         }
 
@@ -216,6 +217,7 @@ namespace dmt {
 
             buf[0] = L']';
             buf[1] = L' ';
+            buf[2] = L'\0';
             totalBytes += 4;
             buf += 2;
 
@@ -225,6 +227,7 @@ namespace dmt {
             buf[0] = L' ';
             buf[1] = L'-';
             buf[2] = L' ';
+            buf[3] = L'\0';
             totalBytes += 6;
             buf += 3;
 
@@ -247,8 +250,8 @@ namespace dmt {
                 ; // Handle error
         }
 
-        static constexpr uint32_t maxChars    = 2048;
-        static constexpr uint32_t maxArgChars = 1024;
+        static constexpr uint32_t maxChars    = 4096;
+        static constexpr uint32_t maxArgChars = 2048;
         static constexpr uint32_t maxBytes    = maxChars >> 1;
         OVERLAPPED                overlapped{};
         HANDLE                    hStdOut  = INVALID_HANDLE_VALUE;
@@ -310,18 +313,18 @@ namespace dmt {
         // filename
         static uint32_t const srcLocFileOffset = strlen(DMT_PROJ_PATH);
         strncpy(_midBuf, _srcLoc.file_name() + srcLocFileOffset, _midBytes);
-        _midBuf[_midBytes - 1] = '\0';
-        uint32_t len           = strlen(_midBuf);
-        uint32_t numChars      = ::dmt::os::win32::utf16le_From_utf8(std::bit_cast<char const*>(_midBuf),
+        _midBuf[_midBytes - 1]   = '\0';
+        uint32_t len             = strlen(_midBuf);
+        uint32_t numChars        = ::dmt::os::win32::utf16le_From_utf8(std::bit_cast<char const*>(_midBuf),
                                                                 len,
                                                                 _wMidBuf,
                                                                 _wNumBytes,
                                                                 _wNormBuf,
                                                                 _wNormBytes,
                                                                 nullptr);
-        _wNormBuf[numChars]    = L'\0';
-        uint32_t maxChars      = _maxBytes >> 1;
-        uint32_t written       = _snwprintf(_buf, maxChars, L"%s:", _wNormBuf);
+        _wNormBuf[numChars >> 1] = L'\0';
+        uint32_t maxChars        = _maxBytes >> 1;
+        uint32_t written         = _snwprintf(_buf, maxChars, L"%s:", _wNormBuf);
         maxChars -= written;
         _buf += written;
         if (maxChars == 0)
@@ -329,17 +332,17 @@ namespace dmt {
 
         // function name
         strncpy(_midBuf, _srcLoc.function_name(), _midBytes);
-        _midBuf[_midBytes - 1]  = '\0';
-        len                     = strlen(_midBuf);
-        numChars                = ::dmt::os::win32::utf16le_From_utf8(std::bit_cast<char const*>(_midBuf),
+        _midBuf[_midBytes - 1]   = '\0';
+        len                      = strlen(_midBuf);
+        numChars                 = ::dmt::os::win32::utf16le_From_utf8(std::bit_cast<char const*>(_midBuf),
                                                        len,
                                                        _wMidBuf,
                                                        _wNumBytes,
                                                        _wNormBuf,
                                                        _wNormBytes,
                                                        nullptr);
-        _wNormBuf[numChars]     = L'\0';
-        uint32_t const written1 = _snwprintf(_buf, maxChars, L"%s:", _wNormBuf);
+        _wNormBuf[numChars >> 1] = L'\0';
+        uint32_t const written1  = _snwprintf(_buf, maxChars, L"%s:", _wNormBuf);
         written += written1;
         maxChars -= written1;
         _buf += written1;

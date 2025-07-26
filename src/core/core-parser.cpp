@@ -1,4 +1,4 @@
-#include "middleware-parser.h"
+#include "core-parser.h"
 
 #include <array>
 #include <atomic>
@@ -1679,8 +1679,10 @@ namespace dmt {
         sid_t            sid;
     };
 
-    static ParamExractRet maybeExtractParam(AppContext& actx, std::string_view token)
+    static ParamExractRet maybeExtractParam(std::string_view token)
     {
+        Context actx;
+        assert(actx.isValid());
         ParamExractRet ret;
         ret.type = 0;
         ret.name = dequoteString(token);
@@ -1727,8 +1729,10 @@ namespace dmt {
         return ret;
     }
 
-    static bool isParameter(AppContext& actx, std::string_view token)
+    static bool isParameter(std::string_view token)
     {
+        Context actx;
+        assert(actx.isValid());
         if (token.starts_with('"'))
         {
             if (!token.ends_with('"'))
@@ -2343,33 +2347,33 @@ namespace dmt {
     }
 
     // TokenStream ----------------------------------------------------------------------------------------------------
-    TokenStream::TokenStream(AppContext& actx, std::string_view filePath)
+    TokenStream::TokenStream(std::string_view filePath)
     { // TODO proper memory allocation with tag and all
-        std::construct_at(&m_delayedCtor.reader, actx.mctx().pctx, filePath.data(), chunkSize);
+        Context actx;
+        assert(actx.isValid());
+        std::construct_at(&m_delayedCtor.reader, filePath.data(), chunkSize);
         if (!m_delayedCtor.reader)
         {
             actx.error("Couldn't open file {}", {filePath});
             std::abort();
         }
 
-        m_buffer = reinterpret_cast<char*>(actx.stackAllocate(chunkSize, 8, EMemoryTag::eUnknown, (sid_t)0));
+        m_buffer = std::make_unique<char[]>(512);
         if (!m_buffer)
         {
             actx.error("Couldn't allocate 512 B for token buffer");
             std::abort();
         }
         using Tokenizer = std::remove_pointer_t<decltype(m_tokenizer)>;
-        m_tokenizer     = reinterpret_cast<decltype(m_tokenizer)>(
-            actx.stackAllocate(sizeof(Tokenizer), alignof(Tokenizer), EMemoryTag::eUnknown, (sid_t)0));
+        m_tokenizer     = std::make_unique<WordParser>();
         if (!m_tokenizer)
         {
             actx.error("Couldn't allocate word tokenizer");
             std::abort();
         }
-        std::construct_at(m_tokenizer);
 
         // request first chunk
-        bool success = m_delayedCtor.reader.requestChunk(actx.mctx().pctx, m_buffer, 0);
+        bool success = m_delayedCtor.reader.requestChunk(m_buffer, 0);
         assert(success);
     }
 
@@ -2377,16 +2381,15 @@ namespace dmt {
     {
         assert(m_chunkNum == m_delayedCtor.reader.numChunks());
         std::destroy_at(&m_delayedCtor.reader);
-        std::destroy_at(m_tokenizer);
     }
 
-    std::string TokenStream::next(AppContext& actx)
+    std::string TokenStream::next()
     { // TODO stack allocated
-        advance(actx);
+        advance();
         return peek();
     }
 
-    void TokenStream::advance(AppContext& actx)
+    void TokenStream::advance()
     {
         while (true)
         {
@@ -2395,7 +2398,7 @@ namespace dmt {
                 bool completed = false;
                 while (!completed)
                 {
-                    completed = m_delayedCtor.reader.waitForPendingChunk(actx.mctx().pctx, 1000);
+                    completed = m_delayedCtor.reader.waitForPendingChunk(1000);
                 }
                 m_chunk    = {m_buffer, m_delayedCtor.reader.lastNumBytesRead()};
                 m_newChunk = false;
@@ -2420,7 +2423,7 @@ namespace dmt {
                         m_token.clear();
                         return;
                     }
-                    bool success = m_delayedCtor.reader.requestChunk(actx.mctx().pctx, m_buffer, m_chunkNum);
+                    bool success = m_delayedCtor.reader.requestChunk(m_buffer, m_chunkNum);
                     assert(success);
                 }
             }
@@ -2430,15 +2433,17 @@ namespace dmt {
     std::string TokenStream::peek() { return m_token; }
 
     // SceneParser ----------------------------------------------------------------------------------------------------
-    SceneParser::SceneParser(AppContext& actx, IParserTarget* pTarget, std::string_view filePath) : m_pTarget(pTarget)
+    SceneParser::SceneParser(IParserTarget* pTarget, std::string_view filePath) : m_pTarget(pTarget)
     {
+        Context actx;
+        assert(actx.isValid());
         if (!m_pTarget)
         {
             actx.error("Valid parser target needed");
-            std::abort();
+            std::abort(); // TODO remove
         }
 
-        pushFile(actx, filePath, true);
+        pushFile(filePath, true);
         char             separators[2] = {pathSeparator(), '/'};
         std::string_view sepView       = {separators, 2};
         size_t           pos           = filePath.find_last_of(sepView);
@@ -2452,30 +2457,33 @@ namespace dmt {
         assert(m_basePath.back() == separators[0] || m_basePath.back() == separators[1]);
     }
 
-    void SceneParser::parse(AppContext& actx, Options& inOutOptions)
+    void SceneParser::parse(Options& inOutOptions)
     {
         using namespace std::string_view_literals;
 
+        Context actx;
+        assert(actx.isValid());
+
         //check/get Arg and check/get params
         auto typeAndParamListParsing = [this]<typename Enum>
-            requires(std::is_enum_v<Enum>)(AppContext & actx,
-                                           SText const& directive,
-                                           TokenStream& currentStream,
-                                           ArgsDArray&  outArgs,
-                                           ParamMap&    outParams,
-                                           bool (*fromSidFunc)(sid_t, Enum&),
-                                           Enum& out)
-        {
-            currentStream.advance(actx);
+            requires(std::is_enum_v<Enum>)
+        (SText const& directive,
+         TokenStream& currentStream,
+         ArgsDArray&  outArgs,
+         ParamMap&    outParams,
+         bool (*fromSidFunc)(sid_t, Enum&),
+         Enum& out) {
+            Context actx;
+            currentStream.advance();
 
             //check number of Args and get enum
-            if (parseArgs(actx, currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(dequoteString(outArgs[0])), out))
+            if (parseArgs(currentStream, outArgs) != 1 || !fromSidFunc(hashCRC64(dequoteString(outArgs[0])), out))
             {
                 actx.error("Unexpected argument {} for directive {}", {outArgs[0], directive.str});
                 std::abort();
             }
             //check number of parameters and store them in outParams
-            if (parseParams(actx, currentStream, outParams) == 0)
+            if (parseParams(currentStream, outParams) == 0)
             {
                 actx.error("Expected at least a parameter for directive {}", {directive.str});
                 std::abort();
@@ -2489,8 +2497,7 @@ namespace dmt {
                 spec.type;
                 requires std::is_same_v<decltype(spec.type), EnumType> && std::is_enum_v<EnumType> &&
                              std::is_default_constructible_v<Spec>;
-            }(AppContext & actx,
-              SText const&   directive,
+            }(SText const&   directive,
               Options const& options,
               TokenStream&   currentStream,
               ArgsDArray&    outArgs,
@@ -2501,13 +2508,14 @@ namespace dmt {
               EEncounteredHeaderDirective eDirective,
               void (*callback)(SceneParser& self, Spec const& spec) = nullptr)
         {
-            Spec spec;
+            Context actx;
+            Spec    spec;
             //check if you are out from world block
-            if (!transitionToHeaderIfFirstHeaderDirective(actx, options, eDirective))
+            if (!transitionToHeaderIfFirstHeaderDirective(options, eDirective))
                 std::abort();
-            currentStream.advance(actx);
+            currentStream.advance();
             //Check Arg
-            if (uint32_t num = parseArgs(actx, currentStream, outArgs); num != 1)
+            if (uint32_t num = parseArgs(currentStream, outArgs); num != 1)
             {
                 actx.error("Unexpected number of arguments for {} directive. Should be 1, got {}", {directive.str, num});
                 std::abort();
@@ -2519,7 +2527,7 @@ namespace dmt {
                 std::abort();
             }
             //check and get
-            parseParams(actx, currentStream, outParams);
+            parseParams(currentStream, outParams);
 
             if (setParams(spec, outParams, options) != 0)
             {
@@ -2533,15 +2541,11 @@ namespace dmt {
 
         //usefull for the transforms fix leng of params
         auto parseArgumentFloats = [this]<size_t size> // TODO rework without template
-            requires(size == 3 || size == 16 || size == 9 || size == 4 ||
-                     size == 2)(AppContext & actx,
-                                SText const&             directive,
-                                TokenStream&             currentStream,
-                                ArgsDArray&              outArgs,
-                                std::array<float, size>& outArray)
-        {
-            currentStream.advance(actx);
-            if (parseArgs(actx, currentStream, outArgs) != size)
+            requires(size == 3 || size == 16 || size == 9 || size == 4 || size == 2)
+        (SText const& directive, TokenStream& currentStream, ArgsDArray& outArgs, std::array<float, size>& outArray) {
+            Context actx;
+            currentStream.advance();
+            if (parseArgs(currentStream, outArgs) != size)
             {
                 actx.error("Unexpected number of parameters for {} directive", {directive.str});
                 std::abort();
@@ -2555,14 +2559,10 @@ namespace dmt {
 
         //directives that has only string arg
         auto parseArgumentNames =
-            [this](AppContext&  actx,
-                   SText const& directive,
-                   TokenStream& currentStream,
-                   ArgsDArray&  outArgs,
-                   sid_t*       pSids,
-                   uint32_t     num) {
-            currentStream.advance(actx);
-            if (parseArgs(actx, currentStream, outArgs) != num ||
+            [this](SText const& directive, TokenStream& currentStream, ArgsDArray& outArgs, sid_t* pSids, uint32_t num) {
+            Context actx;
+            currentStream.advance();
+            if (parseArgs(currentStream, outArgs) != num ||
                 std::reduce(outArgs.begin(), outArgs.begin() + num, false, [](bool curr, std::string const& elem) {
                     return curr || !startsWithEndsWith(elem, '"', '"');
                 }))
@@ -2578,7 +2578,7 @@ namespace dmt {
         while (!m_fileStack.empty())
         {
             TokenStream& currentStream = topFile();
-            currentStream.advance(actx);
+            currentStream.advance();
 
             //read file
             for (std::string token = currentStream.peek(); !token.empty(); token = currentStream.peek())
@@ -2590,7 +2590,7 @@ namespace dmt {
                 //comment statement
                 if (token.starts_with('#'))
                 {
-                    currentStream.advance(actx);
+                    currentStream.advance();
                     continue;
                 }
 
@@ -2599,7 +2599,7 @@ namespace dmt {
                 {
                     //actx.error("Invalid directive {}", {token});
                     //std::abort();
-                    currentStream.advance(actx);
+                    currentStream.advance();
                     continue;
                 }
 
@@ -2613,8 +2613,8 @@ namespace dmt {
                             actx.error("Option directive allowed only before any other Directives in the Header");
                             std::abort();
                         }
-                        parseParams(actx, currentStream, params);
-                        if (!setOptionParam(actx, params, inOutOptions))
+                        parseParams(currentStream, params);
+                        if (!setOptionParam(params, inOutOptions))
                             std::abort();
                         m_pTarget->Option(params.begin()->first, params.begin()->second);
                         break;
@@ -2630,8 +2630,7 @@ namespace dmt {
                     {
                         void (*copyCamera)(SceneParser& self, CameraSpec const& spec) =
                             [](SceneParser& self, CameraSpec const& spec) { self.m_parsingState.cameraSpec = spec; };
-                        typeHeaderDirectiveParsing(actx,
-                                                   dict::directive::Camera,
+                        typeHeaderDirectiveParsing(dict::directive::Camera,
                                                    inOutOptions,
                                                    currentStream,
                                                    args,
@@ -2645,8 +2644,7 @@ namespace dmt {
                     }
                     case dict::directive::Sampler.sid:
                     {
-                        typeHeaderDirectiveParsing(actx,
-                                                   dict::directive::Sampler,
+                        typeHeaderDirectiveParsing(dict::directive::Sampler,
                                                    inOutOptions,
                                                    currentStream,
                                                    args,
@@ -2659,10 +2657,10 @@ namespace dmt {
                     }
                     case dict::directive::ColorSpace.sid:
                     {
-                        if (!transitionToHeaderIfFirstHeaderDirective(actx, inOutOptions, EEncounteredHeaderDirective::eColorSpace))
+                        if (!transitionToHeaderIfFirstHeaderDirective(inOutOptions, EEncounteredHeaderDirective::eColorSpace))
                             std::abort();
-                        currentStream.advance(actx);
-                        if (parseArgs(actx, currentStream, args) != 1)
+                        currentStream.advance();
+                        if (parseArgs(currentStream, args) != 1)
                         {
                             actx.error("Unexpected number of arguments for ColorSpace directive");
                             std::abort();
@@ -2684,8 +2682,7 @@ namespace dmt {
                             self.m_parsingState.xResolution = spec.xResolution;
                             self.m_parsingState.yResolution = spec.yResolution;
                         };
-                        typeHeaderDirectiveParsing(actx,
-                                                   dict::directive::Film,
+                        typeHeaderDirectiveParsing(dict::directive::Film,
                                                    inOutOptions,
                                                    currentStream,
                                                    args,
@@ -2699,8 +2696,7 @@ namespace dmt {
                     }
                     case dict::directive::PixelFilter.sid:
                     {
-                        typeHeaderDirectiveParsing(actx,
-                                                   dict::directive::PixelFilter,
+                        typeHeaderDirectiveParsing(dict::directive::PixelFilter,
                                                    inOutOptions,
                                                    currentStream,
                                                    args,
@@ -2713,8 +2709,7 @@ namespace dmt {
                     }
                     case dict::directive::Integrator.sid:
                     {
-                        typeHeaderDirectiveParsing(actx,
-                                                   dict::directive::Integrator,
+                        typeHeaderDirectiveParsing(dict::directive::Integrator,
                                                    inOutOptions,
                                                    currentStream,
                                                    args,
@@ -2727,8 +2722,7 @@ namespace dmt {
                     }
                     case dict::directive::Accelerator.sid:
                     {
-                        typeHeaderDirectiveParsing(actx,
-                                                   dict::directive::Accelerator,
+                        typeHeaderDirectiveParsing(dict::directive::Accelerator,
                                                    inOutOptions,
                                                    currentStream,
                                                    args,
@@ -2805,85 +2799,84 @@ namespace dmt {
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::Import.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::LookAt.sid:
                     {
                         std::array<float, 9> look{};
-                        parseArgumentFloats(actx, dict::directive::LookAt, currentStream, args, look);
+                        parseArgumentFloats(dict::directive::LookAt, currentStream, args, look);
                         m_pTarget->LookAt(look[0], look[1], look[2], look[3], look[4], look[5], look[6], look[7], look[8]);
                         break;
                     }
                     case dict::directive::Translate.sid:
                     {
                         std::array<float, 3> translate{};
-                        parseArgumentFloats(actx, dict::directive::Translate, currentStream, args, translate);
+                        parseArgumentFloats(dict::directive::Translate, currentStream, args, translate);
                         m_pTarget->Translate(translate[0], translate[1], translate[2]);
                         break;
                     }
                     case dict::directive::Scale.sid:
                     {
                         std::array<float, 3> scale{};
-                        parseArgumentFloats(actx, dict::directive::Scale, currentStream, args, scale);
+                        parseArgumentFloats(dict::directive::Scale, currentStream, args, scale);
                         m_pTarget->Scale(scale[0], scale[1], scale[2]);
                         break;
                     }
                     case dict::directive::Rotate.sid:
                     {
                         std::array<float, 4> rotate{};
-                        parseArgumentFloats(actx, dict::directive::Rotate, currentStream, args, rotate);
+                        parseArgumentFloats(dict::directive::Rotate, currentStream, args, rotate);
                         m_pTarget->Rotate(rotate[0], rotate[1], rotate[2], rotate[3]);
                         break;
                     }
                     case dict::directive::CoordinateSystem.sid:
                     {
                         sid_t coordSys = 0;
-                        parseArgumentNames(actx, dict::directive::CoordinateSystem, currentStream, args, &coordSys, 1);
+                        parseArgumentNames(dict::directive::CoordinateSystem, currentStream, args, &coordSys, 1);
                         m_pTarget->CoordinateSystem(coordSys);
                         break;
                     }
                     case dict::directive::CoordSysTransform.sid:
                     {
                         sid_t coordSys = 0;
-                        parseArgumentNames(actx, dict::directive::CoordSysTransform, currentStream, args, &coordSys, 1);
+                        parseArgumentNames(dict::directive::CoordSysTransform, currentStream, args, &coordSys, 1);
                         m_pTarget->CoordSysTransform(coordSys);
                         break;
                     }
                     case dict::directive::Transform.sid:
                     {
                         std::array<float, 16> transform{1, 0, 0, 0, /**/ 0, 1, 0, 0, /**/ 0, 0, 1, 0, /**/ 0, 0, 0, 1};
-                        parseArgumentFloats(actx, dict::directive::Transform, currentStream, args, transform);
+                        parseArgumentFloats(dict::directive::Transform, currentStream, args, transform);
                         m_pTarget->Transform(transform);
                         break;
                     }
                     case dict::directive::ConcatTransform.sid:
                     {
                         std::array<float, 16> transform{1, 0, 0, 0, /**/ 0, 1, 0, 0, /**/ 0, 0, 1, 0, /**/ 0, 0, 0, 1};
-                        parseArgumentFloats(actx, dict::directive::ConcatTransform, currentStream, args, transform);
+                        parseArgumentFloats(dict::directive::ConcatTransform, currentStream, args, transform);
                         m_pTarget->ConcatTransform(transform);
                         break;
                     }
                     case dict::directive::TransformTimes.sid:
                     {
                         std::array<float, 2> startEnd{0, 1};
-                        parseArgumentFloats(actx, dict::directive::TransformTimes, currentStream, args, startEnd);
+                        parseArgumentFloats(dict::directive::TransformTimes, currentStream, args, startEnd);
                         m_pTarget->TransformTimes(startEnd[0], startEnd[1]);
                         break;
                     }
                     case dict::directive::ActiveTransform.sid:
                     {
                         EActiveTransform transform = EActiveTransform::eStartTime;
-                        currentStream.advance(actx);
-                        if (parseArgs(actx, currentStream, args) != 1 ||
-                            !activeTransformFromSid(hashCRC64(args[0]), transform))
+                        currentStream.advance();
+                        if (parseArgs(currentStream, args) != 1 || !activeTransformFromSid(hashCRC64(args[0]), transform))
                         {
                             actx.error("illegal or absent argument for directive {}",
                                        {dict::directive::ActiveTransform.str});
@@ -2905,7 +2898,7 @@ namespace dmt {
                     case dict::directive::Attribute.sid:
                     {
                         ETarget target = ETarget::eShape;
-                        typeAndParamListParsing(actx, dict::directive::Attribute, currentStream, args, params, targetFromSid, target);
+                        typeAndParamListParsing(dict::directive::Attribute, currentStream, args, params, targetFromSid, target);
                         m_pTarget->Attribute(target, params);
                         break;
                     }
@@ -2913,13 +2906,13 @@ namespace dmt {
                     { // TODO create file
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::ObjectBegin.sid:
                     {
                         sid_t name = 0;
-                        parseArgumentNames(actx, dict::directive::ObjectBegin, currentStream, args, &name, 1);
+                        parseArgumentNames(dict::directive::ObjectBegin, currentStream, args, &name, 1);
                         pushScope(EScope::eObject);
                         m_pTarget->ObjectBegin(name);
                         break;
@@ -2944,14 +2937,14 @@ namespace dmt {
                             std::abort();
                         }
                         sid_t name = 0;
-                        parseArgumentNames(actx, dict::directive::ObjectBegin, currentStream, args, &name, 1);
+                        parseArgumentNames(dict::directive::ObjectBegin, currentStream, args, &name, 1);
                         m_pTarget->ObjectInstance(name);
                         break;
                     }
                     case dict::directive::LightSource.sid:
                     {
                         ELightType out;
-                        typeAndParamListParsing(actx, dict::directive::LightSource, currentStream, args, params, lightTypeFromSid, out);
+                        typeAndParamListParsing(dict::directive::LightSource, currentStream, args, params, lightTypeFromSid, out);
                         m_pTarget->LightSource(out, params);
                         break;
                     }
@@ -2959,49 +2952,49 @@ namespace dmt {
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::Material.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::MakeNamedMaterial.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::NamedMaterial.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::Texture.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::MakeNamedMedium.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     case dict::directive::MediumInterface.sid:
                     {
                         //to remove
                         if (!isZeroArgsDirective(tokenSid))
-                            currentStream.advance(actx);
+                            currentStream.advance();
                         break;
                     }
                     default:
@@ -3011,13 +3004,15 @@ namespace dmt {
                 }
 
                 if (isZeroArgsDirective(tokenSid))
-                    currentStream.advance(actx);
+                    currentStream.advance();
             }
         }
     }
 
-    bool SceneParser::setOptionParam(AppContext& actx, ParamMap const& params, Options& outOptions)
+    bool SceneParser::setOptionParam(ParamMap const& params, Options& outOptions)
     {
+        Context actx;
+        assert(actx.isValid());
         using namespace std::string_view_literals;
         if (params.size() != 1)
         {
@@ -3063,33 +3058,9 @@ namespace dmt {
                     return false;
                 }
                 break;
-            case dict::opts::msereferenceimage.sid:
-                outOptions.mseReferenceOutput = reinterpret_cast<char*>(
-                    actx.stackAllocate(256, 8, EMemoryTag::eUnknown, (sid_t)0));
-                if (!outOptions.mseReferenceOutput ||
-                    !parseAndSetString(params,
-                                       name,
-                                       outOptions.mseReferenceImage,
-                                       outOptions.mseReferenceImageLength,
-                                       ""sv))
-                {
-                    actx.error("Error while parsing msereferenceimage");
-                    return false;
-                }
-                break;
+            case dict::opts::msereferenceimage.sid: actx.warn("msereferenceimage not handled", {}); break;
             case dict::opts::msereferenceout.sid: // TODO
-                outOptions.mseReferenceOutput = reinterpret_cast<char*>(
-                    actx.stackAllocate(256, 8, EMemoryTag::eUnknown, (sid_t)0));
-                if (!outOptions.mseReferenceOutput ||
-                    !parseAndSetString(params,
-                                       name,
-                                       outOptions.mseReferenceOutput,
-                                       outOptions.mseReferenceOutputLength,
-                                       ""sv))
-                {
-                    actx.error("Error while parsing msereferenceout");
-                    return false;
-                }
+                actx.warn("msereferenceout not handled", {});
                 break;
             case dict::opts::rendercoordsys.sid:
                 if (!parseAndSetEnum(params, name, outOptions.renderCoord, ERenderCoordSys::eCameraWorld, renderCoordSysFromSid))
@@ -3138,23 +3109,25 @@ namespace dmt {
         return true;
     }
 
-    uint32_t SceneParser::parseArgs(AppContext& actx, TokenStream& stream, ArgsDArray& outArr)
+    uint32_t SceneParser::parseArgs(TokenStream& stream, ArgsDArray& outArr)
     {
+        Context actx;
+        assert(actx.isValid());
         uint32_t i = 0;
-        for (std::string token = stream.peek(); !token.empty(); stream.advance(actx), token = stream.peek())
+        for (std::string token = stream.peek(); !token.empty(); stream.advance(), token = stream.peek())
         {
             if (token.starts_with('#'))
                 continue;
 
             sid_t tokenSid = hashCRC64(dequoteString(token));
-            if (isDirective(tokenSid) || isParameter(actx, token))
+            if (isDirective(tokenSid) || isParameter(token))
                 break;
 
             outArr.emplace_back(std::move(token));
             ++i;
         }
 
-        if (i == 0)
+        if (i == 0 && actx.isErrorEnabled())
         {
             actx.error("Expected at least 1 argument for the current directive, got none");
             // abort done by caller, which checks the number of args and their type
@@ -3163,14 +3136,16 @@ namespace dmt {
         return i;
     }
 
-    uint32_t SceneParser::parseParams(AppContext& actx, TokenStream& stream, ParamMap& outParams)
+    uint32_t SceneParser::parseParams(TokenStream& stream, ParamMap& outParams)
     {
+        Context actx;
+        assert(actx.isValid());
         uint32_t i = 0;
         for (std::string token = stream.peek(); !token.empty(); /**/)
         {
             if (token.starts_with('#')) // TODO isComment function
             {
-                stream.advance(actx);
+                stream.advance();
                 token = stream.peek();
                 continue;
             }
@@ -3179,7 +3154,7 @@ namespace dmt {
             if (isDirective(tokenSid))
                 break;
 
-            ParamExractRet param   = maybeExtractParam(actx, token);
+            ParamExractRet param   = maybeExtractParam(token);
             auto [it, wasInserted] = outParams.try_emplace(param.sid, param.type);
             if (!wasInserted)
             {
@@ -3187,10 +3162,10 @@ namespace dmt {
                 std::abort();
             }
 
-            stream.advance(actx);
+            stream.advance();
             tokenSid = hashCRC64(dequoteString(token));
-            for (token = stream.peek(); !token.empty() && !isParameter(actx, token) && !isDirective(tokenSid);
-                 stream.advance(actx), token = stream.peek(), tokenSid = hashCRC64(dequoteString(token)))
+            for (token = stream.peek(); !token.empty() && !isParameter(token) && !isDirective(tokenSid);
+                 stream.advance(), token = stream.peek(), tokenSid = hashCRC64(dequoteString(token)))
             {
                 if ((token.size() == 1 && (token[0] == '[' || token[0] == ']')) || token.starts_with('#'))
                     continue;
@@ -3216,10 +3191,10 @@ namespace dmt {
         return i;
     }
 
-    bool SceneParser::transitionToHeaderIfFirstHeaderDirective(AppContext&                 actx,
-                                                               Options const&              outOptions,
-                                                               EEncounteredHeaderDirective val)
+    bool SceneParser::transitionToHeaderIfFirstHeaderDirective(Options const& outOptions, EEncounteredHeaderDirective val)
     {
+        Context actx;
+        assert(actx.isValid());
         if (m_parsingStep == EParsingStep::eWorld)
         {
             actx.error("Unexpected directive found in World block");
@@ -3239,9 +3214,9 @@ namespace dmt {
         return true;
     }
 
-    void SceneParser::pushFile(AppContext& actx, std::string_view filePath, bool isImport)
+    void SceneParser::pushFile(std::string_view filePath, bool isImport)
     {
-        m_fileStack.emplace_front(actx, filePath);
+        m_fileStack.emplace_front(filePath);
         if (isImport)
             m_scopeStacks.emplace_back();
     }

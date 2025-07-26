@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "cudautils/cudautils-macro.h"
 
 #include <cudautils/cudautils-vecmath.h>
 #include <cudautils/cudautils-color.h>
@@ -13,10 +13,11 @@
 #include <memory>
 #include <vector>
 
+
 namespace dmt {
 
     // PixelFormat Definition
-    enum class PixelFormat
+    enum class DMT_CORE_API PixelFormat
     {
         U256,
         Half,
@@ -28,19 +29,20 @@ namespace dmt {
     DMT_CPU_GPU inline bool Is16Bit(PixelFormat format) { return format == PixelFormat::Half; }
     DMT_CPU_GPU inline bool Is32Bit(PixelFormat format) { return format == PixelFormat::Float; }
 
-    std::string ToString(PixelFormat format);
+    DMT_CORE_API std::string ToString(PixelFormat format);
 
-    DMT_CPU_GPU int TexelBytes(PixelFormat format);
+    DMT_CORE_API DMT_CPU_GPU int TexelBytes(PixelFormat format);
 
     // ResampleWeight Definition
-    struct ResampleWeight
+    struct DMT_CORE_API ResampleWeight
     {
         int   firstPixel;
+        float weight[4];
         float weight[4];
     };
 
     // WrapMode Definitions
-    enum class WrapMode
+    enum class DMT_CORE_API WrapMode
     {
         Black,
         Clamp,
@@ -48,15 +50,15 @@ namespace dmt {
         OctahedralSphere
     };
 
-    struct WrapMode2D
+    struct DMT_CORE_API WrapMode2D
     {
         DMT_CPU_GPU WrapMode2D(WrapMode w) : wrap{w, w} {}
         DMT_CPU_GPU WrapMode2D(WrapMode x, WrapMode y) : wrap{x, y} {}
 
-        dmt::array<WrapMode, 2> wrap;
+        WrapMode wrap[2];
     };
 
-    inline dmt::optional<WrapMode> ParseWrapMode(char const* w)
+    inline DMT_CPU_GPU dstd::optional<WrapMode> ParseWrapMode(char const* w)
     {
         if (!strcmp(w, "clamp"))
             return WrapMode::Clamp;
@@ -85,8 +87,6 @@ namespace dmt {
     }
 
     // Image Wrapping Inline Functions
-    DMT_CPU_GPU inline bool RemapPixelCoords(Point2i* pp, Point2i resolution, WrapMode2D wrapMode);
-
     DMT_CPU_GPU inline bool RemapPixelCoords(Point2i* pp, Point2i resolution, WrapMode2D wrapMode)
     {
         Point2i& p = *pp;
@@ -147,7 +147,7 @@ namespace dmt {
     }
 
     // ImageMetadata Definition
-    struct ImageMetadata
+    struct DMT_CORE_API ImageMetadata
     {
         // ImageMetadata Public Methods
         //I don't know about RGBColorSpace
@@ -473,6 +473,7 @@ namespace dmt {
 
 } // namespace dmt
 
+
 #if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_IMAGE_IMPL)
-#include "cudautils-image.cu"
+    #include "cudautils-image.cu"
 #endif

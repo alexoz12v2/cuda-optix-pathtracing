@@ -116,33 +116,124 @@ namespace dmt {
     }
 
     // -- intersect --
+    // TODO add clamp(u, 0, 1) and clamp(v, 0, 1) if you add them to the intersection struct for texture sampling (moller trumbore)
     Intersection Triangle::intersect(Ray const& ray, float tMax) const
     {
-        // https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
-        Vector3f const e1 = tri.v1 - tri.v0;
-        Vector3f const e2 = tri.v2 - tri.v0;
-        Vector3f const h  = cross(ray.d, e2);
-        float const    a  = dot(e1, h);
+#if defined DMT_MOLLER_TRUMBORE
+        // moller trumbore algorithm https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+        Vector3f const         e1  = tri.v1 - tri.v0;
+        Vector3f const         e2  = tri.v2 - tri.v0;
+        static constexpr float tol = 1e-7f; // or 6
+        // det[a, b, c] = a . (b x c) -> all cyclic permutations + cross is anticommutative
+        Vector3f const h = cross(ray.d, e2);
+        float const    a = dot(e1, h);
 
-        if (std::abs(a) < 1e-8f) // if determinant is zero, then ray || triangle
+        if (a > -tol && a < tol) // if determinant is zero, then ray || triangle
             return {.p = {{}}, .t = 0.f, .hit = false};
 
         float const    f = fl::rcp(a); // inverse for cramer's rule
         Vector3f const s = ray.o - tri.v0;
         float const    u = f * dot(s, h); // barycentric coord 0
-        if (u < 0.f || u > 1.f)
+        if (u < -tol || u > 1.f + tol)
             return {.p = {{}}, .t = 0.f, .hit = false};
 
         Vector3f    q = cross(s, e1);
         float const v = f * dot(ray.d, q); // barycentric coord 1
-        if (v < 0.f || v > 1.f)
+        if (v < -tol || (u + v) > 1.f + tol)
             return {.p = {{}}, .t = 0.f, .hit = false};
 
         float const t = f * dot(e2, q);
-        if (t < 1e-5f || t > tMax)
+        if (t < -tol || t > tMax)
             return {.p = {{}}, .t = t, .hit = false};
 
         return {.p = ray.o + t * ray.d, .t = t, .hit = true};
+#else
+        // Woop's watertight algorithm https://jcgt.org/published/0002/01/05/paper.pdf
+        // calculate dimension where the ray direction is maximal
+        int32_t kz = maxComponentIndex(ray.d);
+        int32_t kx = kz + 1;
+        if (kx == 3)
+            kx = 0;
+        int ky = kx + 1;
+        if (ky == 3)
+            ky = 0;
+        // swap kx and ky dimension to preserve winding direction of triangles
+        if (ray.d[kz] < 0.0f)
+            std::swap(kx, ky);
+
+        // calculate shear constants
+        float const Sx = ray.d[kx] / ray.d[kz];
+        float const Sy = ray.d[ky] / ray.d[kz];
+        float const Sz = fl::rcp(ray.d[kz]);
+
+        // calculate vertices relative to ray origin
+        Vector3f const A = tri.v0 - ray.o;
+        Vector3f const B = tri.v1 - ray.o;
+        Vector3f const C = tri.v2 - ray.o;
+
+        // perfor shear and scale of vertices
+        float const Ax = A[kx] - Sx * A[kz];
+        float const Ay = A[ky] - Sy * A[kz];
+        float const Bx = B[kx] - Sx * B[kz];
+        float const By = B[ky] - Sy * B[kz];
+        float const Cx = C[kx] - Sx * C[kz];
+        float const Cy = C[ky] - Sy * C[kz];
+
+        // calculate scaled barycentric coordinates
+        float U = Cx * By - Cy * Bx;
+        float V = Ax * Cy - Ay * Cx;
+        float W = Bx * Ay - By * Ax;
+
+        // fallback to test against edges using double precision
+        if (fl::nearZero(U) || fl::nearZero(V) || fl::nearZero(W))
+        {
+            double CxBy = (double)Cx * (double)By;
+            double CyBx = (double)Cy * (double)Bx;
+            U           = (float)(CxBy - CyBx);
+            double AxCy = (double)Ax * (double)Cy;
+            double AyCx = (double)Ay * (double)Cx;
+            V           = (float)(AxCy - AyCx);
+            double BxAy = (double)Bx * (double)Ay;
+            double ByAx = (double)By * (double)Ax;
+            W           = (float)(BxAy - ByAx);
+        }
+
+        // Perform edge tests. Moving this test before and at the end of the previous conditional gives higher performance
+    #ifdef BACKFACE_CULLING
+        if (U < 0.0f || V < 0.0f || W < 0.0f)
+            return {.p = {}, .t = 0, .hit = false};
+    #else
+        if ((U < 0.0f || V < 0.0f || W < 0.0f) && (U > 0.0f || V > 0.0f || W > 0.0f))
+            return {.p = {}, .t = 0, .hit = false};
+    #endif
+
+        // calculate determinant
+        float const det = U + V + W;
+        if (fl::nearZero(det))
+            return {.p = {}, .t = 0, .hit = false};
+
+        // Calculate scaled z-coordinates of vertices and use them to calculate the hit distance
+        float const Az = Sz * A[kz];
+        float const Bz = Sz * B[kz];
+        float const Cz = Sz * C[kz];
+        float const T  = U * Az + V * Bz + W * Cz;
+    #ifdef BACKFACE_CULLING
+        if (T < 0.0f || T > tMax * det)
+            return {.p = {}, .t = 0, .hit = false};
+    #else
+        int det_sign = fl::signBit(det);
+        if (fl::xorf(T, det_sign) < 0.0f || fl::xorf(T, det_sign) > tMax * fl::xorf(det, det_sign))
+            return {.p = {}, .t = 0, .hit = false};
+    #endif
+        // normalize U, V, W, and T
+        float const rcpDet = 1.0f / det;
+        float const u      = U * rcpDet;
+        float const v      = V * rcpDet;
+        float const w      = W * rcpDet;
+        float const t      = T * rcpDet;
+
+        return {.p = ray.o + t * ray.d, .t = t, .hit = true};
+#endif
     }
 
     Intersection Triangles2::intersect(Ray const& ray, float tMax) const
@@ -156,11 +247,13 @@ namespace dmt {
         __m128 const dy = _mm_set1_ps(ray.d.y);
         __m128 const dz = _mm_set1_ps(ray.d.z);
 
-        __m128 const eps   = _mm_set1_ps(1e-8f);
+        static constexpr float eps1 = 1e-7f;
+
+        __m128 const eps   = _mm_set1_ps(eps1);
         __m128 const tMaxV = _mm_set1_ps(tMax);
         __m128 const inf   = _mm_set1_ps(fl::infinity());
-        __m128 const zero  = _mm_set1_ps(0.f);
-        __m128 const one   = _mm_set1_ps(1.f);
+        __m128 const zero  = _mm_set1_ps(-eps1);
+        __m128 const one   = _mm_set1_ps(1.f + eps1);
 
         // vertices. x1 - x0 1st tri, x4 - x3 2nd tri, hence interlaced format. either loadu and transpose or set
         // I need only the first lane, the second is duplicated and ignored
@@ -215,7 +308,7 @@ namespace dmt {
         // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
         __m128 const v     = _mm_mul_ps(invA,
                                     _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
-        __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(v, one));
+        __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(_mm_add_ps(v, u), one));
 
         // invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
         __m128 const t     = _mm_mul_ps(invA,
@@ -257,11 +350,13 @@ namespace dmt {
         __m128 const dy = _mm_set1_ps(ray.d.y);
         __m128 const dz = _mm_set1_ps(ray.d.z);
 
-        __m128 const eps   = _mm_set1_ps(1e-8f);
+        static constexpr float eps1 = 1e-7f;
+
+        __m128 const eps   = _mm_set1_ps(eps1);
         __m128 const tMaxV = _mm_set1_ps(tMax);
         __m128 const inf   = _mm_set1_ps(fl::infinity());
-        __m128 const zero  = _mm_set1_ps(0.f);
-        __m128 const one   = _mm_set1_ps(1.f);
+        __m128 const zero  = _mm_set1_ps(-eps1);
+        __m128 const one   = _mm_set1_ps(1.f + eps1);
 
         // vertices. x1 - x0 1st tri, x4 - x3 2nd tri, hence interlaced format. either loadu and transpose or set
         __m128 const v0x = _mm_set_ps(xs[3], xs[0], xs[9], xs[6]);
@@ -315,7 +410,7 @@ namespace dmt {
         // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
         __m128 const v     = _mm_mul_ps(invA,
                                     _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
-        __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(v, one));
+        __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(_mm_add_ps(v, u), one));
 
         // t = invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
         __m128 const t     = _mm_mul_ps(invA,
@@ -349,6 +444,7 @@ namespace dmt {
     Intersection Triangles8::intersect(Ray const& ray, float tMax) const
     {
         static constexpr int32_t FloatStride = sizeof(float);
+        static constexpr float   eps1        = 1e-7;
 
         // index vector: [0, 3, 6, 9, 12, 15, 18, 21] for vertex0
         int32_t const v0Offsets[8] = {0, 3, 6, 9, 12, 15, 18, 21};
@@ -382,9 +478,9 @@ namespace dmt {
         __m256 const dz = _mm256_set1_ps(ray.d.z);
 
         // constants
-        __m256 const eps   = _mm256_set1_ps(1e-8f);
-        __m256 const zero  = _mm256_set1_ps(0.f);
-        __m256 const one   = _mm256_set1_ps(1.f);
+        __m256 const eps   = _mm256_set1_ps(eps1);
+        __m256 const zero  = _mm256_set1_ps(-eps1);
+        __m256 const one   = _mm256_set1_ps(1.f + eps1);
         __m256 const tMaxV = _mm256_set1_ps(tMax);
         __m256 const inf   = _mm256_set1_ps(fl::infinity());
 
@@ -430,7 +526,8 @@ namespace dmt {
         __m256 const v     = _mm256_mul_ps(invA,
                                        _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx, qx), _mm256_mul_ps(dy, qy)),
                                                      _mm256_mul_ps(dz, qz)));
-        __m256 const vMask = _mm256_and_ps(_mm256_cmp_ps(v, zero, _CMP_GE_OQ), _mm256_cmp_ps(v, one, _CMP_LE_OQ));
+        __m256 const vMask = _mm256_and_ps(_mm256_cmp_ps(v, zero, _CMP_GE_OQ),
+                                           _mm256_cmp_ps(_mm256_add_ps(v, u), one, _CMP_LE_OQ));
 
         // t = invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
         __m256 const t     = _mm256_mul_ps(invA,

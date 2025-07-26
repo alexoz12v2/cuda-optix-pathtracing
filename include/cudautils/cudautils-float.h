@@ -276,10 +276,11 @@ namespace dmt::fl {
 #endif
     }
 
-    DMT_CORE_API DMT_CPU_GPU float rcp(float x);
+    DMT_CPU_GPU inline float xorf(float f, int32_t mask) { return bitsToFloat(floatToBits(f) & mask); }
 
-    DMT_CORE_API DMT_CPU_GPU bool nearZero(float x);
-    DMT_CORE_API DMT_CPU_GPU bool near(float x, float y);
+    DMT_CORE_API DMT_CPU_GPU float rcp(float x);
+    DMT_CORE_API DMT_CPU_GPU bool  nearZero(float x);
+    DMT_CORE_API DMT_CPU_GPU bool  near(float x, float y);
     // Helper to compute (a^2 + b^2)^1/2 without overflow or underflow
     DMT_CORE_API DMT_CPU_GPU float pythag(float a, float b);
 

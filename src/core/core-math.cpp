@@ -119,29 +119,37 @@ namespace dmt::transforms {
         return dmt::Transform{m};
     }
 
+    // | Rx Ux Fx Tx |
+    // | Ry Uy Fy Ty |
+    // | Rz Uz Fz Tz |
+    // | 0  0  0  1  |
     Transform DMT_FASTCALL worldFromCamera(Normal3f cameraDirection, Point3f cameraPosition)
     {
-        Normal3f tmpUp{{0, 0, 1}};
-        if (absDot(cameraDirection, tmpUp) > 0.99f)
-            tmpUp = {{0, 1, 0}}; // handle gimbal lock
+        Vector3f const forward = cameraDirection; // +Z in camera space
+        Vector3f const worldUp{0.0f, 0.0f, 1.0f}; // World up (0, 0, +Z)
 
-        // orthonormal basis
-        Normal3f const right = normalFrom(cross(tmpUp, cameraDirection)); // world X
-        Normal3f const up    = normalFrom(cross(cameraDirection, right)); // world Z
+        // Compute right (X) and up (Y) vectors for the camera frame (left handed system)
+        Vector3f right = cross(forward, worldUp); // +X in camera space
+        Vector3f up    = cross(right, forward);   // +Y in camera space
+        right          = normalize(right);
+        up             = normalize(up);
 
+        // Column-major matrix for worldFromCamera
         // clang-format off
         Matrix4f const m{{
-            right.x,          up.x,             cameraDirection.x, 0, // note: column
-            right.y,          up.y,             cameraDirection.y, 0,
-            right.z,          up.z,             cameraDirection.z, 0,
-            cameraPosition.x, cameraPosition.y, cameraPosition.z,  1
+            right.x,   right.y,   right.z,   0.0f, // Column 0: right
+            up.x,      up.y,      up.z,      0.0f, // Column 1: up
+            forward.x, forward.y, forward.z, 0.0f, // Column 2: forward
+            cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f // Column 3: position
         }};
         // clang-format on
+        assert(determinant(m) < 0 &&
+               "left handed camera space -> right handed world space"
+               " should swap handedness");
 
-        return dmt::Transform{m};
+        return Transform{m};
     }
 
-    // NOTE: DOESN'T WORK. Start By testing whether the order of elemnets inside the matrix is correct by testing a translation
     Transform DMT_FASTCALL
         cameraFromRaster_Perspective(float fovRadians, float aspectRatio, uint32_t xRes, uint32_t yRes, float focalLength)
     {

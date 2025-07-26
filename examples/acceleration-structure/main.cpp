@@ -125,11 +125,21 @@ namespace dmt::ddbg {
         Point3f const planeCenter{{0.f, 0.f, 0.f}}; // XY plane at Z=0
         float const   planeSize = 6.0f;
 
-        auto cubeTris  = makeCubeTriangles(cubeCenter, cubeSize);
-        auto planeTris = makePlaneTriangles(planeCenter, planeSize);
+        //auto cubeTris  = makeCubeTriangles(cubeCenter, cubeSize);
+        //auto planeTris = makePlaneTriangles(planeCenter, planeSize);
 
-        scene.insert(scene.end(), cubeTris.begin(), cubeTris.end());
-        scene.insert(scene.end(), planeTris.begin(), planeTris.end());
+        //scene.insert(scene.end(), cubeTris.begin(), cubeTris.end());
+        //scene.insert(scene.end(), planeTris.begin(), planeTris.end());
+
+        // triangle in front of camera
+        Point3f const v0{-0.5f, 0.f, -0.5f};
+        Point3f const v1{0.5f, 0, -0.5f};
+        Point3f const v2{0, 0, 0.5f};
+
+        Point3f const v3{0.9f, 0, 0.5f};
+
+        scene.emplace_back(v0, v1, v2);
+        scene.emplace_back(v2, v1, v3);
 
         return scene;
     }
@@ -879,6 +889,71 @@ namespace dmt {
         }
     }
 
+    void writeIntersectionTestImage(
+        std::pmr::monotonic_buffer_resource&  scratch,
+        unsigned char*                        scratchBuffer,
+        size_t                                ScratchBufferBytes,
+        std::pmr::synchronized_pool_resource& pool,
+        std::span<TriangleData>               scene,
+        std::span<Primitive const*>           primsView,
+        uint32_t                              Width,
+        uint32_t                              Height,
+        sampling::HaltonOwen&                 sampler,
+        filtering::Mitchell const&            filter,
+        Transform const&                      cameraFromRaster,
+        Transform const&                      renderFromCamera)
+    {
+        Context       ctx;
+        Point2i const res{static_cast<int32_t>(Width), static_cast<int32_t>(Height)};
+        film::RGBFilm film{res, 1e5f, &pool};
+        ctx.log("Executing test run with intersection tests against all primitives", {});
+
+        UniqueRef<unsigned char[]> maskImage = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
+
+        for (Point2i pixel : ScanlineRange2D(res))
+        {
+            if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
+                ctx.log("Starting Pixel {{ {} {} }}", std::make_tuple(pixel.x, pixel.y));
+
+            for (int32_t sampleIndex = 0; sampleIndex < 1; ++sampleIndex)
+            {
+                sampler.startPixelSample(pixel, sampleIndex);
+                camera::CameraSample /*const*/ cs = camera::getCameraSample(sampler, pixel, filter);
+                cs.pFilm.x                        = static_cast<float>(pixel.x) + 0.5f;
+                cs.pFilm.y                        = static_cast<float>(pixel.y) + 0.5f;
+                Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
+
+                float            nearest   = fl::infinity();
+                Primitive const* primitive = nullptr;
+
+                for (size_t i = 0; i < primsView.size(); ++i)
+                {
+                    if (auto si = primsView[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
+                    {
+                        primitive = primsView[i];
+                        nearest   = si.t;
+                    }
+                }
+
+                RGB const radiance = primitive ? primitive->color() : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+                maskImage[pixel.x + res.x * pixel.y] = primitive ? 255 : 0;
+
+                film.addSample(pixel, radiance, cs.filterWeight);
+
+                resetMonotonicBufferPointer(scratch, scratchBuffer, ScratchBufferBytes);
+            }
+        }
+
+        os::Path imagePath = os::Path::executableDir(&pool);
+        imagePath /= "test.png";
+        ctx.log("Writing test image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
+        film.writeImage(imagePath);
+        imagePath = os::Path::executableDir(&pool);
+        imagePath /= "mask.png";
+        ctx.log("Writing test mask into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
+        stbi_write_png(imagePath.toUnderlying(&scratch).c_str(), res.x, res.y, 1, maskImage.get(), 0);
+    }
+
     void runMainProgram(std::span<TriangleData> scene, std::span<Primitive const*> primsView, BVHBuildNode* bvh)
     {
         // primsView primitive coordinates defined in world space
@@ -906,11 +981,11 @@ namespace dmt {
         resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
 
         // define camera (image plane physical dims, resolution given by image)
-        Vector3f const cameraPosition{{0.f, -4.f, 2.f}};
-        Normal3f const cameraDirection = normalFrom({{0.f, 1.f, -0.5f}});
-        float const    focalLength     = 35e-3f; // 35 mm
-        float const    fovRadians      = fl::pi() / 2;
-        float const    aspectRatio     = Width / Height;
+        Vector3f const cameraPosition{0.f, -1.f, 0.f};
+        Normal3f const cameraDirection{0.f, 1.f, 0.f};
+        float const    focalLength = 35e-3f; // 35 mm
+        float const    fovRadians  = fl::pi() / 2;
+        float const    aspectRatio = Width / Height;
 
         Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(fovRadians, aspectRatio, Width, Height, focalLength);
         Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
@@ -918,12 +993,15 @@ namespace dmt {
         // TODO: translate the BVH to be in camera-world (render) space, then switch renderFromCamera to use camera-world
 
         // for each pixel, for each sample within the pixel (halton + owen scrambling)
-        for (Point2i pixel : dmt::ScanlineRange2D({{Width, Height}}))
+        for (Point2i pixel : ScanlineRange2D({{Width, Height}}))
         {
-            ctx.log("Starting Pixel {{ {} {} }}", std::make_tuple(pixel.x, pixel.y));
-            for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
+            // TODO reduce logging. remove later
+            if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
+                ctx.log("Starting Pixel {{ {} {} }}",
+                        std::make_tuple(pixel.x, pixel.y)); // TODO more samples when filter introduced
+
+            for (int32_t sampleIndex = 0; sampleIndex < 1 /* SamplesPerPixel */; ++sampleIndex)
             {
-                ctx.log("  Pixel {{ {} {} }}, sample {}", std::make_tuple(pixel.x, pixel.y, sampleIndex));
                 sampler.startPixelSample(pixel, sampleIndex);
                 camera::CameraSample /*const*/ cs = camera::getCameraSample(sampler, pixel, filter);
                 cs.pFilm.x                        = static_cast<float>(pixel.x) + 0.5f;
@@ -939,6 +1017,19 @@ namespace dmt {
         imagePath /= "image.png";
         ctx.log("Writing image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
         film.writeImage(imagePath);
+
+        writeIntersectionTestImage(scratch,
+                                   scratchBuffer.get(),
+                                   ScratchBufferBytes,
+                                   pool,
+                                   scene,
+                                   primsView,
+                                   Width,
+                                   Height,
+                                   sampler,
+                                   filter,
+                                   cameraFromRaster,
+                                   renderFromCamera);
     }
 } // namespace dmt
 
@@ -959,7 +1050,12 @@ int32_t guardedMain()
         std::unique_ptr<unsigned char[]> bufferPtr    = std::make_unique<unsigned char[]>(2048);
         auto                             bufferMemory = std::pmr::monotonic_buffer_resource(bufferPtr.get(), 2048);
         auto                             scene        = dmt::ddbg::debugScene();
+
+        ctx.warn("No morton reordering of primitives, still to test", {});
+#if 0
         dmt::reorderByMorton(scene);
+#endif
+
         auto prims     = dmt::makeSinglePrimitivesFromTriangles(scene);
         auto primsView = dmt::ddbg::rawPtrsCopy(prims);
 
@@ -978,9 +1074,9 @@ int32_t guardedMain()
 
         dmt::test::bvhTestRays(rootNode);
 
+        ctx.warn("No grouping of primitives, still to test", {});
+#if 0
         dmt::bvh::groupTrianglesInBVHLeaves(rootNode, prims, &bufferMemory);
-
-        dmt::resetMonotonicBufferPointer(bufferMemory, bufferPtr.get(), 2048);
 
         if (ctx.isLogEnabled())
         {
@@ -988,6 +1084,9 @@ int32_t guardedMain()
             std::string tee = dmt::ddbg::printBVHToString(rootNode);
             ctx.log(std::string_view{tee}, {});
         }
+#endif
+
+        dmt::resetMonotonicBufferPointer(bufferMemory, bufferPtr.get(), 2048);
 
         dmt::test::bvhTestRays(rootNode);
 

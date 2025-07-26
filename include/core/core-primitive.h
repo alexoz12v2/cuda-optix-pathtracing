@@ -5,6 +5,9 @@
 #include "cudautils/cudautils-vecmath.h"
 #include "cudautils/cudautils-color.h"
 
+// TODO remove
+#include <random>
+
 namespace dmt {
     struct Intersection
     {
@@ -20,18 +23,9 @@ namespace dmt {
         using namespace std::chrono;
 
         // Get current time in milliseconds
-        auto now = high_resolution_clock::now();
-        auto ms  = duration_cast<milliseconds>(now.time_since_epoch()).count();
-
-        // Use time to seed periodic functions
-        float t = static_cast<float>(ms) * 0.001f; // seconds
-
-        // Use sin-based hash for R, G, B
-        float r = 0.5f * (std::sin(t * 3.0f + 0.0f) + 1.0f);
-        float g = 0.5f * (std::sin(t * 3.0f + 2.0f) + 1.0f);
-        float b = 0.5f * (std::sin(t * 3.0f + 4.0f) + 1.0f);
-
-        return RGB{r, g, b};
+        static std::mt19937 rng(static_cast<unsigned>(high_resolution_clock::now().time_since_epoch().count()));
+        static std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        return RGB{dist(rng), dist(rng), dist(rng)};
     }
 
     class DMT_CORE_API DMT_INTERFACE Primitive

@@ -212,6 +212,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
 
         ret.o = o.midpoint();
+        ret.d = normalize(ret.d); // Maybe not necessary?
         return ret;
     }
 

@@ -925,10 +925,10 @@ namespace dmt {
                 ctx.log("  Pixel {{ {} {} }}, sample {}", std::make_tuple(pixel.x, pixel.y, sampleIndex));
                 sampler.startPixelSample(pixel, sampleIndex);
                 camera::CameraSample /*const*/ cs = camera::getCameraSample(sampler, pixel, filter);
-                cs.pFilm.x = static_cast<float>(pixel.x) + 0.5f;
-                cs.pFilm.y = static_cast<float>(pixel.y) + 0.5f;
-                Ray const                  ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
-                RGB const                  radiance = incidentRadiance(ray, bvh, sampler, &scratch);
+                cs.pFilm.x                        = static_cast<float>(pixel.x) + 0.5f;
+                cs.pFilm.y                        = static_cast<float>(pixel.y) + 0.5f;
+                Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
+                RGB const radiance = incidentRadiance(ray, bvh, sampler, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);
                 resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
             }

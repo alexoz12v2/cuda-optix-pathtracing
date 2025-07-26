@@ -128,19 +128,19 @@ namespace dmt {
     {
         DMT_CPU_GPU static constexpr Tuple3<S> zero()
         {
-            return {.x = static_cast<S>(0), .y = static_cast<S>(0), .z = static_cast<S>(0)};
+            return {static_cast<S>(0), static_cast<S>(0), static_cast<S>(0)};
         }
         DMT_CPU_GPU static constexpr Tuple3<S> xAxis()
         {
-            return {.x = static_cast<S>(1), .y = static_cast<S>(0), .z = static_cast<S>(0)};
+            return {static_cast<S>(1), static_cast<S>(0), static_cast<S>(0)};
         }
         DMT_CPU_GPU static constexpr Tuple3<S> yAxis()
         {
-            return {.x = static_cast<S>(0), .y = static_cast<S>(1), .z = static_cast<S>(0)};
+            return {static_cast<S>(0), static_cast<S>(1), static_cast<S>(0)};
         }
         DMT_CPU_GPU static constexpr Tuple3<S> zAxis()
         {
-            return {.x = static_cast<S>(0), .y = static_cast<S>(0), .z = static_cast<S>(1)};
+            return {static_cast<S>(0), static_cast<S>(0), static_cast<S>(1)};
         }
 
         using value_type = S;
@@ -553,10 +553,7 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Tuple2f lerp(float t, Tuple2f zero, Tuple2f one);
     DMT_CORE_API DMT_CPU_GPU Tuple3f lerp(float t, Tuple3f zero, Tuple3f one);
     DMT_CORE_API DMT_CPU_GPU Tuple4f lerp(float t, Tuple4f zero, Tuple4f one);
-    DMT_CPU_GPU Tuple2f lerp(float t, Tuple2f zero, Tuple2f one);
-    DMT_CPU_GPU Tuple3f lerp(float t, Tuple3f zero, Tuple3f one);
-    DMT_CPU_GPU Tuple4f lerp(float t, Tuple4f zero, Tuple4f one);
-    //to move in a math class
+    //to move in a math clas
     DMT_CPU_GPU inline float lerp(float x, float a, float b) { return (1 - x) * a + x * b; }
 
     DMT_CORE_API DMT_CPU_GPU Tuple2f fma(Tuple2f mult0, Tuple2f mult1, Tuple2f add);
@@ -634,7 +631,7 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Frame coordinateSystem(Normal3f xAxis);
 
     DMT_CORE_API DMT_CPU_GPU Quaternion slerp(float t, Quaternion zero, Quaternion one);
-    inline float           Dot(Vector3f const& a, Vector3f const& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+    inline float Dot(Vector3f const& a, Vector3f const& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
     // Vector Types: Spherical Geometry Functions ---------------------------------------------------------------------
     DMT_CORE_API DMT_CPU_GPU float    sphericalTriangleArea(Vector3f edge0, Vector3f edge1, Vector3f edge2);
@@ -746,6 +743,83 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU bool     inside(Point2f p, Bounds2f const& b);
     DMT_CORE_API DMT_CPU_GPU Bounds2f bbUnion(Bounds2f const& a, Bounds2f const& b);
     DMT_CORE_API DMT_CPU_GPU Bounds2f bbUnion(Bounds2f const& b, Point2f p);
+
+
+    struct DMT_CORE_API Bounds2i
+    {
+        DMT_CPU_GPU Bounds2i()
+        {
+            int32_t minNum = std::numeric_limits<int32_t>::lowest();
+            int32_t maxNum = std::numeric_limits<int32_t>::max();
+            pMin           = Point2i{{maxNum, maxNum}};
+            pMax           = Point2i{{minNum, minNum}};
+        }
+        DMT_CPU_GPU explicit Bounds2i(Point2i p) : pMin(p), pMax(p) {}
+        DMT_CPU_GPU Bounds2i(Point2i p1, Point2i p2) : pMin(min(p1, p2)), pMax(max(p1, p2)) {}
+
+        DMT_CPU_GPU
+        Vector2i diagonal() const { return pMax - pMin; }
+
+        DMT_CPU_GPU int32_t area() const
+        {
+            Vector2i d = pMax - pMin;
+            return d.x * d.y;
+        }
+
+        DMT_CPU_GPU bool isEmpty() const { return pMin.x >= pMax.x || pMin.y >= pMax.y; }
+
+        DMT_CPU_GPU bool isDegenerate() const { return pMin.x > pMax.x || pMin.y > pMax.y; }
+
+        DMT_CPU_GPU int maxDimension() const
+        {
+            Vector2i diag = diagonal();
+            if (diag.x > diag.y)
+                return 0;
+            else
+                return 1;
+        }
+        DMT_CPU_GPU Point2i operator[](int i) const
+        {
+            assert(i == 0 || i == 1);
+            return (i == 0) ? pMin : pMax;
+        }
+
+        DMT_CPU_GPU Point2i& operator[](int i)
+        {
+            assert(i == 0 || i == 1);
+            return (i == 0) ? pMin : pMax;
+        }
+
+        DMT_CPU_GPU bool operator==(Bounds2i const& b) const { return near(b.pMin, pMin) && near(b.pMax, pMax); }
+
+        DMT_CPU_GPU Point2i corner(int corner) const
+        {
+            assert(corner >= 0 && corner < 4);
+            return Point2i{{(*this)[(corner & 1)].x, (*this)[(corner & 2) ? 1 : 0].y}};
+        }
+
+        DMT_CPU_GPU Point2i lerp(Point2f t) const
+        {
+            return Point2i{{static_cast<int32_t>(dmt::lerp(t.x, pMin.x, pMax.x)),
+                            static_cast<int32_t>(dmt::lerp(t.y, pMin.y, pMax.y))}};
+        }
+
+        DMT_CPU_GPU Vector2i offset(Point2i p) const
+        {
+            Vector2i o = p - pMin;
+            if (pMax.x > pMin.x)
+                o.x /= pMax.x - pMin.x;
+            if (pMax.y > pMin.y)
+                o.y /= pMax.y - pMin.y;
+            return o;
+        }
+
+        DMT_CPU_GPU void boundingSphere(Point2i* c, float* rad) const;
+
+        Point2i pMin, pMax;
+    };
+
+    DMT_CORE_API DMT_CPU_GPU bool inside(Point2i p, Bounds2i b);
 
     // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------
     struct DMT_CORE_API Index2
@@ -884,9 +958,8 @@ namespace dmt {
         RayDifferential() = default;
         DMT_CPU_GPU RayDifferential(Point3f o, Vector3f d, float time = 0.f, uintptr_t medium = 0);
         DMT_CPU_GPU explicit RayDifferential(Ray const& ray);
-        DMT_CPU_GPU void SetDifferentials(Point3f _rxOrigin, Vector3f _rxDirection, Point3f _ryOrigin, Vector3f _ryDirection);
-        DMT_CPU_GPU void ScaleDifferentials(float s);
-        DMT_CPU_GPU bool HasDifferentials() const;
+        DMT_CPU_GPU void setDifferentials(Point3f _rxOrigin, Vector3f _rxDirection, Point3f _ryOrigin, Vector3f _ryDirection);
+        DMT_CPU_GPU void scaleDifferentials(float s);
 
         bool     hasDifferentials = false;
         Point3f  rxOrigin, ryOrigin;
@@ -1083,6 +1156,169 @@ namespace dstd {
 
         std::aligned_storage_t<sizeof(T), alignof(T)> optionalValue;
         bool                                          set = false;
+    };
+
+    template <typename T, std::size_t N>
+    class InlinedVector
+    {
+        static_assert(N > 0, "InlinedVector must have non-zero capacity");
+
+    public:
+        using value_type = T;
+        using size_type  = std::size_t;
+
+        InlinedVector() : _size(0) {}
+
+        /// @note by copy only
+        InlinedVector(size_t sz, T const& v) : _size(sz)
+        {
+            assert(sz <= N && "Exceeding capacity");
+            for (size_t i = 0; i < sz; ++i)
+                std::construct_at(&reinterpret_cast<T*>(&_storage)[i], v);
+        }
+
+        ~InlinedVector() { clear(); }
+
+        InlinedVector(InlinedVector const& other) : _size(0)
+        {
+            for (size_type i = 0; i < other._size; ++i)
+                emplace_back(other[i]);
+        }
+
+        InlinedVector& operator=(InlinedVector const& other)
+        {
+            if (this != &other)
+            {
+                clear();
+                for (size_type i = 0; i < other._size; ++i)
+                    emplace_back(other[i]);
+            }
+            return *this;
+        }
+
+        InlinedVector(InlinedVector&& other) noexcept : _size(0)
+        {
+            for (size_type i = 0; i < other._size; ++i)
+                emplace_back(std::move(other[i]));
+            other.clear();
+        }
+
+        InlinedVector& operator=(InlinedVector&& other) noexcept
+        {
+            if (this != &other)
+            {
+                clear();
+                for (size_type i = 0; i < other._size; ++i)
+                    emplace_back(std::move(other[i]));
+                other.clear();
+            }
+            return *this;
+        }
+
+        void push_back(T const& value)
+        {
+            if (_size >= N)
+                throw std::overflow_error("InlinedVector capacity exceeded");
+            new (data() + _size) T(value);
+            ++_size;
+        }
+
+        void push_back(T&& value)
+        {
+            if (_size >= N)
+                throw std::overflow_error("InlinedVector capacity exceeded");
+            new (data() + _size) T(std::move(value));
+            ++_size;
+        }
+
+        template <typename... Args>
+        void emplace_back(Args&&... args)
+        {
+            if (_size >= N)
+                throw std::overflow_error("InlinedVector capacity exceeded");
+            new (data() + _size) T(std::forward<Args>(args)...);
+            ++_size;
+        }
+
+        void pop_back()
+        {
+            if (_size == 0)
+                throw std::underflow_error("InlinedVector is empty");
+            --_size;
+            data()[_size].~T();
+        }
+
+        T& operator[](size_type index)
+        {
+            if (index >= _size)
+                throw std::out_of_range("InlinedVector index out of range");
+            return data()[index];
+        }
+
+        T const& operator[](size_type index) const
+        {
+            if (index >= _size)
+                throw std::out_of_range("InlinedVector index out of range");
+            return data()[index];
+        }
+
+        void resize(size_type new_size)
+        {
+            if (new_size > N)
+                throw std::overflow_error("InlinedVector resize beyond capacity");
+
+            if (new_size > _size)
+            {
+                while (_size < new_size)
+                    emplace_back(); // default constructor
+            }
+            else
+            {
+                while (_size > new_size)
+                    pop_back();
+            }
+        }
+
+        void resize(size_type new_size, T const& value)
+        {
+            if (new_size > N)
+                throw std::overflow_error("InlinedVector resize beyond capacity");
+
+            if (new_size > _size)
+            {
+                while (_size < new_size)
+                    push_back(value);
+            }
+            else
+            {
+                while (_size > new_size)
+                    pop_back();
+            }
+        }
+
+        size_type           size() const { return _size; }
+        constexpr size_type capacity() const { return N; }
+        bool                empty() const { return _size == 0; }
+
+        void clear()
+        {
+            for (size_type i = 0; i < _size; ++i)
+                data()[i].~T();
+            _size = 0;
+        }
+
+        T*       begin() { return data(); }
+        T*       end() { return data() + _size; }
+        T const* begin() const { return data(); }
+        T const* end() const { return data() + _size; }
+
+    private:
+        using Storage = typename std::aligned_storage<sizeof(T), alignof(T)>::type;
+        Storage   _storage[N];
+        size_type _size;
+
+        T*       data() { return reinterpret_cast<T*>(&_storage[0]); }
+        T const* data() const { return reinterpret_cast<T const*>(&_storage[0]); }
     };
 
 } // namespace dstd

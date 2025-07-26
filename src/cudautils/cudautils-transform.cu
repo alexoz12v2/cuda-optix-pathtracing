@@ -140,8 +140,6 @@ namespace dmt {
     // Inequality comparison
     __host__ __device__ bool Transform::operator!=(Transform const& other) const { return !(*this == other); }
 
-    __host__ __device__ Transform Transform::operator*(Transform const& t2) const { return Transform(m * t2.m); }
-
     __host__ __device__ bool Transform::hasScale(float tolerance) const
     {
         // compute the length of the three reference unit vectors after being transformed. if any of these has been
@@ -180,7 +178,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
         ret.o = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
-        if (ray.HasDifferentials())
+        if (ray.hasDifferentials)
         {
             ret.rxOrigin    = applyInverse(ray.rxOrigin);
             ret.ryOrigin    = applyInverse(ray.ryOrigin);
@@ -225,7 +223,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
         ret.o = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
-        if (ray.HasDifferentials())
+        if (ray.hasDifferentials)
         {
             ret.rxOrigin    = operator()(ray.rxOrigin);
             ret.ryOrigin    = operator()(ray.ryOrigin);
@@ -244,7 +242,8 @@ namespace dmt {
 
     DMT_CPU_GPU Transform Translate(Vector3f delta)
     {
-        Matrix4f m(1, 0, 0, delta.x, 0, 1, 0, delta.y, 0, 0, 1, delta.z, 0, 0, 0, 1);
+        Matrix4f m{{1, 0, 0, delta.x, 0, 1, 0, delta.y, 0, 0, 1, delta.z, 0, 0, 0, 1}};
+        m = transpose(m);
 
         return Transform(m);
     }
@@ -1047,43 +1046,6 @@ namespace dmt {
                 zeros.data[outNumZeros++] = tNewton;
             }
         }
-    }
-
-    // CameraTransform ------------------------------------------------------------------------------------------------
-    __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, int renderCoordSys)
-    {
-        switch (renderCoordSys)
-        {
-            case 0:
-            {
-
-                break;
-            }
-            case 1:
-            {
-                break;
-            }
-            case 2:
-            {
-                break;
-            }
-            default: // should be never reached
-#if !defined(__CUDA_ARCH__)
-                std::abort();
-#else
-                // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated
-                __threadfence();
-                asm("trap;");
-#endif
-                break;
-        }
-    }
-
-    __host__ __device__ Transform dmt::CameraTransform::renderFromWorld() const
-    {
-        Transform t = worldFromRender;
-        t.inverse_();
-        return t;
     }
 
     // Private Static Stuff -------------------------------------------------------------------------------------------

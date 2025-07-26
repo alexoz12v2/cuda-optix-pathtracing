@@ -11,6 +11,7 @@ namespace dmt {
         float r, g, b;
     };
 
+#if 0
     // RGBColorSpace Definition
     class RGBColorSpace
     {
@@ -57,15 +58,15 @@ namespace dmt {
         RGBToSpectrumTable const* rgbToSpectrumTable;
     };
 
-#ifdef PBRT_BUILD_GPU_RENDERER
+    #ifdef PBRT_BUILD_GPU_RENDERER
     extern PBRT_CONST RGBColorSpace* RGBColorSpace_sRGB;
     extern PBRT_CONST RGBColorSpace* RGBColorSpace_DCI_P3;
     extern PBRT_CONST RGBColorSpace* RGBColorSpace_Rec2020;
     extern PBRT_CONST RGBColorSpace* RGBColorSpace_ACES2065_1;
-#endif
+    #endif
 
     SquareMatrix<3> ConvertRGBColorSpace(RGBColorSpace const& from, RGBColorSpace const& to);
-
+#endif
 
 } // namespace dmt
 

@@ -519,9 +519,9 @@ namespace dmt {
     {
         float clampedSinTheta = glm::clamp(sinTheta, -1.f, 1.f);
         return {{
-            .x = (clampedSinTheta * glm::cos(phi)),
-            .y = (clampedSinTheta * glm::sin(phi)),
-            .z = (glm::clamp(cosTheta, -1.f, 1.f)), // -1 ?
+            (clampedSinTheta * glm::cos(phi)),
+            (clampedSinTheta * glm::sin(phi)),
+            (glm::clamp(cosTheta, -1.f, 1.f)), // -1 ?
         }};
     }
     __host__ __device__ float sphericalTheta(Vector3f v) { return fl::acosClamp(v.z); }
@@ -882,6 +882,20 @@ namespace dmt {
         return b;
     }
 
+    // Bounds2i
+    static glm::bvec2 operator>=(Point2i a, Point2i b) { return {a.x >= b.x, a.y >= b.y}; }
+    static glm::bvec2 operator<=(Point2i a, Point2i b) { return {a.x <= b.x, a.y <= b.y}; }
+
+    __host__ __device__ bool inside(Point2i p, Bounds2i b) { return glm::all(p >= b.pMin && p <= b.pMax); }
+
+    __host__ __device__ void Bounds2i::boundingSphere(Point2i* c, float* rad) const
+    {
+        *c   = (pMin + pMax) / 2;
+        *rad = inside(*c, *this) ? distanceL2(Point2f{{static_cast<float>(c->x), static_cast<float>(c->y)}},
+                                              Point2f{{static_cast<float>(pMax.x), static_cast<float>(pMax.y)}})
+                                 : 0;
+    }
+
     // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------
     __host__ __device__ Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta)
     {
@@ -1076,7 +1090,7 @@ namespace dmt {
         glm::vec4 w{v.x, v.y, v.z, 0.f};
         w = toGLMmat(m) * w;
         assert(fl::nearZero(w.w));
-        return {{.x = w.x, .y = w.y, .z = w.y}};
+        return {{w.x, w.y, w.y}};
     }
 
     __host__ __device__ Normal3f mul(Matrix4f const& m, Normal3f const& v)
@@ -1085,7 +1099,7 @@ namespace dmt {
         w = toGLMmat(m) * w;
         assert(fl::nearZero(w.w));
         w = glm::normalize(w);
-        return {{.x = w.x, .y = w.y, .z = w.y}};
+        return {{w.x, w.y, w.y}};
     }
 
     __host__ __device__ Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v)
@@ -1104,7 +1118,7 @@ namespace dmt {
         glm::vec4 w{p.x, p.y, p.z, 1.f};
         w = toGLMmat(m) * w;
         w /= w.w;
-        return {{.x = w.x, .y = w.y, .z = w.y}};
+        return {{w.x, w.y, w.y}};
     }
 
     __host__ __device__ Point3fi mul(Matrix4f const& mat, Point3fi const& point)
@@ -1197,9 +1211,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1230,9 +1244,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1263,9 +1277,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1343,9 +1357,6 @@ namespace dmt {
         rxDirection = d + (rxDirection - d) * s;
         ryDirection = d + (ryDirection - d) * s;
     }
-
-    __host__ __device__ bool RayDifferential::hasDifferentials() const { return medium & 1; }
-
 
     // math utilities: vector -----------------------------------------------------------------------------------------
 } // namespace dmt

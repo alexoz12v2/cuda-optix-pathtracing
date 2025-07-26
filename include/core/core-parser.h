@@ -1120,7 +1120,7 @@ namespace dmt {
 
         virtual void Shape(EShapeType type, ParamMap const& params) = 0;
 
-        virtual ~IParserTarget(){};
+        virtual ~IParserTarget() {};
 
         virtual void Option(sid_t name, ParamPair const& value) = 0;
 

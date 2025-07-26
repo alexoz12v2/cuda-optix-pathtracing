@@ -455,11 +455,9 @@ namespace dmt {
         // If tuple is not empty, apply formatters
         if constexpr (tupleSize > 0)
         {
-            std::apply(
-                [&](auto&&... args) {
+            std::apply([&](auto&&... args) {
                 ((UTF8Formatter<std::decay_t<decltype(args)>>{}(args, argBufPtr, totalArgBytes, _argBufferSize)), ...);
-                },
-                _params);
+            }, _params);
         }
 
         uint32_t usedArgs  = 0;

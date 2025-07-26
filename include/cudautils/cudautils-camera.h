@@ -7,7 +7,7 @@
 #include <cudautils/cudautils-film.h>
 
 namespace dmt {
-    struct CameraSample
+    struct DMT_CORE_API CameraSample
     {
         Point2f pFilm;
         Point2f pLens;
@@ -15,20 +15,20 @@ namespace dmt {
         float   filterWeight = 1;
     };
 
-    struct CameraRay
+    struct DMT_CORE_API CameraRay
     {
         Ray             ray;
         SampledSpectrum weight = SampledSpectrum(1);
     };
 
-    struct CameraRayDifferential
+    struct DMT_CORE_API CameraRayDifferential
     {
         RayDifferential ray;
         SampledSpectrum weight = SampledSpectrum(1);
     };
 
     // CameraTransform Definition
-    class CameraTransform
+    class DMT_CORE_API CameraTransform
     {
     public:
         // CameraTransform Public Methods
@@ -99,7 +99,7 @@ namespace dmt {
         Transform         worldFromRender;
     };
 
-    struct CameraBaseParameters
+    struct DMT_CORE_API CameraBaseParameters
     {
         CameraTransform cameraTransform;
         float           shutterOpen = 0, shutterClose = 1;
@@ -110,7 +110,7 @@ namespace dmt {
         CameraBaseParameters(CameraTransform const& cameraTransorm, Film film);
     };
 
-    class CameraBase
+    class DMT_CORE_API CameraBase
     {
     public:
         Film                   GetFilm() const { return film; }
@@ -123,15 +123,15 @@ namespace dmt {
         void Approxiamate_dp_dxy(Point3f p, Normal3f n, float time, int samplesPerPixel, Vector3f* dpdx, Vector3f* dpdy) const
         {
             Point3f   pCamera         = CameraFromRender(p, time);
-            Transform DownZFromCamera = RotateFromTo(normalize(Vector3f(pCamera)), Vector3f(0, 0, 1));
+            Transform DownZFromCamera = RotateFromTo(normalize(Vector3f(pCamera)), Vector3f{{0, 0, 1}});
             Point3f   pDownZ          = DownZFromCamera(pCamera);
             Normal3f  nDownZ          = DownZFromCamera(CameraFromRender(n, time));
             float     d               = nDownZ.z * pDownZ.z;
-            Ray       xRay(Point3f(0, 0, 0) + minPosDifferentialX, Vector3f(0, 0, 1) + minDirDifferentialX);
-            float     tx = -(Dot(nDownZ, Vector3f(xRay.o)) - d) / Dot(nDownZ, xRay.d);
-            Ray       yRay(Point3f(0, 0, 0) + minPosDifferentialY, Vector3f(0, 0, 1) + minDirDifferentialY);
-            float     ty = -(Dot(nDownZ, Vector3f(yRay.o)) - d) / Dot(nDownZ, yRay.d);
-            Point3f   px = xRay(tx), py = yRay(ty);
+            Ray   xRay{Point3f{{0, 0, 0}} + minPosDifferentialX, normalize(Vector3f{{0, 0, 1}} + minDirDifferentialX)};
+            float tx = -(dot(nDownZ, Vector3f(xRay.o)) - d) / dot(nDownZ, xRay.d);
+            Ray   yRay(Point3f{{0, 0, 0}} + minPosDifferentialY, normalize(Vector3f{{0, 0, 1}} + minDirDifferentialY));
+            float ty   = -(dot(nDownZ, Vector3f(yRay.o)) - d) / dot(nDownZ, yRay.d);
+            Point3f px = xRay(tx), py = yRay(ty);
             /*//PixelJitter is an option but now I don't know if handle so for now is enable
             float     sppScale = GetOptions().disablePixelJitter
                                      ? 1
@@ -153,11 +153,12 @@ namespace dmt {
         CameraBase() = default;
         CameraBase(CameraBaseParameters p);
 
-        DMT_CPU_GPU static inline dmt::optional<CameraRay> GenerateRay(CameraSample sample, SampledWavelengths& lambda);
+        // In derived
+        DMT_CPU_GPU dstd::optional<CameraRay> (*GenerateRay)(CameraSample sample, SampledWavelengths& lambda) = nullptr;
 
-        DMT_CPU_GPU static dmt::optional<CameraRayDifferential> GenerateRayDifferential(CameraBase          camera,
-                                                                                        CameraSample        sample,
-                                                                                        SampledWavelengths& lambda);
+        DMT_CPU_GPU static dstd::optional<CameraRayDifferential> GenerateRayDifferential(CameraBase          camera,
+                                                                                         CameraSample        sample,
+                                                                                         SampledWavelengths& lambda);
 
         DMT_CPU_GPU Ray RenderFromCamera(Ray const& r) const { return cameraTransform.RenderFromCamera(r); }
 
@@ -207,7 +208,7 @@ namespace dmt {
     };
 
     //ProjectiveCamera Definition
-    class ProjectiveCamera : public CameraBase
+    class DMT_CORE_API ProjectiveCamera : public CameraBase
     {
     public:
         ProjectiveCamera() = default;

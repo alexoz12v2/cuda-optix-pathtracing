@@ -718,6 +718,7 @@ namespace dmt::camera {
         return res;
     }
 
+    // WARNING: DOESN'T WORK
     Ray generateRay(CameraSample cs, Transform const& cameraFromRaster, Transform const& renderFromCamera)
     {
         Point3f const pxImage{{cs.pFilm.x, cs.pFilm.y, 0}};
@@ -923,7 +924,9 @@ namespace dmt {
             {
                 ctx.log("  Pixel {{ {} {} }}, sample {}", std::make_tuple(pixel.x, pixel.y, sampleIndex));
                 sampler.startPixelSample(pixel, sampleIndex);
-                camera::CameraSample const cs = camera::getCameraSample(sampler, pixel, filter);
+                camera::CameraSample /*const*/ cs = camera::getCameraSample(sampler, pixel, filter);
+                cs.pFilm.x = static_cast<float>(pixel.x) + 0.5f;
+                cs.pFilm.y = static_cast<float>(pixel.y) + 0.5f;
                 Ray const                  ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
                 RGB const                  radiance = incidentRadiance(ray, bvh, sampler, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);

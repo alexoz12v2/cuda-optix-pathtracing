@@ -141,25 +141,27 @@ namespace dmt::transforms {
         return dmt::Transform{m};
     }
 
+    // NOTE: DOESN'T WORK. Start By testing whether the order of elemnets inside the matrix is correct by testing a translation
     Transform DMT_FASTCALL
         cameraFromRaster_Perspective(float fovRadians, float aspectRatio, uint32_t xRes, uint32_t yRes, float focalLength)
     {
-        // Image plane half-height at depth = focalLength
+        // Compute half width/height of image plane at focal distance
         float const halfHeight = focalLength * tan(0.5f * fovRadians);
         float const halfWidth  = halfHeight * aspectRatio;
 
         float const pixelSizeX = 2.0f * halfWidth / static_cast<float>(xRes);
         float const pixelSizeY = 2.0f * halfHeight / static_cast<float>(yRes);
 
-        float const tx = -halfWidth + pixelSizeX * 0.5f;
-        float const ty = -halfHeight + pixelSizeY * 0.5f;
+        // Translation to move raster origin (top-left) to image center in camera space
+        float const tx = -halfWidth + 0.5f * pixelSizeX;
+        float const ty = halfHeight - 0.5f * pixelSizeY; // Flip Y
 
         // clang-format off
-        Matrix4f const m{{
-            pixelSizeX, 0,           0,           0,
-            0,          pixelSizeY,  0,           0,
-            0,          0,           0,           0, // We'll set z = focalLength later
-            tx,         ty,          focalLength, 1
+        Matrix4f const m {{
+            pixelSizeX, 0.0f,       0.0f,        0.0f,
+            0.0f,      -pixelSizeY, 0.0f,        0.0f, // flip Y axis
+            0.0f,       0.0f,       1.0f,        0.0f,
+            tx,         ty,         focalLength, 1.0f
         }};
         // clang-format on
 

@@ -785,7 +785,7 @@ namespace dmt {
             return *std::bit_cast<Vector4f const*>(&m[i * 4]);
         }
 
-        float m[16];
+        alignas(16) float m[16];
     };
     static_assert(std::is_trivial_v<Matrix4f> && std::is_standard_layout_v<Matrix4f>);
 

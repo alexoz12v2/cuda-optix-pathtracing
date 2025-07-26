@@ -4,10 +4,12 @@
 
 #include <cudautils/cudautils-vecmath.h>
 #include <cudautils/cudautils-color.h>
+#include <platform/platform-utils.h>
 
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <span>
 #include <memory>
 #include <vector>
 
@@ -135,7 +137,10 @@ namespace dmt {
                 case WrapMode::Clamp: p[c] = Clamp(p[c], 0, resolution[c] - 1); break;
                 case WrapMode::Black: return false;
                 default:
-                    //LOG_FATAL("Unhandled WrapMode mode");
+                {
+                    dmt::Context ctx;
+                    ctx.error("Unhandled WrapMode mode", {});
+                }
             }
         }
         return true;
@@ -150,13 +155,13 @@ namespace dmt {
         std::string          ToString() const;
 
         // ImageMetadata Public Members
-        pstd::optional<float>                           renderTimeSeconds;
-        pstd::optional<Matrix4f>                        cameraFromWorld, NDCFromWorld;
-        pstd::optional<Bounds2i>                        pixelBounds;
-        pstd::optional<Point2i>                         fullResolution;
-        pstd::optional<int>                             samplesPerPixel;
-        pstd::optional<float>                           MSE;
-        pstd::optional<RGBColorSpace const*>            colorSpace;
+        dmt::optional<float>                            renderTimeSeconds;
+        dmt::optional<Matrix4f>                         cameraFromWorld, NDCFromWorld;
+        dmt::optional<Bounds2i>                         pixelBounds;
+        dmt::optional<Point2i>                          fullResolution;
+        dmt::optional<int>                              samplesPerPixel;
+        dmt::optional<float>                            MSE;
+        dmt::optional<RGBColorSpace const*>             colorSpace;
         std::map<std::string, std::string>              strings;
         std::map<std::string, std::vector<std::string>> stringVectors;
     };
@@ -182,32 +187,32 @@ namespace dmt {
     };
 
     // ImageChannelValues Definition channels RGBA
-    struct ImageChannelValues : public InlinedVector<Float, 4>
+    struct ImageChannelValues : public InlinedVector<float, 4>
     {
         // ImageChannelValues() = default;
-        explicit ImageChannelValues(size_t sz, Float v = {}) : InlinedVector<Float, 4>(sz, v) {}
+        explicit ImageChannelValues(size_t sz, float v = {}) : InlinedVector<float, 4>(sz, v) {}
 
-        operator Float() const
+        operator float() const
         {
             CHECK_EQ(1, size());
             return (*this)[0];
         }
-        operator pstd::array<Float, 3>() const
+        operator std::array<float, 3>() const
         {
             CHECK_EQ(3, size());
             return {(*this)[0], (*this)[1], (*this)[2]};
         }
 
-        Float MaxValue() const
+        float MaxValue() const
         {
-            Float m = (*this)[0];
+            float m = (*this)[0];
             for (int i = 1; i < size(); ++i)
                 m = std::max(m, (*this)[i]);
             return m;
         }
-        Float Average() const
+        float Average() const
         {
-            Float sum = 0;
+            float sum = 0;
             for (int i = 0; i < size(); ++i)
                 sum += (*this)[i];
             return sum / size();
@@ -222,37 +227,34 @@ namespace dmt {
     public:
         // Image Public Methods
         Image(Allocator alloc = {}) : p8(alloc), p16(alloc), p32(alloc), format(PixelFormat::U256), resolution(0, 0) {}
-        Image(pstd::vector<uint8_t> p8, Point2i resolution, pstd::span<std::string const> channels, ColorEncoding encoding);
-        Image(pstd::vector<Half> p16, Point2i resolution, pstd::span<std::string const> channels);
-        Image(pstd::vector<float> p32, Point2i resolution, pstd::span<std::string const> channels);
+        Image(std::vector<uint8_t> p8, Point2i resolution, std::span<std::string const> channels, ColorEncoding encoding);
+        Image(std::vector<Half> p16, Point2i resolution, std::span<std::string const> channels);
+        Image(std::vector<float> p32, Point2i resolution, std::span<std::string const> channels);
 
-        Image(PixelFormat                   format,
-              Point2i                       resolution,
-              pstd::span<std::string const> channelNames,
-              ColorEncoding                 encoding = nullptr,
-              Allocator                     alloc    = {});
+        Image(PixelFormat                  format,
+              Point2i                      resolution,
+              std::span<std::string const> channelNames,
+              ColorEncoding                encoding = nullptr,
+              Allocator                    alloc    = {});
 
-        PBRT_CPU_GPU
-        PixelFormat Format() const { return format; }
-        PBRT_CPU_GPU
-        Point2i Resolution() const { return resolution; }
-        PBRT_CPU_GPU
-        int                      NChannels() const { return channelNames.size(); }
+
+        DMT_CPU_GPU PixelFormat  Format() const { return format; }
+        DMT_CPU_GPU Point2i      Resolution() const { return resolution; }
+        DMT_CPU_GPU int          NChannels() const { return channelNames.size(); }
         std::vector<std::string> ChannelNames() const;
         ColorEncoding const      Encoding() const { return encoding; }
 
-        PBRT_CPU_GPU
-        operator bool() const { return resolution.x > 0 && resolution.y > 0; }
 
-        PBRT_CPU_GPU
-        size_t PixelOffset(Point2i p) const
+        DMT_CPU_GPU operator bool() const { return resolution.x > 0 && resolution.y > 0; }
+
+
+        DMT_CPU_GPU size_t PixelOffset(Point2i p) const
         {
             DCHECK(InsideExclusive(p, Bounds2i({0, 0}, resolution)));
             return NChannels() * (p.y * resolution.x + p.x);
         }
 
-        PBRT_CPU_GPU
-        Float GetChannel(Point2i p, int c, WrapMode2D wrapMode = WrapMode::Clamp) const
+        DMT_CPU_GPU float GetChannel(Point2i p, int c, WrapMode2D wrapMode = WrapMode::Clamp) const
         {
             // Remap provided pixel coordinates before reading channel
             if (!RemapPixelCoords(&p, resolution, wrapMode))
@@ -262,44 +264,49 @@ namespace dmt {
             {
                 case PixelFormat::U256:
                 { // Return _U256_-encoded pixel channel value
-                    Float r;
+                    float r;
                     encoding.ToLinear({&p8[PixelOffset(p) + c], 1}, {&r, 1});
                     return r;
                 }
                 case PixelFormat::Half:
                 { // Return _Half_-encoded pixel channel value
-                    return Float(p16[PixelOffset(p) + c]);
+                    return float(p16[PixelOffset(p) + c]);
                 }
                 case PixelFormat::Float:
                 { // Return _Float_-encoded pixel channel value
                     return p32[PixelOffset(p) + c];
                 }
-                default: LOG_FATAL("Unhandled PixelFormat"); return 0;
+                default:
+                {
+                    dmt::Context ctx;
+                    ctx.error("Unhandled PixelFormat", {});
+                    return 0;
+                }
             }
         }
 
-        PBRT_CPU_GPU
-        Float BilerpChannel(Point2f p, int c, WrapMode2D wrapMode = WrapMode::Clamp) const
+
+        DMT_CPU_GPU float BilerpChannel(Point2f p, int c, WrapMode2D wrapMode = WrapMode::Clamp) const
         {
             // Compute discrete pixel coordinates and offsets for _p_
-            Float x = p[0] * resolution.x - 0.5f, y = p[1] * resolution.y - 0.5f;
-            int   xi = pstd::floor(x), yi = pstd::floor(y);
-            Float dx = x - xi, dy = y - yi;
+            float x = p[0] * resolution.x - 0.5f, y = p[1] * resolution.y - 0.5f;
+            int   xi = std::floor(x), yi = std::floor(y);
+            float dx = x - xi, dy = y - yi;
 
             // Load pixel channel values and return bilinearly interpolated value
-            pstd::array<Float, 4> v = {GetChannel({xi, yi}, c, wrapMode),
-                                       GetChannel({xi + 1, yi}, c, wrapMode),
-                                       GetChannel({xi, yi + 1}, c, wrapMode),
-                                       GetChannel({xi + 1, yi + 1}, c, wrapMode)};
+            std::array<float, 4> v = {GetChannel({xi, yi}, c, wrapMode),
+                                      GetChannel({xi + 1, yi}, c, wrapMode),
+                                      GetChannel({xi, yi + 1}, c, wrapMode),
+                                      GetChannel({xi + 1, yi + 1}, c, wrapMode)};
             return ((1 - dx) * (1 - dy) * v[0] + dx * (1 - dy) * v[1] + (1 - dx) * dy * v[2] + dx * dy * v[3]);
         }
 
-        PBRT_CPU_GPU
-        void SetChannel(Point2i p, int c, Float value);
+
+        DMT_CPU_GPU void SetChannel(Point2i p, int c, float value);
 
         ImageChannelValues GetChannels(Point2i p, WrapMode2D wrapMode = WrapMode::Clamp) const;
 
-        ImageChannelDesc GetChannelDesc(pstd::span<std::string const> channels) const;
+        ImageChannelDesc GetChannelDesc(std::span<std::string const> channels) const;
 
         ImageChannelDesc AllChannelsDesc() const
         {
@@ -315,8 +322,8 @@ namespace dmt {
         Image SelectChannels(ImageChannelDesc const& desc, Allocator alloc = {}) const;
         Image Crop(Bounds2i const& bounds, Allocator alloc = {}) const;
 
-        void CopyRectOut(Bounds2i const& extent, pstd::span<float> buf, WrapMode2D wrapMode = WrapMode::Clamp) const;
-        void CopyRectIn(Bounds2i const& extent, pstd::span<float const> buf);
+        void CopyRectOut(Bounds2i const& extent, std::span<float> buf, WrapMode2D wrapMode = WrapMode::Clamp) const;
+        void CopyRectIn(Bounds2i const& extent, std::span<float const> buf);
 
         ImageChannelValues Average(ImageChannelDesc const& desc) const;
 
@@ -327,15 +334,15 @@ namespace dmt {
         ImageChannelValues MSE(ImageChannelDesc const& desc, Image const& ref, Image* mseImage = nullptr) const;
         ImageChannelValues MRSE(ImageChannelDesc const& desc, Image const& ref, Image* mrseImage = nullptr) const;
 
-        Image GaussianFilter(ImageChannelDesc const& desc, int halfWidth, Float sigma) const;
+        Image GaussianFilter(ImageChannelDesc const& desc, int halfWidth, float sigma) const;
 
         template <typename F>
-        Array2D<Float> GetSamplingDistribution(F               dxdA,
+        Array2D<float> GetSamplingDistribution(F               dxdA,
                                                Bounds2f const& domain = Bounds2f(Point2f(0, 0), Point2f(1, 1)),
                                                Allocator       alloc  = {});
-        Array2D<Float> GetSamplingDistribution()
+        Array2D<float> GetSamplingDistribution()
         {
-            return GetSamplingDistribution([](Point2f) { return Float(1); });
+            return GetSamplingDistribution([](Point2f) { return 1; });
         }
 
         static ImageAndMetadata Read(std::string filename, Allocator alloc = {}, ColorEncoding encoding = nullptr);
@@ -346,8 +353,8 @@ namespace dmt {
 
         // TODO? provide an iterator to iterate over all pixels and channels?
 
-        PBRT_CPU_GPU
-        Float LookupNearestChannel(Point2f p, int c, WrapMode2D wrapMode = WrapMode::Clamp) const
+
+        DMT_CPU_GPU float LookupNearestChannel(Point2f p, int c, WrapMode2D wrapMode = WrapMode::Clamp) const
         {
             Point2i pi(p.x * resolution.x, p.y * resolution.y);
             return GetChannel(pi, c, wrapMode);
@@ -360,20 +367,20 @@ namespace dmt {
         ImageChannelValues Bilerp(Point2f p, ImageChannelDesc const& desc, WrapMode2D wrapMode = WrapMode::Clamp) const;
 
         void SetChannels(Point2i p, ImageChannelValues const& values);
-        void SetChannels(Point2i p, pstd::span<Float const> values);
-        void SetChannels(Point2i p, ImageChannelDesc const& desc, pstd::span<Float const> values);
+        void SetChannels(Point2i p, std::span<float const> values);
+        void SetChannels(Point2i p, ImageChannelDesc const& desc, std::span<float const> values);
 
-        Image                      FloatResizeUp(Point2i newResolution, WrapMode2D wrap) const;
-        void                       FlipY();
-        static pstd::vector<Image> GeneratePyramid(Image image, WrapMode2D wrapMode, Allocator alloc = {});
+        Image                     FloatResizeUp(Point2i newResolution, WrapMode2D wrap) const;
+        void                      FlipY();
+        static std::vector<Image> GeneratePyramid(Image image, WrapMode2D wrapMode, Allocator alloc = {});
 
         std::vector<std::string> ChannelNames(ImageChannelDesc const&) const;
 
-        PBRT_CPU_GPU
-        size_t BytesUsed() const { return p8.size() + 2 * p16.size() + 4 * p32.size(); }
 
-        PBRT_CPU_GPU
-        void const* RawPointer(Point2i p) const
+        DMT_CPU_GPU size_t BytesUsed() const { return p8.size() + 2 * p16.size() + 4 * p32.size(); }
+
+
+        DMT_CPU_GPU void const* RawPointer(Point2i p) const
         {
             if (Is8Bit(format))
                 return p8.data() + PixelOffset(p);
@@ -385,8 +392,8 @@ namespace dmt {
                 return p32.data() + PixelOffset(p);
             }
         }
-        PBRT_CPU_GPU
-        void* RawPointer(Point2i p) { return const_cast<void*>(((Image const*)this)->RawPointer(p)); }
+
+        DMT_CPU_GPU void* RawPointer(Point2i p) { return const_cast<void*>(((Image const*)this)->RawPointer(p)); }
 
         Image JointBilateralFilter(ImageChannelDesc const&   toFilter,
                                    int                       halfWidth,
@@ -407,24 +414,21 @@ namespace dmt {
         std::unique_ptr<uint8_t[]> QuantizePixelsToU256(int* nOutOfGamut) const;
 
         // Image Private Members
-        PixelFormat               format;
-        Point2i                   resolution;
-        pstd::vector<std::string> channelNames;
-        ColorEncoding             encoding = nullptr;
-        pstd::vector<uint8_t>     p8;
-        pstd::vector<Half>        p16;
-        pstd::vector<float>       p32;
+        PixelFormat              format;
+        Point2i                  resolution;
+        std::vector<std::string> channelNames;
+        ColorEncoding            encoding = nullptr;
+        std::vector<uint8_t>     p8;
+        std::vector<Half>        p16;
+        std::vector<float>       p32;
     };
 
     // Image Inline Method Definitions
-    inline void Image::SetChannel(Point2i p, int c, Float value)
+    inline void Image::SetChannel(Point2i p, int c, float value)
     {
         // CHECK(!IsNaN(value));
         if (IsNaN(value))
         {
-#ifndef PBRT_IS_GPU_CODE
-            LOG_ERROR("NaN at pixel %d,%d comp %d", p.x, p.y, c);
-#endif
             value = 0;
         }
 
@@ -438,9 +442,9 @@ namespace dmt {
     }
 
     template <typename F>
-    inline Array2D<Float> Image::GetSamplingDistribution(F dxdA, Bounds2f const& domain, Allocator alloc)
+    inline Array2D<float> Image::GetSamplingDistribution(F dxdA, Bounds2f const& domain, Allocator alloc)
     {
-        Array2D<Float> dist(resolution[0], resolution[1], alloc);
+        Array2D<float> dist(resolution[0], resolution[1], alloc);
         ParallelFor(0, resolution[1], [&](int64_t y0, int64_t y1) {
             for (int y = y0; y < y1; ++y)
             {

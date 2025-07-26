@@ -301,6 +301,26 @@ namespace dmt {
         return value - 1;
     }
 
+    //Mod
+    template <typename T>
+    DMT_CPU_GPU inline T Mod(T a, T b)
+    {
+        T result = a - (a / b) * b;
+        return (T)((result < 0) ? result + b : result);
+    }
+
+    //Clamp
+    template <typename T, typename U, typename V>
+    DMT_CPU_GPU inline constexpr T Clamp(T val, U low, V high)
+    {
+        if (val < low)
+            return T(low);
+        else if (val > high)
+            return T(high);
+        else
+            return val;
+    }
+
     template <std::integral T>
     constexpr T clamp(T val, T min_val, T max_val) noexcept
     {

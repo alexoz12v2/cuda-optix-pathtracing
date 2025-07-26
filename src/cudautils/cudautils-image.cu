@@ -1,5 +1,5 @@
-#include <pbrt/util/image.h>
-
+#include "cudautils-image.h"
+/*
 #include <pbrt/util/bluenoise.h>
 #include <pbrt/util/color.h>
 #include <pbrt/util/colorspace.h>
@@ -10,13 +10,14 @@
 #include <pbrt/util/print.h>
 #include <pbrt/util/pstd.h>
 #include <pbrt/util/string.h>
-
+*/
 // No need, since we need to do our own file i/o to support UTF-8 filenames.
 #define LODEPNG_NO_COMPILE_DISK
 #include <lodepng/lodepng.h>
 
-#ifndef PBRT_IS_GPU_CODE
+#ifndef DMT_IS_GPU_CODE
 // Work around conflict with "half".
+/*
 #include <ImfChannelList.h>
 #include <ImfChromaticitiesAttribute.h>
 #include <ImfFloatAttribute.h>
@@ -28,6 +29,7 @@
 #include <ImfOutputFile.h>
 #include <ImfStringAttribute.h>
 #include <ImfStringVectorAttribute.h>
+*/
 #endif
 
 #include <algorithm>
@@ -46,7 +48,7 @@
 #define QOI_IMPLEMENTATION
 #include <qoi/qoi.h>
 
-namespace pbrt {
+namespace dmt {
 
     std::string ToString(PixelFormat format)
     {
@@ -59,7 +61,7 @@ namespace pbrt {
         }
     }
 
-    PBRT_CPU_GPU int TexelBytes(PixelFormat format)
+    DMT_CPU_GPU int TexelBytes(PixelFormat format)
     {
         switch (format)
         {
@@ -72,7 +74,7 @@ namespace pbrt {
 
     std::string ImageChannelValues::ToString() const
     {
-        return StringPrintf("[ ImageChannelValues %s ]", ((InlinedVector<Float, 4>&)*this));
+        return StringPrintf("[ ImageChannelValues %s ]", ((InlinedVector<float, 4>&)*this));
     }
 
     std::string ImageChannelDesc::ToString() const { return StringPrintf("[ ImageChannelDesc offset: %s ]", offset); }
@@ -163,16 +165,16 @@ namespace pbrt {
         return false;
     }
 
-    Image Image::GaussianFilter(ImageChannelDesc const& desc, int halfWidth, Float sigma) const
+    Image Image::GaussianFilter(ImageChannelDesc const& desc, int halfWidth, float sigma) const
     {
         // Compute filter weights
-        std::vector<Float> wts(2 * halfWidth + 1, Float(0));
+        std::vector<float> wts(2 * halfWidth + 1, float(0));
         for (int d = 0; d < 2 * halfWidth + 1; ++d)
             wts[d] = Gaussian(d - halfWidth, 0, sigma);
 
         // Normalize weights
-        Float wtSum = std::accumulate(wts.begin(), wts.end(), Float(0));
-        for (Float& w : wts)
+        float wtSum = std::accumulate(wts.begin(), wts.end(), float(0));
+        for (float& w : wts)
             w /= wtSum;
 
         // Separable blur; first blur in x into blurx, selecting out the
@@ -222,20 +224,20 @@ namespace pbrt {
     {
         CHECK_GE(newRes, oldRes);
         std::vector<ResampleWeight> wt(newRes);
-        Float                       filterRadius = 2, tau = 2;
+        float                       filterRadius = 2, tau = 2;
         for (int i = 0; i < newRes; ++i)
         {
             // Compute image resampling weights for _i_th pixel
-            Float center     = (i + .5f) * oldRes / newRes;
+            float center     = (i + .5f) * oldRes / newRes;
             wt[i].firstPixel = pstd::floor((center - filterRadius) + 0.5f);
             for (int j = 0; j < 4; ++j)
             {
-                Float pos       = wt[i].firstPixel + j + .5f;
+                float pos       = wt[i].firstPixel + j + .5f;
                 wt[i].weight[j] = WindowedSinc(pos - center, filterRadius, tau);
             }
 
             // Normalize filter weights for pixel resampling
-            Float invSumWts = 1 / (wt[i].weight[0] + wt[i].weight[1] + wt[i].weight[2] + wt[i].weight[3]);
+            float invSumWts = 1 / (wt[i].weight[0] + wt[i].weight[1] + wt[i].weight[2] + wt[i].weight[3]);
             for (int j = 0; j < 4; ++j)
                 wt[i].weight[j] *= invSumWts;
         }
@@ -259,7 +261,7 @@ namespace pbrt {
                               Point2i(xWeights[outExtent.pMax.x - 1].firstPixel + 4,
                                       yWeights[outExtent.pMax.y - 1].firstPixel + 4));
             std::vector<float> inBuf(NChannels() * inExtent.Area());
-            CopyRectOut(inExtent, pstd::span<float>(inBuf), wrapMode);
+            CopyRectOut(inExtent, std::span<float>(inBuf), wrapMode);
 
             // Resize image in the $x$ dimension
             // Compute image extents and allocate _xBuf_
@@ -275,7 +277,7 @@ namespace pbrt {
                 for (int xOut = outExtent.pMin.x; xOut < outExtent.pMax.x; ++xOut)
                 {
                     // Resample image pixel _(xOut, yOut)_
-                    DCHECK(xOut >= 0 && xOut < xWeights.size());
+                    assert(xOut >= 0 && xOut < xWeights.size());
                     ResampleWeight const& rsw = xWeights[xOut];
                     // Compute _inOffset_ into _inBuf_ for _(xOut, yOut)_
                     // w.r.t. inBuf
@@ -312,7 +314,7 @@ namespace pbrt {
 
                     int outOffset = NChannels() * (x + y * nxOut);
                     for (int c = 0; c < NChannels(); ++c, ++outOffset, ++xBufOffset)
-                        outBuf[outOffset] = std::max<Float>(0,
+                        outBuf[outOffset] = std::max<float>(0,
                                                             (rsw.weight[0] * xBuf[xBufOffset] +
                                                              rsw.weight[1] * xBuf[xBufOffset + step] +
                                                              rsw.weight[2] * xBuf[xBufOffset + 2 * step] +
@@ -389,7 +391,7 @@ namespace pbrt {
         }
 
         // Initialize top level of pyramid and return it
-        CHECK(image.resolution[0] == 1 && image.resolution[1] == 1);
+        assert(image.resolution[0] == 1 && image.resolution[1] == 1);
         pyramid.push_back(Image(origFormat, {1, 1}, image.channelNames, origEncoding, alloc));
         pyramid[nLevels - 1].CopyRectIn(Bounds2i({0, 0}, {1, 1}), pstd::span<float const>(image.p32.data(), nChannels));
         return pyramid;
@@ -443,7 +445,7 @@ namespace pbrt {
 
     ImageChannelValues Image::GetChannels(Point2i p, ImageChannelDesc const& desc, WrapMode2D wrapMode) const
     {
-        ImageChannelValues cv(desc.offset.size(), Float(0));
+        ImageChannelValues cv(desc.offset.size(), float(0));
         if (!RemapPixelCoords(&p, resolution, wrapMode))
             return cv;
 
@@ -459,7 +461,7 @@ namespace pbrt {
             case PixelFormat::Half:
             {
                 for (int i = 0; i < desc.offset.size(); ++i)
-                    cv[i] = Float(p16[pixelOffset + desc.offset[i]]);
+                    cv[i] = float(p16[pixelOffset + desc.offset[i]]);
                 break;
             }
             case PixelFormat::Float:
@@ -474,7 +476,7 @@ namespace pbrt {
         return cv;
     }
 
-    void Image::SetChannels(Point2i p, ImageChannelDesc const& desc, pstd::span<Float const> values)
+    void Image::SetChannels(Point2i p, ImageChannelDesc const& desc, std::span<float const> values)
     {
         CHECK_LE(values.size(), NChannels());
         for (size_t i = 0; i < values.size(); ++i)
@@ -526,7 +528,7 @@ namespace pbrt {
 
     ImageChannelValues Image::GetChannels(Point2i p, WrapMode2D wrapMode) const
     {
-        ImageChannelValues cv(NChannels(), Float(0));
+        ImageChannelValues cv(NChannels(), float(0));
         if (!RemapPixelCoords(&p, resolution, wrapMode))
             return cv;
 
@@ -541,7 +543,7 @@ namespace pbrt {
             case PixelFormat::Half:
             {
                 for (int i = 0; i < NChannels(); ++i)
-                    cv[i] = Float(p16[pixelOffset + i]);
+                    cv[i] = float(p16[pixelOffset + i]);
                 break;
             }
             case PixelFormat::Float:
@@ -596,7 +598,7 @@ namespace pbrt {
 
         ImageChannelValues error(desc.size());
         for (int c = 0; c < desc.size(); ++c)
-            error[c] = sumError[c] / (Float(Resolution().x) * Float(Resolution().y));
+            error[c] = sumError[c] / (float(Resolution().x) * float(Resolution().y));
         return error;
     }
 
@@ -632,7 +634,7 @@ namespace pbrt {
 
         ImageChannelValues mse(desc.size());
         for (int c = 0; c < desc.size(); ++c)
-            mse[c] = sumSE[c] / (Float(Resolution().x) * Float(Resolution().y));
+            mse[c] = sumSE[c] / (float(Resolution().x) * float(Resolution().y));
         return mse;
     }
 
@@ -666,7 +668,7 @@ namespace pbrt {
 
         ImageChannelValues mrse(desc.size());
         for (int c = 0; c < desc.size(); ++c)
-            mrse[c] = sumRSE[c] / (Float(Resolution().x) * Float(Resolution().y));
+            mrse[c] = sumRSE[c] / (float(Resolution().x) * float(Resolution().y));
         return mrse;
     }
 
@@ -684,7 +686,7 @@ namespace pbrt {
 
         ImageChannelValues average(desc.size());
         for (int c = 0; c < desc.size(); ++c)
-            average[c] = sum[c] / (Float(Resolution().x) * Float(Resolution().y));
+            average[c] = sum[c] / (float(Resolution().x) * float(Resolution().y));
         return average;
     }
 
@@ -707,7 +709,7 @@ namespace pbrt {
 #ifdef PBRT_FLOAT_AS_DOUBLE
                         for (int i = 0; i < count; ++i)
                         {
-                            Float v;
+                            float v;
                             encoding.ToLinear({&p8[offset + i], 1}, {&v, 1});
                             *bufIter++ = v;
                         }
@@ -721,7 +723,7 @@ namespace pbrt {
                 {
                     ForExtent(extent, wrapMode, *this, [&bufIter, this](int offset) {
 #ifdef PBRT_FLOAT_AS_DOUBLE
-                        Float v;
+                        float v;
                         encoding.ToLinear({&p8[offset], 1}, {&v, 1});
                         *bufIter = v;
 #else
@@ -733,11 +735,11 @@ namespace pbrt {
                 break;
 
             case PixelFormat::Half:
-                ForExtent(extent, wrapMode, *this, [&bufIter, this](int offset) { *bufIter++ = Float(p16[offset]); });
+                ForExtent(extent, wrapMode, *this, [&bufIter, this](int offset) { *bufIter++ = float(p16[offset]); });
                 break;
 
             case PixelFormat::Float:
-                ForExtent(extent, wrapMode, *this, [&bufIter, this](int offset) { *bufIter++ = Float(p32[offset]); });
+                ForExtent(extent, wrapMode, *this, [&bufIter, this](int offset) { *bufIter++ = float(p32[offset]); });
                 break;
 
             default: LOG_FATAL("Unhandled PixelFormat");
@@ -763,7 +765,7 @@ namespace pbrt {
 #ifdef PBRT_FLOAT_AS_DOUBLE
                         for (int i = 0; i < count; ++i)
                         {
-                            Float v = *bufIter++;
+                            float v = *bufIter++;
                             encoding.FromLinear({&v, 1}, {&p8[offset + i], 1});
                         }
 #else
@@ -774,7 +776,7 @@ namespace pbrt {
                 }
                 else
                     ForExtent(extent, WrapMode::Clamp, *this, [&bufIter, this](int offset) {
-                        Float v = *bufIter++;
+                        float v = *bufIter++;
                         encoding.FromLinear({&v, 1}, {&p8[offset], 1});
                     });
                 break;
@@ -795,7 +797,7 @@ namespace pbrt {
 
     ImageChannelValues Image::LookupNearest(Point2f p, WrapMode2D wrapMode) const
     {
-        ImageChannelValues cv(NChannels(), Float(0));
+        ImageChannelValues cv(NChannels(), float(0));
         for (int c = 0; c < NChannels(); ++c)
             cv[c] = LookupNearestChannel(p, c, wrapMode);
         return cv;
@@ -803,7 +805,7 @@ namespace pbrt {
 
     ImageChannelValues Image::LookupNearest(Point2f p, ImageChannelDesc const& desc, WrapMode2D wrapMode) const
     {
-        ImageChannelValues cv(desc.offset.size(), Float(0));
+        ImageChannelValues cv(desc.offset.size(), float(0));
         for (int i = 0; i < desc.offset.size(); ++i)
             cv[i] = LookupNearestChannel(p, desc.offset[i], wrapMode);
         return cv;
@@ -811,7 +813,7 @@ namespace pbrt {
 
     ImageChannelValues Image::Bilerp(Point2f p, WrapMode2D wrapMode) const
     {
-        ImageChannelValues cv(NChannels(), Float(0));
+        ImageChannelValues cv(NChannels(), float(0));
         for (int c = 0; c < NChannels(); ++c)
             cv[c] = BilerpChannel(p, c, wrapMode);
         return cv;
@@ -819,7 +821,7 @@ namespace pbrt {
 
     ImageChannelValues Image::Bilerp(Point2f p, ImageChannelDesc const& desc, WrapMode2D wrapMode) const
     {
-        ImageChannelValues cv(desc.offset.size(), Float(0));
+        ImageChannelValues cv(desc.offset.size(), float(0));
         for (int i = 0; i < desc.offset.size(); ++i)
             cv[i] = BilerpChannel(p, desc.offset[i], wrapMode);
         return cv;
@@ -833,7 +835,7 @@ namespace pbrt {
             SetChannel(p, i, *iter);
     }
 
-    void Image::SetChannels(Point2i p, pstd::span<Float const> values)
+    void Image::SetChannels(Point2i p, pstd::span<float const> values)
     {
         CHECK_LE(values.size(), NChannels());
         for (size_t i = 0; i < values.size(); ++i)
@@ -864,14 +866,14 @@ namespace pbrt {
 
     Image Image::JointBilateralFilter(ImageChannelDesc const&   toFilterDesc,
                                       int                       halfWidth,
-                                      Float const               xySigma[2],
+                                      float const               xySigma[2],
                                       ImageChannelDesc const&   jointDesc,
                                       ImageChannelValues const& jointSigma) const
     {
         CHECK_EQ(jointDesc.size(), jointSigma.size());
         Image result(PixelFormat::Float, resolution, ChannelNames(toFilterDesc));
 
-        std::vector<Float> fx, fy;
+        std::vector<float> fx, fy;
         for (int i = 0; i <= halfWidth; ++i)
         {
             fx.push_back(Gaussian(i, 0, xySigma[0]));
@@ -884,8 +886,8 @@ namespace pbrt {
                 for (int x = 0; x < resolution.x; ++x)
                 {
                     ImageChannelValues jointPixelChannels = GetChannels({x, y}, jointDesc);
-                    ImageChannelValues filteredSum(toFilterDesc.size(), Float(0));
-                    Float              weightSum = 0;
+                    ImageChannelValues filteredSum(toFilterDesc.size(), float(0));
+                    float              weightSum = 0;
 
                     for (int dy = -halfWidth + 1; dy < halfWidth; ++dy)
                     {
@@ -898,7 +900,7 @@ namespace pbrt {
                                 if (x + dx < 0 || x + dx >= resolution.x)
                                     continue;
                                 ImageChannelValues jointOtherChannels = GetChannels({x + dx, y + dy}, jointDesc);
-                                Float              weight             = fx[std::abs(dx)] * fy[std::abs(dy)];
+                                float              weight             = fx[std::abs(dx)] * fy[std::abs(dy)];
                                 for (int c = 0; c < jointDesc.size(); ++c)
                                     weight *= Gaussian(jointPixelChannels[c], jointOtherChannels[c], jointSigma[c]);
                                 weightSum += weight;
@@ -1084,7 +1086,7 @@ namespace pbrt {
 
 ///////////////////////////////////////////////////////////////////////////
 // OpenEXR
-#ifndef PBRT_IS_GPU_CODE
+#ifndef DMT_IS_GPU_CODE
     static Imf::FrameBuffer imageToFrameBuffer(Image const& image, ImageChannelDesc const& desc, Imath::Box2i const& dataWindow)
     {
         size_t xStride = image.NChannels() * TexelBytes(image.Format());
@@ -1372,7 +1374,7 @@ namespace pbrt {
                         for (unsigned int x = 0; x < width; ++x, bufIter += 2)
                         {
                             // Convert from little endian.
-                            Float v = (((int)bufIter[0] << 8) + (int)bufIter[1]) / 65535.f;
+                            float v = (((int)bufIter[0] << 8) + (int)bufIter[1]) / 65535.f;
                             v       = encoding.ToFloatLinear(v);
                             image.SetChannel(Point2i(x, y), 0, v);
                         }
@@ -1414,7 +1416,7 @@ namespace pbrt {
                             {
                                 DCHECK(bufIter < buf.end());
                                 // Convert from little endian.
-                                Float rgba[4] = {(((int)bufIter[0] << 8) + (int)bufIter[1]) / 65535.f,
+                                float rgba[4] = {(((int)bufIter[0] << 8) + (int)bufIter[1]) / 65535.f,
                                                  (((int)bufIter[2] << 8) + (int)bufIter[3]) / 65535.f,
                                                  (((int)bufIter[4] << 8) + (int)bufIter[5]) / 65535.f,
                                                  (((int)bufIter[6] << 8) + (int)bufIter[7]) / 65535.f};
@@ -1435,7 +1437,7 @@ namespace pbrt {
                             {
                                 DCHECK(bufIter < buf.end());
                                 // Convert from little endian.
-                                Float rgb[3] = {(((int)bufIter[0] << 8) + (int)bufIter[1]) / 65535.f,
+                                float rgb[3] = {(((int)bufIter[0] << 8) + (int)bufIter[1]) / 65535.f,
                                                 (((int)bufIter[2] << 8) + (int)bufIter[3]) / 65535.f,
                                                 (((int)bufIter[4] << 8) + (int)bufIter[5]) / 65535.f};
                                 for (int c = 0; c < 3; ++c)
@@ -1538,8 +1540,8 @@ namespace pbrt {
             for (int x = 0; x < resolution.x; ++x)
                 for (int c = 0; c < NChannels(); ++c)
                 {
-                    Float dither = -.5f + BlueNoise(c, {x, y});
-                    Float v      = GetChannel({x, y}, c);
+                    float dither = -.5f + BlueNoise(c, {x, y});
+                    float v      = GetChannel({x, y}, c);
                     if (v < 0 || v > 1)
                         ++(*nOutOfGamut);
                     u256[NChannels() * (y * resolution.x + x) + c] = LinearToSRGB8(v, dither);
@@ -1902,7 +1904,7 @@ namespace pbrt {
             {
                 if (NChannels() == 1)
                 {
-                    Float v         = GetChannel({x, y}, 0);
+                    float v         = GetChannel({x, y}, 0);
                     scanline[3 * x] = scanline[3 * x + 1] = scanline[3 * x + 2] = v;
                 }
                 else
@@ -1928,4 +1930,4 @@ namespace pbrt {
     }
 #endif
 
-} // namespace pbrt
+} // namespace dmt

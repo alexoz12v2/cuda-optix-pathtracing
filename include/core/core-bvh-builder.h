@@ -9,11 +9,11 @@
 #include <vector>
 
 namespace dmt {
-    inline constexpr int LogBranchingFactor    = 3;
-    inline constexpr int BranchingFactor       = 1 << LogBranchingFactor;
-    inline constexpr int LeavesBranchingFactor = 1 << LogBranchingFactor; // TODO better
-    inline constexpr int TrianglesPerLeaf      = 4;
-    inline constexpr int maxPrimsInNode        = 8;
+    inline constexpr int     BranchingFactor       = 8;
+    inline constexpr int     LeavesBranchingFactor = 12;
+    inline constexpr int32_t MinNumBin             = 16;
+    inline constexpr int32_t MaxNumBin             = 128;
+    inline constexpr float   BinScaleFactor        = 2.f;
 
     struct DMT_CORE_API BVHBuildNode
     {

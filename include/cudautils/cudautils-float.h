@@ -240,6 +240,17 @@ namespace dmt::fl {
 #endif
     }
 
+    DMT_CPU_GPU inline float clamp(float x, float min, float max)
+    {
+#if defined(__CUDA_ARCH__)
+        return ::min(::max(x, min), max);
+#else
+        return std::clamp(x, min, max);
+#endif
+    }
+
+    DMT_CPU_GPU inline float clamp01(float x) { return clamp(x, 0, 1); }
+
     DMT_CPU_GPU inline float asinClamp(float x)
     {
 #if defined(__CUDA_ARCH__)

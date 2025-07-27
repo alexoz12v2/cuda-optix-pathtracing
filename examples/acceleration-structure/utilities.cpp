@@ -6,6 +6,8 @@
     #error "what"
 #endif
 
+#include <utility>
+
 #include <immintrin.h>
 
 namespace dmt {
@@ -75,6 +77,7 @@ namespace dmt {
                 group.zs[3 * j + 0] = tris[i + j].v0.z;
                 group.zs[3 * j + 1] = tris[i + j].v1.z;
                 group.zs[3 * j + 2] = tris[i + j].v2.z;
+                group.colors[j]     = tris[i + j].color;
             }
             out.push_back(makeUniqueRef<Triangles8>(memory, std::move(group)));
         }
@@ -96,6 +99,7 @@ namespace dmt {
                 group.zs[3 * j + 0] = tris[i + j].v0.z;
                 group.zs[3 * j + 1] = tris[i + j].v1.z;
                 group.zs[3 * j + 2] = tris[i + j].v2.z;
+                group.colors[j]     = tris[i + j].color;
             }
             out.push_back(makeUniqueRef<Triangles4>(memory, std::move(group)));
         }
@@ -117,6 +121,7 @@ namespace dmt {
                 group.zs[3 * j + 0] = tris[i + j].v0.z;
                 group.zs[3 * j + 1] = tris[i + j].v1.z;
                 group.zs[3 * j + 2] = tris[i + j].v2.z;
+                group.colors[j]     = tris[i + j].color;
             }
             out.push_back(makeUniqueRef<Triangles2>(memory, std::move(group)));
         }
@@ -772,77 +777,107 @@ namespace dmt::bvh {
 
         return intersection;
     }
+
+    Primitive const* intersectBVHBuild(Ray ray, BVHBuildNode* bvh, Intersection* outIsect, std::pmr::memory_resource* _temp)
+    {
+        std::pmr::vector<BVHBuildNode*> activeNodeStack{_temp};
+        activeNodeStack.reserve(64);
+        activeNodeStack.push_back(bvh);
+
+        Primitive const* primitive = nullptr;
+        while (!activeNodeStack.empty() && !primitive)
+        {
+            BVHBuildNode* current = activeNodeStack.back();
+            activeNodeStack.pop_back();
+
+            if (current->childCount > 0)
+            {
+                // children order of traversal: 1) Distance Heuristic: from smallest to highest tmin - ray origin 2) Sign Heuristic
+                // start with distance heuristic
+                struct
+                {
+                    uint32_t i = static_cast<uint32_t>(-1);
+                    float    d = fl::infinity();
+                } tmins[BranchingFactor];
+                uint32_t currentIndex = 0;
+
+                for (uint32_t i = 0; i < current->childCount; ++i)
+                {
+                    float tmin = fl::infinity();
+                    if (slabTest(ray.o, ray.d, current->children[i]->bounds, &tmin))
+                    {
+                        tmins[currentIndex].d = tmin;
+                        tmins[currentIndex].i = i;
+                        ++currentIndex;
+                    }
+                }
+
+                std::sort(std::begin(tmins), std::begin(tmins) + currentIndex, [](auto const& a, auto const& b) {
+                    return a.d > b.d;
+                });
+
+                for (uint32_t i = 0; i < currentIndex; ++i)
+                    activeNodeStack.push_back(current->children[tmins[i].i]);
+            }
+            else
+            {
+                // TODO handle any-hit, closest-hit, ...
+                // for now, stop at the first leaf intersection
+                float nearest = fl::infinity();
+                for (size_t i = 0; i < current->primitiveCount; ++i)
+                {
+                    assert(current->primitives[i] && "null primitive");
+                    if (auto si = current->primitives[i] ? current->primitives[i]->intersect(ray, fl::infinity())
+                                                         : Intersection{};
+                        si.hit && si.t < nearest)
+                    {
+                        primitive = current->primitives[i];
+                        nearest   = si.t;
+                        if (outIsect)
+                            *outIsect = si;
+                    }
+                }
+            }
+        }
+
+        return primitive;
+    }
+
+    std::pmr::vector<Primitive const*> extractPrimitivesFromBuild(BVHBuildNode* bvh, std::pmr::memory_resource* memory)
+    {
+        std::pmr::vector<Primitive const*> ret{memory};
+
+        auto const f = []<typename F>
+            requires std::is_invocable_v<F, Primitive const*>
+        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
+            if (_node->childCount == 0)
+            {
+                for (uint32_t i = 0; i < _node->primitiveCount; ++i)
+                {
+                    assert(_node->primitives[i] && "nullptr primitive found");
+                    doFunc(_node->primitives[i]);
+                }
+            }
+            else
+            {
+                for (uint32_t i = 0; i < _node->childCount; ++i)
+                {
+                    assert(_node->children[i] && "nullptr child BVH build node found");
+                    _f(_f, _node->children[i], doFunc);
+                }
+            }
+        };
+
+        size_t requiredCapacity = 0;
+        f(f, bvh, [&requiredCapacity](Primitive const* p) { ++requiredCapacity; });
+        ret.reserve(requiredCapacity);
+        f(f, bvh, [&ret](Primitive const* p) { ret.push_back(p); });
+
+        return ret;
+    }
 } // namespace dmt::bvh
 
 namespace dmt::numbers {
-    static __m128i permuteSSE2(__m128i i, uint32_t l, uint64_t p)
-    {
-        uint64_t const p0 = static_cast<uint32_t>(p);
-        uint64_t const p1 = p >> 32;
-
-        uint64_t w = l - 1;
-        w |= w >> 1;
-        w |= w >> 2;
-        w |= w >> 4;
-        w |= w >> 8;
-        w |= w >> 16;
-        w |= w >> 32;
-
-        __m128i const W = _mm_set1_epi64x(w);
-        __m128i       x = i;
-
-        __m128i const P0 = _mm_set1_epi64x(p0);
-        __m128i const P1 = _mm_set1_epi64x(p1);
-        __m128i const P  = _mm_set1_epi64x(p);
-
-        __m128i const M1  = _mm_set1_epi64x(0xe170893d);
-        __m128i const M2  = _mm_set1_epi64x(0x0929eb3f);
-        __m128i const M3  = _mm_set1_epi64x(0x6935fa69);
-        __m128i const M4  = _mm_set1_epi64x(0x74dcb303);
-        __m128i const M5  = _mm_set1_epi64x(0x9e501cc3);
-        __m128i const M6  = _mm_set1_epi64x(0xc860a3df);
-        __m128i const ONE = _mm_set1_epi64x(1);
-
-        do
-        {
-            x = _mm_xor_si128(x, P0);
-            x = _mm_mul_epu32(x, M1);
-            x = _mm_xor_si128(x, P1);
-            x = _mm_xor_si128(x, _mm_srli_epi64(_mm_and_si128(x, W), 4));
-            x = _mm_xor_si128(x, _mm_srli_epi64(P0, 8));
-            x = _mm_mul_epu32(x, M2);
-            x = _mm_xor_si128(x, _mm_srli_epi64(P, 23));
-            x = _mm_xor_si128(x, _mm_srli_epi64(_mm_and_si128(x, W), 1));
-            x = _mm_mul_epu32(x, _mm_or_si128(ONE, _mm_srli_epi64(P, 27)));
-            x = _mm_mul_epu32(x, M3);
-            x = _mm_xor_si128(x, _mm_srli_epi64(_mm_and_si128(x, W), 11));
-            x = _mm_mul_epu32(x, M4);
-            x = _mm_xor_si128(x, _mm_srli_epi64(_mm_and_si128(x, W), 2));
-            x = _mm_mul_epu32(x, M5);
-            x = _mm_xor_si128(x, _mm_srli_epi64(_mm_and_si128(x, W), 2));
-            x = _mm_mul_epu32(x, M6);
-            x = _mm_and_si128(x, W);
-            x = _mm_xor_si128(x, _mm_srli_epi64(x, 5));
-        } while ((_mm_movemask_epi8(_mm_cmpgt_epi64(x, _mm_set1_epi64x(l - 1))) & 0xFFFF) != 0);
-
-        // Return (x + p) % l
-        x = _mm_add_epi64(x, P);
-        x = _mm_rem_epu64(x, _mm_set1_epi64x(l)); // emulate % l
-
-        return x;
-    }
-
-    // doesn't work
-    uint16_t permutationElement(int32_t i, int32_t j, uint32_t l, uint64_t p)
-    {
-        __m128i v   = _mm_set_epi64x(static_cast<uint64_t>(j), static_cast<uint64_t>(i));
-        __m128i res = permuteSSE2(v, l, p);
-
-        alignas(16) uint64_t out[2];
-        _mm_store_si128(reinterpret_cast<__m128i*>(out), res);
-        return static_cast<uint16_t>(out[0]); // or return both if needed
-    }
-
     uint16_t permutationElement(int32_t i, uint32_t l, uint64_t p)
     {
         uint32_t w = l - 1;

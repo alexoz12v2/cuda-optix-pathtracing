@@ -16,11 +16,76 @@
 #include <iomanip>
 
 namespace dmt::ddbg {
-    std::string printBVHToString(BVHBuildNode* node, int depth = 0, std::string const& prefix = "")
+    void printTrianglePrimitives(std::span<Primitive const*> bvhPrimitives)
     {
-        std::string result;
-        if (depth == 0)
-            result += "\n";
+        Context ctx;
+        if (!ctx.isValid())
+            return;
+
+        auto const printTri = [&ctx](int32_t choice, size_t i, Point3f v0, Point3f v1, Point3f v2, RGB color) {
+            std::string_view prefix = choice == 0   ? "Triangle"
+                                      : choice == 1 ? "Triangles2"
+                                      : choice == 2 ? "Triangles4"
+                                                    : "Triangles8";
+            // clang-format off
+            ctx.log("{} {}: {{ v0: {{{} {} {}}}, v1: {{{} {} {}}}, v2: {{{} {} {}}}, c: {{{} {} {}}} }}",
+                    std::make_tuple(prefix, i,
+                                    v0.x, v0.y, v0.z,
+                                    v1.x, v1.y, v1.z,
+                                    v2.x, v2.y, v2.z,
+                                    color.r, color.g, color.b));
+            // clang-format on
+        };
+
+        size_t index = 0;
+        for (auto const* prim : bvhPrimitives)
+        {
+            if (auto const* p = dynamic_cast<Triangle const*>(prim); p)
+            {
+                auto const [v0, v1, v2, c] = p->tri;
+                printTri(0, index++, v0, v1, v2, c);
+            }
+            else if (auto const* p = dynamic_cast<Triangles2 const*>(prim); p)
+            {
+                for (int32_t i = 0; i < 2; ++i)
+                {
+                    Point3f const v0{p->xs[i * 3 + 0], p->ys[i * 3 + 0], p->zs[i * 3 + 0]};
+                    Point3f const v1{p->xs[i * 3 + 1], p->ys[i * 3 + 1], p->zs[i * 3 + 1]};
+                    Point3f const v2{p->xs[i * 3 + 2], p->ys[i * 3 + 2], p->zs[i * 3 + 2]};
+                    RGB const     c{p->colors[i]};
+                    printTri(1, index++, v0, v1, v2, c);
+                }
+            }
+            else if (auto const p = dynamic_cast<Triangles4 const*>(prim); p)
+            {
+                for (int32_t i = 0; i < 4; ++i)
+                {
+                    Point3f const v0{p->xs[i * 3 + 0], p->ys[i * 3 + 0], p->zs[i * 3 + 0]};
+                    Point3f const v1{p->xs[i * 3 + 1], p->ys[i * 3 + 1], p->zs[i * 3 + 1]};
+                    Point3f const v2{p->xs[i * 3 + 2], p->ys[i * 3 + 2], p->zs[i * 3 + 2]};
+                    RGB const     c{p->colors[i]};
+                    printTri(2, index++, v0, v1, v2, c);
+                }
+            }
+            else if (auto const p = dynamic_cast<Triangles8 const*>(prim); p)
+            {
+                for (int32_t i = 0; i < 8; ++i)
+                {
+                    Point3f const v0{p->xs[i * 3 + 0], p->ys[i * 3 + 0], p->zs[i * 3 + 0]};
+                    Point3f const v1{p->xs[i * 3 + 1], p->ys[i * 3 + 1], p->zs[i * 3 + 1]};
+                    Point3f const v2{p->xs[i * 3 + 2], p->ys[i * 3 + 2], p->zs[i * 3 + 2]};
+                    RGB const     c{p->colors[i]};
+                    printTri(3, index++, v0, v1, v2, c);
+                }
+            }
+        }
+    }
+
+    void printBVHToString(BVHBuildNode* node, int depth = 0, std::string const& prefix = "")
+    {
+        Context ctx;
+        if (!ctx.isValid())
+            return;
 
         constexpr auto boundsToString = [](Bounds3f const& b) -> std::string {
             std::ostringstream oss;
@@ -30,36 +95,66 @@ namespace dmt::ddbg {
         };
 
         if (!node)
-            return result;
+            return;
 
         std::string indent(depth * 2, ' ');
 
         if (node->childCount == 0 && node->primitiveCount > 0)
         {
-            result += indent + prefix + "Leaf [count: " + std::to_string(node->primitiveCount) + ", ";
-            result += boundsToString(node->bounds) + "]\n";
+            ctx.log("{}{}Leaf [count: {} {}]",
+                    std::make_tuple(indent, prefix, std::to_string(node->primitiveCount), boundsToString(node->bounds)));
         }
         else
         {
-            result += indent + prefix + "Internal [children: " + std::to_string(node->childCount) + ", ";
-            result += boundsToString(node->bounds) + "]\n";
+            ctx.log("{}{}Internal [children: {}, {}]",
+                    std::make_tuple(indent, prefix, std::to_string(node->childCount), boundsToString(node->bounds)));
 
             for (uint32_t i = 0; i < node->childCount; ++i)
             {
                 bool        isLast      = (i == node->childCount - 1);
                 std::string childPrefix = isLast ? "└─ " : "├─ ";
-                result += printBVHToString(node->children[i], depth + 1, childPrefix);
+                printBVHToString(node->children[i], depth + 1, childPrefix);
             }
         }
-
-        return result;
     }
 
-    std::vector<TriangleData> makeCubeTriangles(Point3f centerPosition, float size)
+    static RGB hsvToRgb(float h, float s, float v)
+    {
+        h = std::fmodf(h, 1.0f);
+        if (h < 0.0f)
+            h += 1.0f;
+
+        float c = v * s;
+        float x = c * (1 - std::fabs(std::fmodf(h * 6.0f, 2.0f) - 1));
+        float m = v - c;
+
+        float r1, g1, b1;
+        // clang-format off
+        if      (h < 1.0f / 6.0f) { r1 = c; g1 = x; b1 = 0; }
+        else if (h < 2.0f / 6.0f) { r1 = x; g1 = c; b1 = 0; }
+        else if (h < 3.0f / 6.0f) { r1 = 0; g1 = c; b1 = x; }
+        else if (h < 4.0f / 6.0f) { r1 = 0; g1 = x; b1 = c; }
+        else if (h < 5.0f / 6.0f) { r1 = x; g1 = 0; b1 = c; }
+        else                      { r1 = c; g1 = 0; b1 = x; }
+        // clang-format on
+
+        return {r1 + m, g1 + m, b1 + m};
+    }
+
+    RGB makeRGBFromHSVinterp(float h, float s, float vMax, float vMin, uint32_t num, uint32_t index)
+    {
+        if (num == 0)
+            return {0, 0, 0};
+        float v = (static_cast<float>(index) / static_cast<float>(num - 1)) * vMax + vMin;
+        return hsvToRgb(h, s, v);
+    }
+
+    std::vector<TriangleData> makeCubeTriangles(Point3f centerPosition, float size, float zRadians, float hue, float saturation)
     {
         std::vector<TriangleData> tris;
 
         float const h = size * 0.5f; // half size
+
         // Cube in local space
         std::array<Point3f, 8> const localVerts =
             {Point3f{{-h, -h, -h}},
@@ -71,9 +166,18 @@ namespace dmt::ddbg {
              Point3f{{+h, +h, +h}},
              Point3f{{-h, +h, +h}}};
 
-        // Local to world transform (just offset, no rotation)
-        auto world = [&](Point3f const& p) {
-            return Point3f{{p.x + centerPosition.x, p.y + centerPosition.y, p.z + centerPosition.z}};
+        // Precompute rotation matrix around Z axis
+        float const cosZ = std::cos(zRadians);
+        float const sinZ = std::sin(zRadians);
+
+        auto const rotateZ = [cosZ, sinZ](Point3f const& p) -> Point3f {
+            return Point3f{{cosZ * p.x - sinZ * p.y, sinZ * p.x + cosZ * p.y, p.z}};
+        };
+
+        // Local to world transform (rotation + translation)
+        auto const toWorld = [rotateZ, centerPosition](Point3f const& p) -> Point3f {
+            Point3f rotated = rotateZ(p);
+            return Point3f{{rotated.x + centerPosition.x, rotated.y + centerPosition.y, rotated.z + centerPosition.z}};
         };
 
         // Face indices
@@ -88,13 +192,20 @@ namespace dmt::ddbg {
         }};
         // clang-format on
 
+        uint32_t i = 0;
         for (auto const& idx : indices)
-            tris.push_back({world(localVerts[idx[0]]), world(localVerts[idx[1]]), world(localVerts[idx[2]])});
+        {
+            tris.emplace_back(toWorld(localVerts[idx[0]]),
+                              toWorld(localVerts[idx[1]]),
+                              toWorld(localVerts[idx[2]]),
+                              makeRGBFromHSVinterp(hue, saturation, 0.85f, 0.03f, 12, i));
+            ++i;
+        }
 
         return tris;
     }
 
-    std::vector<TriangleData> makePlaneTriangles(Point3f centerPosition, float size)
+    std::vector<TriangleData> makePlaneTriangles(Point3f centerPosition, float size, float hue, float saturation)
     {
         std::vector<TriangleData> tris;
         float const               h = size * 0.5f;
@@ -106,9 +217,9 @@ namespace dmt::ddbg {
         Point3f const v3 = {{centerPosition.x - h, centerPosition.y + h, centerPosition.z}};
 
         // Triangle 1: v0, v1, v2
-        tris.emplace_back(v0, v1, v2);
+        tris.emplace_back(v0, v1, v2, makeRGBFromHSVinterp(hue, saturation, 0.2f, 0.1f, 2, 0));
         // Triangle 2: v2, v3, v0
-        tris.emplace_back(v2, v3, v0);
+        tris.emplace_back(v2, v3, v0, makeRGBFromHSVinterp(hue, saturation, 0.2f, 0.1f, 2, 1));
 
         return tris;
     }
@@ -117,29 +228,27 @@ namespace dmt::ddbg {
     {
         std::pmr::vector<TriangleData> scene{memory};
 
-        // Place cube centered near origin, slightly raised
-        Point3f const cubeCenter{{0.f, 0.f, 0.5f}}; // in front of camera at {0, -4, 2}
-        float const   cubeSize = 1.0f;
+        auto cube  = makeCubeTriangles({0.f, 1.5f, -0.75f}, 0.5f, fl::pi() * 0.25f, 0.02f, 0.7f);
+        auto cube1 = makeCubeTriangles({0.5f, 1.2f, -0.9f}, 0.42f, fl::pi() * 0.7f, 0.5f, 0.7f);
+        auto cube2 = makeCubeTriangles({0.5f, 1.7f, -0.9f}, 0.42f, fl::pi() * 0.7f, 0.f, 0.3f);
+        auto cube3 = makeCubeTriangles({0.5f, 1.7f, -0.6f}, 0.42f, fl::pi() * 0.7f, 0.7f, 0.3f);
+        auto plane = makePlaneTriangles({0.f, 1.f, -1.f}, 3.0f, 0.23f, 0.7f);
 
-        // Place a ground plane large enough under cube
-        Point3f const planeCenter{{0.f, 0.f, 0.f}}; // XY plane at Z=0
-        float const   planeSize = 6.0f;
-
-        //auto cubeTris  = makeCubeTriangles(cubeCenter, cubeSize);
-        //auto planeTris = makePlaneTriangles(planeCenter, planeSize);
-
-        //scene.insert(scene.end(), cubeTris.begin(), cubeTris.end());
-        //scene.insert(scene.end(), planeTris.begin(), planeTris.end());
+        scene.insert(scene.end(), cube.begin(), cube.end());
+        scene.insert(scene.end(), plane.begin(), plane.end());
+        scene.insert(scene.end(), cube1.begin(), cube1.end());
+        scene.insert(scene.end(), cube2.begin(), cube2.end());
+        scene.insert(scene.end(), cube3.begin(), cube3.end());
 
         // triangle in front of camera
-        Point3f const v0{-0.5f, 0.f, -0.5f};
-        Point3f const v1{0.5f, 0, -0.5f};
-        Point3f const v2{0, 0, 0.5f};
+        //Point3f const v0{-0.5f, 0.f, -0.5f};
+        //Point3f const v1{0.5f, 0, -0.5f};
+        //Point3f const v2{0, 0, 0.5f};
 
-        Point3f const v3{0.9f, 0, 0.5f};
+        //Point3f const v3{0.9f, 0, 0.5f};
 
-        scene.emplace_back(v0, v1, v2);
-        scene.emplace_back(v2, v1, v3);
+        //scene.emplace_back(v0, v1, v2);
+        //scene.emplace_back(v2, v1, v3);
 
         return scene;
     }
@@ -541,7 +650,7 @@ namespace dmt::sampling {
         static float sampleDim(int dim, int64_t haltonIndex)
         {
             namespace dn = dmt::numbers;
-            return owenScrambledRadicalInverse(dim, haltonIndex, dn::mixBits(1 + dim << 4));
+            return owenScrambledRadicalInverse(dim, haltonIndex, dn::mixBits(1 + static_cast<uint64_t>(dim) << 4));
         }
 
     private:
@@ -863,25 +972,11 @@ namespace dmt {
     RGB incidentRadiance(Ray const& ray, BVHBuildNode* bvh, sampling::HaltonOwen& sampler, std::pmr::memory_resource* temp)
     {
         // TODO: Doesn't work
-        auto*            leaf = bvh::traverseBVHBuild(ray, bvh, temp);
-        Primitive const* prim = nullptr;
-        if (leaf)
-        {
-            float minDistSoFar = fl::infinity();
-            for (int32_t i = 0; i < leaf->primitiveCount; ++i)
-            {
-                Intersection isect = leaf->primitives[i]->intersect(ray, fl::infinity());
-                if (isect.hit && minDistSoFar > isect.t)
-                {
-                    prim         = leaf->primitives[i];
-                    minDistSoFar = isect.t;
-                }
-            }
-        }
-
+        Intersection     isect;
+        Primitive const* prim = bvh::intersectBVHBuild(ray, bvh, &isect, temp);
         if (prim)
         {
-            return prim->color();
+            return isect.color;
         }
         else
         {
@@ -889,13 +984,145 @@ namespace dmt {
         }
     }
 
+    // note: we are using float equality because the numbers should come from copying, no computation needed
+    bool checkGrouping(std::span<Primitive const*> primsView, std::span<Primitive const*> primsGrouped)
+    {
+        if (primsView.size() != primsGrouped.size() * 8)
+            return false;
+
+        for (size_t i = 0; i < primsGrouped.size(); ++i)
+        {
+            auto const* group = dynamic_cast<Triangles8 const*>(primsGrouped[i]);
+            if (!group)
+                return false;
+
+            for (int j = 0; j < 8; ++j)
+            {
+                size_t      primIndex = (i << 3) + j;
+                auto const* tri       = dynamic_cast<Triangle const*>(primsView[primIndex]);
+                if (!tri)
+                    return false;
+
+                Point3f v0 = tri->tri.v0;
+                Point3f v1 = tri->tri.v1;
+                Point3f v2 = tri->tri.v2;
+
+                auto idx = 3 * j;
+
+                // Compare vertices
+                if (group->xs[idx + 0] != v0.x || group->ys[idx + 0] != v0.y || group->zs[idx + 0] != v0.z)
+                    return false;
+                if (group->xs[idx + 1] != v1.x || group->ys[idx + 1] != v1.y || group->zs[idx + 1] != v1.z)
+                    return false;
+                if (group->xs[idx + 2] != v2.x || group->ys[idx + 2] != v2.y || group->zs[idx + 2] != v2.z)
+                    return false;
+
+                // Optional: Compare color (if needed)
+                RGB c = tri->tri.color;
+                RGB g = group->colors[j];
+                if (c.r != g.r || c.g != g.g || c.b != g.b)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool checkBvhPrimitivesEquality(std::span<Primitive const*> primsView, std::span<Primitive const*> primsGrouped)
+    {
+        if (primsGrouped.size() > primsView.size())
+            return false;
+
+        // assume all Primitives in primsView are Triangle
+        UniqueRef<bool[]> checked = makeUniqueRef<bool[]>(std::pmr::get_default_resource(), primsView.size());
+        std::fill(checked.get(), checked.get() + primsView.size(), false);
+
+        auto const matchTriangle = [&](Point3f const& v0, Point3f const& v1, Point3f const& v2, RGB const& color) -> bool {
+            for (size_t i = 0; i < primsView.size(); ++i)
+            {
+                if (checked[i])
+                    continue;
+
+                auto const* tri = dynamic_cast<Triangle const*>(primsView[i]);
+                if (!tri)
+                    return false;
+
+                if ((tri->tri.v0.x == v0.x && tri->tri.v0.y == v0.y && tri->tri.v0.z == v0.z) &&
+                    (tri->tri.v1.x == v1.x && tri->tri.v1.y == v1.y && tri->tri.v1.z == v1.z) &&
+                    (tri->tri.v2.x == v2.x && tri->tri.v2.y == v2.y && tri->tri.v2.z == v2.z) &&
+                    (tri->tri.color.r == color.r && tri->tri.color.g == color.g && tri->tri.color.b == color.b))
+                {
+                    checked[i] = true;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        for (Primitive const* group : primsGrouped)
+        {
+            if (auto const* p = dynamic_cast<Triangle const*>(group); p)
+            {
+                if (!matchTriangle(p->tri.v0, p->tri.v1, p->tri.v2, p->tri.color))
+                    return false;
+            }
+            else if (auto const* p = dynamic_cast<Triangles2 const*>(group); p)
+            {
+                for (int i = 0; i < 2; ++i)
+                {
+                    Point3f const v0{p->xs[i * 3 + 0], p->ys[i * 3 + 0], p->zs[i * 3 + 0]};
+                    Point3f const v1{p->xs[i * 3 + 1], p->ys[i * 3 + 1], p->zs[i * 3 + 1]};
+                    Point3f const v2{p->xs[i * 3 + 2], p->ys[i * 3 + 2], p->zs[i * 3 + 2]};
+                    if (!matchTriangle(v0, v1, v2, p->colors[i]))
+                        return false;
+                }
+            }
+            else if (auto const* p = dynamic_cast<Triangles4 const*>(group); p)
+            {
+                for (int i = 0; i < 4; ++i)
+                {
+                    Point3f const v0{p->xs[i * 3 + 0], p->ys[i * 3 + 0], p->zs[i * 3 + 0]};
+                    Point3f const v1{p->xs[i * 3 + 1], p->ys[i * 3 + 1], p->zs[i * 3 + 1]};
+                    Point3f const v2{p->xs[i * 3 + 2], p->ys[i * 3 + 2], p->zs[i * 3 + 2]};
+                    if (!matchTriangle(v0, v1, v2, p->colors[i]))
+                        return false;
+                }
+            }
+            else if (auto const* p = dynamic_cast<Triangles8 const*>(group); p)
+            {
+                for (int i = 0; i < 8; ++i)
+                {
+                    Point3f const v0{p->xs[i * 3 + 0], p->ys[i * 3 + 0], p->zs[i * 3 + 0]};
+                    Point3f const v1{p->xs[i * 3 + 1], p->ys[i * 3 + 1], p->zs[i * 3 + 1]};
+                    Point3f const v2{p->xs[i * 3 + 2], p->ys[i * 3 + 2], p->zs[i * 3 + 2]};
+                    if (!matchTriangle(v0, v1, v2, p->colors[i]))
+                        return false;
+                }
+            }
+            else
+            {
+                return false; // Unknown type
+            }
+        }
+
+        // All grouped triangles matched, ensure no extras
+        for (size_t i = 0; i < primsView.size(); ++i)
+        {
+            if (!checked[i])
+                return false;
+        }
+
+        return true;
+    }
+
     void writeIntersectionTestImage(
         std::pmr::monotonic_buffer_resource&  scratch,
         unsigned char*                        scratchBuffer,
         size_t                                ScratchBufferBytes,
         std::pmr::synchronized_pool_resource& pool,
-        std::span<TriangleData>               scene,
         std::span<Primitive const*>           primsView,
+        std::span<Primitive const*>           primsGrouped,
+        std::span<Primitive const*>           bvhPrimitives,
         uint32_t                              Width,
         uint32_t                              Height,
         sampling::HaltonOwen&                 sampler,
@@ -906,14 +1133,44 @@ namespace dmt {
         Context       ctx;
         Point2i const res{static_cast<int32_t>(Width), static_cast<int32_t>(Height)};
         film::RGBFilm film{res, 1e5f, &pool};
+        film::RGBFilm filmGroup{res, 1e5f, &pool};
+        film::RGBFilm filmBvhPrimitives{res, 1e5f, &pool};
         ctx.log("Executing test run with intersection tests against all primitives", {});
 
-        UniqueRef<unsigned char[]> maskImage = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
+        UniqueRef<unsigned char[]> maskImage              = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
+        UniqueRef<unsigned char[]> maskImageGroup         = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
+        UniqueRef<unsigned char[]> maskImageBvhPrimitives = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
+
+        bool const allTriangles = std::transform_reduce(primsView.begin(), primsView.end(), true, [](bool a, bool b) {
+            return a && b;
+        }, [](Primitive const* p) { return dynamic_cast<Triangle const*>(p); });
+        if ((primsView.size() & 7) == 0 && allTriangles)
+        {
+#define DMT_CHAR_FIRE_EMOJI "\xF0\x9F\x94\xA5"
+            ctx.warn("All scene primitives are triangles and divisible by 8, hence checking grouping", {});
+            ctx.warn(DMT_CHAR_FIRE_EMOJI " Note: We are assuming grouping has Triangles8 and no sorting happened", {});
+            if (!checkGrouping(primsView, primsGrouped))
+            {
+                ctx.error("Grouping failed", {});
+                assert(false && "grouping failed");
+            }
+        }
+        if (allTriangles)
+        {
+            if (!checkBvhPrimitivesEquality(primsView, primsGrouped))
+            {
+                ctx.error("BVH Grouping failed", {});
+                assert(false && "BVH grouping failed");
+            }
+        }
 
         for (Point2i pixel : ScanlineRange2D(res))
         {
             if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
                 ctx.log("Starting Pixel {{ {} {} }}", std::make_tuple(pixel.x, pixel.y));
+
+            if (pixel.x == 62 && pixel.y == 66)
+                int i = 0;
 
             for (int32_t sampleIndex = 0; sampleIndex < 1; ++sampleIndex)
             {
@@ -923,22 +1180,54 @@ namespace dmt {
                 cs.pFilm.y                        = static_cast<float>(pixel.y) + 0.5f;
                 Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
 
-                float            nearest   = fl::infinity();
-                Primitive const* primitive = nullptr;
+                float        nearest = fl::infinity();
+                Intersection isect{};
 
                 for (size_t i = 0; i < primsView.size(); ++i)
                 {
                     if (auto si = primsView[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
                     {
-                        primitive = primsView[i];
-                        nearest   = si.t;
+                        isect   = si;
+                        nearest = si.t;
                     }
                 }
 
-                RGB const radiance = primitive ? primitive->color() : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
-                maskImage[pixel.x + res.x * pixel.y] = primitive ? 255 : 0;
+                RGB radiance = isect.hit ? isect.color : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+                maskImage[pixel.x + res.x * pixel.y] = isect.hit ? 255 : 0;
 
                 film.addSample(pixel, radiance, cs.filterWeight);
+
+                nearest   = fl::infinity();
+                isect.hit = false;
+
+                for (size_t i = 0; i < primsGrouped.size(); ++i)
+                {
+                    if (auto si = primsGrouped[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
+                    {
+                        isect   = si;
+                        nearest = si.t;
+                    }
+                }
+
+                radiance = isect.hit ? isect.color : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+
+                filmGroup.addSample(pixel, radiance, cs.filterWeight);
+
+                nearest   = fl::infinity();
+                isect.hit = false;
+
+                for (size_t i = 0; i < bvhPrimitives.size(); ++i)
+                {
+                    if (auto si = bvhPrimitives[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
+                    {
+                        isect   = si;
+                        nearest = si.t;
+                    }
+                }
+
+                radiance = isect.hit ? isect.color : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+
+                filmBvhPrimitives.addSample(pixel, radiance, cs.filterWeight);
 
                 resetMonotonicBufferPointer(scratch, scratchBuffer, ScratchBufferBytes);
             }
@@ -948,13 +1237,28 @@ namespace dmt {
         imagePath /= "test.png";
         ctx.log("Writing test image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
         film.writeImage(imagePath);
+
         imagePath = os::Path::executableDir(&pool);
         imagePath /= "mask.png";
         ctx.log("Writing test mask into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
         stbi_write_png(imagePath.toUnderlying(&scratch).c_str(), res.x, res.y, 1, maskImage.get(), 0);
+
+        imagePath = os::Path::executableDir(&pool);
+        imagePath /= "test_group.png";
+        ctx.log("Writing test grouped image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
+        filmGroup.writeImage(imagePath);
+
+        imagePath = os::Path::executableDir(&pool);
+        imagePath /= "test_bvhprims.png";
+        ctx.log("Writing test bvh grouped image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
+        filmBvhPrimitives.writeImage(imagePath);
     }
 
-    void runMainProgram(std::span<TriangleData> scene, std::span<Primitive const*> primsView, BVHBuildNode* bvh)
+    void runMainProgram(std::span<TriangleData>     scene,
+                        std::span<Primitive const*> primsView,
+                        BVHBuildNode*               bvh,
+                        std::span<Primitive const*> bvhPrimitives,
+                        std::span<Primitive const*> primsGrouped)
     {
         // primsView primitive coordinates defined in world space
         static constexpr uint32_t Width              = 128;
@@ -981,8 +1285,8 @@ namespace dmt {
         resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
 
         // define camera (image plane physical dims, resolution given by image)
-        Vector3f const cameraPosition{0.f, -1.f, 0.f};
-        Normal3f const cameraDirection{0.f, 1.f, 0.f};
+        Vector3f const cameraPosition{0.f, 0.f, 0.f};
+        Normal3f const cameraDirection{0.f, 1.f, -0.5f};
         float const    focalLength = 35e-3f; // 35 mm
         float const    fovRadians  = fl::pi() / 2;
         float const    aspectRatio = Width / Height;
@@ -1000,14 +1304,12 @@ namespace dmt {
                 ctx.log("Starting Pixel {{ {} {} }}",
                         std::make_tuple(pixel.x, pixel.y)); // TODO more samples when filter introduced
 
-            for (int32_t sampleIndex = 0; sampleIndex < 1 /* SamplesPerPixel */; ++sampleIndex)
+            for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
             {
                 sampler.startPixelSample(pixel, sampleIndex);
-                camera::CameraSample /*const*/ cs = camera::getCameraSample(sampler, pixel, filter);
-                cs.pFilm.x                        = static_cast<float>(pixel.x) + 0.5f;
-                cs.pFilm.y                        = static_cast<float>(pixel.y) + 0.5f;
-                Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
-                RGB const radiance = incidentRadiance(ray, bvh, sampler, &scratch);
+                camera::CameraSample const cs = camera::getCameraSample(sampler, pixel, filter);
+                Ray const                  ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
+                RGB const                  radiance = incidentRadiance(ray, bvh, sampler, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);
                 resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
             }
@@ -1022,8 +1324,9 @@ namespace dmt {
                                    scratchBuffer.get(),
                                    ScratchBufferBytes,
                                    pool,
-                                   scene,
                                    primsView,
+                                   primsGrouped,
+                                   bvhPrimitives,
                                    Width,
                                    Height,
                                    sampler,
@@ -1051,10 +1354,14 @@ int32_t guardedMain()
         auto                             bufferMemory = std::pmr::monotonic_buffer_resource(bufferPtr.get(), 2048);
         auto                             scene        = dmt::ddbg::debugScene();
 
-        ctx.warn("No morton reordering of primitives, still to test", {});
 #if 0
         dmt::reorderByMorton(scene);
+#else
+        ctx.warn("No morton reordering of primitives, still to test", {});
 #endif
+
+        auto primsGrouped     = dmt::makePrimitivesFromTriangles(scene);
+        auto primsGroupedView = dmt::ddbg::rawPtrsCopy(primsGrouped);
 
         auto prims     = dmt::makeSinglePrimitivesFromTriangles(scene);
         auto primsView = dmt::ddbg::rawPtrsCopy(prims);
@@ -1068,23 +1375,35 @@ int32_t guardedMain()
         if (ctx.isLogEnabled())
         {
             ctx.log("-- Before Primitive Packing --", {});
-            std::string tee = dmt::ddbg::printBVHToString(rootNode);
-            ctx.log(std::string_view{tee}, {});
+            dmt::ddbg::printBVHToString(rootNode);
         }
 
         dmt::test::bvhTestRays(rootNode);
 
-        ctx.warn("No grouping of primitives, still to test", {});
-#if 0
+        auto bvhPrimitivesBefore = dmt::bvh::extractPrimitivesFromBuild(rootNode);
+        if (!dmt::checkBvhPrimitivesEquality(primsView, bvhPrimitivesBefore))
+        {
+            ctx.error("BVH Primitive equality failed before gruoping", {});
+            assert(false && "BVH Primitive equality failed before gruoping");
+        }
+
+        dmt::ddbg::printTrianglePrimitives(bvhPrimitivesBefore);
+
         dmt::bvh::groupTrianglesInBVHLeaves(rootNode, prims, &bufferMemory);
+        auto bvhPrimitives = dmt::bvh::extractPrimitivesFromBuild(rootNode);
+        if (!dmt::checkBvhPrimitivesEquality(primsView, bvhPrimitives))
+        {
+            ctx.error("BVH Primitive equality failed after gruoping", {});
+            assert(false && "BVH Primitive equality failed after gruoping");
+        }
 
         if (ctx.isLogEnabled())
         {
             ctx.log("-- After Primitive Packing --", {});
-            std::string tee = dmt::ddbg::printBVHToString(rootNode);
-            ctx.log(std::string_view{tee}, {});
+            dmt::ddbg::printBVHToString(rootNode);
         }
-#endif
+
+        dmt::ddbg::printTrianglePrimitives(bvhPrimitives);
 
         dmt::resetMonotonicBufferPointer(bufferMemory, bufferPtr.get(), 2048);
 
@@ -1093,7 +1412,7 @@ int32_t guardedMain()
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();
 
-        dmt::runMainProgram(scene, spanPrims, rootNode);
+        dmt::runMainProgram(scene, spanPrims, rootNode, bvhPrimitives, primsGroupedView);
 
         dmt::bvh::cleanup(rootNode);
 

@@ -149,10 +149,18 @@ namespace dmt::test {
 } // namespace dmt::test
 
 namespace dmt::bvh {
-    BVHBuildNode* traverseBVHBuild(Ray                        ray,
-                                   BVHBuildNode*              bvh,
-                                   std::pmr::memory_resource* memory = std::pmr::get_default_resource());
-}
+    BVHBuildNode*    traverseBVHBuild(Ray                        ray,
+                                      BVHBuildNode*              bvh,
+                                      std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+    Primitive const* intersectBVHBuild(Ray                        ray,
+                                       BVHBuildNode*              bvh,
+                                       Intersection*              outIsect = nullptr,
+                                       std::pmr::memory_resource* memory   = std::pmr::get_default_resource());
+
+    std::pmr::vector<Primitive const*> extractPrimitivesFromBuild(
+        BVHBuildNode*              bvh,
+        std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+} // namespace dmt::bvh
 
 namespace dmt::numbers {
     template <std::unsigned_integral... Args>

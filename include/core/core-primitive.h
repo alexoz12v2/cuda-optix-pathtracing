@@ -14,42 +14,26 @@ namespace dmt {
         Point3f p;
         float   t;
         bool    hit;
+        // TODO remove
+        RGB color;
     };
     static_assert(std::is_standard_layout_v<Intersection> && std::is_trivial_v<Intersection>);
-
-    // TODO remove
-    inline RGB randomColorFromTime()
-    {
-        using namespace std::chrono;
-
-        // Get current time in milliseconds
-        static std::mt19937 rng(static_cast<unsigned>(high_resolution_clock::now().time_since_epoch().count()));
-        static std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-        return RGB{dist(rng), dist(rng), dist(rng)};
-    }
 
     class DMT_CORE_API DMT_INTERFACE Primitive
     {
     public:
-        // TODO remove
-        Primitive() : m_color{randomColorFromTime()} {}
-
         virtual ~Primitive() {};
 
         virtual Bounds3f     bounds() const                              = 0;
         virtual Intersection intersect(Ray const& ray, float tMax) const = 0;
-        RGB                  color() const { return m_color; }
-
-        // TODO remove
-
-    protected:
-        RGB m_color;
     };
 
     // TODO: Indexed variants
     class DMT_CORE_API Triangle : public Primitive
     {
     public:
+        // TODO remove
+        using Primitive::Primitive;
         Bounds3f     bounds() const override;
         Intersection intersect(Ray const& ray, float tMax) const override;
 
@@ -63,7 +47,10 @@ namespace dmt {
         Intersection intersect(Ray const& ray, float tMax) const override;
 
         static constexpr int32_t numTriangles = 2;
-        float                    xs[3 * numTriangles], ys[3 * numTriangles], zs[3 * numTriangles];
+
+        float xs[3 * numTriangles], ys[3 * numTriangles], zs[3 * numTriangles];
+        // TODO remove
+        RGB colors[numTriangles];
     };
 
     class DMT_CORE_API Triangles4 : public Primitive
@@ -75,6 +62,8 @@ namespace dmt {
         Intersection intersect(Ray const& ray, float tMax) const override;
 
         float xs[3 * numTriangles], ys[3 * numTriangles], zs[3 * numTriangles];
+        // TODO remove
+        RGB colors[numTriangles];
     };
 
     class DMT_CORE_API Triangles8 : public Primitive
@@ -89,5 +78,7 @@ namespace dmt {
         float xs[3 * numTriangles];
         float ys[3 * numTriangles];
         float zs[3 * numTriangles];
+        // TODO remove
+        RGB colors[numTriangles];
     };
 } // namespace dmt

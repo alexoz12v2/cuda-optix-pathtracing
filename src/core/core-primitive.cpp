@@ -116,446 +116,535 @@ namespace dmt {
     }
 
     // -- intersect --
-    // TODO add clamp(u, 0, 1) and clamp(v, 0, 1) if you add them to the intersection struct for texture sampling (moller trumbore)
-    Intersection Triangle::intersect(Ray const& ray, float tMax) const
-    {
-#if defined DMT_MOLLER_TRUMBORE
-        // moller trumbore algorithm https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
-        Vector3f const         e1  = tri.v1 - tri.v0;
-        Vector3f const         e2  = tri.v2 - tri.v0;
-        static constexpr float tol = 1e-7f; // or 6
-        // det[a, b, c] = a . (b x c) -> all cyclic permutations + cross is anticommutative
-        Vector3f const h = cross(ray.d, e2);
-        float const    a = dot(e1, h);
+    namespace triangle {
+#define DMT_MOLLER_TRUMBORE
 
-        if (a > -tol && a < tol) // if determinant is zero, then ray || triangle
-            return {.p = {{}}, .t = 0.f, .hit = false};
-
-        float const    f = fl::rcp(a); // inverse for cramer's rule
-        Vector3f const s = ray.o - tri.v0;
-        float const    u = f * dot(s, h); // barycentric coord 0
-        if (u < -tol || u > 1.f + tol)
-            return {.p = {{}}, .t = 0.f, .hit = false};
-
-        Vector3f    q = cross(s, e1);
-        float const v = f * dot(ray.d, q); // barycentric coord 1
-        if (v < -tol || (u + v) > 1.f + tol)
-            return {.p = {{}}, .t = 0.f, .hit = false};
-
-        float const t = f * dot(e2, q);
-        if (t < -tol || t > tMax)
-            return {.p = {{}}, .t = t, .hit = false};
-
-        return {.p = ray.o + t * ray.d, .t = t, .hit = true};
-#else
-        // Woop's watertight algorithm https://jcgt.org/published/0002/01/05/paper.pdf
-        // calculate dimension where the ray direction is maximal
-        int32_t kz = maxComponentIndex(ray.d);
-        int32_t kx = kz + 1;
-        if (kx == 3)
-            kx = 0;
-        int ky = kx + 1;
-        if (ky == 3)
-            ky = 0;
-        // swap kx and ky dimension to preserve winding direction of triangles
-        if (ray.d[kz] < 0.0f)
-            std::swap(kx, ky);
-
-        // calculate shear constants
-        float const Sx = ray.d[kx] / ray.d[kz];
-        float const Sy = ray.d[ky] / ray.d[kz];
-        float const Sz = fl::rcp(ray.d[kz]);
-
-        // calculate vertices relative to ray origin
-        Vector3f const A = tri.v0 - ray.o;
-        Vector3f const B = tri.v1 - ray.o;
-        Vector3f const C = tri.v2 - ray.o;
-
-        // perfor shear and scale of vertices
-        float const Ax = A[kx] - Sx * A[kz];
-        float const Ay = A[ky] - Sy * A[kz];
-        float const Bx = B[kx] - Sx * B[kz];
-        float const By = B[ky] - Sy * B[kz];
-        float const Cx = C[kx] - Sx * C[kz];
-        float const Cy = C[ky] - Sy * C[kz];
-
-        // calculate scaled barycentric coordinates
-        float U = Cx * By - Cy * Bx;
-        float V = Ax * Cy - Ay * Cx;
-        float W = Bx * Ay - By * Ax;
-
-        // fallback to test against edges using double precision
-        if (fl::nearZero(U) || fl::nearZero(V) || fl::nearZero(W))
+        struct Triisect
         {
-            double CxBy = (double)Cx * (double)By;
-            double CyBx = (double)Cy * (double)Bx;
-            U           = (float)(CxBy - CyBx);
-            double AxCy = (double)Ax * (double)Cy;
-            double AyCx = (double)Ay * (double)Cx;
-            V           = (float)(AxCy - AyCx);
-            double BxAy = (double)Bx * (double)Ay;
-            double ByAx = (double)By * (double)Ax;
-            W           = (float)(BxAy - ByAx);
+            static constexpr float tol = 1e-7f; // or 6
+
+            float    u;
+            float    v;
+            float    w;
+            float    t;
+            uint32_t index;
+
+            operator bool() const { return !fl::isInfOrNaN(u); }
+
+            static constexpr Triisect nothing()
+            {
+                return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0};
+            }
+        };
+
+        static DMT_FORCEINLINE Triisect DMT_FASTCALL
+            intersect4(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask)
+        {
+#if defined DMT_MOLLER_TRUMBORE
+            // constants
+            __m128 const  tol     = _mm_set1_ps(Triisect::tol);
+            __m128 const  mtol    = _mm_set1_ps(-Triisect::tol);
+            __m128 const  one     = _mm_set1_ps(Triisect::tol + 1.f);
+            __m128i const iOne    = _mm_set1_epi32(1);
+            __m128 const  signBit = _mm_set1_ps(-0.f);
+            __m128 const  tMaxv   = _mm_set1_ps(tMax);
+            __m128 const  argMask = _mm_castsi128_ps(
+                _mm_set_epi32((mask & 0x08) ? -1 : 0, (mask & 0x04) ? -1 : 0, (mask & 0x02) ? -1 : 0, (mask & 0x01) ? -1 : 0));
+
+            // ray
+            __m128 const dx = _mm_set1_ps(ray.d.x);
+            __m128 const dy = _mm_set1_ps(ray.d.y);
+            __m128 const dz = _mm_set1_ps(ray.d.z);
+
+            __m128 const ox = _mm_set1_ps(ray.o.x);
+            __m128 const oy = _mm_set1_ps(ray.o.y);
+            __m128 const oz = _mm_set1_ps(ray.o.z);
+
+            // v0, v1, v2
+            __m128i vIndex = _mm_set_epi32(9, 6, 3, 0);
+
+            __m128 const v0x = _mm_i32gather_ps(reinterpret_cast<float const*>(v0s), vIndex, sizeof(float));
+            __m128 const v1x = _mm_i32gather_ps(reinterpret_cast<float const*>(v1s), vIndex, sizeof(float));
+            __m128 const v2x = _mm_i32gather_ps(reinterpret_cast<float const*>(v2s), vIndex, sizeof(float));
+
+            vIndex           = _mm_add_epi32(vIndex, iOne);
+            __m128 const v0y = _mm_i32gather_ps(reinterpret_cast<float const*>(v0s), vIndex, sizeof(float));
+            __m128 const v1y = _mm_i32gather_ps(reinterpret_cast<float const*>(v1s), vIndex, sizeof(float));
+            __m128 const v2y = _mm_i32gather_ps(reinterpret_cast<float const*>(v2s), vIndex, sizeof(float));
+
+            vIndex           = _mm_add_epi32(vIndex, iOne);
+            __m128 const v0z = _mm_i32gather_ps(reinterpret_cast<float const*>(v0s), vIndex, sizeof(float));
+            __m128 const v1z = _mm_i32gather_ps(reinterpret_cast<float const*>(v1s), vIndex, sizeof(float));
+            __m128 const v2z = _mm_i32gather_ps(reinterpret_cast<float const*>(v2s), vIndex, sizeof(float));
+
+            // known term: o - v0
+            __m128 const oMv0x = _mm_sub_ps(ox, v0x);
+            __m128 const oMv0y = _mm_sub_ps(oy, v0y);
+            __m128 const oMv0z = _mm_sub_ps(oz, v0z);
+
+            // e1 = v1 - v0, e2 = v2 - v0
+            __m128 const e1x = _mm_sub_ps(v1x, v0x);
+            __m128 const e1y = _mm_sub_ps(v1y, v0y);
+            __m128 const e1z = _mm_sub_ps(v1z, v0z);
+
+            __m128 const e2x = _mm_sub_ps(v2x, v0x);
+            __m128 const e2y = _mm_sub_ps(v2y, v0y);
+            __m128 const e2z = _mm_sub_ps(v2z, v0z);
+
+            // det[-d, e1, e2] = dot(e1, cross(d, e2))
+            __m128 const dXe2x = _mm_sub_ps(_mm_mul_ps(dy, e2z), _mm_mul_ps(dz, e2y));
+            __m128 const dXe2y = _mm_sub_ps(_mm_mul_ps(dz, e2x), _mm_mul_ps(dx, e2z));
+            __m128 const dXe2z = _mm_sub_ps(_mm_mul_ps(dx, e2y), _mm_mul_ps(dy, e2x));
+
+            __m128 const det    = _mm_add_ps(_mm_add_ps(_mm_mul_ps(e1x, dXe2x), _mm_mul_ps(e1y, dXe2y)),
+                                          _mm_mul_ps(e1z, dXe2z));
+            __m128 const invDet = _mm_rcp_ps(det);
+
+            // abs(det) > tol
+            __m128 const detMask = _mm_cmp_ps(_mm_andnot_ps(signBit, det), tol, _CMP_GT_OQ);
+
+            // uDetNum = det[-d, oMv0, e2] = dot(oMv0, cross(d, e2)) = dot(oMv0, dXe2) | u = uDetNum * invDet
+            __m128 const uDetNum = _mm_add_ps(_mm_add_ps(_mm_mul_ps(oMv0x, dXe2x), _mm_mul_ps(oMv0y, dXe2y)),
+                                              _mm_mul_ps(oMv0z, dXe2z));
+            __m128 const u       = _mm_mul_ps(uDetNum, invDet);
+
+            // u >= -tol && u <= 1.f + tol
+            __m128 const uMask = _mm_and_ps(_mm_cmp_ps(u, mtol, _CMP_GE_OQ), _mm_cmp_ps(u, one, _CMP_LE_OQ));
+
+            // vDetNum = det[-d, e1, oMv0] = dot(d, cross(oMv0, e1)) = dot(d, oMv0_Xe1)
+            __m128 const oMv0_Xe1x = _mm_sub_ps(_mm_mul_ps(oMv0y, e1z), _mm_mul_ps(oMv0z, e1y));
+            __m128 const oMv0_Xe1y = _mm_sub_ps(_mm_mul_ps(oMv0z, e1x), _mm_mul_ps(oMv0x, e1z));
+            __m128 const oMv0_Xe1z = _mm_sub_ps(_mm_mul_ps(oMv0x, e1y), _mm_mul_ps(oMv0y, e1x));
+
+            __m128 const vDetNum = _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, oMv0_Xe1x), _mm_mul_ps(dy, oMv0_Xe1y)),
+                                              _mm_mul_ps(dz, oMv0_Xe1z));
+
+            __m128 const v = _mm_mul_ps(vDetNum, invDet);
+
+            // v >= -tol && (u + v) <= 1 + tol
+            __m128 const vMask = _mm_and_ps(_mm_cmp_ps(v, mtol, _CMP_GE_OQ), _mm_cmp_ps(_mm_add_ps(u, v), one, _CMP_LE_OQ));
+
+            // tDetNum = det[oMv0, e1, e2] = dot(e2, cross(oMv0, e1)) = dot(e2, oMv0_Xe1)
+            __m128 const tDetNum = _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, oMv0_Xe1x), _mm_mul_ps(e2y, oMv0_Xe1y)),
+                                              _mm_mul_ps(e2z, oMv0_Xe1z));
+            __m128 const t       = _mm_mul_ps(tDetNum, invDet);
+
+            // t >= -tol && t <= tMax
+            __m128 const tMask = _mm_and_ps(_mm_cmp_ps(t, mtol, _CMP_GE_OQ), _mm_cmp_ps(t, tMaxv, _CMP_LE_OQ));
+
+            // extract best result
+            __m128 const finalMask = _mm_and_ps(argMask, _mm_and_ps(_mm_and_ps(detMask, uMask), _mm_and_ps(vMask, tMask)));
+
+            // if at least 1 respects the condition (check by extracting sign bit from each element)
+            if (_mm_movemask_ps(finalMask) == 0)
+            {
+                return Triisect::nothing();
+            }
+            else
+            {
+                __m128 const      tMasked = _mm_blendv_ps(_mm_set1_ps(fl::infinity()), t, finalMask);
+                alignas(16) float tArray[4];
+                alignas(16) float uArray[4];
+                alignas(16) float vArray[4];
+
+                _mm_store_ps(tArray, tMasked);
+                _mm_store_ps(uArray, u);
+                _mm_store_ps(vArray, v);
+
+                float minT      = fl::infinity();
+                int   bestIndex = -1;
+
+                for (int i = 0; i < 4; ++i)
+                {
+                    if (tArray[i] < minT)
+                    {
+                        minT      = tArray[i];
+                        bestIndex = i;
+                    }
+                }
+
+                assert(bestIndex >= 0 && "if a mask was active at least 1 intersection");
+                return {.u     = fl::clamp01(uArray[bestIndex]),
+                        .v     = fl::clamp01(vArray[bestIndex]),
+                        .w     = fl::clamp01(1.f - uArray[bestIndex] - vArray[bestIndex]),
+                        .t     = minT,
+                        .index = static_cast<uint32_t>(bestIndex)};
+            }
+#else
+    #error "not implemented"
+            return Triisect::nothing();
+#endif
         }
 
-        // Perform edge tests. Moving this test before and at the end of the previous conditional gives higher performance
-    #ifdef BACKFACE_CULLING
-        if (U < 0.0f || V < 0.0f || W < 0.0f)
-            return {.p = {}, .t = 0, .hit = false};
-    #else
-        if ((U < 0.0f || V < 0.0f || W < 0.0f) && (U > 0.0f || V > 0.0f || W > 0.0f))
-            return {.p = {}, .t = 0, .hit = false};
-    #endif
+        static DMT_FORCEINLINE Triisect DMT_FASTCALL
+            intersect8(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s)
+        {
+#if defined DMT_MOLLER_TRUMBORE
+            // constants
+            __m256 const  tol     = _mm256_set1_ps(Triisect::tol);
+            __m256 const  mtol    = _mm256_set1_ps(-Triisect::tol);
+            __m256 const  one     = _mm256_set1_ps(Triisect::tol + 1.f);
+            __m256i const iOne    = _mm256_set1_epi32(1);
+            __m256 const  signBit = _mm256_set1_ps(-0.f);
+            __m256 const  tMaxv   = _mm256_set1_ps(tMax);
 
-        // calculate determinant
-        float const det = U + V + W;
-        if (fl::nearZero(det))
-            return {.p = {}, .t = 0, .hit = false};
+            // ray
+            __m256 const dx = _mm256_set1_ps(ray.d.x);
+            __m256 const dy = _mm256_set1_ps(ray.d.y);
+            __m256 const dz = _mm256_set1_ps(ray.d.z);
 
-        // Calculate scaled z-coordinates of vertices and use them to calculate the hit distance
-        float const Az = Sz * A[kz];
-        float const Bz = Sz * B[kz];
-        float const Cz = Sz * C[kz];
-        float const T  = U * Az + V * Bz + W * Cz;
-    #ifdef BACKFACE_CULLING
-        if (T < 0.0f || T > tMax * det)
-            return {.p = {}, .t = 0, .hit = false};
-    #else
-        int det_sign = fl::signBit(det);
-        if (fl::xorf(T, det_sign) < 0.0f || fl::xorf(T, det_sign) > tMax * fl::xorf(det, det_sign))
-            return {.p = {}, .t = 0, .hit = false};
-    #endif
-        // normalize U, V, W, and T
-        float const rcpDet = 1.0f / det;
-        float const u      = U * rcpDet;
-        float const v      = V * rcpDet;
-        float const w      = W * rcpDet;
-        float const t      = T * rcpDet;
+            __m256 const ox = _mm256_set1_ps(ray.o.x);
+            __m256 const oy = _mm256_set1_ps(ray.o.y);
+            __m256 const oz = _mm256_set1_ps(ray.o.z);
 
-        return {.p = ray.o + t * ray.d, .t = t, .hit = true};
+            // v0, v1, v2
+            __m256i vIndex = _mm256_set_epi32(21, 18, 15, 12, 9, 6, 3, 0);
+
+            __m256 const v0x = _mm256_i32gather_ps(reinterpret_cast<float const*>(v0s), vIndex, sizeof(float));
+            __m256 const v1x = _mm256_i32gather_ps(reinterpret_cast<float const*>(v1s), vIndex, sizeof(float));
+            __m256 const v2x = _mm256_i32gather_ps(reinterpret_cast<float const*>(v2s), vIndex, sizeof(float));
+
+            vIndex           = _mm256_add_epi32(vIndex, iOne);
+            __m256 const v0y = _mm256_i32gather_ps(reinterpret_cast<float const*>(v0s), vIndex, sizeof(float));
+            __m256 const v1y = _mm256_i32gather_ps(reinterpret_cast<float const*>(v1s), vIndex, sizeof(float));
+            __m256 const v2y = _mm256_i32gather_ps(reinterpret_cast<float const*>(v2s), vIndex, sizeof(float));
+
+            vIndex           = _mm256_add_epi32(vIndex, iOne);
+            __m256 const v0z = _mm256_i32gather_ps(reinterpret_cast<float const*>(v0s), vIndex, sizeof(float));
+            __m256 const v1z = _mm256_i32gather_ps(reinterpret_cast<float const*>(v1s), vIndex, sizeof(float));
+            __m256 const v2z = _mm256_i32gather_ps(reinterpret_cast<float const*>(v2s), vIndex, sizeof(float));
+
+            // known term: o - v0
+            __m256 const oMv0x = _mm256_sub_ps(ox, v0x);
+            __m256 const oMv0y = _mm256_sub_ps(oy, v0y);
+            __m256 const oMv0z = _mm256_sub_ps(oz, v0z);
+
+            // e1 = v1 - v0, e2 = v2 - v0
+            __m256 const e1x = _mm256_sub_ps(v1x, v0x);
+            __m256 const e1y = _mm256_sub_ps(v1y, v0y);
+            __m256 const e1z = _mm256_sub_ps(v1z, v0z);
+
+            __m256 const e2x = _mm256_sub_ps(v2x, v0x);
+            __m256 const e2y = _mm256_sub_ps(v2y, v0y);
+            __m256 const e2z = _mm256_sub_ps(v2z, v0z);
+
+            // det[-d, e1, e2] = dot(e1, cross(d, e2))
+            __m256 const dXe2x = _mm256_sub_ps(_mm256_mul_ps(dy, e2z), _mm256_mul_ps(dz, e2y));
+            __m256 const dXe2y = _mm256_sub_ps(_mm256_mul_ps(dz, e2x), _mm256_mul_ps(dx, e2z));
+            __m256 const dXe2z = _mm256_sub_ps(_mm256_mul_ps(dx, e2y), _mm256_mul_ps(dy, e2x));
+
+            __m256 const det    = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e1x, dXe2x), _mm256_mul_ps(e1y, dXe2y)),
+                                             _mm256_mul_ps(e1z, dXe2z));
+            __m256 const invDet = _mm256_rcp_ps(det);
+
+            // abs(det) > tol
+            __m256 const detMask = _mm256_cmp_ps(_mm256_andnot_ps(signBit, det), tol, _CMP_GT_OQ);
+
+            // uDetNum = det[-d, oMv0, e2] = dot(oMv0, cross(d, e2)) = dot(oMv0, dXe2) | u = uDetNum * invDet
+            __m256 const uDetNum = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(oMv0x, dXe2x), _mm256_mul_ps(oMv0y, dXe2y)),
+                                                 _mm256_mul_ps(oMv0z, dXe2z));
+            __m256 const u = _mm256_mul_ps(uDetNum, invDet);
+
+            // u >= -tol && u <= 1.f + tol
+            __m256 const uMask = _mm256_and_ps(_mm256_cmp_ps(u, mtol, _CMP_GE_OQ), _mm256_cmp_ps(u, one, _CMP_LE_OQ));
+
+            // vDetNum = det[-d, e1, oMv0] = dot(d, cross(oMv0, e1)) = dot(d, oMv0_Xe1)
+            __m256 const oMv0_Xe1x = _mm256_sub_ps(_mm256_mul_ps(oMv0y, e1z), _mm256_mul_ps(oMv0z, e1y));
+            __m256 const oMv0_Xe1y = _mm256_sub_ps(_mm256_mul_ps(oMv0z, e1x), _mm256_mul_ps(oMv0x, e1z));
+            __m256 const oMv0_Xe1z = _mm256_sub_ps(_mm256_mul_ps(oMv0x, e1y), _mm256_mul_ps(oMv0y, e1x));
+
+            __m256 const vDetNum = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx, oMv0_Xe1x), _mm256_mul_ps(dy, oMv0_Xe1y)),
+                                                 _mm256_mul_ps(dz, oMv0_Xe1z));
+
+            __m256 const v = _mm256_mul_ps(vDetNum, invDet);
+
+            // v >= -tol && (u + v) <= 1 + tol
+            __m256 const vMask = _mm256_and_ps(_mm256_cmp_ps(v, mtol, _CMP_GE_OQ),
+                                               _mm256_cmp_ps(_mm256_add_ps(u, v), one, _CMP_LE_OQ));
+
+            // tDetNum = det[oMv0, e1, e2] = dot(e2, cross(oMv0, e1)) = dot(e2, oMv0_Xe1)
+            __m256 const tDetNum = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e2x, oMv0_Xe1x), _mm256_mul_ps(e2y, oMv0_Xe1y)),
+                                                 _mm256_mul_ps(e2z, oMv0_Xe1z));
+            __m256 const t = _mm256_mul_ps(tDetNum, invDet);
+
+            // t >= -tol && t <= tMax
+            __m256 const tMask = _mm256_and_ps(_mm256_cmp_ps(t, mtol, _CMP_GE_OQ), _mm256_cmp_ps(t, tMaxv, _CMP_LE_OQ));
+
+            // extract best result
+            __m256 const mask = _mm256_and_ps(_mm256_and_ps(detMask, uMask), _mm256_and_ps(vMask, tMask));
+
+            // if at least 1 respects the condition (check by extracting sign bit from each element)
+            if (_mm256_movemask_ps(mask) == 0)
+            {
+                return Triisect::nothing();
+            }
+            else
+            {
+                __m256 const      tMasked = _mm256_blendv_ps(_mm256_set1_ps(fl::infinity()), t, mask);
+                alignas(32) float tArray[8];
+                alignas(32) float uArray[8];
+                alignas(32) float vArray[8];
+
+                _mm256_store_ps(tArray, tMasked);
+                _mm256_store_ps(uArray, u);
+                _mm256_store_ps(vArray, v);
+
+                float minT      = fl::infinity();
+                int   bestIndex = -1;
+
+                for (int i = 0; i < 8; ++i)
+                {
+                    if (tArray[i] < minT)
+                    {
+                        minT      = tArray[i];
+                        bestIndex = i;
+                    }
+                }
+
+                assert(bestIndex >= 0 && "if a mask was active at least 1 intersection");
+                return {.u     = fl::clamp01(uArray[bestIndex]),
+                        .v     = fl::clamp01(vArray[bestIndex]),
+                        .w     = fl::clamp01(1.f - uArray[bestIndex] - vArray[bestIndex]),
+                        .t     = minT,
+                        .index = static_cast<uint32_t>(bestIndex)};
+            }
+#else
+    #error "not implemented"
+            return Triisect::nothing();
 #endif
+        }
+
+        static DMT_FORCEINLINE Triisect DMT_FASTCALL
+            intersect(Ray const& ray, float tMax, Point3f v0, Point3f v1, Point3f v2, uint32_t index)
+        {
+#if defined DMT_MOLLER_TRUMBORE
+            // moller trumbore algorithm https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+            Vector3f const         e1  = v1 - v0;
+            Vector3f const         e2  = v2 - v0;
+            static constexpr float tol = Triisect::tol;
+            // det[a, b, c] = a . (b x c) -> all cyclic permutations + cross is anticommutative
+            Vector3f const h = cross(ray.d, e2);
+            float const    a = dot(e1, h);
+
+            if (a > -tol && a < tol) // if determinant is zero, then ray || triangle
+                return Triisect::nothing();
+
+            float const    f = fl::rcp(a); // inverse for cramer's rule
+            Vector3f const s = ray.o - v0;
+            float const    u = f * dot(s, h); // barycentric coord 0
+            if (u < -tol || u > 1.f + tol)
+                return Triisect::nothing();
+
+            Vector3f    q = cross(s, e1);
+            float const v = f * dot(ray.d, q); // barycentric coord 1
+            if (v < -tol || (u + v) > 1.f + tol)
+                return Triisect::nothing();
+
+            float const t = f * dot(e2, q);
+            if (t < -tol || t > tMax)
+                return Triisect::nothing();
+
+            return {.u = fl::clamp01(u), .v = fl::clamp01(v), .w = fl::clamp01(1.f - u - v), .t = t, .index = index};
+#else
+            // Woop's watertight algorithm https://jcgt.org/published/0002/01/05/paper.pdf
+            // calculate dimension where the ray direction is maximal
+            int32_t kz = maxComponentIndex(ray.d);
+            int32_t kx = kz + 1;
+            if (kx == 3)
+                kx = 0;
+            int ky = kx + 1;
+            if (ky == 3)
+                ky = 0;
+            // swap kx and ky dimension to preserve winding direction of triangles
+            if (ray.d[kz] < 0.0f)
+                std::swap(kx, ky);
+
+            // calculate shear constants
+            float const Sx = ray.d[kx] / ray.d[kz];
+            float const Sy = ray.d[ky] / ray.d[kz];
+            float const Sz = fl::rcp(ray.d[kz]);
+
+            // calculate vertices relative to ray origin
+            Vector3f const A = v0 - ray.o;
+            Vector3f const B = v1 - ray.o;
+            Vector3f const C = v2 - ray.o;
+
+            // perfor shear and scale of vertices
+            float const Ax = A[kx] - Sx * A[kz];
+            float const Ay = A[ky] - Sy * A[kz];
+            float const Bx = B[kx] - Sx * B[kz];
+            float const By = B[ky] - Sy * B[kz];
+            float const Cx = C[kx] - Sx * C[kz];
+            float const Cy = C[ky] - Sy * C[kz];
+
+            // calculate scaled barycentric coordinates
+            float U = Cx * By - Cy * Bx;
+            float V = Ax * Cy - Ay * Cx;
+            float W = Bx * Ay - By * Ax;
+
+            // fallback to test against edges using double precision
+            if (fl::nearZero(U) || fl::nearZero(V) || fl::nearZero(W))
+            {
+                double CxBy = (double)Cx * (double)By;
+                double CyBx = (double)Cy * (double)Bx;
+                U           = (float)(CxBy - CyBx);
+                double AxCy = (double)Ax * (double)Cy;
+                double AyCx = (double)Ay * (double)Cx;
+                V           = (float)(AxCy - AyCx);
+                double BxAy = (double)Bx * (double)Ay;
+                double ByAx = (double)By * (double)Ax;
+                W           = (float)(BxAy - ByAx);
+            }
+
+            // Perform edge tests. Moving this test before and at the end of the previous conditional gives higher performance
+    #ifdef DMT_BACKFACE_CULLING
+            if (U < 0.0f || V < 0.0f || W < 0.0f)
+                return Triisect::nothing();
+    #else
+            if ((U < 0.0f || V < 0.0f || W < 0.0f) && (U > 0.0f || V > 0.0f || W > 0.0f))
+                return Triisect::nothing();
+    #endif
+
+            // calculate determinant
+            float const det = U + V + W;
+            if (fl::nearZero(det))
+                return Triisect::nothing();
+
+            // Calculate scaled z-coordinates of vertices and use them to calculate the hit distance
+            float const Az = Sz * A[kz];
+            float const Bz = Sz * B[kz];
+            float const Cz = Sz * C[kz];
+            float const T  = U * Az + V * Bz + W * Cz;
+    #ifdef DMT_BACKFACE_CULLING
+            if (T < 0.0f || T > tMax * det)
+                return Triisect::nothing();
+    #else
+            int det_sign = fl::signBit(det);
+            if (fl::xorf(T, det_sign) < 0.0f || fl::xorf(T, det_sign) > tMax * fl::xorf(det, det_sign))
+                return Triisect::nothing();
+    #endif
+            // normalize U, V, W, and T
+            float const rcpDet = 1.0f / det;
+            float const u      = U * rcpDet;
+            float const v      = V * rcpDet;
+            float const w      = W * rcpDet;
+            float const t      = T * rcpDet;
+
+            return {.u = u, .v = v, .w = w, .t = t};
+#endif
+        }
+
+        static DMT_FORCEINLINE Intersection DMT_FASTCALL fromTrisect(Triisect trisect, Ray const& ray, RGB color)
+        {
+            if (trisect)
+                return {.p = ray.o + trisect.t * ray.d, .t = trisect.t, .hit = true, .color = color};
+            else
+                return {.p = {}, .t = 0, .hit = false};
+        }
+    } // namespace triangle
+
+    Intersection Triangle::intersect(Ray const& ray, float tMax) const
+    {
+        triangle::Triisect const trisect = triangle::intersect(ray, tMax, tri.v0, tri.v1, tri.v2, 0);
+        return triangle::fromTrisect(trisect, ray, tri.color);
     }
 
     Intersection Triangles2::intersect(Ray const& ray, float tMax) const
     {
-        // unpack origin, direction and constants
-        __m128 const ox = _mm_set1_ps(ray.o.x);
-        __m128 const oy = _mm_set1_ps(ray.o.y);
-        __m128 const oz = _mm_set1_ps(ray.o.z);
-
-        __m128 const dx = _mm_set1_ps(ray.d.x);
-        __m128 const dy = _mm_set1_ps(ray.d.y);
-        __m128 const dz = _mm_set1_ps(ray.d.z);
-
-        static constexpr float eps1 = 1e-7f;
-
-        __m128 const eps   = _mm_set1_ps(eps1);
-        __m128 const tMaxV = _mm_set1_ps(tMax);
-        __m128 const inf   = _mm_set1_ps(fl::infinity());
-        __m128 const zero  = _mm_set1_ps(-eps1);
-        __m128 const one   = _mm_set1_ps(1.f + eps1);
-
-        // vertices. x1 - x0 1st tri, x4 - x3 2nd tri, hence interlaced format. either loadu and transpose or set
-        // I need only the first lane, the second is duplicated and ignored
-        __m128 const v0x = _mm_set_ps(xs[3], xs[0], xs[3], xs[0]);
-        __m128 const v1x = _mm_set_ps(xs[4], xs[1], xs[4], xs[1]);
-        __m128 const v2x = _mm_set_ps(xs[5], xs[2], xs[5], xs[2]);
-
-        __m128 const v0y = _mm_set_ps(ys[3], ys[0], ys[3], ys[0]);
-        __m128 const v1y = _mm_set_ps(ys[4], ys[1], ys[4], ys[1]);
-        __m128 const v2y = _mm_set_ps(ys[5], ys[2], ys[5], ys[2]);
-
-        __m128 const v0z = _mm_set_ps(zs[3], zs[0], zs[3], zs[0]);
-        __m128 const v1z = _mm_set_ps(zs[4], zs[1], zs[4], zs[1]);
-        __m128 const v2z = _mm_set_ps(zs[5], zs[2], zs[5], zs[2]);
-
-        // e1 = v1 - v0, e2 = v2 - v0
-        __m128 const e1x = _mm_sub_ps(v1x, v0x);
-        __m128 const e1y = _mm_sub_ps(v1y, v0y);
-        __m128 const e1z = _mm_sub_ps(v1z, v0z);
-
-        __m128 const e2x = _mm_sub_ps(v2x, v0x);
-        __m128 const e2y = _mm_sub_ps(v2y, v0y);
-        __m128 const e2z = _mm_sub_ps(v2z, v0z);
-
-        // h = cross(d, e2)
-        __m128 const hx = _mm_sub_ps(_mm_mul_ps(dy, e2z), _mm_mul_ps(dz, e2y));
-        __m128 const hy = _mm_sub_ps(_mm_mul_ps(dz, e2x), _mm_mul_ps(dx, e2z));
-        __m128 const hz = _mm_sub_ps(_mm_mul_ps(dx, e2y), _mm_mul_ps(dy, e2x));
-
-        // determinant a = dot(e1, h)
-        __m128 const a = _mm_add_ps(_mm_add_ps(_mm_mul_ps(e1x, hx), _mm_mul_ps(e1y, hy)), _mm_mul_ps(e1z, hz));
-
-        // if (std::abs(a) < 1e-8f)
-        __m128 const mask = _mm_cmpgt_ps(_mm_andnot_ps(_mm_set1_ps(-0.f), a), eps);
-        __m128 const invA = _mm_rcp_ps(a);
-
-        // s = o - v0
-        __m128 const sx = _mm_sub_ps(ox, v0x);
-        __m128 const sy = _mm_sub_ps(oy, v0y);
-        __m128 const sz = _mm_sub_ps(oz, v0z);
-
-        // first barycentric coord with Cramer's: u = invA * dot(s, h); check if in [0, 1]
-        __m128 const u     = _mm_mul_ps(invA,
-                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(sx, hx), _mm_mul_ps(sy, hy)), _mm_mul_ps(sz, hz)));
-        __m128 const uMask = _mm_and_ps(_mm_cmpge_ps(u, zero), _mm_cmple_ps(u, one));
-
-        // q = cross(s, e1)
-        __m128 const qx = _mm_sub_ps(_mm_mul_ps(sy, e1z), _mm_mul_ps(sz, e1y));
-        __m128 const qy = _mm_sub_ps(_mm_mul_ps(sz, e1x), _mm_mul_ps(sx, e1z));
-        __m128 const qz = _mm_sub_ps(_mm_mul_ps(sx, e1y), _mm_mul_ps(sy, e1x));
-
-        // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
-        __m128 const v     = _mm_mul_ps(invA,
-                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
-        __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(_mm_add_ps(v, u), one));
-
-        // invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
-        __m128 const t     = _mm_mul_ps(invA,
-                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, qx), _mm_mul_ps(e2y, qy)), _mm_mul_ps(e2z, qz)));
-        __m128 const tMask = _mm_and_ps(_mm_cmpgt_ps(t, eps), _mm_cmplt_ps(t, tMaxV));
-
-        // and all masks and, where mask on put t, where mask off put infinity
-        __m128 const finalMask = _mm_and_ps(_mm_and_ps(mask, uMask), _mm_and_ps(vMask, tMask));
-        __m128 const tResult   = _mm_or_ps(_mm_and_ps(finalMask, t), _mm_andnot_ps(finalMask, inf));
-
-        alignas(16) float tVals[4];
-        _mm_store_ps(tVals, tResult);
-
-        int32_t bestIndex = -1;
-        float   bestT     = tMax;
-        for (int32_t i = 0; i < 2; ++i)
+#if 0
+        Point3f v0s[2]{};
+        Point3f v1s[2]{};
+        Point3f v2s[2]{};
+        for (int j = 0; j < 2; ++j)
         {
-            if (tVals[i] < bestT)
+            v0s[j] = {xs[3 * j + 0], ys[3 * j + 0], zs[3 * j + 0]};
+            v1s[j] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
+            v2s[j] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
+        }
+
+        triangle::Triisect        trisects[2]{triangle::intersect(ray, tMax, v0s[0], v1s[0], v2s[0], 0),
+                                              triangle::intersect(ray, tMax, v0s[1], v1s[1], v2s[1], 1)};
+        triangle::Triisect const  empty = triangle::Triisect::nothing();
+        triangle::Triisect const* best  = nullptr;
+        for (auto const& trisect : trisects)
+        {
+            if (trisect)
             {
-                bestIndex = i;
-                bestT     = tVals[i];
+                if (!best || trisect.t < best->t)
+                    best = &trisect;
             }
         }
 
-        if (bestIndex >= 0)
-            return {.p = ray.o + bestT * ray.d, .t = bestT, .hit = true};
-        else
-            return {.p = {{}}, .t = 0.f, .hit = false};
+        if (!best)
+            best = &empty;
+
+        return triangle::fromTrisect(*best, ray, colors[best->index]);
+#else
+        Point3f v0s[4]{};
+        Point3f v1s[4]{};
+        Point3f v2s[4]{};
+        for (int i = 0; i < 4; ++i)
+        {
+            int j  = i & 0x3;
+            v0s[i] = {xs[3 * j + 0], ys[3 * j + 0], zs[3 * j + 0]};
+            v1s[i] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
+            v2s[i] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
+        }
+        triangle::Triisect const trisect = triangle::intersect4(ray, fl::infinity(), v0s, v1s, v2s, 0x3);
+        assert(trisect.index < 2 && "out of bounds triangle2 intersection index");
+        return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
+#endif
     }
 
     Intersection Triangles4::intersect(Ray const& ray, float tMax) const
-    { //
-        // unpack origin, direction and constants
-        __m128 const ox = _mm_set1_ps(ray.o.x);
-        __m128 const oy = _mm_set1_ps(ray.o.y);
-        __m128 const oz = _mm_set1_ps(ray.o.z);
-
-        __m128 const dx = _mm_set1_ps(ray.d.x);
-        __m128 const dy = _mm_set1_ps(ray.d.y);
-        __m128 const dz = _mm_set1_ps(ray.d.z);
-
-        static constexpr float eps1 = 1e-7f;
-
-        __m128 const eps   = _mm_set1_ps(eps1);
-        __m128 const tMaxV = _mm_set1_ps(tMax);
-        __m128 const inf   = _mm_set1_ps(fl::infinity());
-        __m128 const zero  = _mm_set1_ps(-eps1);
-        __m128 const one   = _mm_set1_ps(1.f + eps1);
-
-        // vertices. x1 - x0 1st tri, x4 - x3 2nd tri, hence interlaced format. either loadu and transpose or set
-        __m128 const v0x = _mm_set_ps(xs[3], xs[0], xs[9], xs[6]);
-        __m128 const v1x = _mm_set_ps(xs[4], xs[1], xs[10], xs[7]);
-        __m128 const v2x = _mm_set_ps(xs[5], xs[2], xs[11], xs[8]);
-
-        __m128 const v0y = _mm_set_ps(ys[3], ys[0], ys[9], ys[6]);
-        __m128 const v1y = _mm_set_ps(ys[4], ys[1], ys[10], ys[7]);
-        __m128 const v2y = _mm_set_ps(ys[5], ys[2], ys[11], ys[8]);
-
-        __m128 const v0z = _mm_set_ps(zs[3], zs[0], zs[9], zs[6]);
-        __m128 const v1z = _mm_set_ps(zs[4], zs[1], zs[10], zs[7]);
-        __m128 const v2z = _mm_set_ps(zs[5], zs[2], zs[11], zs[8]);
-
-        // e1 = v1 - v0, e2 = v2 - v0
-        __m128 const e1x = _mm_sub_ps(v1x, v0x);
-        __m128 const e1y = _mm_sub_ps(v1y, v0y);
-        __m128 const e1z = _mm_sub_ps(v1z, v0z);
-
-        __m128 const e2x = _mm_sub_ps(v2x, v0x);
-        __m128 const e2y = _mm_sub_ps(v2y, v0y);
-        __m128 const e2z = _mm_sub_ps(v2z, v0z);
-
-        // h = cross(d, e2)
-        __m128 const hx = _mm_sub_ps(_mm_mul_ps(dy, e2z), _mm_mul_ps(dz, e2y));
-        __m128 const hy = _mm_sub_ps(_mm_mul_ps(dz, e2x), _mm_mul_ps(dx, e2z));
-        __m128 const hz = _mm_sub_ps(_mm_mul_ps(dx, e2y), _mm_mul_ps(dy, e2x));
-
-        // determinant a = dot(e1, h)
-        __m128 const a = _mm_add_ps(_mm_add_ps(_mm_mul_ps(e1x, hx), _mm_mul_ps(e1y, hy)), _mm_mul_ps(e1z, hz));
-
-        // if (std::abs(a) < 1e-8f)
-        __m128 const mask = _mm_cmpgt_ps(_mm_andnot_ps(_mm_set1_ps(-0.f), a), eps);
-        __m128 const invA = _mm_rcp_ps(a);
-
-        // s = o - v0
-        __m128 const sx = _mm_sub_ps(ox, v0x);
-        __m128 const sy = _mm_sub_ps(oy, v0y);
-        __m128 const sz = _mm_sub_ps(oz, v0z);
-
-        // first barycentric coord with Cramer's: u = invA * dot(s, h); check if in [0, 1]
-        __m128 const u     = _mm_mul_ps(invA,
-                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(sx, hx), _mm_mul_ps(sy, hy)), _mm_mul_ps(sz, hz)));
-        __m128 const uMask = _mm_and_ps(_mm_cmpge_ps(u, zero), _mm_cmple_ps(u, one));
-
-        // q = cross(s, e1)
-        __m128 const qx = _mm_sub_ps(_mm_mul_ps(sy, e1z), _mm_mul_ps(sz, e1y));
-        __m128 const qy = _mm_sub_ps(_mm_mul_ps(sz, e1x), _mm_mul_ps(sx, e1z));
-        __m128 const qz = _mm_sub_ps(_mm_mul_ps(sx, e1y), _mm_mul_ps(sy, e1x));
-
-        // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
-        __m128 const v     = _mm_mul_ps(invA,
-                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, qx), _mm_mul_ps(dy, qy)), _mm_mul_ps(dz, qz)));
-        __m128 const vMask = _mm_and_ps(_mm_cmpge_ps(v, zero), _mm_cmple_ps(_mm_add_ps(v, u), one));
-
-        // t = invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
-        __m128 const t     = _mm_mul_ps(invA,
-                                    _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, qx), _mm_mul_ps(e2y, qy)), _mm_mul_ps(e2z, qz)));
-        __m128 const tMask = _mm_and_ps(_mm_cmpgt_ps(t, eps), _mm_cmplt_ps(t, tMaxV));
-
-        // and all masks and, where mask on put t, where mask off put infinity
-        __m128 const finalMask = _mm_and_ps(_mm_and_ps(mask, uMask), _mm_and_ps(vMask, tMask));
-        __m128 const tResult   = _mm_or_ps(_mm_and_ps(finalMask, t), _mm_andnot_ps(finalMask, inf));
-
-        alignas(16) float tVals[4];
-        _mm_store_ps(tVals, tResult);
-
-        int32_t bestIndex = -1;
-        float   bestT     = tMax;
-        for (int32_t i = 0; i < 4; ++i)
+    {
+        Point3f v0s[4]{};
+        Point3f v1s[4]{};
+        Point3f v2s[4]{};
+        for (int j = 0; j < 4; ++j)
         {
-            if (tVals[i] < bestT)
+            v0s[j] = {xs[3 * j + 0], ys[3 * j + 0], zs[3 * j + 0]};
+            v1s[j] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
+            v2s[j] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
+        }
+#if 1
+        triangle::Triisect const trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
+        return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
+#else
+        triangle::Triisect const  empty = triangle::Triisect::nothing();
+        triangle::Triisect const  trisects[4]{triangle::intersect(ray, tMax, v0s[0], v1s[0], v2s[0], 0),
+                                              triangle::intersect(ray, tMax, v0s[1], v1s[1], v2s[1], 1),
+                                              triangle::intersect(ray, tMax, v0s[2], v1s[2], v2s[2], 2),
+                                              triangle::intersect(ray, tMax, v0s[3], v1s[3], v2s[3], 3)};
+        triangle::Triisect const* best = nullptr;
+        for (auto const& trisect : trisects)
+        {
+            if (trisect)
             {
-                bestIndex = i;
-                bestT     = tVals[i];
+                if (!best || trisect.t < best->t)
+                    best = &trisect;
             }
         }
 
-        if (bestIndex >= 0)
-            return {.p = ray.o + bestT * ray.d, .t = bestT, .hit = true};
-        else
-            return {.p = {{}}, .t = 0.f, .hit = false};
+        if (!best)
+            best = &empty;
+        return triangle::fromTrisect(*best, ray, colors[best->index]);
+#endif
     }
 
     Intersection Triangles8::intersect(Ray const& ray, float tMax) const
     {
-        static constexpr int32_t FloatStride = sizeof(float);
-        static constexpr float   eps1        = 1e-7;
-
-        // index vector: [0, 3, 6, 9, 12, 15, 18, 21] for vertex0
-        int32_t const v0Offsets[8] = {0, 3, 6, 9, 12, 15, 18, 21};
-        int32_t const v1Offsets[8] = {1, 4, 7, 10, 13, 16, 19, 22};
-        int32_t const v2Offsets[8] = {2, 5, 8, 11, 14, 17, 20, 23};
-
-        __m256i const v0Index = _mm256_loadu_epi32(v0Offsets);
-        __m256i const v1Index = _mm256_loadu_epi32(v1Offsets);
-        __m256i const v2Index = _mm256_loadu_epi32(v2Offsets);
-
-        // gather vertex components
-        __m256 const v0x = _mm256_i32gather_ps(xs, v0Index, FloatStride);
-        __m256 const v0y = _mm256_i32gather_ps(ys, v0Index, FloatStride);
-        __m256 const v0z = _mm256_i32gather_ps(zs, v0Index, FloatStride);
-
-        __m256 const v1x = _mm256_i32gather_ps(xs, v1Index, FloatStride);
-        __m256 const v1y = _mm256_i32gather_ps(ys, v1Index, FloatStride);
-        __m256 const v1z = _mm256_i32gather_ps(zs, v1Index, FloatStride);
-
-        __m256 const v2x = _mm256_i32gather_ps(xs, v2Index, FloatStride);
-        __m256 const v2y = _mm256_i32gather_ps(ys, v2Index, FloatStride);
-        __m256 const v2z = _mm256_i32gather_ps(zs, v2Index, FloatStride);
-
-        // ray origin and direction broadcasted
-        __m256 const ox = _mm256_set1_ps(ray.o.x);
-        __m256 const oy = _mm256_set1_ps(ray.o.y);
-        __m256 const oz = _mm256_set1_ps(ray.o.z);
-
-        __m256 const dx = _mm256_set1_ps(ray.d.x);
-        __m256 const dy = _mm256_set1_ps(ray.d.y);
-        __m256 const dz = _mm256_set1_ps(ray.d.z);
-
-        // constants
-        __m256 const eps   = _mm256_set1_ps(eps1);
-        __m256 const zero  = _mm256_set1_ps(-eps1);
-        __m256 const one   = _mm256_set1_ps(1.f + eps1);
-        __m256 const tMaxV = _mm256_set1_ps(tMax);
-        __m256 const inf   = _mm256_set1_ps(fl::infinity());
-
-        // e1 = v1 - v0, e2 = v2 - v0
-        __m256 const e1x = _mm256_sub_ps(v1x, v0x);
-        __m256 const e1y = _mm256_sub_ps(v1y, v0y);
-        __m256 const e1z = _mm256_sub_ps(v1z, v0z);
-
-        __m256 const e2x = _mm256_sub_ps(v2x, v0x);
-        __m256 const e2y = _mm256_sub_ps(v2y, v0y);
-        __m256 const e2z = _mm256_sub_ps(v2z, v0z);
-
-        // h = cross(d, e2)
-        __m256 const hx = _mm256_sub_ps(_mm256_mul_ps(dy, e2z), _mm256_mul_ps(dz, e2y));
-        __m256 const hy = _mm256_sub_ps(_mm256_mul_ps(dz, e2x), _mm256_mul_ps(dx, e2z));
-        __m256 const hz = _mm256_sub_ps(_mm256_mul_ps(dx, e2y), _mm256_mul_ps(dy, e2x));
-
-        // determinant a = dot(e1, h)
-        __m256 const a = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e1x, hx), _mm256_mul_ps(e1y, hy)),
-                                       _mm256_mul_ps(e1z, hz));
-
-        // if (std::abs(a) < 1e-8f)
-        __m256 const mask = _mm256_cmp_ps(_mm256_andnot_ps(_mm256_set1_ps(-0.f), a), eps, _CMP_GT_OQ);
-        __m256 const invA = _mm256_rcp_ps(a);
-
-        // s = o - v0
-        __m256 const sx = _mm256_sub_ps(ox, v0x);
-        __m256 const sy = _mm256_sub_ps(oy, v0y);
-        __m256 const sz = _mm256_sub_ps(oz, v0z);
-
-        // first barycentric coord with Cramer's: u = invA * dot(s, h); check if in [0, 1]
-        __m256 const u     = _mm256_mul_ps(invA,
-                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(sx, hx), _mm256_mul_ps(sy, hy)),
-                                                     _mm256_mul_ps(sz, hx)));
-        __m256 const uMask = _mm256_and_ps(_mm256_cmp_ps(u, zero, _CMP_GE_OQ), _mm256_cmp_ps(u, one, _CMP_LE_OQ));
-
-        // q = cross(s, e1)
-        __m256 const qx = _mm256_sub_ps(_mm256_mul_ps(sy, e1z), _mm256_mul_ps(sz, e1y));
-        __m256 const qy = _mm256_sub_ps(_mm256_mul_ps(sz, e1x), _mm256_mul_ps(sx, e1z));
-        __m256 const qz = _mm256_sub_ps(_mm256_mul_ps(sx, e1y), _mm256_mul_ps(sy, e1x));
-
-        // second barycentric coord with Cramer's: v = invA * dot(ray.d, q); check if in [0, 1]
-        __m256 const v     = _mm256_mul_ps(invA,
-                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx, qx), _mm256_mul_ps(dy, qy)),
-                                                     _mm256_mul_ps(dz, qz)));
-        __m256 const vMask = _mm256_and_ps(_mm256_cmp_ps(v, zero, _CMP_GE_OQ),
-                                           _mm256_cmp_ps(_mm256_add_ps(v, u), one, _CMP_LE_OQ));
-
-        // t = invA * dot(e2, q) ; should be greater than some tolerance and less than tMax
-        __m256 const t     = _mm256_mul_ps(invA,
-                                       _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(e2x, qx), _mm256_mul_ps(e2y, qy)),
-                                                     _mm256_mul_ps(e2z, qz)));
-        __m256 const tMask = _mm256_and_ps(_mm256_cmp_ps(t, eps, _CMP_GT_OQ), _mm256_cmp_ps(t, tMaxV, _CMP_LT_OQ));
-
-        // and all masks and, where mask on put t, where mask off put infinity
-        __m256 const finalMask = _mm256_and_ps(_mm256_and_ps(mask, uMask), _mm256_and_ps(vMask, tMask));
-        __m256 const tResult   = _mm256_or_ps(_mm256_and_ps(finalMask, t), _mm256_andnot_ps(finalMask, inf));
-
-        alignas(alignof(__m256)) float tVals[8];
-        _mm256_store_ps(tVals, tResult);
-
-        int32_t bestIndex = -1;
-        float   bestT     = tMax;
-        for (int32_t i = 0; i < 8; ++i)
+        Point3f v0s[8]{};
+        Point3f v1s[8]{};
+        Point3f v2s[8]{};
+        for (int i = 0; i < Triangles8::numTriangles; ++i)
         {
-            if (tVals[i] < bestT)
-            {
-                bestIndex = i;
-                bestT     = tVals[i];
-            }
+            v0s[i] = {xs[3 * i + 0], ys[3 * i + 0], zs[3 * i + 0]};
+            v1s[i] = {xs[3 * i + 1], ys[3 * i + 1], zs[3 * i + 1]};
+            v2s[i] = {xs[3 * i + 2], ys[3 * i + 2], zs[3 * i + 2]};
         }
 
-        if (bestIndex >= 0)
-            return {.p = ray.o + bestT * ray.d, .t = bestT, .hit = true};
-        else
-            return {.p = {{}}, .t = 0.f, .hit = false};
+        triangle::Triisect const trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
+        return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
     }
 } // namespace dmt

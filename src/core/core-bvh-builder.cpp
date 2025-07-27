@@ -46,13 +46,8 @@ namespace dmt::bvh {
                BVHBuildNode*              _parent,
                std::pmr::memory_resource* _memory,
                std::pmr::memory_resource* _temp) -> void {
-            constexpr int32_t NumChildren    = 8;
-            constexpr int32_t MinNumBin      = 16;
-            constexpr int32_t MaxNumBin      = 128;
-            constexpr float   BinScaleFactor = 2.f;
-
             assert(std::distance(_primsBeg, _primsEnd) >= 0 && "negative primitive range in BVH construction");
-            if (auto dist = std::distance(_primsBeg, _primsEnd); dist < LeavesBranchingFactor && dist >= 0)
+            if (auto dist = std::distance(_primsBeg, _primsEnd); dist <= LeavesBranchingFactor && dist >= 0)
             {
                 assert(_parent->childCount == 0 && "Leaf BVH Node shouldn't have children");
                 _parent->primitiveCount = std::distance(_primsBeg, _primsEnd);
@@ -66,7 +61,7 @@ namespace dmt::bvh {
                     Iter         beg, end;
                 };
                 std::pmr::vector<WorkingStackItem> childCandidates{_temp};
-                childCandidates.reserve(NumChildren);
+                childCandidates.reserve(BranchingFactor);
                 childCandidates.emplace_back();
                 std::memset(&childCandidates.back().node, 0, sizeof(BVHBuildNode));
                 childCandidates.back()
@@ -77,7 +72,7 @@ namespace dmt::bvh {
                 childCandidates.back().end = _primsEnd;
 
                 bool shouldContinue = true;
-                while (childCandidates.size() < NumChildren && shouldContinue)
+                while (childCandidates.size() < BranchingFactor && shouldContinue)
                 {
                     auto maybeNode = dstd::move_to_back_and_pop_if(childCandidates, [](WorkingStackItem const& wItem) {
                         return std::distance(wItem.beg, wItem.end) >= LeavesBranchingFactor;
@@ -208,7 +203,7 @@ namespace dmt::bvh {
                     auto* node = reinterpret_cast<BVHBuildNode*>(_memory->allocate(sizeof(BVHBuildNode)));
                     std::memset(node, 0, sizeof(BVHBuildNode));
                     node->bounds = workItem.node.bounds;
-                    assert(_parent->childCount < BranchingFactor - 1 && "Too many children for BVH Node");
+                    assert(_parent->childCount < BranchingFactor && "Too many children for BVH Node");
                     _parent->children[_parent->childCount++] = node;
                     _f(_f, workItem.beg, workItem.end, node, _memory, _temp);
                 }
@@ -264,8 +259,13 @@ namespace dmt::bvh {
                         out.push_back(dmt::UniqueRef<Primitive>(const_cast<Primitive*>(p)));
                 }
 
-                // Group triangles
+#define DMT_BVH_TRIANGLES_GROUP8
+#define DMT_BVH_TRIANGLES_GROUP4
+#define DMT_BVH_TRIANGLES_GROUP2
+
+                // Group triangles TODO Remove color
                 std::size_t i = 0;
+#ifdef DMT_BVH_TRIANGLES_GROUP8
                 while (i + 8 <= triangles.size())
                 {
                     Triangles8 group{};
@@ -282,11 +282,14 @@ namespace dmt::bvh {
                         group.zs[3 * j + 0] = triangles[i + j].tri.v0.z;
                         group.zs[3 * j + 1] = triangles[i + j].tri.v1.z;
                         group.zs[3 * j + 2] = triangles[i + j].tri.v2.z;
+                        group.colors[j]     = triangles[i + j].tri.color;
                     }
                     out.push_back(makeUniqueRef<Triangles8>(memory, std::move(group)));
                     i += 8;
                 }
+#endif
 
+#ifdef DMT_BVH_TRIANGLES_GROUP4
                 if (i + 4 <= triangles.size())
                 {
                     Triangles4 group{};
@@ -303,11 +306,14 @@ namespace dmt::bvh {
                         group.zs[3 * j + 0] = triangles[i + j].tri.v0.z;
                         group.zs[3 * j + 1] = triangles[i + j].tri.v1.z;
                         group.zs[3 * j + 2] = triangles[i + j].tri.v2.z;
+                        group.colors[j]     = triangles[i + j].tri.color;
                     }
                     out.push_back(makeUniqueRef<Triangles4>(memory, std::move(group)));
                     i += 4;
                 }
+#endif
 
+#ifdef DMT_BVH_TRIANGLES_GROUP2
                 if (i + 2 <= triangles.size())
                 {
                     Triangles2 group{};
@@ -324,10 +330,12 @@ namespace dmt::bvh {
                         group.zs[3 * j + 0] = triangles[i + j].tri.v0.z;
                         group.zs[3 * j + 1] = triangles[i + j].tri.v1.z;
                         group.zs[3 * j + 2] = triangles[i + j].tri.v2.z;
+                        group.colors[j]     = triangles[i + j].tri.color;
                     }
                     out.push_back(makeUniqueRef<Triangles2>(memory, std::move(group)));
                     i += 2;
                 }
+#endif
 
                 for (; i < triangles.size(); ++i)
                 {

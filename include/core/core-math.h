@@ -3,6 +3,7 @@
 #include "core/core-macros.h"
 #include "cudautils/cudautils-vecmath.h"
 #include "cudautils/cudautils-transform.h"
+#include "cudautils/cudautils-color.h"
 
 #if !defined(DMT_ARCH_X86_64)
     #error "Support only for AVX2 capable x86_64 CPU"
@@ -26,6 +27,8 @@ namespace dmt {
     struct DMT_CORE_API TriangleData
     {
         Point3f v0, v1, v2;
+        // TODO remove
+        RGB color;
     };
 } // namespace dmt
 

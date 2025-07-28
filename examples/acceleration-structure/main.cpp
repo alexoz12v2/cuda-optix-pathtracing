@@ -1115,6 +1115,9 @@ namespace dmt {
         return true;
     }
 
+#define DMT_DBG_PX_X 61
+#define DMT_DBG_PX_Y 58
+
     void writeIntersectionTestImage(
         std::pmr::monotonic_buffer_resource&  scratch,
         unsigned char*                        scratchBuffer,
@@ -1169,7 +1172,7 @@ namespace dmt {
             if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
                 ctx.log("Starting Pixel {{ {} {} }}", std::make_tuple(pixel.x, pixel.y));
 
-            if (pixel.x == 62 && pixel.y == 66)
+            if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
                 int i = 0;
 
             for (int32_t sampleIndex = 0; sampleIndex < 1; ++sampleIndex)
@@ -1178,6 +1181,7 @@ namespace dmt {
                 camera::CameraSample /*const*/ cs = camera::getCameraSample(sampler, pixel, filter);
                 cs.pFilm.x                        = static_cast<float>(pixel.x) + 0.5f;
                 cs.pFilm.y                        = static_cast<float>(pixel.y) + 0.5f;
+                cs.filterWeight                   = 1.f;
                 Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
 
                 float        nearest = fl::infinity();
@@ -1303,13 +1307,18 @@ namespace dmt {
             if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
                 ctx.log("Starting Pixel {{ {} {} }}",
                         std::make_tuple(pixel.x, pixel.y)); // TODO more samples when filter introduced
+            if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
+                int i = 0;
 
-            for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
+            for (int32_t sampleIndex = 0; sampleIndex < 1 /* SamplesPerPixel*/; ++sampleIndex)
             {
                 sampler.startPixelSample(pixel, sampleIndex);
-                camera::CameraSample const cs = camera::getCameraSample(sampler, pixel, filter);
-                Ray const                  ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
-                RGB const                  radiance = incidentRadiance(ray, bvh, sampler, &scratch);
+                camera::CameraSample cs = camera::getCameraSample(sampler, pixel, filter);
+                cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
+                cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
+                cs.filterWeight         = 1.f;
+                Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
+                RGB const radiance = incidentRadiance(ray, bvh, sampler, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);
                 resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
             }

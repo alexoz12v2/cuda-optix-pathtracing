@@ -785,7 +785,8 @@ namespace dmt::bvh {
         activeNodeStack.push_back(bvh);
 
         Primitive const* primitive = nullptr;
-        while (!activeNodeStack.empty() && !primitive)
+        float            nearest   = fl::infinity();
+        while (!activeNodeStack.empty())
         {
             BVHBuildNode* current = activeNodeStack.back();
             activeNodeStack.pop_back();
@@ -813,7 +814,7 @@ namespace dmt::bvh {
                 }
 
                 std::sort(std::begin(tmins), std::begin(tmins) + currentIndex, [](auto const& a, auto const& b) {
-                    return a.d > b.d;
+                    return a.d < b.d;
                 });
 
                 for (uint32_t i = 0; i < currentIndex; ++i)
@@ -823,7 +824,6 @@ namespace dmt::bvh {
             {
                 // TODO handle any-hit, closest-hit, ...
                 // for now, stop at the first leaf intersection
-                float nearest = fl::infinity();
                 for (size_t i = 0; i < current->primitiveCount; ++i)
                 {
                     assert(current->primitives[i] && "null primitive");
@@ -835,11 +835,13 @@ namespace dmt::bvh {
                         nearest   = si.t;
                         if (outIsect)
                             *outIsect = si;
+                        // TODO handle anyhit
                     }
                 }
             }
         }
 
+        // closesthit
         return primitive;
     }
 

@@ -2,6 +2,8 @@ include(FetchContent)
 include(FindPackageHandleStandardArgs)
 
 macro(dmt_setup_dependencies)
+  set(IMATH_INSTALL OFF)
+
   # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
   find_package(OpenGL REQUIRED)
   find_package(CUDAToolkit REQUIRED)
@@ -18,10 +20,10 @@ macro(dmt_setup_dependencies)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
   endif()
 
-  if(NOT TARGET Backward::Backward)
+  if(NOT TARGET backward)
     FetchContent_Declare(backward
-      GIT_REPOSITORY https://github.com/bombela/backward-cpp
-      GIT_TAG master # or a version tag, such as v1.6
+      GIT_REPOSITORY https://github.com/bombela/backward-cpp.git
+      GIT_TAG v1.6 # or a version tag, such as v1.6
       SYSTEM # optional, the Backward include directory will be treated as system directory
     )
     FetchContent_MakeAvailable(backward)

@@ -1,7 +1,7 @@
 #include "cudautils-vecmath.h"
 
 #if defined(DMT_ARCH_X86_64)
-#include <immintrin.h>
+    #include <immintrin.h>
 #endif
 
 // TODO generated optimized assembly for x64 uses vectorized instructions for floating point types, like "[v]addps", but integer types
@@ -25,6 +25,15 @@ namespace dmt {
     static_assert(VectorScalable<Point4f>);
 
     // Vector Types: Basic Operations ---------------------------------------------------------------------------------
+    __host__ __device__ bool operator==(Point2i a, Point2i b) { return a.x == b.x && a.y == b.y; }
+
+    __host__ __device__ bool operator==(Point3i a, Point3i b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+
+    __host__ __device__ bool operator==(Point4i a, Point4i b)
+    {
+        return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+    }
+
     __host__ __device__ Point2i::operator Vector2i() { return *std::bit_cast<Vector2i const*>(this); }
     __host__ __device__ Point2f::operator Vector2f() { return *std::bit_cast<Vector2f const*>(this); }
     __host__ __device__ Point3i::operator Vector3i() { return *std::bit_cast<Vector3i const*>(this); }
@@ -510,9 +519,9 @@ namespace dmt {
     {
         float clampedSinTheta = glm::clamp(sinTheta, -1.f, 1.f);
         return {{
-            .x = (clampedSinTheta * glm::cos(phi)),
-            .y = (clampedSinTheta * glm::sin(phi)),
-            .z = (glm::clamp(cosTheta, -1.f, 1.f)), // -1 ?
+            (clampedSinTheta * glm::cos(phi)),
+            (clampedSinTheta * glm::sin(phi)),
+            (glm::clamp(cosTheta, -1.f, 1.f)), // -1 ?
         }};
     }
     __host__ __device__ float sphericalTheta(Vector3f v) { return fl::acosClamp(v.z); }
@@ -590,6 +599,17 @@ namespace dmt {
                 p.z <= b.pMax.z);
     }
 
+    __host__ __device__ Bounds3f makeBounds(Point3f p0, Point3f p1)
+    {
+        return {.pMin = min(p0, p1), .pMax = max(p0, p1)};
+    }
+
+    __host__ __device__ Bounds3f bbEmpty()
+    {
+        return {.pMin = {{fl::infinity(), fl::infinity(), fl::infinity()}},
+                .pMax = {{-fl::infinity(), -fl::infinity(), -fl::infinity()}}};
+    }
+
     __host__ __device__ Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b)
     {
         Bounds3f bRet;
@@ -620,17 +640,18 @@ namespace dmt {
 
     __host__ __device__ Point3f Bounds3f::corner(EBoundsCorner corner) const
     {
+        using enum EBoundsCorner;
         Point3f const ret{{
-            operator[](corner & eRight).x,
-            operator[]((corner & eForward) >> 1).y,
-            operator[]((corner & eTop) >> 2).z,
+            operator[](toUnderlying(corner) & toUnderlying(eRight)).x,
+            operator[]((toUnderlying(corner) & toUnderlying(eForward)) >> 1).y,
+            operator[]((toUnderlying(corner) & toUnderlying(eTop)) >> 2).z,
         }};
         return ret;
     }
 
     __host__ __device__ Vector3f Bounds3f::diagonal() const { return pMax - pMin; }
 
-    __host__ __device__ float Bounds3f::surfaceAraa() const
+    __host__ __device__ float Bounds3f::surfaceArea() const
     {
         Vector3f const d = diagonal();
         return 2 * (d.x * d.y + d.x * d.z + d.y * d.z);
@@ -754,6 +775,125 @@ namespace dmt {
             tMax = tzMax;
 
         return (tMin < rayMax) && (tMax > 0);
+    }
+
+    // Bounds2f
+    __host__ __device__ Bounds2f makeBounds(Point2f p0, Point2f p1)
+    {
+        return {.pMin = min(p0, p1), .pMax = max(p0, p1)};
+    }
+
+    __host__ __device__ Bounds2f bbEmpty2()
+    {
+        return {.pMin = {{fl::infinity(), fl::infinity()}}, .pMax = {{-fl::infinity(), -fl::infinity()}}};
+    }
+
+    __host__ __device__ bool inside(Point2f p, Bounds2f const& b)
+    {
+        return (p.x >= b.pMin.x && p.x <= b.pMax.x && p.y >= b.pMin.y && p.y <= b.pMax.y);
+    }
+
+    __host__ __device__ Bounds2f bbUnion(Bounds2f const& a, Bounds2f const& b)
+    {
+        Bounds2f bRet;
+        bRet.pMin = min(a.pMin, b.pMin);
+        bRet.pMax = max(a.pMax, b.pMax);
+        return bRet;
+    }
+
+    __host__ __device__ Bounds2f bbUnion(Bounds2f const& b, Point2f p)
+    {
+        Bounds2f bRet;
+        bRet.pMin = min(b.pMin, p);
+        bRet.pMax = max(b.pMax, p);
+        return bRet;
+    }
+
+    __host__ __device__ Point2f& Bounds2f::operator[](int32_t i)
+    {
+        assert(i == 0 || i == 1);
+        return i == 0 ? pMin : pMax;
+    }
+
+    __host__ __device__ Point2f const& Bounds2f::operator[](int32_t i) const
+    {
+        assert(i == 0 || i == 1);
+        return i == 0 ? pMin : pMax;
+    }
+
+    __host__ __device__ Point2f Bounds2f::corner(EBoundsCorner2 corner) const
+    {
+        using enum EBoundsCorner2;
+        Point2f const ret{{
+            operator[](toUnderlying(corner) & toUnderlying(eRight)).x,
+            operator[]((toUnderlying(corner) & toUnderlying(eTop)) >> 1).y,
+        }};
+        return ret;
+    }
+
+    __host__ __device__ Vector2f Bounds2f::diagonal() const { return pMax - pMin; }
+
+    __host__ __device__ float Bounds2f::surfaceArea() const
+    {
+        Vector2f const d = diagonal();
+        return d.x * d.y;
+    }
+
+    __host__ __device__ float Bounds2f::volume() const { return 0; }
+
+    __host__ __device__ int32_t Bounds2f::maxDimention() const
+    {
+        Vector2f const d = diagonal();
+        if (d.x > d.y)
+            return 0;
+        else
+            return 1;
+    }
+
+    __host__ __device__ Point2f Bounds2f::lerp(Point2f t) const
+    {
+        Point2f const ret{{glm::lerp(pMax.x, pMin.x, t.x), glm::lerp(pMax.y, pMin.y, t.y)}};
+        return ret;
+    }
+
+    __host__ __device__ Vector2f Bounds2f::offset(Point2f p) const
+    {
+        Vector2f o = p - pMin;
+        if (pMax.x > pMin.x)
+            o.x /= pMax.x - pMin.x;
+        if (pMax.y > pMin.y)
+            o.y /= pMax.y - pMin.y;
+        return o;
+    }
+
+    __host__ __device__ void Bounds2f::boundingCircle(Point2f& outCenter, float& outRadius) const
+    {
+        outCenter = (pMin + pMax) / 2.f;
+        outRadius = inside(outCenter, *this) ? glm::distance(toGLM(outCenter), toGLM(pMax)) : 0.f;
+    }
+
+    __host__ __device__ bool Bounds2f::isEmpty() const { return pMin.x >= pMax.x || pMin.y >= pMax.y; }
+
+    __host__ __device__ bool Bounds2f::isDegenerate() const { return pMin.x > pMax.x || pMin.y > pMax.y; }
+
+    __host__ __device__ bool Bounds2f::operator==(Bounds2f const& that) const
+    {
+        bool b = near(pMin, that.pMin) && near(pMax, that.pMax);
+        return b;
+    }
+
+    // Bounds2i
+    static glm::bvec2 operator>=(Point2i a, Point2i b) { return {a.x >= b.x, a.y >= b.y}; }
+    static glm::bvec2 operator<=(Point2i a, Point2i b) { return {a.x <= b.x, a.y <= b.y}; }
+
+    __host__ __device__ bool inside(Point2i p, Bounds2i b) { return glm::all(p >= b.pMin && p <= b.pMax); }
+
+    __host__ __device__ void Bounds2i::boundingSphere(Point2i* c, float* rad) const
+    {
+        *c   = (pMin + pMax) / 2;
+        *rad = inside(*c, *this) ? distanceL2(Point2f{{static_cast<float>(c->x), static_cast<float>(c->y)}},
+                                              Point2f{{static_cast<float>(pMax.x), static_cast<float>(pMax.y)}})
+                                 : 0;
     }
 
     // Vector Types: Matrix 4x4 ---------------------------------------------------------------------------------------
@@ -950,7 +1090,7 @@ namespace dmt {
         glm::vec4 w{v.x, v.y, v.z, 0.f};
         w = toGLMmat(m) * w;
         assert(fl::nearZero(w.w));
-        return {{.x = w.x, .y = w.y, .z = w.y}};
+        return {{w.x, w.y, w.z}};
     }
 
     __host__ __device__ Normal3f mul(Matrix4f const& m, Normal3f const& v)
@@ -959,7 +1099,7 @@ namespace dmt {
         w = toGLMmat(m) * w;
         assert(fl::nearZero(w.w));
         w = glm::normalize(w);
-        return {{.x = w.x, .y = w.y, .z = w.y}};
+        return {{w.x, w.y, w.z}};
     }
 
     __host__ __device__ Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v)
@@ -978,7 +1118,7 @@ namespace dmt {
         glm::vec4 w{p.x, p.y, p.z, 1.f};
         w = toGLMmat(m) * w;
         w /= w.w;
-        return {{.x = w.x, .y = w.y, .z = w.y}};
+        return {{w.x, w.y, w.z}};
     }
 
     __host__ __device__ Point3fi mul(Matrix4f const& mat, Point3fi const& point)
@@ -1217,9 +1357,6 @@ namespace dmt {
         rxDirection = d + (rxDirection - d) * s;
         ryDirection = d + (ryDirection - d) * s;
     }
-
-    __host__ __device__ bool RayDifferential::hasDifferentials() const { return medium & 1; }
-
 
     // math utilities: vector -----------------------------------------------------------------------------------------
 } // namespace dmt

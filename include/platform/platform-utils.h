@@ -21,13 +21,9 @@
 #include <cstdint>
 
 namespace dmt::os {
-    DMT_PLATFORM_API uint64_t processId();
-    DMT_PLATFORM_API uint64_t threadId();
-    DMT_PLATFORM_API void*    reserveVirtualAddressSpace(size_t size);
+    DMT_PLATFORM_API uint32_t processId();
+    DMT_PLATFORM_API uint32_t threadId();
     DMT_PLATFORM_API size_t   systemAlignment();
-    DMT_PLATFORM_API bool     commitPhysicalMemory(void* address, size_t size);
-    DMT_PLATFORM_API bool     freeVirtualAddressSpace(void* address, size_t size);
-    DMT_PLATFORM_API void     decommitPage(void* pageAddress, size_t pageSize);
 
     // use C runtime standard allocation functions
     DMT_PLATFORM_API void* allocate(size_t _bytes, size_t _align);
@@ -36,6 +32,34 @@ namespace dmt::os {
     // for debugging purposes only, so we don't care about memory
     DMT_PLATFORM_API std::pmr::vector<std::pair<std::pmr::string, std::pmr::string>> getEnv(
         std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+
+    namespace env {
+        inline std::pmr::vector<std::pair<std::pmr::string, std::pmr::string>> copy(
+            std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+        {
+            return ::dmt::os::getEnv(resource);
+        }
+
+        DMT_PLATFORM_API bool set(std::string_view           name,
+                                  std::string_view           value,
+                                  std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        DMT_PLATFORM_API bool remove(std::string_view           name,
+                                     std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        // TODO overload which returs unique pointer and does size query
+        DMT_PLATFORM_API std::pmr::string get(std::string_view           name,
+                                              std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    } // namespace env
+
+    struct DMT_PLATFORM_API FileStat
+    {
+        bool     valid       = false;
+        bool     isDirectory = false;
+        uint64_t size        = 0;
+
+        uint64_t accessTime   = 0; // POSIX: atime, Windows: ftLastAccessTime
+        uint64_t modifiedTime = 0; // POSIX: mtime, Windows: ftLastWriteTime
+        uint64_t creationTime = 0; // POSIX: birthtime (or ctime), Windows: ftCreationTime
+    };
 
     class DMT_PLATFORM_API Path
     {
@@ -50,6 +74,8 @@ namespace dmt::os {
 
         static Path executableDir(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
+        FileStat stat() const;
+
         void parent_();
         Path parent() const;
 
@@ -59,8 +85,8 @@ namespace dmt::os {
         // uses the same memory reosurce
         Path operator/(char const* pathComponent) const;
 
-        bool isDirectory() const { return m_isDir; }
-        bool isFile() const { return !m_isDir; }
+        bool isDirectory() const { return m_valid && m_isDir; }
+        bool isFile() const { return m_valid && !m_isDir; }
         // synonym to "is valid and exists in the filesystem"
         bool isValid() const { return m_valid; }
 
@@ -128,6 +154,10 @@ namespace dmt::os {
         bool                       m_canGrow;
     };
 
+    DMT_PLATFORM_API std::pmr::string readFileContents(
+        Path const&                path,
+        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+
     namespace lib {
         DMT_PLATFORM_API void* getFunc(void* library, char const* funcName);
     }
@@ -151,19 +181,6 @@ namespace dmt {
     }
 
     using sid_t = uint64_t;
-    template <typename T>
-    struct PmrDeleter
-    {
-        explicit PmrDeleter(std::pmr::memory_resource* pRes) : resource(pRes) {}
-
-        void operator()(T* ptr) const
-        {
-            if (ptr)
-                resource->deallocate(ptr, sizeof(T), alignof(T));
-        }
-
-        std::pmr::memory_resource* resource;
-    };
 
     template <typename Enum>
         requires(std::is_enum_v<Enum>)
@@ -259,6 +276,12 @@ namespace dmt {
         }
     }
 
+    template <std::integral T>
+    inline constexpr bool isPOT(T value)
+    {
+        return (value > 0) && ((value & (value - 1)) == 0);
+    }
+
     inline constexpr uint32_t smallestPOTMask(uint32_t value)
     {
         // If value is 0, smallest POT is 1 (mask = 0x0000'0001)
@@ -276,6 +299,26 @@ namespace dmt {
 
         // Return the power of 2 as the mask
         return value - 1;
+    }
+
+    //Mod
+    template <typename T>
+    DMT_CPU_GPU inline T Mod(T a, T b)
+    {
+        T result = a - (a / b) * b;
+        return (T)((result < 0) ? result + b : result);
+    }
+
+    //Clamp
+    template <typename T, typename U, typename V>
+    DMT_CPU_GPU inline constexpr T Clamp(T val, U low, V high)
+    {
+        if (val < low)
+            return T(low);
+        else if (val > high)
+            return T(high);
+        else
+            return val;
     }
 
     template <std::integral T>
@@ -487,6 +530,224 @@ namespace dmt {
 #endif
     }
 
+    //----------TIsIntegral------------------------------
+    template <typename T>
+    struct TIsIntegral
+    {
+        enum
+        {
+            Value = false
+        };
+    };
+
+    template <>
+    struct TIsIntegral<bool>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<char>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<signed char>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned char>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<char16_t>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<char32_t>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<wchar_t>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<short>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned short>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<int>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned int>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<long long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+    template <>
+    struct TIsIntegral<unsigned long long>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+
+    template <typename T>
+    struct TIsIntegral<T const>
+    {
+        enum
+        {
+            Value = TIsIntegral<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsIntegral<volatile T>
+    {
+        enum
+        {
+            Value = TIsIntegral<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsIntegral<volatile T const>
+    {
+        enum
+        {
+            Value = TIsIntegral<T>::Value
+        };
+    };
+
+    //------------TIsPointer-------------------------
+    template <typename T>
+    struct TIsPointer
+    {
+        enum
+        {
+            Value = false
+        };
+    };
+
+    template <typename T>
+    struct TIsPointer<T*>
+    {
+        enum
+        {
+            Value = true
+        };
+    };
+
+    template <typename T>
+    struct TIsPointer<T const>
+    {
+        enum
+        {
+            Value = TIsPointer<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsPointer<volatile T>
+    {
+        enum
+        {
+            Value = TIsPointer<T>::Value
+        };
+    };
+    template <typename T>
+    struct TIsPointer<volatile T const>
+    {
+        enum
+        {
+            Value = TIsPointer<T>::Value
+        };
+    };
+
+    //Align with template
+    template <typename T>
+    DMT_FORCEINLINE constexpr T Align(T Val, uint64_t Alignment)
+    {
+        static_assert(TIsIntegral<T>::Value || TIsPointer<T>::Value, "Align expects an integer or pointer type");
+
+        return (T)(((uint64_t)Val + Alignment - 1) & ~(Alignment - 1));
+    }
+
+    //IsAligned with template
+    template <typename T>
+    DMT_FORCEINLINE constexpr bool IsAligned(T Val, uint64_t Alignment)
+    {
+        static_assert(TIsIntegral<T>::Value || TIsPointer<T>::Value, "IsAligned expects an integer or pointer type");
+
+        return !((uint64_t)Val & (Alignment - 1));
+    }
+
     inline void* alignTo(void* address, size_t alignment)
     {
         // Ensure alignment is a power of two (required for bitwise operations).
@@ -523,7 +784,7 @@ namespace dmt {
     }
 
 #if !defined(DMT_ARCH_X86_64)
-#error "Pointer Tagging relies heavily on x86_64's virtual addreess format"
+    #error "Pointer Tagging relies heavily on x86_64's virtual addreess format"
 #endif
     /** Class managing a pointer aligned to a 32 byte boundary, embedding a 12 bits tag split among its 7 high bits and 5 low bits
      * - x86_64 systems actually use 48 bits for virtual addresses. Actually, scratch that, with the
@@ -858,4 +1119,22 @@ namespace dmt {
             }
         }
     }
+
+    static DMT_FORCEINLINE uint64_t CountLeadingZeros64(uint64_t Value)
+    {
+        // return 64 if value if was 0
+        unsigned long BitIndex;
+        if (!_BitScanReverse64(&BitIndex, Value))
+            BitIndex = -1;
+        return 63 - BitIndex;
+    }
+
+    static DMT_FORCEINLINE uint64_t CeilLogTwo64(uint64_t Arg)
+    {
+        // if Arg is 0, change it to 1 so that we return 0
+        Arg = Arg ? Arg : 1;
+        return 64 - CountLeadingZeros64(Arg - 1);
+    }
+
+    static DMT_FORCEINLINE uint64_t RoundUpToPowerOfTwo64(uint64_t Arg) { return uint64_t(1) << CeilLogTwo64(Arg); }
 } // namespace dmt

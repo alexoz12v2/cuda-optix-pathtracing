@@ -1,4 +1,4 @@
-#include "platform-threadPool.h"
+﻿#include "platform-threadPool.h"
 
 #include "platform-context.h"
 
@@ -16,91 +16,19 @@
 #include <cassert>
 
 namespace dmt {
-    ThreadPool::ThreadPool(int const size) :
-    busyThreads(size),
-    m_threads(std::vector<std::thread>(size)),
-    m_shutdownRequested(false)
+    static void jobWorkerThread(void* that)
     {
-        for (size_t i = 0; i < size; ++i)
-        {
-            m_threads[i] = std::thread(ThreadWorker(this));
-        }
-    }
-
-    ThreadPool::~ThreadPool() { Shutdown(); }
-
-    void ThreadPool::Shutdown()
-    {
-        //define a scope for lock
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_shutdownRequested = true;
-            m_conditionVariable.notify_all(); //wake-up all threads
-        }
-
-        for (size_t i = 0; i < m_threads.size(); ++i)
-        {
-            if (m_threads[i].joinable())
-            {
-                m_threads[i].join();
-            }
-        }
-        std::cout << "Derstroyed Threads" << std::endl;
-    }
-
-
-    int ThreadPool::QueueSize()
-    {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        return m_queue.size();
-    }
-
-    //set the pointer of the pool so the worker can access to the shared queue and mutex
-    ThreadPool::ThreadWorker::ThreadWorker(ThreadPool* pool) : m_threadPool(pool) {}
-    //execute immediately starts to execute
-    void ThreadPool::ThreadWorker::operator()()
-    {
-        //acuire the lock of the mutex and given back
-        //std::unique_lock<std::mutex> lock(thread_pool->mutex, std::defer_lock);
-        std::unique_lock<std::mutex> lock(m_threadPool->m_mutex);
-        //continusly run
-        while (!m_threadPool->m_shutdownRequested || (m_threadPool->m_shutdownRequested && !m_threadPool->m_queue.empty()))
-        {
-            m_threadPool->busyThreads--;
-            //thrad stops and gives back the mutex until it is woken up again
-            //it will check the condition-> true continue, false go back into sleep
-            m_threadPool->m_conditionVariable.wait(lock, [this] {
-                return this->m_threadPool->m_shutdownRequested || !this->m_threadPool->m_queue.empty();
-            });
-            m_threadPool->busyThreads++;
-            //check if there is a task
-            if (!this->m_threadPool->m_queue.empty())
-            {
-                auto func = m_threadPool->m_queue.front();
-                m_threadPool->m_queue.pop();
-                lock.unlock();
-                func();
-                lock.lock();
-            }
-        }
-    }
-
-    // ThreadPoolV2 ---------------------------------------------------------------------------------------------------
-    struct BufferCountPair
-    {
-        std::unique_ptr<TaggedPointer[]> p;
-        uint32_t                         count;
-    };
-
-    static void jobWorkerThread(ThreadPoolV2* threadPool)
-    {
-        Job       copy;
-        EJobLayer currentLayer   = EJobLayer::eEmpty;
-        bool      otherRemaining = false;
+        auto*          storage    = reinterpret_cast<ThreadPoolV2::ThreadStorage*>(that);
+        auto*          threadPool = storage->threadPool;
+        uint32_t const index      = storage->index;
+        Job            copy;
+        EJobLayer      currentLayer   = EJobLayer::eEmpty;
+        bool           otherRemaining = false;
 
         // forever
         while (true)
         {
+            // Context ctx;
             // wait for a job to become available
             {
                 std::unique_lock<decltype(threadPool->m_mtx)> lk{threadPool->m_mtx};
@@ -122,17 +50,27 @@ namespace dmt {
                 // copy the next job
                 copy = threadPool->nextJob(otherRemaining, currentLayer);
 
-                if (activeLayer != currentLayer)
-                {
-                    threadPool->m_activeLayer = currentLayer;
-                }
+                threadPool->m_activeLayer = currentLayer;
             }
 
+            // uncomment to debug
+            // static std::mutex mtx;
             if (copy.func)
             {
+                //if (ctx.isValid() && ctx.isTraceEnabled())
+                //    ctx.trace("number of jobs remaining {}, func: {}",
+                //              std::make_tuple(threadPool->numJobs(currentLayer), copy.func));
+                //std::lock_guard lk{mtx};
                 threadPool->m_jobsInFlight.test_and_set();
-                copy.func(copy.data);
-                if (!otherRemaining)
+                //if (ctx.isValid() && ctx.isTraceEnabled())
+                //    ctx.trace("index: {}", std::make_tuple(index));
+                copy.func(copy.data, index);
+                copy.func = nullptr;
+                if (otherRemaining)
+                {
+                    threadPool->m_cv.notify_all(); // 👈 Wake up another worker if more work is pending
+                }
+                else
                 {
                     threadPool->m_jobsInFlight.clear();
                 }
@@ -140,12 +78,15 @@ namespace dmt {
         }
     }
 
-    ThreadPoolV2::ThreadPoolV2(std::pmr::memory_resource* resource) : m_resource(resource)
+    ThreadPoolV2::ThreadPoolV2(uint32_t numThreads, std::pmr::memory_resource* resource) :
+    m_resource(resource),
+    m_index(makeUniqueRef<IndexArray>(resource)),
+    m_threads(makeUniqueRef<os::Thread[]>(resource, numThreads)),
+    m_threadIndices(makeUniqueRef<ThreadStorage[]>(resource, numThreads)),
+    m_numThreads(numThreads)
     {
         using namespace std::string_view_literals;
-        static_assert(numBlocks >= 5);
-        static constexpr uint32_t threadBlocks = 3;
-        static_assert(threadBlocks > 1);
+        // TODO: why are we locking at construction? Do threads need to wait construction
         std::lock_guard<decltype(m_mtx)> lk{m_mtx};
         Context                          ctx;
         if (!ctx.isValid())
@@ -155,462 +96,283 @@ namespace dmt {
         }
 
         // allocate the 256 Bytes block for the index
-        m_pIndex = m_resource->allocate(numBlocks * toUnderlying(EBlockSize::e256B), 32);
-        if (m_pIndex == taggedNullptr)
+        if (!m_index)
         {
             ctx.error("Couldn't allocate {} index blocks for threadPool", std::make_tuple(numBlocks));
             m_resource = nullptr;
             return;
         }
 
-        // initialize index with `ceilDiv((numBlocks - 1), 2)` pointers, the rest taggedNullptr,
-        // and all layers as empty
-        auto& index = *m_pIndex.pointer<IndexNode256B>();
-        index.next  = taggedNullptr;
+        // initialize first Job blob of each index
+        std::ranges::fill(m_index->layers, EJobLayer::eEmpty);
         for (uint32_t i = 0; i != layerCardinality; ++i)
         {
-            index.data.ptrs[i] = taggedNullptr;
+            // TODO maybe: alternative: allocate them all at once?
+            m_index->ptrs[i] = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+            memset(m_index->ptrs[i], 0, sizeof(JobBlob));
+            std::construct_at(m_index->ptrs[i]);
+            m_index->ptrs[i]->next    = nullptr;
+            m_index->ptrs[i]->counter = 0;
         }
 
-        for (uint32_t i = 0; i != layerCardinality; ++i)
+        for (uint32_t i = 0; i < m_numThreads; ++i)
         {
-            index.data.layers[i] = EJobLayer::eEmpty;
-        }
-
-        uint32_t jobBlocks = numBlocks - 1 - threadBlocks;
-        uint32_t offset    = blockSz;
-        for (uint32_t i = 0; i != jobBlocks; ++i)
-        {
-            void* ptr = std::bit_cast<void*>(m_pIndex.address() + offset);
-            assert(alignTo(ptr, toUnderlying(EBlockSize::e32B)) == ptr);
-
-            // store it in the job index
-            index.data.ptrs[i] = TaggedPointer{ptr, nullTag};
-
-            // zero initialize memory of the block
-            std::memset(ptr, 0, sizeof(JobNode256B));
-
-            offset += blockSz;
-        }
-
-        assert(std::thread::hardware_concurrency() >= 1);
-        uint32_t numThreads = std::max(std::thread::hardware_concurrency() - 1u, 1u);
-        // TODO hsndle thread construction
-        // 1. see how many additional blocks you need to accomodate the `numThreads` and allocate them
-        // 2. arrange the blocks in a linked list structure, and store the `activeCount`
-        // 3. construct all threads with the entry point
-
-        uint32_t threadOffset       = offset;
-        m_pThreads                  = TaggedPointer{std::bit_cast<void*>(m_pIndex.address() + threadOffset), nullTag};
-        TaggedPointer ptThreads     = m_pThreads;
-        TaggedPointer ptThreadsNext = TaggedPointer{std::bit_cast<void*>(m_pIndex.address() + threadOffset + blockSz),
-                                                    nullTag};
-        for (uint32_t i = 0; i != threadBlocks; ++i)
-        {
-            uint8_t numTs = static_cast<uint8_t>(std::min(numThreads, ThreadBlob::numTs));
-            numThreads -= numTs;
-            prepareThreadNode(ptThreads, ptThreadsNext, numTs);
-
-            offset += blockSz;
-            ptThreads     = i < threadBlocks - 1 ? ptThreadsNext : ptThreads;
-            ptThreadsNext = i < threadBlocks - 2
-                                ? TaggedPointer(std::bit_cast<void*>(ptThreadsNext.address() + blockSz), nullTag)
-                                : taggedNullptr;
-        }
-
-        if (numThreads != 0)
-        {
-            uint32_t additionalBlocks = ceilDiv(numThreads, ThreadBlob::numTs);
-            uint32_t threadsResidual  = numThreads % ThreadBlob::numTs;
-            for (uint32_t i = 0; i < additionalBlocks; ++i)
-            {
-                uint8_t threadNum = static_cast<uint8_t>(i == additionalBlocks - 1 ? threadsResidual : ThreadBlob::numTs);
-                ptThreadsNext = m_resource->allocate(toUnderlying(EBlockSize::e256B), 32);
-                if (ptThreadsNext == taggedNullptr)
-                {
-                    m_resource = nullptr;
-                    ctx.error("Could not allocate additional block of 256 B index {} for the threadpool",
-                              std::make_tuple(i));
-                    return;
-                }
-
-                ptThreads.pointer<ThreadNode256B>()->next = ptThreadsNext;
-                prepareThreadNode(ptThreadsNext, taggedNullptr, threadNum);
-                ptThreads = ptThreadsNext;
-            }
-        }
-    }
-
-    void ThreadPoolV2::prepareThreadNode(TaggedPointer current, TaggedPointer next, uint8_t activeCount)
-    {
-        auto& threadNode = *current.pointer<ThreadNode256B>();
-
-        threadNode.data.activeCount = activeCount;
-        threadNode.next             = next;
-        for (uint32_t j = 0; j < activeCount; ++j)
-        {
-            std::construct_at(&threadNode.data.ts[j].t, jobWorkerThread, this);
+            std::construct_at(&m_threads[i], jobWorkerThread, m_resource);
+            m_threadIndices[i].index      = i;
+            m_threadIndices[i].threadPool = this;
+            m_threads[i].start(&m_threadIndices[i]);
         }
     }
 
     void ThreadPoolV2::kickJobs()
     {
-        assert(m_pIndex != taggedNullptr);
-        {
+        { // TODO is this scope necessary
             std::lock_guard<decltype(m_mtx)> lk{m_mtx};
             m_ready = true;
         }
-        m_cv.notify_one();
+        m_cv.notify_all();
     }
 
     void ThreadPoolV2::pauseJobs()
     {
-        assert(m_pIndex != taggedNullptr);
         std::lock_guard<decltype(m_mtx)> lk{m_mtx};
         m_ready = false;
     }
 
-    void ThreadPoolV2::forEachTrueJobIndexBlock(void (*func)(void*, TaggedPointer), void* p)
-    {
-        TaggedPointer ptIndexNode = m_pIndex;
-        auto*         pIndexNode  = ptIndexNode.pointer<IndexNode256B>();
-        bool          first       = true;
-        while (pIndexNode->next != taggedNullptr)
-        {
-            if (!first && isTrueTaggedPointer(ptIndexNode))
-            {
-                func(p, ptIndexNode);
-            }
-            first = false;
-
-            // 2. account for all job blocks inside the current index block
-            for (uint32_t i = 0; i < layerCardinality; ++i)
-            {
-                TaggedPointer ptJobBlock = pIndexNode->data.ptrs[i];
-                while (ptJobBlock != taggedNullptr)
-                {
-                    if (isTrueTaggedPointer(ptJobBlock))
-                    {
-                        func(p, ptJobBlock);
-                    }
-                    ptJobBlock = ptJobBlock.pointer<JobNode256B>()->next;
-                }
-            }
-
-            ptIndexNode = pIndexNode->next;
-            pIndexNode  = ptIndexNode.pointer<IndexNode256B>();
-        }
-    }
-
-    void ThreadPoolV2::forEachTrueThreadBlock(void (*func)(void*, TaggedPointer), void* p, bool joinAll)
-    {
-        TaggedPointer ptThreadBlock = m_pThreads;
-        while (ptThreadBlock != taggedNullptr)
-        {
-            // Maybe This won't work
-            auto& threadBlock = *ptThreadBlock.pointer<ThreadNode256B>();
-            if (isTrueTaggedPointer(ptThreadBlock))
-            {
-                func(p, ptThreadBlock);
-            }
-
-            if (joinAll)
-            {
-                for (uint8_t i = 0; i < threadBlock.data.activeCount; ++i)
-                {
-                    ThreadWrapper& thread = threadBlock.data.ts[i];
-                    while (!thread.t.joinable())
-                    { // twiddle thumbs
-                    }
-                    thread.t.join();
-                    std::destroy_at(&thread.t);
-                }
-            }
-
-            ptThreadBlock = threadBlock.next;
-        }
-    }
-
     void ThreadPoolV2::cleanup()
     {
-        // cycle through all Tagged pointers and count the number of true taggeed pointers
-        uint32_t       trueTaggedPointerCount = 0;
-        constexpr auto incrementCount         = [](void* p, TaggedPointer tp) {
-            assert(tp.tag() != nullTag);
-            auto& cnt = *reinterpret_cast<uint32_t*>(p);
-            ++cnt;
-        };
-        constexpr auto storePtr = [](void* p, TaggedPointer tp) {
-            auto& pair           = *reinterpret_cast<BufferCountPair*>(p);
-            pair.p[pair.count++] = tp;
-        };
-        constexpr auto nothing = [](void* p, TaggedPointer tp) {};
-
         {
             std::lock_guard<decltype(m_mtx)> lk{m_mtx};
 
-            // 1. account for all index blocks
-            forEachTrueJobIndexBlock(incrementCount, &trueTaggedPointerCount);
-
-            // 3. account for all thread blocks (signal all threads for destruction and join them all in the meantime)
             m_shutdownRequested = true;
-        } // lock guard scope
+            m_cv.notify_all(); // Wake up all worker threads so they can exit
+        }
 
-        m_cv.notify_all();
-        forEachTrueThreadBlock(nothing, nullptr, true);
-
+        // Join all threads
+        for (uint32_t i = 0; i < m_numThreads; ++i)
         {
-            std::lock_guard<decltype(m_mtx)> lk{m_mtx};
+            m_threads[i].join();
+        }
 
-            forEachTrueThreadBlock(incrementCount, &trueTaggedPointerCount, false);
-
-            // allocate a unique ptr with the necessary space to hold the true tagged pointers (we don't care
-            // about memory here as this should be the shutdown of the application)
-            BufferCountPair t{.p = std::make_unique<TaggedPointer[]>(trueTaggedPointerCount), .count = 0};
-
-            // copy all true tagged pointers in the unique pointer buffer
-            forEachTrueJobIndexBlock(storePtr, &t);
-            forEachTrueThreadBlock(storePtr, &t, false);
-
-            // free all memory
-            for (uint32_t i = 0; i < trueTaggedPointerCount; ++i)
+        // Free all JobBlobs per layer
+        if (m_index)
+        {
+            for (uint32_t i = 0; i < layerCardinality; ++i)
             {
-                m_resource->deallocate(t.p[i].pointer(), toUnderlying(EBlockSize::e256B));
+                JobBlob* blob = m_index->ptrs[i];
+                while (blob)
+                {
+                    JobBlob* next = blob->next;
+                    std::destroy_at(blob);
+                    m_resource->deallocate(blob, sizeof(JobBlob), alignof(JobBlob));
+                    blob = next;
+                }
+
+                m_index->ptrs[i]   = nullptr;
+                m_index->layers[i] = EJobLayer::eEmpty;
+            }
+        }
+
+        m_ready             = false;
+        m_numJobs           = 0;
+        m_activeLayer       = EJobLayer::eEmpty;
+        m_shutdownRequested = false;
+        m_jobsInFlight.clear();
+    }
+
+    ThreadPoolV2::~ThreadPoolV2() noexcept { cleanup(); }
+
+    bool ThreadPoolV2::addJob(Job const& job, EJobLayer layer)
+    {
+        std::lock_guard<SpinLock> lk{m_mtx};
+        if (!m_index)
+            return false;
+
+        auto layerIndex             = toUnderlying(layer);
+        m_index->layers[layerIndex] = layer;
+
+        JobBlob*& head = m_index->ptrs[layerIndex];
+        if (!head)
+        {
+            head = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+            if (!head)
+                return false;
+
+            memset(head, 0, sizeof(JobBlob));
+            std::construct_at(head);
+        }
+
+        JobBlob* blob = head;
+        while (blob)
+        {
+            for (uint32_t l = 0; l < JobBlob::maxBlobCount; ++l)
+            {
+                if (!blob->jobs[l].func) // unused slot
+                {
+                    blob->jobs[l] = job;
+                    ++blob->counter;
+                    return true;
+                }
             }
 
-            // free the index block, the only one with `numBlocks` adjacent
-            m_resource->deallocate(m_pIndex.pointer(), numBlocks * toUnderlying(EBlockSize::e256B));
+            if (!blob->next)
+            {
+                blob->next = reinterpret_cast<JobBlob*>(m_resource->allocate(sizeof(JobBlob)));
+                if (!blob->next)
+                    return false;
 
-            // bookkeeping
-            m_ready    = false;
-            m_pIndex   = taggedNullptr;
-            m_pThreads = taggedNullptr;
+                memset(blob->next, 0, sizeof(JobBlob));
+                std::construct_at(blob->next);
+            }
 
-            m_resource = nullptr;
-        } // lock guard scope
-    }
-
-    static TaggedPointer tryAlloc(std::pmr::memory_resource* resource, EJobLayer layer)
-    {
-        TaggedPointer newJobBlock = resource->allocate(toUnderlying(EBlockSize::e256B), 32);
-        if (newJobBlock == taggedNullptr)
-        {
-            Context ctx;
-            if (ctx.isValid())
-                ctx.error("failed to allocate new job block for layer {}", std::make_tuple(toUnderlying(layer)));
+            blob = blob->next;
         }
 
-        return newJobBlock;
-    }
-
-    ThreadPoolV2::~ThreadPoolV2() noexcept
-    {
-        if (isValid())
-            cleanup();
-    }
-
-    void ThreadPoolV2::addJob(Job const& job, EJobLayer layer)
-    {
-        std::lock_guard<decltype(m_mtx)> lk{m_mtx};
-        assert(m_pIndex != taggedNullptr);
-        if (!isValid())
-            return;
-
-        auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
-        // track the next pointer of the last node which was already allocated, such that
-        // we can know if an allocation happened
-        TaggedPointer lastPtr = taggedNullptr;
-
-        while (pIndexNode != nullptr)
-        { // check if the layer is already in the index
-            for (uint32_t i = 0; i < layerCardinality; ++i)
-            { // check either if layer is in the index or if there's an empty slot
-                if (pIndexNode->data.layers[i] == layer)
-                { // add job to this layers's job linked list
-                    TaggedPointer jobBlockPtr = pIndexNode->data.ptrs[i];
-                    auto*         jobNode     = jobBlockPtr.pointer<JobNode256B>();
-                    assert(jobNode && "layer not empty, but somehow nullptr job linked list");
-                    while (jobNode != nullptr)
-                    { // check for space in the current job node
-                        for (auto& jobSlot : jobNode->data.jobs)
-                        { // if the slot is available, add the job
-                            if (jobSlot.func == nullptr)
-                            {
-                                ++jobBlockPtr.pointer<JobNode256B>()->data.counter;
-                                jobSlot = job;
-                                ++m_numJobs;
-                                return;
-                            }
-                        }
-                        // if all job slots are occupied, move to the next job node
-                        // and if this is the last one, try to allocate a new one
-                        if (jobNode->next == taggedNullptr)
-                        {
-                            TaggedPointer newJobBlock = tryAlloc(m_resource, layer);
-
-                            jobNode->next = newJobBlock;
-                            std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
-                        }
-
-                        jobNode = jobNode->next.pointer<JobNode256B>();
-                    }
-                } // pIndexNode->data.layers[i] == layer
-                else if (pIndexNode->data.layers[i] == EJobLayer::eEmpty)
-                { // this is a new layer, allocate a new job block
-                    pIndexNode->data.layers[i] = layer;
-                    TaggedPointer newJobBlock  = pIndexNode->data.ptrs[i] == taggedNullptr ? tryAlloc(m_resource, layer)
-                                                                                           : pIndexNode->data.ptrs[i];
-                    pIndexNode->data.ptrs[i]   = newJobBlock;
-                    std::memset(newJobBlock.pointer(), 0, sizeof(JobNode256B));
-
-                    // add the job in the new block
-                    auto* newJobNode         = newJobBlock.pointer<JobNode256B>();
-                    newJobNode->data.jobs[0] = job;
-                    newJobNode->data.counter = 1;
-                    ++m_numJobs;
-                    return;
-                } // pIndexNode->data.layers[i] == EJobLayer::eEmpty
-            } // loop over layer cardinality of the current index block
-
-            // if you didn't find any slots from the current index block, go to the next one
-            lastPtr    = pIndexNode->next;
-            pIndexNode = lastPtr.pointer<IndexNode256B>(); // can be nullptr
-        }
-
-        // if we exhausted the index, allocate a new block, for the index...
-        TaggedPointer newIndexBlock = m_resource->allocate(toUnderlying(EBlockSize::e256B), 32);
-        if (newIndexBlock == taggedNullptr)
-        {
-            Context ctx;
-            if (ctx.isValid())
-                ctx.error("Failed to allocate new index block for thread pool", {});
-            return;
-        }
-
-        if (lastPtr != taggedNullptr)
-        {
-            lastPtr.pointer<IndexNode256B>()->next = newIndexBlock;
-        }
-        else // this shouldn't be hit
-        {
-            Context ctx;
-            if (ctx.isValid())
-                ctx.warn("You shouldn't be here", {});
-            m_pIndex = newIndexBlock;
-        }
-
-        auto* newIndex = newIndexBlock.pointer<IndexNode256B>();
-        std::memset(newIndex, 0, sizeof(IndexNode256B));
-        newIndex->data.layers[0] = layer;
-        for (uint32_t i = 1; i < layerCardinality; ++i)
-        {
-            newIndex->data.layers[i] = EJobLayer::eEmpty;
-        }
-
-        // ... and a new block for the job
-        TaggedPointer newJobBlock = tryAlloc(m_resource, layer);
-        newIndex->data.ptrs[0]    = newJobBlock;
-        auto* newJobNode          = newJobBlock.pointer<JobNode256B>();
-        std::memset(newJobNode, 0, sizeof(JobNode256B));
-
-        newJobNode->data.jobs[0] = job;
-        newJobNode->data.counter = 1;
-        ++m_numJobs;
+        return false; // Should never happen
     }
 
     Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
     {
-        assert(m_pIndex != taggedNullptr);
-
-        // Find the smallest layer with jobs
-        TaggedPointer jobBlockPtr = getSmallestLayer(outLayer);
-        if (jobBlockPtr == taggedNullptr)
-        {
-            // No jobs left
-            otherJobsRemaining = false;
-            outLayer           = EJobLayer::eEmpty;
-            m_ready            = false;
-            return {};
-        }
-
-        auto* jobNode = jobBlockPtr.pointer<JobNode256B>();
-        while (jobNode != nullptr)
-        {
-            for (auto& jobSlot : jobNode->data.jobs)
-            {
-                if (jobSlot.func != nullptr)
-                {
-                    Job copy     = jobSlot;
-                    jobSlot.func = nullptr;
-
-                    uint64_t value = --jobBlockPtr.pointer<JobNode256B>()->data.counter;
-                    --m_numJobs;
-
-                    // Determine if other jobs remain in this layer
-                    otherJobsRemaining = (value != 0);
-                    return copy;
-                }
-            }
-
-            jobNode = jobNode->next.pointer<JobNode256B>();
-        }
-
-        // If we exhaust the current layer, mark it as empty
-        auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
-        while (pIndexNode != nullptr)
-        {
-            for (uint32_t i = 0; i < layerCardinality; ++i)
-            {
-                if (pIndexNode->data.layers[i] == outLayer)
-                {
-                    pIndexNode->data.layers[i] = EJobLayer::eEmpty;
-                    break;
-                }
-            }
-            pIndexNode = pIndexNode->next.pointer<IndexNode256B>();
-        }
-
-        // No jobs left in the layer
+        Job result{};
         otherJobsRemaining = false;
-        return {};
+
+        for (uint32_t i = 0; i < layerCardinality; ++i)
+        {
+            JobBlob* blob = m_index->ptrs[i];
+            JobBlob* prev = nullptr;
+
+            while (blob)
+            {
+                for (size_t j = 0; j < blob->jobs.size(); ++j)
+                {
+                    if (blob->jobs[j].func != nullptr)
+                    {
+                        result   = blob->jobs[j];
+                        outLayer = m_index->layers[i];
+
+                        blob->jobs[j].func = nullptr;
+                        --blob->counter;
+                        --m_numJobs;
+
+                        // Optional: compact blob if needed
+
+                        // Check if other jobs exist
+                        for (uint32_t k = 0; k < layerCardinality; ++k)
+                        {
+                            JobBlob* check = m_index->ptrs[k];
+                            while (check)
+                            {
+                                if (check->counter > 0 || check->next)
+                                {
+                                    otherJobsRemaining = true;
+                                    return result;
+                                }
+                                check = check->next;
+                            }
+                        }
+
+                        return result;
+                    }
+                }
+
+                prev = blob;
+                blob = blob->next;
+            }
+        }
+
+        outLayer = EJobLayer::eEmpty;
+        return result;
     }
 
-    TaggedPointer ThreadPoolV2::getSmallestLayer(EJobLayer& outLayer) const
+    bool ThreadPoolV2::otherLayerActive(EJobLayer& layer) const
     {
-        assert(m_pIndex != taggedNullptr);
-
-        TaggedPointer smallestJobBlock = taggedNullptr;
-        EJobLayer     smallestLayer    = EJobLayer::eEmpty;
-
-        auto* pIndexNode = m_pIndex.pointer<IndexNode256B>();
-        while (pIndexNode != nullptr)
+        if (m_jobsInFlight.test())
         {
             for (uint32_t i = 0; i < layerCardinality; ++i)
             {
-                EJobLayer currentLayer = pIndexNode->data.layers[i];
-                if (currentLayer != EJobLayer::eEmpty &&
-                    (smallestLayer == EJobLayer::eEmpty || currentLayer < smallestLayer))
+                if (m_index->layers[i] < layer && m_index->ptrs[i] != nullptr && m_index->ptrs[i]->counter > 0)
                 {
-                    smallestLayer    = currentLayer;
-                    smallestJobBlock = pIndexNode->data.ptrs[i];
+                    layer = m_index->layers[i];
+                    return true;
                 }
             }
-            pIndexNode = pIndexNode->next.pointer<IndexNode256B>();
+        }
+        return false;
+    }
+
+    bool ThreadPoolV2::isValid() const { return m_resource != nullptr && m_index != nullptr && m_threads != nullptr; }
+
+    std::pmr::string ThreadPoolV2::debugPrintLayerJobs(EJobLayer layer, std::pmr::memory_resource* resource) const
+    {
+        std::lock_guard<SpinLock> lk{m_mtx};
+
+        return debugPrintLayerJobsUnlocked(layer, resource);
+    }
+
+    DMT_PLATFORM_API uint32_t ThreadPoolV2::numJobs(EJobLayer layer) const
+    {
+        if (!m_index)
+            return 0;
+
+        uint32_t counter = 0;
+        for (uint32_t l = 0; l < layerCardinality; ++l)
+        {
+            if (m_index->layers[l] == layer)
+            {
+                JobBlob* blob = m_index->ptrs[l];
+                while (blob)
+                {
+                    counter += blob->counter;
+                    blob = blob->next;
+                }
+            }
         }
 
-        outLayer = smallestLayer;
-        return smallestJobBlock;
+        return counter;
     }
 
-    bool ThreadPoolV2::otherLayerActive(EJobLayer& inOutLayer) const
+    std::pmr::string ThreadPoolV2::debugPrintLayerJobsUnlocked(EJobLayer layer, std::pmr::memory_resource* resource) const
     {
-        if (inOutLayer == m_activeLayer)
-            return false;
+        std::pmr::string result(resource);
 
-        inOutLayer = m_activeLayer;
-        return m_activeLayer != EJobLayer::eEmpty && m_jobsInFlight.test();
+
+        int layerIndex = -1;
+        for (uint32_t i = 0; i < layerCardinality; ++i)
+        {
+            if (m_index->layers[i] == layer)
+            {
+                layerIndex = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (layerIndex < 0)
+        {
+            result += "Layer not found.\n";
+            return result;
+        }
+
+        JobBlob* blob      = m_index->ptrs[layerIndex];
+        uint32_t blobIndex = 0;
+
+        while (blob)
+        {
+            result += std::format("Blob {}: counter = {}\n", blobIndex, blob->counter);
+
+            for (size_t i = 0; i < blob->jobs.size(); ++i)
+            {
+                Job const& job = blob->jobs[i];
+                if (job.func)
+                    result += std::format("  [{}] func = {}\n", i, reinterpret_cast<void*>(job.func));
+                else
+                    result += std::format("  [{}] <null>\n", i);
+            }
+
+            blob = blob->next;
+            ++blobIndex;
+        }
+
+        return result;
     }
-
-    bool ThreadPoolV2::isValid() const { return m_resource != nullptr; }
 
 } // namespace dmt

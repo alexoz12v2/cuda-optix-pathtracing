@@ -126,6 +126,13 @@ add_custom_target(dmt-link-assets
   COMMENT "Creating symbolic link for assets directory"
 )
 
+# Declare targets to Copy CUDA Device code inside the build/shaders directory
+add_custom_target(dmt-copy-cuda-device-code ALL 
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${OPTIX80_PATH}/include ${CUDAToolkit_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}/shaders
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${OPTIX80_PATH}/include/internal ${CUDAToolkit_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}/shaders/internal
+  COMMENT "Copy CUDA Device code source header files for JIT compilation"
+)
+
 # add library code
 add_subdirectory(src)
 

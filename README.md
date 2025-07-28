@@ -247,3 +247,7 @@ pbrt --wavefront --log-level verbose --display-server 127.0.0.1:14158 .\villa-da
 
 Alternatively, `pbrt` can also display to a native, `glfw` based window with the `--interactive` option. 
 (one of `--interactive` and `--display-server <addr:port>` can be used, not both). It's laggy so I don't reccomend it.
+
+### Compilation Problem on windows
+
+- no CUDA toolset found: make sure that all files from `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\extras\visual_studio_integration\MSBuildExtensions\` (substisute you own CUDA directory) are contained in `C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations\`

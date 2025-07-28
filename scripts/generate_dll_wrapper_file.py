@@ -188,7 +188,7 @@ def write_type_declarations_and_populate_method_data(
 
 
 def prepare_library_population(
-    library_dict: dict[str, Path], version_pattern, latest_only
+    library_dict: dict[str, Path], version_pattern, latest_only, macro_filter
 ):
     match platform.system():
         case "Windows":
@@ -198,8 +198,31 @@ def prepare_library_population(
         case _:
             raise ValueError("Unsupported platform")
 
+    # TODO: cuGraphInstantiate -> cuGraphInstantiateWithFlags
+
     if latest_only:
         exports = filter_latest_versions(exports, version_pattern)
+    else:
+        export_set = set(exports)
+        new_exports = {}
+
+        for export in exports:
+            # Skip exports that are already macro versions (i.e., ending with macro_filter)
+            if macro_filter and export.endswith(macro_filter):
+                continue
+
+            # Try to find macro version
+            if macro_filter:
+                macro_version = f"{export}{macro_filter}"
+                if macro_version in export_set:
+                    new_exports[export] = macro_version
+                    continue  # found macro version, good
+
+            # If no macro version, fall back to normal export
+            if export not in new_exports:
+                new_exports[export] = export
+
+        exports = new_exports
 
     library_name = Path(library_dict["Windows"]).name
     library_class_name = library_name.replace("-", "_").capitalize()[
@@ -243,13 +266,14 @@ def generate_loader(
     json_file,
     header_name: str | None,
     use_executable_dir: bool,
-    export_macro: str
+    export_macro: str,
+    macro_filter
 ) -> Tuple[str, str]:
     """Generates C++ code for dynamically loading functions from a shared library."""
     header_string = [f"#pragma once\n{get_header()}"]
     implementation_string = [""]
     exports, library_class_name = prepare_library_population(
-        library_path, version_pattern, latest_only
+        library_path, version_pattern, latest_only, macro_filter
     )
     data: List[MethodData] = list()
 
@@ -339,14 +363,15 @@ def platform_generate_loader(
     json_file: Path,
     header_name: str | None,
     use_executable_dir: bool,
-    export_macro: str
+    export_macro: str,
+    macro_filter
 ) -> Tuple[str, str]:
     header_string = [
         f'#pragma once\n{get_header()}\n#include "platform/platform-utils.h"\n'
     ]
     implementation_string = [f'#include "{header_name}"\n{get_header()}\n']
     exports, library_class_name = prepare_library_population(
-        library_dict, version_pattern, latest_only
+        library_dict, version_pattern, latest_only, macro_filter
     )
     data: List[MethodData] = list()
 
@@ -459,6 +484,13 @@ def main():
         help="Only export the latest version of each function.",
     )
     parser.add_argument(
+        "-mf",
+        "--macro-filter",
+        type=str,
+        default=None,
+        help="String to be appended when searching for macro overridden symbol names",
+    )
+    parser.add_argument(
         "-j",
         "--json-type-mapping",
         type=str,
@@ -545,7 +577,8 @@ def main():
         json_file,
         header_name,
         args.use_executable_path,
-        args.export_macro
+        args.export_macro,
+        args.macro_filter
     )
 
     cpp_file.parent.mkdir(parents=True, exist_ok=True)

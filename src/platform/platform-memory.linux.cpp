@@ -12,6 +12,39 @@
 #include <cerrno>
 #include <cstdlib>
 
+namespace dmt::os {
+    void* reserveVirtualAddressSpace(size_t size)
+    {
+        void* address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (address == MAP_FAILED)
+        {
+            return nullptr;
+        }
+        return address;
+    }
+
+    bool commitPhysicalMemory(void* address, size_t size)
+    {
+        int result = mprotect(address, size, PROT_READ | PROT_WRITE);
+        return result == 0;
+    }
+
+    void decommitPhysicalMemory(void* pageAddress, size_t pageSize)
+    {
+        mprotect(pageAddress, pageSize, PROT_NONE);
+        madvise(pageAddress, pageSize, MADV_DONTNEED); // Optional: Release physical memory
+    }
+
+    bool freeVirtualAddressSpace(void* address, size_t size) // true if success
+    {
+        return !munmap(address, size);
+    }
+
+    void* allocateLockedLargePages(void* address, size_t size, EPageSize pageSize, bool skipAclCheck) { return false; }
+
+    void deallocateLockedMemoryLargePages(void* address, size_t size, EPageSize pageSize) {}
+} // namespace dmt::os
+
 namespace dmt {
     inline constexpr uint32_t     howMany4KBsIn1GB = toUnderlying(EPageSize::e1GB) / toUnderlying(EPageSize::e4KB);
     static thread_local page_info pageInfoPool[howMany4KBsIn1GB];

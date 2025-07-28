@@ -15,7 +15,7 @@ namespace dmt {
         cudaApi->cuGetErrorString(result, &errorStr);
 
         if (errorStr != nullptr)
-            ctx.error("CUDA Driver Error: {}", std::make_tuple(errorStr));
+            ctx.error("CUDA Driver Error: {}", std::make_tuple(std::string_view(errorStr)));
         else
             ctx.error("CUDA Driver Unrecognized Error (did you forget to call cuInit?)", {});
 

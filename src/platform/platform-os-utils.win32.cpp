@@ -8,33 +8,50 @@
 #include <strsafe.h>
 
 namespace dmt::os::win32 {
-    uint32_t utf16le_From_utf8(char8_t const* DMT_RESTRICT _u8str,
-                               uint32_t                    _u8NumBytes,
-                               wchar_t* DMT_RESTRICT       _mediaBuf,
-                               uint32_t                    _mediaMaxBytes,
-                               wchar_t* DMT_RESTRICT       _outBuf,
-                               uint32_t                    _maxBytes,
-                               uint32_t*                   _outBytesWritten)
+    uint32_t utf16le_From_utf8(char const* DMT_RESTRICT _u8str,
+                               uint32_t                 _u8NumBytes,
+                               wchar_t* DMT_RESTRICT    _mediaBuf,
+                               uint32_t                 _mediaMaxBytes,
+                               wchar_t* DMT_RESTRICT    _outBuf,
+                               uint32_t                 _maxBytes,
+                               uint32_t*                _outBytesWritten)
     {
         if (_outBytesWritten)
-            *_outBytesWritten = static_cast<uint32_t>(sizeof(wchar_t));
-        int res = MultiByteToWideChar(CP_UTF8,
-                                      MB_ERR_INVALID_CHARS,
-                                      std::bit_cast<char const*>(_u8str),
-                                      static_cast<int>(_u8NumBytes),
-                                      _mediaBuf,
-                                      _mediaMaxBytes / sizeof(wchar_t));
-        // TODO if (res == 0) errror, else number is positive
-        assert(res >= 0);
+            *_outBytesWritten = 0;
+        int const u8len = static_cast<int>(_u8NumBytes);
+        int res = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, _u8str, u8len, _mediaBuf, _mediaMaxBytes >> 1);
+        if (res == 0)
+        {
+            auto err = GetLastError();
+            if (err == ERROR_INSUFFICIENT_BUFFER)
+                res = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, _u8str, _mediaMaxBytes >> 1, _mediaBuf, _mediaMaxBytes >> 1);
+            else
+                res = MultiByteToWideChar(CP_UTF8, 0, _u8str, u8len, _mediaBuf, _mediaMaxBytes >> 1);
+        }
+        assert(res > 0);
 
         int estimatedSize = NormalizeString(::NormalizationC, _mediaBuf, res, nullptr, 0);
-        if (estimatedSize > (_maxBytes >> 1)) // means divided by sizeof(wchar_t)
-            assert(false);                    // TODO better
-        int actualLength = NormalizeString(::NormalizationC, _mediaBuf, res, _outBuf, _maxBytes >> 1);
+        int actualLength  = 0;
+        if (estimatedSize > (_maxBytes >> 1))
+        {
+            actualLength = std::min(static_cast<int>(_maxBytes >> 1), res);
+            memcpy(_outBuf, _mediaBuf, _maxBytes);
+            _outBuf[actualLength - 1] = L'\n'; // TODO remove
+        }
+        else
+        {
+            actualLength = NormalizeString(::NormalizationC, _mediaBuf, res, _outBuf, _maxBytes >> 1);
+            if (actualLength == 0)
+            {
+                actualLength = std::min(static_cast<int>(_maxBytes >> 1), res);
+                memcpy(_outBuf, _mediaBuf, _maxBytes);
+                _outBuf[actualLength - 1] = L'\n'; // TODO remove
+            }
+        }
 
         if (_outBytesWritten)
-            *_outBytesWritten *= actualLength;
-        return actualLength;
+            *_outBytesWritten = actualLength << 1;
+        return actualLength << 1;
     }
 
     std::unique_ptr<wchar_t[]> quickUtf16leFrom(char const* prefix, char const* str)
@@ -44,14 +61,14 @@ namespace dmt::os::win32 {
         std::unique_ptr<wchar_t[]> normBuf  = std::make_unique<wchar_t[]>(numChars);
         std::unique_ptr<wchar_t[]> midBuf   = std::make_unique<wchar_t[]>(numChars - 15);
 
-        uint32_t numOutChars = utf16le_From_utf8(std::bit_cast<char8_t const*>(str),
+        uint32_t numOutChars = utf16le_From_utf8(std::bit_cast<char const*>(str),
                                                  static_cast<uint32_t>(std::strlen(prefix)),
                                                  midBuf.get(),
                                                  (numChars - 15) << 1,
                                                  normBuf.get(),
                                                  numChars << 1,
                                                  nullptr);
-        numOutChars += utf16le_From_utf8(std::bit_cast<char8_t const*>(str),
+        numOutChars += utf16le_From_utf8(std::bit_cast<char const*>(str),
                                          static_cast<uint32_t>(std::strlen(str)),
                                          midBuf.get(),
                                          (numChars - 15) << 1,

@@ -1,6 +1,7 @@
 #include "platform-utils.h"
 
 #include "platform-os-utils.win32.h"
+#include "platform-memory.h"
 
 #pragma comment(lib, "mincore")
 #pragma comment(lib, "Shlwapi.lib")
@@ -17,17 +18,71 @@
 #include <utility>
 
 namespace dmt::os {
-    uint64_t processId()
+    uint32_t processId()
     {
-        uint64_t const ret = static_cast<uint64_t>(GetCurrentProcessId());
+        uint32_t const ret = static_cast<uint32_t>(GetCurrentProcessId());
         return ret;
     }
 
-    uint64_t threadId()
+    uint32_t threadId()
     {
-        uint64_t const ret = static_cast<uint64_t>(GetCurrentThreadId());
+        uint32_t const ret = static_cast<uint32_t>(GetCurrentThreadId());
         return ret;
     }
+
+    namespace env {
+        bool set(std::string_view name, std::string_view value, std::pmr::memory_resource* resource)
+        {
+            static constexpr size_t maxWinLength = 32760;
+            bool                    result       = false;
+            if (name.length() <= 0 || value.length() > maxWinLength)
+                return result;
+
+#if defined(_WIN32)
+            // TODO switch to smart pointers maybe?
+            std::pmr::wstring const wName  = dmt::os::win32::utf16FromUtf8(name, resource);
+            std::pmr::wstring const wValue = dmt::os::win32::utf16FromUtf8(value, resource);
+            result                         = SetEnvironmentVariableW(wName.c_str(), wValue.c_str());
+#else
+    #error "not done yet"
+#endif
+            return result;
+        }
+
+        bool remove(std::string_view name, std::pmr::memory_resource* resource)
+        {
+            std::pmr::wstring const wName = dmt::os::win32::utf16FromUtf8(name, resource);
+            return SetEnvironmentVariableW(wName.c_str(), nullptr);
+        }
+
+        std::pmr::string get(std::string_view name, std::pmr::memory_resource* resource)
+        {
+            std::pmr::wstring const wName = dmt::os::win32::utf16FromUtf8(name, resource);
+            std::pmr::string        result{resource};
+            if (DWORD numChars = GetEnvironmentVariableW(wName.c_str(), nullptr, 0); numChars > 0)
+            {
+                wchar_t* wBuffer  = reinterpret_cast<wchar_t*>(resource->allocate((numChars + 1) * sizeof(wchar_t)));
+                wBuffer[numChars] = L'\0';
+                if (GetEnvironmentVariableW(wName.c_str(), wBuffer, numChars) > 0)
+                {
+                    result.resize(numChars + 10);
+                    // clang-format off
+                    if (WideCharToMultiByte(
+                        CP_UTF8, 0,
+                        wBuffer, numChars,
+                        result.data(), static_cast<int32_t>(result.size()),
+                        nullptr, nullptr)
+                        <= 0)
+                    {
+                        // clang-format on
+                        result.clear();
+                    }
+                }
+            }
+
+            return result;
+        }
+    } // namespace env
 
     // Path ----------------------------------------------------------------------------------------------------------
     Path::Path(std::pmr::memory_resource* resource, void* content, uint32_t capacity, uint32_t size) :
@@ -230,6 +285,7 @@ namespace dmt::os {
     {
         m_data = m_resource->allocate(m_capacity);
         memcpy(m_data, other.m_data, m_dataSize);
+        memset(static_cast<char*>(m_data) + other.m_dataSize, 0, 2);
     }
 
     // Copy Assignment
@@ -239,6 +295,7 @@ namespace dmt::os {
         {
             void* newData = m_resource->allocate(other.m_capacity);
             memcpy(newData, other.m_data, other.m_dataSize);
+            memset(static_cast<char*>(m_data) + other.m_dataSize, 0, 2);
 
             // Free old memory
             m_resource->deallocate(m_data, m_capacity);
@@ -306,7 +363,7 @@ namespace dmt::os {
             return; // Don't modify root path (e.g., \\?\C:\)
 
         // Handle UNC root case (\\Server\Share)
-        if (path[0] == L'\\' && path[1] == L'\\')
+        if (path[0] == L'\\' && path[1] == L'\\' && path[2] != L'?')
         {
             int slashCount = 0;
             for (int i = 2; i < len; ++i)
@@ -327,6 +384,7 @@ namespace dmt::os {
             {
                 path[i]    = L'\0';               // Null-terminate
                 m_dataSize = i * sizeof(wchar_t); // Update byte size
+                m_isDir    = true;
                 return;
             }
         }
@@ -357,8 +415,9 @@ namespace dmt::os {
         if (compLen == 0)
             return; // Invalid input
 
-        wchar_t* compBuffer = new wchar_t[compLen];
-        MultiByteToWideChar(CP_UTF8, 0, pathComponent, -1, compBuffer, compLen);
+        auto compBuffer = dmt::makeUniqueRef<wchar_t[]>(m_resource, compLen);
+
+        MultiByteToWideChar(CP_UTF8, 0, pathComponent, -1, compBuffer.get(), compLen);
 
         // Compute new size needed
         size_t additionalSize = compLen * sizeof(wchar_t);
@@ -384,17 +443,17 @@ namespace dmt::os {
             *pathEnd++ = L'\\';
 
         // Append new component
-        memcpy(pathEnd, compBuffer, additionalSize);
+        memcpy(pathEnd, compBuffer.get(), additionalSize);
         m_dataSize += additionalSize - sizeof(wchar_t); // Exclude null terminator
 
         // Ensure null termination
         pathEnd[compLen - 1] = L'\0';
 
         // Update validity
-        m_isDir = true; // Assume directory until checked
-        m_valid = PathFileExistsW(reinterpret_cast<wchar_t*>(m_data));
-
-        delete[] compBuffer;
+        pathStart = reinterpret_cast<wchar_t*>(m_data);
+        m_valid   = PathFileExistsW(pathStart);
+        if (m_valid)
+            m_isDir = PathIsDirectoryW(pathStart);
     }
 
     // Returns a new Path object with an appended component
@@ -404,6 +463,71 @@ namespace dmt::os {
         copy /= pathComponent;
         return copy;
     }
+
+    FileStat Path::stat() const
+    {
+        FileStat info;
+        if (!m_valid)
+            return info;
+
+        wchar_t const*            wpath = static_cast<wchar_t const*>(m_data);
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        if (!GetFileAttributesExW(wpath, GetFileExInfoStandard, &data))
+            return info;
+
+        info.valid       = true;
+        info.isDirectory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        info.size        = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+
+        ULARGE_INTEGER t;
+
+        t.LowPart       = data.ftLastAccessTime.dwLowDateTime;
+        t.HighPart      = data.ftLastAccessTime.dwHighDateTime;
+        info.accessTime = (t.QuadPart - 116444736000000000ULL) / 10000000ULL;
+
+        t.LowPart         = data.ftLastWriteTime.dwLowDateTime;
+        t.HighPart        = data.ftLastWriteTime.dwHighDateTime;
+        info.modifiedTime = (t.QuadPart - 116444736000000000ULL) / 10000000ULL;
+
+        t.LowPart         = data.ftCreationTime.dwLowDateTime;
+        t.HighPart        = data.ftCreationTime.dwHighDateTime;
+        info.creationTime = (t.QuadPart - 116444736000000000ULL) / 10000000ULL;
+
+        return info;
+    }
+
+    // Basic File Management -----------------------------------------------------------------------------------------
+    std::pmr::string readFileContents(Path const& path, std::pmr::memory_resource* resource)
+    {
+        std::pmr::string str{resource};
+        if (!path.isFile())
+            return str;
+
+        FileStat stats    = path.stat();
+        uint64_t fileSize = stats.size;
+        if (fileSize == 0)
+            return str;
+
+        str.resize(static_cast<size_t>(fileSize));
+        wchar_t const* wpath = static_cast<wchar_t const*>(path.internalData());
+
+        HANDLE hFile = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+        if (hFile == INVALID_HANDLE_VALUE)
+            return std::pmr::string{resource};
+
+        DWORD bytesRead = 0;
+        if (!ReadFile(hFile, str.data(), static_cast<DWORD>(fileSize), &bytesRead, nullptr))
+        {
+            CloseHandle(hFile);
+            return std::pmr::string{resource};
+        }
+
+        CloseHandle(hFile);
+
+        return str;
+    }
+
 
     // Library Loader ------------------------------------------------------------------------------------------------
     void* LibraryLoader::loadLibrary(std::string_view name, bool useSystemPaths, Path const* pathOverride) const
@@ -479,32 +603,12 @@ namespace dmt::os {
         }
     } // namespace lib
 
-    // not exported utils --------------------------------------------------------------------------------------------
-    void* reserveVirtualAddressSpace(size_t size)
-    {
-        void* address = VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
-        return address; // to check whether it is different than nullptr
-    }
-
     size_t systemAlignment()
     {
         SYSTEM_INFO sysInfo{};
         GetSystemInfo(&sysInfo);
         return static_cast<size_t>(sysInfo.dwAllocationGranularity);
     }
-
-    bool commitPhysicalMemory(void* address, size_t size)
-    {
-        void* committed = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
-        return committed != nullptr;
-    }
-
-    bool freeVirtualAddressSpace(void* address, size_t size) // true if success
-    {
-        return VirtualFree(address, 0, MEM_RELEASE);
-    }
-
-    void decommitPage(void* pageAddress, size_t pageSize) { VirtualFree(pageAddress, pageSize, MEM_DECOMMIT); }
 
     void* allocate(size_t _bytes, size_t _align) { return _aligned_malloc(_bytes, _align); }
 

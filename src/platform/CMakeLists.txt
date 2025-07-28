@@ -10,6 +10,7 @@ block()
       ${HEADER_DIR}/platform-logging.h
       ${HEADER_DIR}/platform-macros.h
       ${HEADER_DIR}/platform-memory.h
+      ${HEADER_DIR}/platform-memory-stackAllocator.h
       ${HEADER_DIR}/platform-threadPool.h
       ${HEADER_DIR}/platform-utils.h
       ${HEADER_DIR}/platform.h
@@ -20,6 +21,7 @@ block()
       platform-launch.cpp
       platform-logging.cpp
       platform-memory.cpp
+      platform-memory-stackAllocator.cpp
       platform-threadPool.cpp
       platform-utils.cpp
       platform.cpp
@@ -27,8 +29,9 @@ block()
   set(platform_win32_private_sources
       platform-file.win32.cpp
       platform-logging.win32.cpp
-      platform-memory.win32.cpp
       platform-utils.win32.cpp
+      platform-memory.win32.cpp
+      platform-threadPool.win32.cpp
   )
   set(platform_linux_private_sources
       platform-file.linux.cpp
@@ -96,8 +99,8 @@ block()
     ${CMAKE_SOURCE_DIR}/scripts/generate_dll_wrapper_file.py 
     "{ \"Windows\": \"C:\\\\Windows\\\\System32\\\\nvcuda.dll\", \"Linux\": \"\" }"
     -i cuda.h 
+    -mf "_v2"
     -v "_v{n}" 
-    -l 
     -j ${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_driver.json 
     --cpp-file ${cuda_driver_cpp_file}
     --header-file ${cuda_driver_h_file}
@@ -136,7 +139,7 @@ target_link_libraries(dmt-platform
     dmt-platform-os-utils
     $<$<BOOL:${DMT_OS_LINUX}>:rt pthread > # needed by async io linux
     $<$<BOOL:${DMT_OS_WINDOWS}>:kernel32.dll advapi32.dll> # needed by fileapi.h (does it automatically with dll, clarity)
-    Backward::Backward
+    backward
     nlohmann_json::nlohmann_json
 )
 

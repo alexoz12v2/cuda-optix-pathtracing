@@ -178,7 +178,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
         ret.o = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
-        if (ray.hasDifferentials())
+        if (ray.hasDifferentials)
         {
             ret.rxOrigin    = applyInverse(ray.rxOrigin);
             ret.ryOrigin    = applyInverse(ray.ryOrigin);
@@ -212,6 +212,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
 
         ret.o = o.midpoint();
+        ret.d = normalize(ret.d); // Maybe not necessary?
         return ret;
     }
 
@@ -223,7 +224,7 @@ namespace dmt {
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
         ret.o = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
-        if (ray.hasDifferentials())
+        if (ray.hasDifferentials)
         {
             ret.rxOrigin    = operator()(ray.rxOrigin);
             ret.ryOrigin    = operator()(ray.ryOrigin);
@@ -237,6 +238,15 @@ namespace dmt {
     {
         glm::mat3 const linearPart{toGLMmat(m)};
         return glm::determinant(linearPart) < 0.f;
+    }
+
+
+    DMT_CPU_GPU Transform Translate(Vector3f delta)
+    {
+        Matrix4f m{{1, 0, 0, delta.x, 0, 1, 0, delta.y, 0, 0, 1, delta.z, 0, 0, 0, 1}};
+        m = transpose(m);
+
+        return Transform(m);
     }
 
     // AnimatedTransform ----------------------------------------------------------------------------------------------
@@ -1037,44 +1047,6 @@ namespace dmt {
                 zeros.data[outNumZeros++] = tNewton;
             }
         }
-    }
-
-    // CameraTransform ------------------------------------------------------------------------------------------------
-    __host__ __device__ CameraTransform::CameraTransform(AnimatedTransform const& worldFromCamera, ERenderCoordSys renderCoordSys)
-    {
-        switch (renderCoordSys)
-        {
-            using enum ERenderCoordSys;
-            case eCameraWorld:
-            {
-
-                break;
-            }
-            case eCamera:
-            {
-                break;
-            }
-            case eWorld:
-            {
-                break;
-            }
-            default: // should be never reached
-#if !defined(__CUDA_ARCH__)
-                std::abort();
-#else
-                // TODO: per-warp buffers inside managed memory watched by a job, and logged when activated
-                __threadfence();
-                asm("trap;");
-#endif
-                break;
-        }
-    }
-
-    __host__ __device__ Transform dmt::CameraTransform::renderFromWorld() const
-    {
-        Transform t = worldFromRender;
-        t.inverse_();
-        return t;
     }
 
     // Private Static Stuff -------------------------------------------------------------------------------------------

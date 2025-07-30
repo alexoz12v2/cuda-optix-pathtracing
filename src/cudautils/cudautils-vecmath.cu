@@ -441,6 +441,146 @@ namespace dmt {
     __host__ __device__ Tuple3f::value_type normL2(Tuple3f v) { return glm::length(toGLM(v)); }
     __host__ __device__ Tuple4f::value_type normL2(Tuple4f v) { return glm::length(toGLM(v)); }
 
+    __host__ __device__ bool all(Tuple2f v) { return v.x && v.y; }
+    __host__ __device__ bool all(Tuple3f v) { return v.x && v.y && v.z; }
+    __host__ __device__ bool all(Tuple4f v) { return v.x && v.y && v.z && v.w; }
+
+    __host__ __device__ bool any(Tuple2f v) { return v.x || v.y; }
+    __host__ __device__ bool any(Tuple3f v) { return v.x || v.y || v.z; }
+    __host__ __device__ bool any(Tuple4f v) { return v.x || v.y || v.z || v.w; }
+
+    __host__ __device__ Tuple2f operator>(Tuple2f v0, Tuple2f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple2f     result;
+        result.x = (v0.x > v1.x) ? on : zero;
+        result.y = (v0.y > v1.y) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple3f operator>(Tuple3f v0, Tuple3f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple3f     result;
+        result.x = (v0.x > v1.x) ? on : zero;
+        result.y = (v0.y > v1.y) ? on : zero;
+        result.z = (v0.z > v1.z) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple3f operator<(Tuple3f v0, Tuple3f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple3f     result;
+        result.x = (v0.x < v1.x) ? on : zero;
+        result.y = (v0.y < v1.y) ? on : zero;
+        result.z = (v0.z < v1.z) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple4f operator<(Tuple4f v0, Tuple4f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple4f     result;
+        result.x = (v0.x < v1.x) ? on : zero;
+        result.y = (v0.y < v1.y) ? on : zero;
+        result.z = (v0.z < v1.z) ? on : zero;
+        result.w = (v0.w < v1.w) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple2f operator>=(Tuple2f v0, Tuple2f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple2f     result;
+        result.x = (v0.x >= v1.x) ? on : zero;
+        result.y = (v0.y >= v1.y) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple3f operator>=(Tuple3f v0, Tuple3f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple3f     result;
+        result.x = (v0.x >= v1.x) ? on : zero;
+        result.y = (v0.y >= v1.y) ? on : zero;
+        result.z = (v0.z >= v1.z) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple3f operator<=(Tuple3f v0, Tuple3f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple3f     result;
+        result.x = (v0.x <= v1.x) ? on : zero;
+        result.y = (v0.y <= v1.y) ? on : zero;
+        result.z = (v0.z <= v1.z) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple4f operator<=(Tuple4f v0, Tuple4f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple4f     result;
+        result.x = (v0.x <= v1.x) ? on : zero;
+        result.y = (v0.y <= v1.y) ? on : zero;
+        result.z = (v0.z <= v1.z) ? on : zero;
+        result.w = (v0.w <= v1.w) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple2f operator==(Tuple2f v0, Tuple2f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple2f     result;
+        result.x = (v0.x == v1.x) ? on : zero;
+        result.y = (v0.y == v1.y) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple3f operator==(Tuple3f v0, Tuple3f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple3f     result;
+        result.x = (v0.x == v1.x) ? on : zero;
+        result.y = (v0.y == v1.y) ? on : zero;
+        result.z = (v0.z == v1.z) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple3f operator!=(Tuple3f v0, Tuple3f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple3f     result;
+        result.x = (v0.x != v1.x) ? on : zero;
+        result.y = (v0.y != v1.y) ? on : zero;
+        result.z = (v0.z != v1.z) ? on : zero;
+        return result;
+    }
+
+    __host__ __device__ Tuple4f operator!=(Tuple4f v0, Tuple4f v1)
+    {
+        float const on   = fl::bitsToFloat(0xffffffff);
+        float const zero = 0.0f;
+        Tuple4f     result;
+        result.x = (v0.x != v1.x) ? on : zero;
+        result.y = (v0.y != v1.y) ? on : zero;
+        result.z = (v0.z != v1.z) ? on : zero;
+        result.w = (v0.w != v1.w) ? on : zero;
+        return result;
+    }
+
     __host__ __device__ Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b)
     {
         return glm::distance(toGLM(a), toGLM(b));

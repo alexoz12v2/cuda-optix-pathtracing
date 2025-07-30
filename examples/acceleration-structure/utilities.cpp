@@ -744,6 +744,245 @@ namespace dmt::test {
 
         ctx.warn("Projection works on a tolerance of {}", std::make_tuple(tol));
     }
+
+    static bool compareIntersections(Intersection const& a, Intersection const& b)
+    {
+        if (a.hit != b.hit)
+            return false;
+        if (!a.hit)
+            return true; // both missed
+        static constexpr float eps = 1e-4f;
+        return normL2(a.p - b.p) < eps && fl::abs(a.t - b.t) < eps;
+    }
+
+    static void testRayAgainstAllGroupedVsUngrouped(std::vector<UniqueRef<Primitive>> const& ungrouped,
+                                                    std::vector<UniqueRef<Primitive>> const& grouped,
+                                                    Ray const&                               ray)
+    {
+        Context ctx;
+        assert(ctx.isValid() && "Invalid context");
+
+        Intersection closestUngrouped{};
+        closestUngrouped.t = fl::infinity();
+        for (auto const& prim : ungrouped)
+        {
+            Intersection its = prim->intersect(ray, closestUngrouped.t);
+            if (its.hit && its.t < closestUngrouped.t)
+                closestUngrouped = its;
+        }
+
+        Intersection closestGrouped{};
+        closestGrouped.t = fl::infinity();
+        for (auto const& prim : grouped)
+        {
+            Intersection its = prim->intersect(ray, closestGrouped.t);
+            if (its.hit && its.t < closestGrouped.t)
+                closestGrouped = its;
+        }
+
+        if (!compareIntersections(closestUngrouped, closestGrouped))
+        {
+            ctx.error("Mismatch:", {});
+            ctx.error("Ungrouped hit: {}, p = {} {} {}, t = {}",
+                      std::make_tuple(closestUngrouped.hit,
+                                      closestUngrouped.p.x,
+                                      closestUngrouped.p.y,
+                                      closestUngrouped.p.z,
+                                      closestUngrouped.t));
+            ctx.error("Grouped hit: {}, p = {} {} {}, t = {}",
+                      std::make_tuple(closestGrouped.hit,
+                                      closestGrouped.p.x,
+                                      closestGrouped.p.y,
+                                      closestGrouped.p.y,
+                                      closestGrouped.p.z,
+                                      closestGrouped.t));
+            assert(false && "Grouped Triangles and Ungrouped triangles Intersection results differ");
+        }
+    }
+
+    void testIndexedTriangleGrouping()
+    {
+        Context ctx;
+        assert(ctx.isValid() && "invalid context");
+
+        auto* mem = std::pmr::get_default_resource();
+
+        Scene scene;
+        {
+            scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(mem));
+            auto& cube = *scene.geometry.back();
+            TriangleMesh::unitCube(cube);
+        }
+        {
+            scene.instances.emplace_back(makeUniqueRef<Instance>(mem));
+            auto& cubeInstance   = *scene.instances.back();
+            cubeInstance.meshIdx = 0;
+
+            Transform const t = Transform::translate({0.f, 1.5f, -0.75f}) * Transform::rotate(45.f, Vector3f::zAxis()) *
+                                Transform::scale(0.5f);
+
+            extractAffineTransform(t.m, cubeInstance.affineTransform);
+            cubeInstance.bounds = scene.geometry[cubeInstance.meshIdx]->transformedBounds(t);
+            cubeInstance.color  = color::rgbFromHsv({0.01f, 0.05f, 0.7f});
+        }
+
+        std::vector<UniqueRef<Primitive>> ungroupedPrims;
+        std::vector<UniqueRef<Primitive>> groupedPrims;
+
+        Instance const&     instance = *scene.instances[0];
+        TriangleMesh const& mesh     = *scene.geometry[instance.meshIdx];
+        for (size_t tri = 0; tri < mesh.triCount(); ++tri)
+        {
+            auto prim         = makeUniqueRef<TriangleIndexed>(mem);
+            prim->scene       = &scene;
+            prim->instanceIdx = 0;
+            prim->triIdx      = tri;
+            ungroupedPrims.push_back(std::move(prim));
+        }
+
+        {
+            size_t tri   = 0;
+            bool   found = false;
+            for (; tri + 7 < mesh.triCount(); tri += 8)
+            {
+                if (!found)
+                {
+                    found = true;
+                    ctx.warn("Found in test a triangle 8", {});
+                }
+                auto prim         = makeUniqueRef<TrianglesIndexed8>(mem);
+                prim->scene       = &scene;
+                prim->instanceIdx = 0;
+                for (size_t i = 0; i < 7; ++i)
+                    prim->triIdxs[i] = tri + i;
+                groupedPrims.push_back(std::move(prim));
+            }
+
+            found = false;
+            for (; tri + 3 < mesh.triCount(); tri += 4)
+            {
+                if (!found)
+                {
+                    found = true;
+                    ctx.warn("Found in test a triangle 4", {});
+                }
+                auto prim         = makeUniqueRef<TrianglesIndexed4>(mem);
+                prim->scene       = &scene;
+                prim->instanceIdx = 0;
+                for (size_t i = 0; i < 4; ++i)
+                    prim->triIdxs[i] = tri + i;
+                groupedPrims.push_back(std::move(prim));
+            }
+
+            found = false;
+            for (; tri + 1 < mesh.triCount(); tri += 2)
+            {
+                if (!found)
+                {
+                    found = true;
+                    ctx.warn("Found in test a triangle 2", {});
+                }
+                auto prim         = makeUniqueRef<TrianglesIndexed2>(mem);
+                prim->scene       = &scene;
+                prim->instanceIdx = 0;
+                for (size_t i = 0; i < 2; ++i)
+                    prim->triIdxs[i] = tri + i;
+                groupedPrims.push_back(std::move(prim));
+            }
+
+            found = false;
+            for (; tri < mesh.triCount(); tri++)
+            {
+                if (!found)
+                {
+                    found = true;
+                    ctx.warn("Found in test a triangle remainder", {});
+                }
+                auto prim         = makeUniqueRef<TriangleIndexed>(mem);
+                prim->scene       = &scene;
+                prim->instanceIdx = 0;
+                prim->triIdx      = tri;
+                groupedPrims.push_back(std::move(prim));
+            }
+        }
+
+        ctx.log("BOUNDS TEST", {});
+        auto boundsEqual = [](Bounds3f const& a, Bounds3f const& b, float eps = 1e-4f) -> bool {
+            return all(abs(a.pMin - b.pMin) < Vector3f::s(eps)) && all(abs(a.pMax - b.pMax) < Vector3f::s(eps));
+        };
+
+        size_t ungroupedIndex = 0;
+        for (auto const& groupedPrim : groupedPrims)
+        {
+            Bounds3f groupedBB   = groupedPrim->bounds();
+            Bounds3f ungroupedBB = bbEmpty();
+
+            if (auto* p = dynamic_cast<TrianglesIndexed8*>(groupedPrim.get()); p)
+            {
+                for (size_t i = 0; i < 8; ++i)
+                {
+                    assert(ungroupedIndex < ungroupedPrims.size());
+                    ungroupedBB = bbUnion(ungroupedBB, ungroupedPrims[ungroupedIndex++]->bounds());
+                }
+            }
+            else if (auto* p = dynamic_cast<TrianglesIndexed4*>(groupedPrim.get()); p)
+            {
+                for (size_t i = 0; i < 4; ++i)
+                {
+                    assert(ungroupedIndex < ungroupedPrims.size());
+                    ungroupedBB = bbUnion(ungroupedBB, ungroupedPrims[ungroupedIndex++]->bounds());
+                }
+            }
+            else if (auto* p = dynamic_cast<TrianglesIndexed2*>(groupedPrim.get()); p)
+            {
+                for (size_t i = 0; i < 2; ++i)
+                {
+                    assert(ungroupedIndex < ungroupedPrims.size());
+                    ungroupedBB = bbUnion(ungroupedBB, ungroupedPrims[ungroupedIndex++]->bounds());
+                }
+            }
+            else if (auto* p = dynamic_cast<TriangleIndexed*>(groupedPrim.get()); p)
+            {
+                assert(ungroupedIndex < ungroupedPrims.size());
+                ungroupedBB = ungroupedPrims[ungroupedIndex++]->bounds();
+            }
+
+            if (!boundsEqual(groupedBB, ungroupedBB))
+            {
+                ctx.error("Bounds mismatch for grouped primitive:", {});
+                ctx.error("Grouped:   [{} {} {}] - [{} {} {}]",
+                          std::make_tuple(groupedBB.pMin.x,
+                                          groupedBB.pMin.y,
+                                          groupedBB.pMin.z,
+                                          groupedBB.pMax.x,
+                                          groupedBB.pMax.y,
+                                          groupedBB.pMax.z));
+                ctx.error("Ungrouped: [{} {} {}] - [{} {} {}]",
+                          std::make_tuple(ungroupedBB.pMin.x,
+                                          ungroupedBB.pMin.y,
+                                          ungroupedBB.pMin.z,
+                                          ungroupedBB.pMax.x,
+                                          ungroupedBB.pMax.y,
+                                          ungroupedBB.pMax.z));
+                assert(false && "Grouped bounding box does not match union of ungrouped bounds");
+            }
+        }
+
+        // INTERSECTION TEST
+        ctx.log("INTERSECTION TEST", {});
+        // this ray is known to intersect triangle
+        Ray const testRay{Vector3f::zero(), normalize(Vector3f{-0.211708546, 0.926500857, -0.311087847})};
+        testRayAgainstAllGroupedVsUngrouped(ungroupedPrims, groupedPrims, testRay);
+
+        std::vector<Ray> rays = {{{0.f, 0.f, 0.f}, normalize(Vector3f{-0.2f, 0.9f, -0.3f})},
+                                 {{1.f, 2.f, -1.f}, normalize(Vector3f{-1.f, -1.f, 1.f})},
+                                 {{0.5f, 2.f, 0.f}, normalize(Vector3f{0.f, -1.f, 0.f})},
+                                 {{0.f, 1.5f, -2.f}, normalize(Vector3f{0.f, 0.f, 1.f})}};
+
+        for (auto const& ray : rays)
+            testRayAgainstAllGroupedVsUngrouped(ungroupedPrims, groupedPrims, ray);
+    }
+
 } // namespace dmt::test
 
 namespace dmt::bvh {

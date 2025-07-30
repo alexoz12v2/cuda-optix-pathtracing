@@ -86,17 +86,48 @@ namespace dmt {
         RGB colors[numTriangles];
     };
 
-    class DMT_CORE_API TriangleIndexed : public Primitive
+    class DMT_CORE_API TriangleIndexedBase : public Primitive
+    {
+    public:
+        Scene const* scene;
+        size_t       instanceIdx;
+
+        std::tuple<Point3f, Point3f, Point3f> worldSpacePts(size_t _triIdx) const;
+    };
+
+    class DMT_CORE_API TriangleIndexed : public TriangleIndexedBase
     {
     public:
         Bounds3f     bounds() const override;
         Intersection intersect(Ray const& ray, float tMax) const override;
 
-        Scene const* scene;
-        size_t       instanceIdx;
-        size_t       triIdx;
+        size_t triIdx;
+    };
 
-    private:
-        std::tuple<Point3f, Point3f, Point3f> worldSpacePts() const;
+    class DMT_CORE_API TrianglesIndexed2 : public TriangleIndexedBase
+    {
+    public:
+        Bounds3f     bounds() const override;
+        Intersection intersect(Ray const& ray, float tMax) const override;
+
+        size_t triIdxs[2];
+    };
+
+    class DMT_CORE_API TrianglesIndexed4 : public TriangleIndexedBase
+    {
+    public:
+        Bounds3f     bounds() const override;
+        Intersection intersect(Ray const& ray, float tMax) const override;
+
+        size_t triIdxs[4];
+    };
+
+    class DMT_CORE_API TrianglesIndexed8 : public TriangleIndexedBase
+    {
+    public:
+        Bounds3f     bounds() const override;
+        Intersection intersect(Ray const& ray, float tMax) const override;
+
+        size_t triIdxs[8];
     };
 } // namespace dmt

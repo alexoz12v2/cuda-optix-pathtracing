@@ -20,6 +20,7 @@ namespace dmt {
     inline constexpr float   BinScaleFactor        = 2.f;
     static constexpr float   DegenerateEpsilon     = 1e-5f;
 
+    /// Note: Children are Owned by ancestor node, while primitives are *NOT* owned by the node structure
     struct DMT_CORE_API BVHBuildNode
     {
         Bounds3f         bounds;

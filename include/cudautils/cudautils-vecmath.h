@@ -107,6 +107,7 @@ namespace dmt {
     struct Tuple2
     {
         DMT_CPU_GPU static constexpr Tuple2<S> zero() { return {.x = static_cast<S>(0), .y = static_cast<S>(0)}; }
+        DMT_CPU_GPU static constexpr Tuple2<S> s(S s) { return {.x = static_cast<S>(s), .y = static_cast<S>(s)}; }
 
         using value_type = S;
         static consteval int32_t numComponents() { return 2; }
@@ -146,6 +147,10 @@ namespace dmt {
         {
             return {static_cast<S>(1), static_cast<S>(1), static_cast<S>(1)};
         }
+        DMT_CPU_GPU static constexpr Tuple3<S> s(S s)
+        {
+            return {static_cast<S>(s), static_cast<S>(s), static_cast<S>(s)};
+        }
 
         using value_type = S;
         static consteval int32_t numComponents() { return 3; }
@@ -172,6 +177,10 @@ namespace dmt {
         DMT_CPU_GPU static constexpr Tuple4<S> quatIdentity()
         {
             return {.x = static_cast<S>(1), .y = static_cast<S>(0), .z = static_cast<S>(0), .w = static_cast<S>(0)};
+        }
+        DMT_CPU_GPU static constexpr Tuple4<S> s(S s)
+        {
+            return {.x = static_cast<S>(s), .y = static_cast<S>(s), .z = static_cast<S>(s)};
         }
 
         using value_type = S;
@@ -605,6 +614,33 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type normL2(Tuple2f v);
     DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type normL2(Tuple3f v);
     DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type normL2(Tuple4f v);
+
+    DMT_CORE_API DMT_CPU_GPU Tuple2f operator>(Tuple2f v0, Tuple2f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f operator>(Tuple3f v0, Tuple3f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f operator>(Tuple2f v0, Tuple2f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f operator<(Tuple3f v0, Tuple3f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f operator<(Tuple4f v0, Tuple4f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f operator<(Tuple4f v0, Tuple4f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f operator>=(Tuple2f v0, Tuple2f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f operator>=(Tuple3f v0, Tuple3f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f operator>=(Tuple2f v0, Tuple2f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f operator<=(Tuple3f v0, Tuple3f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f operator<=(Tuple4f v0, Tuple4f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f operator<=(Tuple4f v0, Tuple4f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f operator==(Tuple2f v0, Tuple2f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f operator==(Tuple3f v0, Tuple3f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple2f operator==(Tuple2f v0, Tuple2f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f operator!=(Tuple3f v0, Tuple3f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f operator!=(Tuple4f v0, Tuple4f v1);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f operator!=(Tuple4f v0, Tuple4f v1);
+
+    DMT_CORE_API DMT_CPU_GPU bool all(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU bool all(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU bool all(Tuple4f v);
+
+    DMT_CORE_API DMT_CPU_GPU bool any(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU bool any(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU bool any(Tuple4f v);
 
     DMT_CORE_API DMT_CPU_GPU Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b);
     DMT_CORE_API DMT_CPU_GPU Tuple3f::value_type distanceL2(Tuple3f a, Tuple3f b);

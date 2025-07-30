@@ -1403,6 +1403,7 @@ int32_t guardedMain()
         }
 
         dmt::ddbg::printTrianglePrimitives(bvhPrimitives);
+        dmt::test::testIndexedTriangleGrouping();
 
         dmt::resetMonotonicBufferPointer(bufferMemory, bufferPtr.get(), 2048);
 

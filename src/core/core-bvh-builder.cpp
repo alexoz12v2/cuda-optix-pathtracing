@@ -339,6 +339,109 @@ namespace dmt::bvh {
         return root;
     }
 
+    static bool allSingleIndexedPrimitives(Primitive const* primitives[LeavesBranchingFactor], uint32_t count)
+    {
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            if (!dynamic_cast<TriangleIndexed const*>(primitives[i]))
+                return false;
+        }
+        return true;
+    }
+
+    static bool groupPrimitivesRecursive(
+        Scene const&                              scene,
+        size_t                                    instanceIdx,
+        BVHBuildNode*                             node,
+        std::pmr::vector<Primitive const*> const& middlePrims,
+        std::pmr::vector<UniqueRef<Primitive>>&   outPrims,
+        std::pmr::memory_resource*                memory)
+    {
+        assert(node && "nullptr");
+        if (!node)
+            return false;
+
+        if (node->childCount == 0) // leaf
+        {
+            size_t triCount = node->primitiveCount;
+            bool   valid    = allSingleIndexedPrimitives(node->primitives, node->primitiveCount);
+            assert(valid && "Uncompatible primitive types");
+            if (!valid) // if valid we can reinterpret_cast to TriangleIndexed array
+                return false;
+            TriangleIndexed const** tris = reinterpret_cast<TriangleIndexed const**>(node->primitives);
+
+            size_t i          = 0;
+            size_t groupCount = 0;
+            while (i < triCount)
+            {
+                size_t const remaining = triCount - i;
+                if (remaining >= 8)
+                {
+                    auto* grouped = std::construct_at(
+                        reinterpret_cast<TrianglesIndexed8*>(memory->allocate(sizeof(TrianglesIndexed8))));
+                    grouped->scene       = &scene;
+                    grouped->instanceIdx = instanceIdx;
+                    for (size_t j = 0; j < 8; ++j)
+                        grouped->triIdxs[j] = tris[i + j]->triIdx;
+
+                    outPrims.push_back(UniqueRef<TrianglesIndexed8>(grouped, PmrDeleter::create<TrianglesIndexed8>(memory)));
+                    i += 8;
+                }
+                else if (remaining >= 4)
+                {
+                    auto* grouped = std::construct_at(
+                        reinterpret_cast<TrianglesIndexed4*>(memory->allocate(sizeof(TrianglesIndexed4))));
+                    grouped->scene       = &scene;
+                    grouped->instanceIdx = instanceIdx;
+                    for (size_t j = 0; j < 4; ++j)
+                        grouped->triIdxs[j] = tris[i + j]->triIdx;
+
+                    outPrims.push_back(UniqueRef<TrianglesIndexed4>(grouped, PmrDeleter::create<TrianglesIndexed4>(memory)));
+                    i += 4;
+                }
+                else if (remaining >= 2)
+                {
+                    auto* grouped = std::construct_at(
+                        reinterpret_cast<TrianglesIndexed2*>(memory->allocate(sizeof(TrianglesIndexed2))));
+                    grouped->scene       = &scene;
+                    grouped->instanceIdx = instanceIdx;
+                    for (size_t j = 0; j < 2; ++j)
+                        grouped->triIdxs[j] = tris[i + j]->triIdx;
+
+                    outPrims.push_back(UniqueRef<TrianglesIndexed2>(grouped, PmrDeleter::create<TrianglesIndexed2>(memory)));
+                    i += 2;
+                }
+                else
+                {
+                    auto* single = std::construct_at(
+                        reinterpret_cast<TriangleIndexed*>(memory->allocate(sizeof(TriangleIndexed))));
+                    *single = *tris[i]; // shallow copy
+                    outPrims.push_back(UniqueRef<TriangleIndexed>(single, PmrDeleter::create<TriangleIndexed>(memory)));
+                    i += 1;
+                }
+
+                ++groupCount;
+            }
+
+            // store grouped primitive in node
+            assert(groupCount <= node->primitiveCount && "Grouping should always diminish primitives for each leaf");
+            node->primitiveCount = static_cast<uint32_t>(groupCount);
+            std::memset(node->primitives, 0, sizeof(node->primitives));
+
+            size_t const offset = outPrims.size() - groupCount;
+            for (uint32_t idx = 0; idx < node->primitiveCount; ++idx)
+            {
+                node->primitives[idx] = outPrims[offset + idx].get();
+            }
+        }
+        else
+        {
+            for (uint32_t i = 0; i < node->childCount; ++i)
+                groupPrimitivesRecursive(scene, instanceIdx, node->children[i], middlePrims, outPrims, memory);
+        }
+        return true;
+    }
+
     BVHBuildNode* buildForInstance(Scene const&                            scene,
                                    size_t                                  instanceIdx,
                                    std::pmr::vector<UniqueRef<Primitive>>& outPrims,
@@ -350,29 +453,34 @@ namespace dmt::bvh {
         TriangleMesh const& mesh       = *scene.geometry[instance->meshIdx];
         size_t const        primsStart = outPrims.size();
 
+        std::pmr::vector<Primitive const*> middlePrims{temp};
+
+        middlePrims.reserve(mesh.triCount());
         outPrims.reserve(primsStart + mesh.triCount());
 
         for (size_t triIdx = 0; triIdx < mesh.triCount(); ++triIdx)
         {
-            TriangleIndexed tri;
-            tri.scene       = &scene;
-            tri.instanceIdx = instanceIdx;
-            tri.triIdx      = triIdx;
-            outPrims.push_back(makeUniqueRef<TriangleIndexed>(memory, tri));
+            // WARNING: using non-temp memory. You need to free it later
+            auto* tri = reinterpret_cast<TriangleIndexed*>(memory->allocate(sizeof(TriangleIndexed)));
+            std::construct_at(tri);
+            tri->scene       = &scene;
+            tri->instanceIdx = instanceIdx;
+            tri->triIdx      = triIdx;
+            //outPrims.push_back(makeUniqueRef<TriangleIndexed>(memory, tri));
+            middlePrims.push_back(tri);
         }
 
         auto* root = reinterpret_cast<BVHBuildNode*>(memory->allocate(sizeof(BVHBuildNode)));
         std::memset(root, 0, sizeof(BVHBuildNode));
         root->bounds = instance->bounds;
 
-        std::pmr::vector<Primitive const*> tempCopy{temp};
+        buildRecursive(middlePrims.data(), middlePrims.data() + middlePrims.size(), root, memory, temp);
 
-        size_t const numel = outPrims.size() - primsStart;
-        tempCopy.reserve(numel);
-        for (size_t i = 0; i < numel; ++i)
-            tempCopy.push_back(outPrims[primsStart + i].get());
+        // Traverse the BVH, and, for each node having 2, 4, 8 TriangleIndexed primitives, group them into TrianglesIndexed2,
+        // TrianglesIndexed4, TrianglesIndexed8
+        // Once done, copy to outPrims, transfering pointer ownership
+        groupPrimitivesRecursive(scene, instanceIdx, root, middlePrims, outPrims, memory);
 
-        buildRecursive(tempCopy.data(), tempCopy.data() + tempCopy.size(), root, memory, temp);
         return root;
     }
 

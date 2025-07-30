@@ -21,7 +21,17 @@ namespace dmt::arch {
     DMT_CORE_API float hmax_ps(__m128 v);
     DMT_CORE_API float hmin_ps(__m256 v);
     DMT_CORE_API float hmax_ps(__m256 v);
+
+    DMT_CORE_API void transpose3x2(float const* src, float* x, float* y, float* z);
+    DMT_CORE_API void transpose3x4(float const* src, float* x, float* y, float* z);
+    DMT_CORE_API void transpose3x8(float const* src, float* x, float* y, float* z);
+    DMT_CORE_API void transpose3xN(float const* src, float* x, float* y, float* z, size_t N);
 } // namespace dmt::arch
+
+namespace dmt::color {
+    DMT_CORE_API RGB     rgbFromHsv(Point3f hsv);
+    DMT_CORE_API Point3f hsvFromRgb(RGB rgb);
+} // namespace dmt::color
 
 namespace dmt {
     struct DMT_CORE_API TriangleData

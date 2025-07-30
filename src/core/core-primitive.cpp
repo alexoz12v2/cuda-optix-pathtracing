@@ -5,118 +5,110 @@
 #endif
 
 namespace dmt {
-    // -- bounds --
-    Bounds3f Triangle::bounds() const
-    {
-        Point3f p0{{tri.v0.x, tri.v0.y, tri.v0.z}};
-        Point3f p1{{tri.v1.x, tri.v1.y, tri.v1.z}};
-        Point3f p2{{tri.v2.x, tri.v2.y, tri.v2.z}};
-        return bbUnion(bbUnion(Bounds3f{p0, p0}, Bounds3f{p1, p1}), Bounds3f{p2, p2});
-    }
-
-    Bounds3f Triangles2::bounds() const
-    {
-        // Load all 6 floats (3 vertices * 2 triangles) for x, y, z
-        __m128 x0 = _mm_loadu_ps(xs);     // xs[0..3]
-        __m128 x1 = _mm_loadu_ps(xs + 2); // xs[2..5] overlaps last part of x0
-
-        __m128 y0 = _mm_loadu_ps(ys);
-        __m128 y1 = _mm_loadu_ps(ys + 2);
-
-        __m128 z0 = _mm_loadu_ps(zs);
-        __m128 z1 = _mm_loadu_ps(zs + 2);
-
-        __m128 xMin = _mm_min_ps(x0, x1);
-        __m128 xMax = _mm_max_ps(x0, x1);
-
-        __m128 yMin = _mm_min_ps(y0, y1);
-        __m128 yMax = _mm_max_ps(y0, y1);
-
-        __m128 zMin = _mm_min_ps(z0, z1);
-        __m128 zMax = _mm_max_ps(z0, z1);
-
-        float x_min = arch::hmin_ps(xMin);
-        float x_max = arch::hmax_ps(xMax);
-        float y_min = arch::hmin_ps(yMin);
-        float y_max = arch::hmax_ps(yMax);
-        float z_min = arch::hmin_ps(zMin);
-        float z_max = arch::hmax_ps(zMax);
-
-        return Bounds3f{Point3f{{x_min, y_min, z_min}}, Point3f{{x_max, y_max, z_max}}};
-    }
-
-    Bounds3f Triangles4::bounds() const
-    {
-        // Load all 12 floats (3 vertices * 4 triangles) for x, y, z
-        __m128 x0 = _mm_loadu_ps(xs);     // xs[0..3]
-        __m128 x1 = _mm_loadu_ps(xs + 4); // xs[4..7]
-        __m128 x2 = _mm_loadu_ps(xs + 8); // xs[8..11]
-
-        __m128 y0 = _mm_loadu_ps(ys);
-        __m128 y1 = _mm_loadu_ps(ys + 4);
-        __m128 y2 = _mm_loadu_ps(ys + 8);
-
-        __m128 z0 = _mm_loadu_ps(zs);
-        __m128 z1 = _mm_loadu_ps(zs + 4);
-        __m128 z2 = _mm_loadu_ps(zs + 8);
-
-        __m128 xMin = _mm_min_ps(_mm_min_ps(x0, x1), x2);
-        __m128 xMax = _mm_max_ps(_mm_max_ps(x0, x1), x2);
-
-        __m128 yMin = _mm_min_ps(_mm_min_ps(y0, y1), y2);
-        __m128 yMax = _mm_max_ps(_mm_max_ps(y0, y1), y2);
-
-        __m128 zMin = _mm_min_ps(_mm_min_ps(z0, z1), z2);
-        __m128 zMax = _mm_max_ps(_mm_max_ps(z0, z1), z2);
-
-        float x_min = arch::hmin_ps(xMin);
-        float x_max = arch::hmax_ps(xMax);
-        float y_min = arch::hmin_ps(yMin);
-        float y_max = arch::hmax_ps(yMax);
-        float z_min = arch::hmin_ps(zMin);
-        float z_max = arch::hmax_ps(zMax);
-
-        return Bounds3f{Point3f{{x_min, y_min, z_min}}, Point3f{{x_max, y_max, z_max}}};
-    }
-
-    Bounds3f Triangles8::bounds() const
-    {
-        // Load all 24 floats (3 * 8) for x, y, z
-        __m256 x0 = _mm256_loadu_ps(xs);      // xs[0]..xs[7]
-        __m256 x1 = _mm256_loadu_ps(xs + 8);  // xs[8]..xs[15]
-        __m256 x2 = _mm256_loadu_ps(xs + 16); // xs[16]..xs[23]
-
-        __m256 y0 = _mm256_loadu_ps(ys);
-        __m256 y1 = _mm256_loadu_ps(ys + 8);
-        __m256 y2 = _mm256_loadu_ps(ys + 16);
-
-        __m256 z0 = _mm256_loadu_ps(zs);
-        __m256 z1 = _mm256_loadu_ps(zs + 8);
-        __m256 z2 = _mm256_loadu_ps(zs + 16);
-
-        // Reduce min/max across the 24 values using AVX2
-        __m256 xMin = _mm256_min_ps(_mm256_min_ps(x0, x1), x2);
-        __m256 xMax = _mm256_max_ps(_mm256_max_ps(x0, x1), x2);
-
-        __m256 yMin = _mm256_min_ps(_mm256_min_ps(y0, y1), y2);
-        __m256 yMax = _mm256_max_ps(_mm256_max_ps(y0, y1), y2);
-
-        __m256 zMin = _mm256_min_ps(_mm256_min_ps(z0, z1), z2);
-        __m256 zMax = _mm256_max_ps(_mm256_max_ps(z0, z1), z2);
-
-        // Final horizontal reduction to scalars
-        float x_min = arch::hmin_ps(xMin);
-        float x_max = arch::hmax_ps(xMax);
-        float y_min = arch::hmin_ps(yMin);
-        float y_max = arch::hmax_ps(yMax);
-        float z_min = arch::hmin_ps(zMin);
-        float z_max = arch::hmax_ps(zMax);
-
-        return Bounds3f{Point3f{{x_min, y_min, z_min}}, Point3f{{x_max, y_max, z_max}}};
-    }
-
-    // -- intersect --
     namespace triangle {
+        static Bounds3f bounds(Point3f p0, Point3f p1, Point3f p2) { return bbUnion(makeBounds(p0, p1), p2); }
+
+        static Bounds3f bounds2(float const xs[6], float const ys[6], float const zs[6])
+        {
+            // Load all 6 floats (3 vertices * 2 triangles) for x, y, z
+            __m128 x0 = _mm_loadu_ps(xs);     // xs[0..3]
+            __m128 x1 = _mm_loadu_ps(xs + 2); // xs[2..5] overlaps last part of x0
+
+            __m128 y0 = _mm_loadu_ps(ys);
+            __m128 y1 = _mm_loadu_ps(ys + 2);
+
+            __m128 z0 = _mm_loadu_ps(zs);
+            __m128 z1 = _mm_loadu_ps(zs + 2);
+
+            __m128 xMin = _mm_min_ps(x0, x1);
+            __m128 xMax = _mm_max_ps(x0, x1);
+
+            __m128 yMin = _mm_min_ps(y0, y1);
+            __m128 yMax = _mm_max_ps(y0, y1);
+
+            __m128 zMin = _mm_min_ps(z0, z1);
+            __m128 zMax = _mm_max_ps(z0, z1);
+
+            float x_min = arch::hmin_ps(xMin);
+            float x_max = arch::hmax_ps(xMax);
+            float y_min = arch::hmin_ps(yMin);
+            float y_max = arch::hmax_ps(yMax);
+            float z_min = arch::hmin_ps(zMin);
+            float z_max = arch::hmax_ps(zMax);
+
+            return makeBounds({x_min, y_min, z_min}, {x_max, y_max, z_max});
+        }
+
+        Bounds3f bounds4(float const xs[12], float const ys[12], float const zs[12])
+        {
+            // Load all 12 floats (3 vertices * 4 triangles) for x, y, z
+            __m128 x0 = _mm_loadu_ps(xs);     // xs[0..3]
+            __m128 x1 = _mm_loadu_ps(xs + 4); // xs[4..7]
+            __m128 x2 = _mm_loadu_ps(xs + 8); // xs[8..11]
+
+            __m128 y0 = _mm_loadu_ps(ys);
+            __m128 y1 = _mm_loadu_ps(ys + 4);
+            __m128 y2 = _mm_loadu_ps(ys + 8);
+
+            __m128 z0 = _mm_loadu_ps(zs);
+            __m128 z1 = _mm_loadu_ps(zs + 4);
+            __m128 z2 = _mm_loadu_ps(zs + 8);
+
+            __m128 xMin = _mm_min_ps(_mm_min_ps(x0, x1), x2);
+            __m128 xMax = _mm_max_ps(_mm_max_ps(x0, x1), x2);
+
+            __m128 yMin = _mm_min_ps(_mm_min_ps(y0, y1), y2);
+            __m128 yMax = _mm_max_ps(_mm_max_ps(y0, y1), y2);
+
+            __m128 zMin = _mm_min_ps(_mm_min_ps(z0, z1), z2);
+            __m128 zMax = _mm_max_ps(_mm_max_ps(z0, z1), z2);
+
+            float x_min = arch::hmin_ps(xMin);
+            float x_max = arch::hmax_ps(xMax);
+            float y_min = arch::hmin_ps(yMin);
+            float y_max = arch::hmax_ps(yMax);
+            float z_min = arch::hmin_ps(zMin);
+            float z_max = arch::hmax_ps(zMax);
+
+            return makeBounds({x_min, y_min, z_min}, {x_max, y_max, z_max});
+        }
+
+        static Bounds3f bounds8(float const xs[24], float const ys[24], float const zs[24])
+        {
+            // Load all 24 floats (3 * 8) for x, y, z
+            __m256 x0 = _mm256_loadu_ps(xs);      // xs[0]..xs[7]
+            __m256 x1 = _mm256_loadu_ps(xs + 8);  // xs[8]..xs[15]
+            __m256 x2 = _mm256_loadu_ps(xs + 16); // xs[16]..xs[23]
+
+            __m256 y0 = _mm256_loadu_ps(ys);
+            __m256 y1 = _mm256_loadu_ps(ys + 8);
+            __m256 y2 = _mm256_loadu_ps(ys + 16);
+
+            __m256 z0 = _mm256_loadu_ps(zs);
+            __m256 z1 = _mm256_loadu_ps(zs + 8);
+            __m256 z2 = _mm256_loadu_ps(zs + 16);
+
+            // Reduce min/max across the 24 values using AVX2
+            __m256 xMin = _mm256_min_ps(_mm256_min_ps(x0, x1), x2);
+            __m256 xMax = _mm256_max_ps(_mm256_max_ps(x0, x1), x2);
+
+            __m256 yMin = _mm256_min_ps(_mm256_min_ps(y0, y1), y2);
+            __m256 yMax = _mm256_max_ps(_mm256_max_ps(y0, y1), y2);
+
+            __m256 zMin = _mm256_min_ps(_mm256_min_ps(z0, z1), z2);
+            __m256 zMax = _mm256_max_ps(_mm256_max_ps(z0, z1), z2);
+
+            // Final horizontal reduction to scalars
+            float x_min = arch::hmin_ps(xMin);
+            float x_max = arch::hmax_ps(xMax);
+            float y_min = arch::hmin_ps(yMin);
+            float y_max = arch::hmax_ps(yMax);
+            float z_min = arch::hmin_ps(zMin);
+            float z_max = arch::hmax_ps(zMax);
+
+            return Bounds3f{Point3f{{x_min, y_min, z_min}}, Point3f{{x_max, y_max, z_max}}};
+        }
+
 #define DMT_MOLLER_TRUMBORE
 
         struct Triisect
@@ -543,6 +535,22 @@ namespace dmt {
         }
     } // namespace triangle
 
+    // -- bounds --
+    Bounds3f Triangle::bounds() const
+    {
+        Point3f const p0{tri.v0.x, tri.v0.y, tri.v0.z};
+        Point3f const p1{tri.v1.x, tri.v1.y, tri.v1.z};
+        Point3f const p2{tri.v2.x, tri.v2.y, tri.v2.z};
+        return triangle::bounds(p0, p1, p2);
+    }
+
+    Bounds3f Triangles2::bounds() const { return triangle::bounds2(xs, ys, zs); }
+
+    Bounds3f Triangles4::bounds() const { return triangle::bounds4(xs, ys, zs); }
+
+    Bounds3f Triangles8::bounds() const { return triangle::bounds8(xs, ys, zs); }
+
+    // -- intersect --
     Intersection Triangle::intersect(Ray const& ray, float tMax) const
     {
         triangle::Triisect const trisect = triangle::intersect(ray, tMax, tri.v0, tri.v1, tri.v2, 0);
@@ -551,35 +559,6 @@ namespace dmt {
 
     Intersection Triangles2::intersect(Ray const& ray, float tMax) const
     {
-#if 0
-        Point3f v0s[2]{};
-        Point3f v1s[2]{};
-        Point3f v2s[2]{};
-        for (int j = 0; j < 2; ++j)
-        {
-            v0s[j] = {xs[3 * j + 0], ys[3 * j + 0], zs[3 * j + 0]};
-            v1s[j] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
-            v2s[j] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
-        }
-
-        triangle::Triisect        trisects[2]{triangle::intersect(ray, tMax, v0s[0], v1s[0], v2s[0], 0),
-                                              triangle::intersect(ray, tMax, v0s[1], v1s[1], v2s[1], 1)};
-        triangle::Triisect const  empty = triangle::Triisect::nothing();
-        triangle::Triisect const* best  = nullptr;
-        for (auto const& trisect : trisects)
-        {
-            if (trisect)
-            {
-                if (!best || trisect.t < best->t)
-                    best = &trisect;
-            }
-        }
-
-        if (!best)
-            best = &empty;
-
-        return triangle::fromTrisect(*best, ray, colors[best->index]);
-#else
         Point3f v0s[4]{};
         Point3f v1s[4]{};
         Point3f v2s[4]{};
@@ -593,7 +572,6 @@ namespace dmt {
         triangle::Triisect const trisect = triangle::intersect4(ray, fl::infinity(), v0s, v1s, v2s, 0x3);
         assert(trisect.index < 2 && "out of bounds triangle2 intersection index");
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
-#endif
     }
 
     Intersection Triangles4::intersect(Ray const& ray, float tMax) const
@@ -607,29 +585,8 @@ namespace dmt {
             v1s[j] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
             v2s[j] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
         }
-#if 1
         triangle::Triisect const trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
-#else
-        triangle::Triisect const  empty = triangle::Triisect::nothing();
-        triangle::Triisect const  trisects[4]{triangle::intersect(ray, tMax, v0s[0], v1s[0], v2s[0], 0),
-                                              triangle::intersect(ray, tMax, v0s[1], v1s[1], v2s[1], 1),
-                                              triangle::intersect(ray, tMax, v0s[2], v1s[2], v2s[2], 2),
-                                              triangle::intersect(ray, tMax, v0s[3], v1s[3], v2s[3], 3)};
-        triangle::Triisect const* best = nullptr;
-        for (auto const& trisect : trisects)
-        {
-            if (trisect)
-            {
-                if (!best || trisect.t < best->t)
-                    best = &trisect;
-            }
-        }
-
-        if (!best)
-            best = &empty;
-        return triangle::fromTrisect(*best, ray, colors[best->index]);
-#endif
     }
 
     Intersection Triangles8::intersect(Ray const& ray, float tMax) const
@@ -648,11 +605,13 @@ namespace dmt {
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
     }
 
-    std::tuple<Point3f, Point3f, Point3f> TriangleIndexed::worldSpacePts() const
+    // INDEXED
+
+    std::tuple<Point3f, Point3f, Point3f> TriangleIndexedBase::worldSpacePts(size_t _triIdx) const
     {
         Transform m = transformFromAffine(scene->instances[instanceIdx]->affineTransform); // maybe inefficient
         TriangleMesh const& mesh = *scene->geometry[scene->instances[instanceIdx]->meshIdx];
-        IndexedTri const    tri  = mesh.getIndexedTri(triIdx);
+        IndexedTri const    tri  = mesh.getIndexedTri(_triIdx);
 
         Point3f const p0 = m(mesh.getPosition(tri[0].positionIdx));
         Point3f const p1 = m(mesh.getPosition(tri[1].positionIdx));
@@ -663,7 +622,7 @@ namespace dmt {
 
     Bounds3f TriangleIndexed::bounds() const
     {
-        auto const [p0, p1, p2] = worldSpacePts();
+        auto const [p0, p1, p2] = worldSpacePts(triIdx);
 
         Point3f const pMin = min(min(p0, p1), p2);
         Point3f const pMax = max(max(p0, p1), p2);
@@ -673,9 +632,97 @@ namespace dmt {
 
     Intersection TriangleIndexed::intersect(Ray const& ray, float tMax) const
     {
-        auto const [p0, p1, p2] = worldSpacePts();
+        auto const [p0, p1, p2] = worldSpacePts(triIdx);
 
         triangle::Triisect const trisect = triangle::intersect(ray, tMax, p0, p1, p2, 0);
+        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+    }
+
+    // clang-format off
+    template <size_t N>
+    struct TypeFromSize;
+    template <> struct TypeFromSize<2> { using type = TrianglesIndexed2; };
+    template <> struct TypeFromSize<4> { using type = TrianglesIndexed4; };
+    template <> struct TypeFromSize<8> { using type = TrianglesIndexed8; };
+    template <size_t N> using TypeFromSize_t = TypeFromSize<N>::type;
+    // clang-format on
+
+    template <size_t N>
+        requires(N == 2 || N == 4 || N == 8)
+    Bounds3f computeIndexedTriangleBounds(TypeFromSize_t<N> const* obj,
+                                          size_t const             triIdxs[N],
+                                          Bounds3f (*boundsFunc)(float const*, float const*, float const*))
+    {
+        constexpr size_t NumPoints = 3 * N;
+        float            xs[NumPoints]{}, ys[NumPoints]{}, zs[NumPoints]{};
+        float            aos[3 * NumPoints]{}; // 3 floats per point
+
+        for (size_t triIdx = 0; triIdx < N; ++triIdx)
+        {
+            auto tuple = obj->worldSpacePts(triIdxs[triIdx]);
+            std::memcpy(aos + 9 * triIdx, &tuple, sizeof(tuple));
+        }
+
+        arch::transpose3xN(aos, xs, ys, zs, NumPoints);
+        return boundsFunc(xs, ys, zs);
+    }
+
+    Bounds3f TrianglesIndexed2::bounds() const
+    {
+        return computeIndexedTriangleBounds<2>(this, triIdxs, triangle::bounds2);
+    }
+
+    Bounds3f TrianglesIndexed4::bounds() const
+    {
+        return computeIndexedTriangleBounds<4>(this, triIdxs, triangle::bounds4);
+    }
+
+    Bounds3f TrianglesIndexed8::bounds() const
+    {
+        return computeIndexedTriangleBounds<8>(this, triIdxs, triangle::bounds8);
+    }
+
+    template <size_t N>
+        requires(N == 2 || N == 4 || N == 8)
+    void fillIndexedVerts(TypeFromSize_t<N> const* obj, size_t const triIdxs[N], Point3f v0s[N], Point3f v1s[N], Point3f v2s[N])
+    {
+        for (uint32_t tri = 0; tri < N; ++tri)
+        {
+            auto const [v0, v1, v2] = obj->worldSpacePts(triIdxs[tri]);
+
+            v0s[tri] = v0;
+            v1s[tri] = v1;
+            v2s[tri] = v2;
+        }
+    }
+
+    Intersection TrianglesIndexed2::intersect(Ray const& ray, float tMax) const
+    {
+        Point3f v0s[2]{};
+        Point3f v1s[2]{};
+        Point3f v2s[2]{};
+        fillIndexedVerts<2>(this, triIdxs, v0s, v1s, v2s);
+        triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0x3);
+        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+    }
+
+    Intersection TrianglesIndexed4::intersect(Ray const& ray, float tMax) const
+    {
+        Point3f v0s[4]{};
+        Point3f v1s[4]{};
+        Point3f v2s[4]{};
+        fillIndexedVerts<4>(this, triIdxs, v0s, v1s, v2s);
+        triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
+        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+    }
+
+    Intersection TrianglesIndexed8::intersect(Ray const& ray, float tMax) const
+    {
+        Point3f v0s[8]{};
+        Point3f v1s[8]{};
+        Point3f v2s[8]{};
+        fillIndexedVerts<8>(this, triIdxs, v0s, v1s, v2s);
+        triangle::Triisect trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
         return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
     }
 } // namespace dmt

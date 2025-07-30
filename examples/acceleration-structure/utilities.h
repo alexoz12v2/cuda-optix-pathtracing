@@ -147,6 +147,7 @@ namespace dmt::test {
     void testDistribution1D();
     void testDistribution2D();
     void testOctahedralProj();
+    void testIndexedTriangleGrouping();
 } // namespace dmt::test
 
 namespace dmt::bvh {

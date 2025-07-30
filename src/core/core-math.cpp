@@ -42,7 +42,185 @@ namespace dmt::arch {
         max2        = _mm_max_ss(max2, shuf);
         return _mm_cvtss_f32(max2);
     }
+
+    void transpose3x2(float const* src, float* x, float* y, float* z)
+    {
+        // Assumes src is [x0, y0, z0, x1, y1, z1]
+        x[0] = src[0];
+        x[1] = src[3];
+        y[0] = src[1];
+        y[1] = src[4];
+        z[0] = src[2];
+        z[1] = src[5];
+    }
+
+    // TODO see if you can do it better with less shuffles using _mm_unpack(lo/hi)_ps, _mm_move(lh/hl)_ps
+    void transpose3x4(float const* src, float* x, float* y, float* z)
+    {
+        // src layout: [x0 y0 z0 x1 y1 z1 x2 y2 z2 x3 y3 z3]
+        __m128 a = _mm_loadu_ps(src);     // x0 y0 z0 x1
+        __m128 b = _mm_loadu_ps(src + 4); // y1 z1 x2 y2
+        __m128 c = _mm_loadu_ps(src + 8); // z2 x3 y3 z3
+
+        // x
+        __m128 x23 = _mm_shuffle_ps(b, c, _MM_SHUFFLE(2, 2, 1, 1));   // x2 x2 x3 x3
+        __m128 xv  = _mm_shuffle_ps(a, x23, _MM_SHUFFLE(0, 3, 0, 2)); // x0 x1 x2 x3
+
+        // y
+        __m128 yz01 = _mm_shuffle_ps(a, b, _MM_SHUFFLE(1, 2, 0, 1));      // y0 z0 y1 z1
+        __m128 y23  = _mm_shuffle_ps(b, c, _MM_SHUFFLE(3, 3, 2, 2));      // y2 y2 y3 y3
+        __m128 yv   = _mm_shuffle_ps(yz01, y23, _MM_SHUFFLE(0, 2, 0, 2)); // y0 y1 y2 y3
+
+        // z
+        __m128 zv = _mm_shuffle_ps(yz01, c, _MM_SHUFFLE(1, 3, 0, 3)); // z0 z1 z2 z3
+
+        // store
+        _mm_storeu_ps(x, xv);
+        _mm_storeu_ps(y, yv);
+        _mm_storeu_ps(z, zv);
+    }
+
+    // TODO translate the following:
+    //transpose3x8(float const*, float*, float*, float*):
+    //    vmovss  xmm0, DWORD PTR [rdi+76]
+    //    vinsertps       xmm1, xmm0, DWORD PTR [rdi+88], 0x10
+    //    vmovss  xmm0, DWORD PTR [rdi+52]
+    //    vinsertps       xmm0, xmm0, DWORD PTR [rdi+64], 0x10
+    //    vmovlhps        xmm0, xmm0, xmm1
+    //    vmovss  xmm1, DWORD PTR [rdi+28]
+    //    vinsertps       xmm2, xmm1, DWORD PTR [rdi+40], 0x10
+    //    vmovss  xmm1, DWORD PTR [rdi+4]
+    //    vinsertps       xmm1, xmm1, DWORD PTR [rdi+16], 0x10
+    //    vmovlhps        xmm1, xmm1, xmm2
+    //    vmovss  xmm2, DWORD PTR [rdi+56]
+    //    vinsertf128     ymm1, ymm1, xmm0, 0x1
+    //    vinsertps       xmm2, xmm2, DWORD PTR [rdi+68], 0x10
+    //    vmovss  xmm0, DWORD PTR [rdi+80]
+    //    vinsertps       xmm0, xmm0, DWORD PTR [rdi+92], 0x10
+    //    vmovlhps        xmm2, xmm2, xmm0
+    //    vmovss  xmm0, DWORD PTR [rdi+32]
+    //    vinsertps       xmm3, xmm0, DWORD PTR [rdi+44], 0x10
+    //    vmovss  xmm0, DWORD PTR [rdi+8]
+    //    vinsertps       xmm0, xmm0, DWORD PTR [rdi+20], 0x10
+    //    vmovlhps        xmm0, xmm0, xmm3
+    //    vmovss  xmm3, DWORD PTR [rdi+48]
+    //    vinsertf128     ymm0, ymm0, xmm2, 0x1
+    //    vinsertps       xmm3, xmm3, DWORD PTR [rdi+60], 0x10
+    //    vmovss  xmm2, DWORD PTR [rdi+72]
+    //    vinsertps       xmm2, xmm2, DWORD PTR [rdi+84], 0x10
+    //    vmovlhps        xmm3, xmm3, xmm2
+    //    vmovss  xmm2, DWORD PTR [rdi+24]
+    //    vinsertps       xmm4, xmm2, DWORD PTR [rdi+36], 0x10
+    //    vmovss  xmm2, DWORD PTR [rdi]
+    //    vinsertps       xmm2, xmm2, DWORD PTR [rdi+12], 0x10
+    //    vmovlhps        xmm2, xmm2, xmm4
+    //    vinsertf128     ymm2, ymm2, xmm3, 0x1
+    //    vmovups YMMWORD PTR [rsi], ymm2
+    //    vmovups YMMWORD PTR [rdx], ymm1
+    //    vmovups YMMWORD PTR [rcx], ymm0
+    //    vzeroupper
+    //    ret
+    void transpose3x8(float const* src, float* x, float* y, float* z)
+    {
+        // src layout: [x0 y0 z0 x1 y1 z1 x2 y2 z2 x3 y3 z3 x4 y4 z4 x5 y5 z5 x6 y6 z6 x7 y7 z7]
+        __m256 a = _mm256_loadu_ps(src);      // x0 y0 z0 x1 y1 z1 x2 y2
+        __m256 b = _mm256_loadu_ps(src + 8);  // z2 x3 y3 z3 x4 y4 z4 x5
+        __m256 c = _mm256_loadu_ps(src + 16); // y5 z5 x6 y6 z6 x7 y7 z7
+
+        // vperm2f128 -> y1 z1 x2 y2 z2 x3 y3 z3 | (a, b, 0b0010'0001)
+        // vpermq     -> z0 x1 x2 y2 ** ** ** ** | (a, 0bxx'xx'11'01)
+        // vpermq     -> ** ** z2 x3 x4 y4 z4 x5 | (b, 0b11'10'00'xx)
+
+        // src: 24 floats = 8 * (x, y, z)
+        __m256 v0 = _mm256_loadu_ps(src);      // [x0 y0 z0 x1 y1 z1 x2 y2]
+        __m256 v1 = _mm256_loadu_ps(src + 8);  // [z2 x3 y3 z3 x4 y4 z4 x5]
+        __m256 v2 = _mm256_loadu_ps(src + 16); // [y5 z5 x6 y6 z6 x7 y7 z7]
+
+        // Step 1: shuffle & unpack into partial x/y/z channels
+        // Gather X
+        __m256 x_part1 = _mm256_set_ps(src[21], src[18], src[15], src[12], src[9], src[6], src[3], src[0]);
+        // Gather Y
+        __m256 y_part1 = _mm256_set_ps(src[22], src[19], src[16], src[13], src[10], src[7], src[4], src[1]);
+        // Gather Z
+        __m256 z_part1 = _mm256_set_ps(src[23], src[20], src[17], src[14], src[11], src[8], src[5], src[2]);
+
+        _mm256_storeu_ps(x, x_part1);
+        _mm256_storeu_ps(y, y_part1);
+        _mm256_storeu_ps(z, z_part1);
+    }
+
+    void transpose3xN(float const* src, float* x, float* y, float* z, size_t N)
+    {
+        size_t i = 0;
+        for (; i + 7 < N; i += 8)
+            transpose3x8(src + 3 * i, x + i, y + i, z + i);
+
+        // residual
+        for (; i < N; ++i)
+        {
+            x[i] = src[3 * i + 0];
+            y[i] = src[3 * i + 1];
+            z[i] = src[3 * i + 2];
+        }
+    }
 } // namespace dmt::arch
+
+namespace dmt::color {
+    RGB rgbFromHsv(Point3f hsv)
+    {
+        auto [h, s, v] = hsv;
+
+        h = std::fmodf(h, 1.0f);
+        if (h < 0.0f)
+            h += 1.0f;
+
+        float c = v * s;
+        float x = c * (1 - std::fabs(std::fmodf(h * 6.0f, 2.0f) - 1));
+        float m = v - c;
+
+        float r1, g1, b1;
+        // clang-format off
+        if      (h < 1.0f / 6.0f) { r1 = c; g1 = x; b1 = 0; }
+        else if (h < 2.0f / 6.0f) { r1 = x; g1 = c; b1 = 0; }
+        else if (h < 3.0f / 6.0f) { r1 = 0; g1 = c; b1 = x; }
+        else if (h < 4.0f / 6.0f) { r1 = 0; g1 = x; b1 = c; }
+        else if (h < 5.0f / 6.0f) { r1 = x; g1 = 0; b1 = c; }
+        else                      { r1 = c; g1 = 0; b1 = x; }
+        // clang-format on
+
+        return {r1 + m, g1 + m, b1 + m};
+    }
+
+    Point3f hsvFromRgb(RGB rgb)
+    {
+        static constexpr float _60Deg = 60.f / 360.f;
+
+        Vector3f    v{rgb.r, rgb.g, rgb.b};
+        float const value            = maxComponent(v);
+        float const valueMinusChroma = minComponent(v);
+
+        float const chroma    = value - valueMinusChroma;
+        float const invChroma = fl::rcp(chroma);
+
+        float hue = 0.f;
+        if (fl::nearZero(chroma))
+            hue = 0.f;
+        else if (value == rgb.r)
+            hue = _60Deg * std::fmodf((rgb.g - rgb.b) * invChroma, 6.f);
+        else if (value == rgb.g)
+            hue = _60Deg * (rgb.b - rgb.r) * invChroma + 2.f;
+        else // value == rgb.b
+            hue = _60Deg * (rgb.r - rgb.g) * invChroma + 4.f;
+
+        float saturation = 0.f;
+        if (fl::nearZero(value))
+            saturation = 0.f;
+        else
+            saturation = chroma / value;
+
+        return {hue, saturation, value};
+    }
+} // namespace dmt::color
 
 namespace dmt {
     static uint16_t encodeOcta(float f)

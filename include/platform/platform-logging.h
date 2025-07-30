@@ -593,14 +593,14 @@ namespace dmt {
             int   bytesWritten = 0;
             if constexpr (std::is_signed_v<T>)
             {
-                if constexpr (sizeof(T) == 4)
+                if constexpr (sizeof(T) <= 4)
                     bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%d", value);
                 else
                     bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%zd", value);
             }
             else
             {
-                if constexpr (sizeof(T) == 4)
+                if constexpr (sizeof(T) <= 4)
                     bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%u", value);
                 else
                     bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%zu", value);

@@ -30,6 +30,19 @@ namespace dmt {
         // TODO remove
         RGB color;
     };
+
+    // https: //www.readkong.com/page/octahedron-environment-maps-6054207
+    struct DMT_CORE_API OctahedralNorm
+    {
+        uint16_t x, y;
+    };
+
+    DMT_CORE_API OctahedralNorm octaFromNorm(Normal3f n);
+    DMT_CORE_API Normal3f       normFromOcta(OctahedralNorm o);
+
+    DMT_CORE_API void      extractAffineTransform(Matrix4f const& m, float affineTransform[12]);
+    DMT_CORE_API Matrix4f  matrixFromAffine(float const affineTransform[12]);
+    DMT_CORE_API Transform transformFromAffine(float const affineTransform[12]);
 } // namespace dmt
 
 namespace dmt::transforms {

@@ -289,11 +289,14 @@ namespace dmt {
     // For an array (without construction)
     template <typename T>
         requires(std::is_trivially_destructible_v<std::remove_extent_t<T>> && std::is_array_v<T>)
-    UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource, std::size_t size)
+    UniqueRef<T> makeUniqueRef(std::pmr::memory_resource* resource,
+                               std::size_t                size,
+                               size_t                     alignment = alignof(std::remove_extent_t<T>))
     {
         using ElementType = std::remove_extent_t<T>;
-        void*        mem  = resource->allocate(sizeof(ElementType) * size, alignof(ElementType));
-        ElementType* arr  = static_cast<ElementType*>(mem); // Memory allocated, but elements NOT constructed
+        assert(isPOT(alignment) && alignment >= alignof(ElementType) && "Invalid alignment");
+        void*        mem = resource->allocate(sizeof(ElementType) * size, alignment);
+        ElementType* arr = static_cast<ElementType*>(mem); // Memory allocated, but elements NOT constructed
 
         return UniqueRef<T>(arr, PmrDeleter::create<T>(resource, size));
     }

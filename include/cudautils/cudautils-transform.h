@@ -20,6 +20,16 @@ namespace dmt {
         DMT_CPU_GPU explicit Transform(Matrix4f const& matrix);
 
         // Apply translation
+        static DMT_CPU_GPU Transform translate(Vector3f const& translation);
+
+        // Apply scaling
+        static DMT_CPU_GPU Transform scale(float scaling) { return scale({scaling, scaling, scaling}); }
+        static DMT_CPU_GPU Transform scale(Vector3f const& scaling);
+
+        // Apply rotation (angle in degrees)
+        static DMT_CPU_GPU Transform rotate(float angle, Vector3f const& axis);
+
+        // Apply translation
         DMT_CPU_GPU void translate_(Vector3f const& translation);
 
         // Apply scaling

@@ -38,6 +38,27 @@ namespace dmt {
         return result;
     }
 
+    __host__ __device__ Transform Transform::translate(Vector3f const& translation)
+    {
+        Transform t;
+        t.translate_(translation);
+        return t;
+    }
+
+    __host__ __device__ Transform Transform::scale(Vector3f const& scaling)
+    {
+        Transform t;
+        t.scale_(scaling);
+        return t;
+    }
+
+    __host__ __device__ Transform Transform::rotate(float angle, Vector3f const& axis)
+    {
+        Transform t;
+        t.rotate_(angle, axis);
+        return t;
+    }
+
     // Combine with another transform
     __host__ __device__ void Transform::combine_(Transform const& other)
     {

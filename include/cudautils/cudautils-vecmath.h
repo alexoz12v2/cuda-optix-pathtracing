@@ -142,6 +142,10 @@ namespace dmt {
         {
             return {static_cast<S>(0), static_cast<S>(0), static_cast<S>(1)};
         }
+        DMT_CPU_GPU static constexpr Tuple3<S> one()
+        {
+            return {static_cast<S>(1), static_cast<S>(1), static_cast<S>(1)};
+        }
 
         using value_type = S;
         static consteval int32_t numComponents() { return 3; }

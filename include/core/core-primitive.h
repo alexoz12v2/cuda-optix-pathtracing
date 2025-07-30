@@ -2,8 +2,12 @@
 
 #include "core/core-macros.h"
 #include "core/core-math.h"
+
 #include "cudautils/cudautils-vecmath.h"
 #include "cudautils/cudautils-color.h"
+
+#include "core/core-trianglemesh.h"
+
 
 // TODO remove
 #include <random>
@@ -80,5 +84,19 @@ namespace dmt {
         float zs[3 * numTriangles];
         // TODO remove
         RGB colors[numTriangles];
+    };
+
+    class DMT_CORE_API TriangleIndexed : public Primitive
+    {
+    public:
+        Bounds3f     bounds() const override;
+        Intersection intersect(Ray const& ray, float tMax) const override;
+
+        Scene const* scene;
+        size_t       instanceIdx;
+        size_t       triIdx;
+
+    private:
+        std::tuple<Point3f, Point3f, Point3f> worldSpacePts() const;
     };
 } // namespace dmt

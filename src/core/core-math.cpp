@@ -44,6 +44,94 @@ namespace dmt::arch {
     }
 } // namespace dmt::arch
 
+namespace dmt {
+    static uint16_t encodeOcta(float f)
+    {
+        static constexpr float max = std::numeric_limits<uint16_t>::max();
+        return static_cast<uint16_t>(fl::round(fl::clamp01((f + 1) / 2) * max));
+    }
+
+    OctahedralNorm octaFromNorm(Normal3f n)
+    {
+        // 1: planar projection
+        Vector3f projected = n.asVec() / (fl::abs(n.x) + fl::abs(n.y) + fl::abs(n.z));
+
+        // 2: outfold the downward faces to the external triangles of the quad
+        if (projected.z < 0.f)
+        {
+            float const ox = projected.x;
+            float const oy = projected.y;
+            projected.x    = (1.f - fl::abs(oy)) * fl::sign(ox);
+            projected.y    = (1.f - fl::abs(ox)) * fl::sign(oy);
+        }
+        // 3: mapping into [0,1]
+        return {.x = encodeOcta(projected.x), .y = encodeOcta(projected.y)};
+    }
+
+
+    Normal3f normFromOcta(OctahedralNorm o)
+    {
+        static constexpr float max = std::numeric_limits<uint16_t>::max();
+
+        // 1: convert back to [-1, 1] range
+        Vector2f const f{static_cast<float>(o.x) / max * 2.f - 1.f, static_cast<float>(o.y) / max * 2.f - 1.f};
+
+        // 2: reconstruct z component
+        Vector3f n(f.x, f.y, 1.f - fl::abs(f.x) - fl::abs(f.y));
+
+        // 3: fold back the lower hemisphere
+        if (n.z < 0.f)
+        {
+            float const ox = n.x;
+            float const oy = n.y;
+
+            n.x = (1.f - fl::abs(oy)) * fl::sign(ox);
+            n.y = (1.f - fl::abs(ox)) * fl::sign(oy);
+        }
+
+        // 4: normalize
+        return Normal3f{n};
+    }
+
+    void extractAffineTransform(Matrix4f const& m, float affineTransform[12])
+    {
+        affineTransform[0] = m.m[0]; // m(0,0)
+        affineTransform[1] = m.m[1]; // m(0,1)
+        affineTransform[2] = m.m[2]; // m(0,2)
+
+        affineTransform[3] = m.m[4]; // m(1,0)
+        affineTransform[4] = m.m[5]; // m(1,1)
+        affineTransform[5] = m.m[6]; // m(1,2)
+
+        affineTransform[6] = m.m[8];  // m(2,0)
+        affineTransform[7] = m.m[9];  // m(2,1)
+        affineTransform[8] = m.m[10]; // m(2,2)
+
+        affineTransform[9]  = m.m[12]; // m(3,0) -> translation x
+        affineTransform[10] = m.m[13]; // m(3,1) -> translation y
+        affineTransform[11] = m.m[14]; // m(3,2) -> translation z
+    }
+
+    Matrix4f matrixFromAffine(float const affineTransform[12])
+    {
+        // clang-format off
+        Matrix4f const m {
+            affineTransform[0], affineTransform[1],  affineTransform[2],  0,
+            affineTransform[3], affineTransform[4],  affineTransform[5],  0,
+            affineTransform[6], affineTransform[7],  affineTransform[8],  0,
+            affineTransform[9], affineTransform[10], affineTransform[11], 1
+        };
+        // clang-format on
+        return m;
+    }
+
+    Transform transformFromAffine(float const affineTransform[12])
+    {
+        return Transform{matrixFromAffine(affineTransform)};
+    }
+
+} // namespace dmt
+
 namespace dmt::transforms {
     Transform DMT_FASTCALL persp(float fovRadians, float aspectRatio, float near, float far)
     {

@@ -17,6 +17,17 @@
 #endif
 
 namespace dmt::fl {
+    __host__ __device__ float abs(float x)
+    {
+#if defined(__CUDA_ARCH__)
+        return ::fabsf(x);
+#elif defined(DMT_ARCH_X86_64)
+        return _mm_cvtss_f32(_mm_andnot_ps(_mm_set_ss(-0.f), _mm_set_ss(x)));
+#else
+    #error "CPU Architecture not supported"
+#endif
+    }
+
     __host__ __device__ float rcp(float x)
     {
         float ret = x;

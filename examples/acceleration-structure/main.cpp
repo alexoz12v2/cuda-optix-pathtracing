@@ -1115,17 +1115,15 @@ namespace dmt {
         return true;
     }
 
-#define DMT_DBG_PX_X 61
-#define DMT_DBG_PX_Y 58
+#define DMT_DBG_PX_X 49
+#define DMT_DBG_PX_Y 54
 
     void writeIntersectionTestImage(
         std::pmr::monotonic_buffer_resource&  scratch,
         unsigned char*                        scratchBuffer,
         size_t                                ScratchBufferBytes,
         std::pmr::synchronized_pool_resource& pool,
-        std::span<Primitive const*>           primsView,
-        std::span<Primitive const*>           primsGrouped,
-        std::span<Primitive const*>           bvhPrimitives,
+        std::span<UniqueRef<Primitive>>       primitives,
         uint32_t                              Width,
         uint32_t                              Height,
         sampling::HaltonOwen&                 sampler,
@@ -1136,36 +1134,9 @@ namespace dmt {
         Context       ctx;
         Point2i const res{static_cast<int32_t>(Width), static_cast<int32_t>(Height)};
         film::RGBFilm film{res, 1e5f, &pool};
-        film::RGBFilm filmGroup{res, 1e5f, &pool};
-        film::RGBFilm filmBvhPrimitives{res, 1e5f, &pool};
         ctx.log("Executing test run with intersection tests against all primitives", {});
 
-        UniqueRef<unsigned char[]> maskImage              = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
-        UniqueRef<unsigned char[]> maskImageGroup         = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
-        UniqueRef<unsigned char[]> maskImageBvhPrimitives = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
-
-        bool const allTriangles = std::transform_reduce(primsView.begin(), primsView.end(), true, [](bool a, bool b) {
-            return a && b;
-        }, [](Primitive const* p) { return dynamic_cast<Triangle const*>(p); });
-        if ((primsView.size() & 7) == 0 && allTriangles)
-        {
-#define DMT_CHAR_FIRE_EMOJI "\xF0\x9F\x94\xA5"
-            ctx.warn("All scene primitives are triangles and divisible by 8, hence checking grouping", {});
-            ctx.warn(DMT_CHAR_FIRE_EMOJI " Note: We are assuming grouping has Triangles8 and no sorting happened", {});
-            if (!checkGrouping(primsView, primsGrouped))
-            {
-                ctx.error("Grouping failed", {});
-                assert(false && "grouping failed");
-            }
-        }
-        if (allTriangles)
-        {
-            if (!checkBvhPrimitivesEquality(primsView, primsGrouped))
-            {
-                ctx.error("BVH Grouping failed", {});
-                assert(false && "BVH grouping failed");
-            }
-        }
+        UniqueRef<unsigned char[]> maskImage = makeUniqueRef<unsigned char[]>(&pool, res.x * res.y);
 
         for (Point2i pixel : ScanlineRange2D(res))
         {
@@ -1187,9 +1158,9 @@ namespace dmt {
                 float        nearest = fl::infinity();
                 Intersection isect{};
 
-                for (size_t i = 0; i < primsView.size(); ++i)
+                for (size_t i = 0; i < primitives.size(); ++i)
                 {
-                    if (auto si = primsView[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
+                    if (auto si = primitives[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
                     {
                         isect   = si;
                         nearest = si.t;
@@ -1200,38 +1171,6 @@ namespace dmt {
                 maskImage[pixel.x + res.x * pixel.y] = isect.hit ? 255 : 0;
 
                 film.addSample(pixel, radiance, cs.filterWeight);
-
-                nearest   = fl::infinity();
-                isect.hit = false;
-
-                for (size_t i = 0; i < primsGrouped.size(); ++i)
-                {
-                    if (auto si = primsGrouped[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
-                    {
-                        isect   = si;
-                        nearest = si.t;
-                    }
-                }
-
-                radiance = isect.hit ? isect.color : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
-
-                filmGroup.addSample(pixel, radiance, cs.filterWeight);
-
-                nearest   = fl::infinity();
-                isect.hit = false;
-
-                for (size_t i = 0; i < bvhPrimitives.size(); ++i)
-                {
-                    if (auto si = bvhPrimitives[i]->intersect(ray, fl::infinity()); si.hit && si.t < nearest)
-                    {
-                        isect   = si;
-                        nearest = si.t;
-                    }
-                }
-
-                radiance = isect.hit ? isect.color : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
-
-                filmBvhPrimitives.addSample(pixel, radiance, cs.filterWeight);
 
                 resetMonotonicBufferPointer(scratch, scratchBuffer, ScratchBufferBytes);
             }
@@ -1246,23 +1185,9 @@ namespace dmt {
         imagePath /= "mask.png";
         ctx.log("Writing test mask into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
         stbi_write_png(imagePath.toUnderlying(&scratch).c_str(), res.x, res.y, 1, maskImage.get(), 0);
-
-        imagePath = os::Path::executableDir(&pool);
-        imagePath /= "test_group.png";
-        ctx.log("Writing test grouped image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
-        filmGroup.writeImage(imagePath);
-
-        imagePath = os::Path::executableDir(&pool);
-        imagePath /= "test_bvhprims.png";
-        ctx.log("Writing test bvh grouped image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
-        filmBvhPrimitives.writeImage(imagePath);
     }
 
-    void runMainProgram(std::span<TriangleData>     scene,
-                        std::span<Primitive const*> primsView,
-                        BVHBuildNode*               bvh,
-                        std::span<Primitive const*> bvhPrimitives,
-                        std::span<Primitive const*> primsGrouped)
+    void runMainProgram()
     {
         // primsView primitive coordinates defined in world space
         static constexpr uint32_t Width              = 128;
@@ -1274,14 +1199,78 @@ namespace dmt {
         Context ctx;
         assert(ctx.isValid() && "Invalid Context");
 
+        Scene scene;
+        { // prepare geometry
+            scene.geometry.reserve(16);
+            scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(std::pmr::get_default_resource()));
+            auto& cube = *scene.geometry.back();
+            TriangleMesh::unitCube(cube);
+        }
+        { // instance geometry
+            {
+                scene.instances.emplace_back(makeUniqueRef<Instance>(std::pmr::get_default_resource()));
+                auto& cubeInstance   = *scene.instances.back();
+                cubeInstance.meshIdx = 0;
+
+                Transform const t = Transform::translate({0.f, 1.5f, -0.75f}) *
+                                    Transform::rotate(45.f, Vector3f::zAxis()) * Transform::scale(0.5f);
+
+                extractAffineTransform(t.m, cubeInstance.affineTransform);
+                cubeInstance.bounds = scene.geometry[cubeInstance.meshIdx]->transformedBounds(t);
+                cubeInstance.color  = ddbg::hsvToRgb(0.3f, 0.7f, 0.6f);
+            }
+            {
+                scene.instances.emplace_back(makeUniqueRef<Instance>(std::pmr::get_default_resource()));
+                auto& cubeInstance   = *scene.instances.back();
+                cubeInstance.meshIdx = 0;
+
+                Transform const t = Transform::translate({0.5f, 1.2f, -0.9f}) *
+                                    Transform::rotate(70.f, Vector3f::zAxis()) * Transform::scale(0.42f);
+
+                extractAffineTransform(t.m, cubeInstance.affineTransform);
+                cubeInstance.bounds = scene.geometry[cubeInstance.meshIdx]->transformedBounds(t);
+                cubeInstance.color  = ddbg::hsvToRgb(0.5f, 0.7f, 0.6f);
+            }
+            {
+                scene.instances.emplace_back(makeUniqueRef<Instance>(std::pmr::get_default_resource()));
+                auto& cubeInstance   = *scene.instances.back();
+                cubeInstance.meshIdx = 0;
+
+                Transform const t = Transform::translate({0.5f, 1.7f, -0.6f}) *
+                                    Transform::rotate(55.f, normalize(Vector3f{Vector3f::zAxis()} + Vector3f::xAxis())) *
+                                    Transform::scale(0.42f);
+
+                extractAffineTransform(t.m, cubeInstance.affineTransform);
+                cubeInstance.bounds = scene.geometry[cubeInstance.meshIdx]->transformedBounds(t);
+                cubeInstance.color  = ddbg::hsvToRgb(0.7f, 0.3f, 0.6f);
+            }
+        }
+
         // memory resources (TODO with our allocators)
         UniqueRef<unsigned char[]> scratchBuffer = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(),
                                                                                   ScratchBufferBytes);
-        std::pmr::monotonic_buffer_resource  scratch{scratchBuffer.get(),
-                                                    ScratchBufferBytes,
-                                                    std::pmr::null_memory_resource()}; // call release everytime you reset it
+        std::pmr::monotonic_buffer_resource scratch{scratchBuffer.get(), ScratchBufferBytes, std::pmr::null_memory_resource()};
         std::pmr::synchronized_pool_resource pool;
 
+        // compute per instance BVH and total BVH
+        std::pmr::vector<BVHBuildNode*>        perInstanceBvhNodes{&pool};
+        std::pmr::vector<UniqueRef<Primitive>> primitives{&pool};
+        perInstanceBvhNodes.reserve(64);
+        primitives.reserve(256);
+
+        ctx.warn("Building Per Instance BVHs", {});
+        for (size_t instanceIdx = 0; instanceIdx < scene.instances.size(); ++instanceIdx)
+        {
+            ctx.warn("BVH[{}]", std::make_tuple(instanceIdx));
+            perInstanceBvhNodes.push_back(bvh::buildForInstance(scene, instanceIdx, primitives, &scratch, &pool));
+            ddbg::printBVHToString(perInstanceBvhNodes.back());
+        }
+
+        auto* bvhRoot = reinterpret_cast<BVHBuildNode*>(pool.allocate(sizeof(BVHBuildNode)));
+        std::memset(bvhRoot, 0, sizeof(BVHBuildNode));
+        bvh::buildCombined(bvhRoot, perInstanceBvhNodes, &scratch, &pool);
+
+        // rendering resources
         ThreadPoolV2         threadpool{std::thread::hardware_concurrency(), &pool};
         film::RGBFilm        film{{{Width, Height}}, 1e5f, &pool};
         sampling::HaltonOwen sampler{SamplesPerPixel, {{Width, Height}}, 123432};
@@ -1299,6 +1288,8 @@ namespace dmt {
         Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
 
         // TODO: translate the BVH to be in camera-world (render) space, then switch renderFromCamera to use camera-world
+        ctx.warn("Printing Global BVH", {});
+        ddbg::printBVHToString(bvhRoot);
 
         // for each pixel, for each sample within the pixel (halton + owen scrambling)
         for (Point2i pixel : ScanlineRange2D({{Width, Height}}))
@@ -1318,7 +1309,7 @@ namespace dmt {
                 cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
                 cs.filterWeight         = 1.f;
                 Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
-                RGB const radiance = incidentRadiance(ray, bvh, sampler, &scratch);
+                RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);
                 resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
             }
@@ -1333,15 +1324,14 @@ namespace dmt {
                                    scratchBuffer.get(),
                                    ScratchBufferBytes,
                                    pool,
-                                   primsView,
-                                   primsGrouped,
-                                   bvhPrimitives,
+                                   primitives,
                                    Width,
                                    Height,
                                    sampler,
                                    filter,
                                    cameraFromRaster,
                                    renderFromCamera);
+        bvh::cleanup(bvhRoot, &pool);
     }
 } // namespace dmt
 
@@ -1417,13 +1407,13 @@ int32_t guardedMain()
         dmt::resetMonotonicBufferPointer(bufferMemory, bufferPtr.get(), 2048);
 
         dmt::test::bvhTestRays(rootNode);
+        dmt::bvh::cleanup(rootNode);
 
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();
+        dmt::test::testOctahedralProj();
 
-        dmt::runMainProgram(scene, spanPrims, rootNode, bvhPrimitives, primsGroupedView);
-
-        dmt::bvh::cleanup(rootNode);
+        dmt::runMainProgram();
 
         ctx.log("Goodbye!", {});
     }

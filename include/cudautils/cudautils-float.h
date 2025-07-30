@@ -33,6 +33,8 @@ namespace dmt::fl {
     /** Boltzmann's constant */
     DMT_CPU_GPU inline constexpr float kBoltz() { return 1.3806488e-23f; }
 
+    DMT_CPU_GPU inline constexpr float degFromRad() { return 57.295779513082320876798154814105; }
+
     DMT_CPU_GPU inline bool isinf(float f)
     {
 #if defined(__CUDA_ARCH__)
@@ -287,8 +289,30 @@ namespace dmt::fl {
 #endif
     }
 
-    DMT_CPU_GPU inline float xorf(float f, int32_t mask) { return bitsToFloat(floatToBits(f) & mask); }
+    DMT_CPU_GPU inline float sign(float x)
+    {
+        if (x == 0.f || x == -0.f) // TODO tolerance?
+            return 0.f;
+#if defined(__CUDA_ARCH__)
+        return ::signbit(x) ? -1.f : 1.f;
+#else
+        return std::signbit(x) ? -1.f : 1.f;
+#endif
+    }
 
+    DMT_CPU_GPU inline float round(float x)
+    {
+
+#if defined(__CUDA_ARCH__)
+        return ::roundf(x);
+#else
+        return std::roundf(x);
+#endif
+    }
+
+    DMT_CORE_API DMT_CPU_GPU inline float xorf(float f, int32_t mask) { return bitsToFloat(floatToBits(f) & mask); }
+
+    DMT_CORE_API DMT_CPU_GPU float abs(float x);
     DMT_CORE_API DMT_CPU_GPU float rcp(float x);
     DMT_CORE_API DMT_CPU_GPU bool  nearZero(float x);
     DMT_CORE_API DMT_CPU_GPU bool  near(float x, float y);

@@ -722,6 +722,28 @@ namespace dmt::test {
         assert(closeEnough && "Inversion test failed: inverted value not close to original sample");
     }
 
+    void testOctahedralProj()
+    {
+        Context ctx;
+        assert(ctx.isValid() && "invalid context");
+        static constexpr float tol = 0.1f;
+
+        ctx.log(" -- Testing Octahedral Projection (tolerance = {} degrees) --", std::make_tuple(tol));
+
+        Normal3f const       orig{1.f, 2.f, -0.3f};
+        OctahedralNorm const octa      = octaFromNorm(orig);
+        Normal3f const       projected = normFromOcta(octa);
+
+        float angularErrorRad = std::acos(fl::clamp(dot(projected, orig), -1.0f, 1.0f));
+        float angularErrorDeg = angularErrorRad * fl::degFromRad();
+        if (angularErrorDeg > tol)
+        {
+            ctx.error("Incorrect octahedral reconstruction", {});
+            assert(false && "Incorrect octahedral reconstruction");
+        }
+
+        ctx.warn("Projection works on a tolerance of {}", std::make_tuple(tol));
+    }
 } // namespace dmt::test
 
 namespace dmt::bvh {

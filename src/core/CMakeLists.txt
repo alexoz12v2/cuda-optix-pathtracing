@@ -10,10 +10,12 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-primitive.h
         ${CMAKE_SOURCE_DIR}/include/core/core-math.h
         ${CMAKE_SOURCE_DIR}/include/core/core-cudautils-cpubuild.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-trianglemesh.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
     core-primitive.cpp
+    core-trianglemesh.cpp
     core-math.cpp
     core-cudautils-cpubuild.cpp
 )

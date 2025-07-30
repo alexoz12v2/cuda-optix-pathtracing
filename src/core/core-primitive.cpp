@@ -647,4 +647,35 @@ namespace dmt {
         triangle::Triisect const trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
     }
+
+    std::tuple<Point3f, Point3f, Point3f> TriangleIndexed::worldSpacePts() const
+    {
+        Transform m = transformFromAffine(scene->instances[instanceIdx]->affineTransform); // maybe inefficient
+        TriangleMesh const& mesh = *scene->geometry[scene->instances[instanceIdx]->meshIdx];
+        IndexedTri const    tri  = mesh.getIndexedTri(triIdx);
+
+        Point3f const p0 = m(mesh.getPosition(tri[0].positionIdx));
+        Point3f const p1 = m(mesh.getPosition(tri[1].positionIdx));
+        Point3f const p2 = m(mesh.getPosition(tri[2].positionIdx));
+
+        return {p0, p1, p2};
+    }
+
+    Bounds3f TriangleIndexed::bounds() const
+    {
+        auto const [p0, p1, p2] = worldSpacePts();
+
+        Point3f const pMin = min(min(p0, p1), p2);
+        Point3f const pMax = max(max(p0, p1), p2);
+
+        return makeBounds(pMin, pMax);
+    }
+
+    Intersection TriangleIndexed::intersect(Ray const& ray, float tMax) const
+    {
+        auto const [p0, p1, p2] = worldSpacePts();
+
+        triangle::Triisect const trisect = triangle::intersect(ray, tMax, p0, p1, p2, 0);
+        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+    }
 } // namespace dmt

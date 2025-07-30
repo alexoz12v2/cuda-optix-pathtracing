@@ -146,6 +146,7 @@ namespace dmt::test {
     void bvhTestRays(BVHBuildNode* rootNode);
     void testDistribution1D();
     void testDistribution2D();
+    void testOctahedralProj();
 } // namespace dmt::test
 
 namespace dmt::bvh {

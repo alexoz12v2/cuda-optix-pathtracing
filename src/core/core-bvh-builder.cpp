@@ -115,13 +115,16 @@ namespace dmt::bvh {
                         float         minimumSplitPosition = 0.f;
                         int32_t const numSplits            = estimateBinningSplitNumber(extent, primsBeg, primsEnd);
                         float const   splitLength          = extent / numSplits;
+                        
                         for (uint64_t i = 0; i < numSplits - 1; ++i)
                         {
 
                             float const splitPosition = current.bounds.pMin[axis] + (i + 1) * splitLength;
-                            float const splitCost = evaluateSAH(std::span{primsBeg, primsEnd}, [](Primitive const* p) {
-                                return p->bounds();
-                            }, axis, splitPosition);
+                            float const splitCost     = evaluateSAH(
+                                std::span{primsBeg, primsEnd},
+                                [](Primitive const* p) { return p->bounds(); },
+                                axis,
+                                splitPosition);
                             if (splitCost < minimumSplitCost)
                             {
                                 minimumSplitCost     = splitCost;
@@ -200,7 +203,7 @@ namespace dmt::bvh {
                     last->end         = primsMid;
                     last->node.bounds = bbUnionPrimitives(std::span{primsBeg, primsMid});
                 } // end else (maybeNode)
-            } // end while (on workItem list)
+            }     // end while (on workItem list)
 
             for (auto const& workItem : childCandidates)
             {
@@ -263,9 +266,11 @@ namespace dmt::bvh {
                 {
                     float const splitPosition = bounds.pMin[axis] + (i + 1) * splitLength;
 
-                    float splitCost = evaluateSAH(currNodes, [](BVHBuildNode const* p) {
-                        return p->bounds;
-                    }, axis, splitPosition);
+                    float splitCost = evaluateSAH(
+                        currNodes,
+                        [](BVHBuildNode const* p) { return p->bounds; },
+                        axis,
+                        splitPosition);
 
                     if (splitCost < minimumSplitCost)
                     {
@@ -495,9 +500,12 @@ namespace dmt::bvh {
 
         auto* root = reinterpret_cast<BVHBuildNode*>(memory->allocate(sizeof(BVHBuildNode)));
         std::memset(root, 0, sizeof(BVHBuildNode));
-        root->bounds = std::transform_reduce(shufflingPrims.begin(), shufflingPrims.end(), bbEmpty(), [](Bounds3f a, Bounds3f b) {
-            return bbUnion(a, b);
-        }, [](Primitive const* p) { return p->bounds(); });
+        root->bounds = std::transform_reduce(
+            shufflingPrims.begin(),
+            shufflingPrims.end(),
+            bbEmpty(),
+            [](Bounds3f a, Bounds3f b) { return bbUnion(a, b); },
+            [](Primitive const* p) { return p->bounds(); });
         buildRecursive(shufflingPrims.data(), shufflingPrims.data() + shufflingPrims.size(), root, memory, temp);
         return root;
     }

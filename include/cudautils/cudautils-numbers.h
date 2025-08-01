@@ -1,10 +1,25 @@
 #pragma once
 
 #include "cudautils/cudautils-macro.h"
-
-#include <cudautils/cudautils-vecmath.h>
+#include "cudautils/cudautils-vecmath.h"
 
 // u = random uniformly distributed fp32 number between 0 and 1
+namespace dmt {
+    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE Point2f cartesianFromPolar(float rho, float phi)
+    {
+        return {rho * cosf(phi), rho * sinf(phi)};
+    }
+
+    DMT_CORE_API DMT_CPU_GPU Point2f  sampleUniformDisk(Point2f u);
+    DMT_CORE_API DMT_CPU_GPU Vector3f sampleCosHemisphere(Vector3f n, Point2f u, float* pdf = nullptr);
+    DMT_CORE_API DMT_CPU_GPU float    cosHemispherePDF(Vector3f n, Vector3f d);
+
+    DMT_CORE_API DMT_CPU_GPU inline Point3f hemisphereFromDisk(Point2f p)
+    {
+        return {p.x, p.y, fl::safeSqrt(1.f - dotSelf(p))};
+    }
+} // namespace dmt
+
 namespace dmt::sampling {
     /**
      * normalized (PDF) approximation of the <a href="https://en.wikipedia.org/wiki/Luminous_efficiency_function">Photopic Luminous Efficiency Function</a>

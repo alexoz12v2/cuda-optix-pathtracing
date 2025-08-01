@@ -6,6 +6,37 @@
 
 namespace dmt {
     namespace triangle {
+        static Vector3f computeNormal(Point3f p0, Point3f p1, Point3f p2)
+        {
+            Vector3f edge1 = p1 - p0;
+            Vector3f edge2 = p2 - p0;
+            return normalize(cross(edge1, edge2)); // Right-handed normal
+        }
+
+        static float extract_component_m128(__m128 vec, int index)
+        {
+            float arr[4];
+            _mm_storeu_ps(arr, vec); // unaligned store
+            return arr[index];       // runtime index
+        }
+
+        static float extract_component_m256(__m256 vec, int index)
+        {
+            float arr[8];
+            _mm256_storeu_ps(arr, vec); // unaligned store
+            return arr[index];          // runtime index
+        }
+
+        static Point3f getPoint(__m128 x, __m128 y, __m128 z, int index)
+        {
+            return {extract_component_m128(x, index), extract_component_m128(y, index), extract_component_m128(z, index)};
+        }
+
+        static Point3f getPoint(__m256 x, __m256 y, __m256 z, int index)
+        {
+            return {extract_component_m256(x, index), extract_component_m256(y, index), extract_component_m256(z, index)};
+        }
+
         static Bounds3f bounds(Point3f p0, Point3f p1, Point3f p2) { return bbUnion(makeBounds(p0, p1), p2); }
 
         static Bounds3f bounds2(float const xs[6], float const ys[6], float const zs[6])
@@ -120,12 +151,13 @@ namespace dmt {
             float    w;
             float    t;
             uint32_t index;
+            Vector3f n;
 
             operator bool() const { return !fl::isInfOrNaN(u); }
 
             static constexpr Triisect nothing()
             {
-                return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0};
+                return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0, .n = {}};
             }
         };
 
@@ -255,12 +287,19 @@ namespace dmt {
                     }
                 }
 
+                // TODO move elsewhere
+                Point3f  p0     = getPoint(v0x, v0y, v0z, bestIndex);
+                Point3f  p1     = getPoint(v1x, v1y, v1z, bestIndex);
+                Point3f  p2     = getPoint(v2x, v2y, v2z, bestIndex);
+                Vector3f normal = computeNormal(p0, p1, p2);
+
                 assert(bestIndex >= 0 && "if a mask was active at least 1 intersection");
                 return {.u     = fl::clamp01(uArray[bestIndex]),
                         .v     = fl::clamp01(vArray[bestIndex]),
                         .w     = fl::clamp01(1.f - uArray[bestIndex] - vArray[bestIndex]),
                         .t     = minT,
-                        .index = static_cast<uint32_t>(bestIndex)};
+                        .index = static_cast<uint32_t>(bestIndex),
+                        .n     = normal};
             }
 #else
     #error "not implemented"
@@ -393,12 +432,19 @@ namespace dmt {
                     }
                 }
 
+                // TODO move elsewhere
+                Point3f  p0     = getPoint(v0x, v0y, v0z, bestIndex);
+                Point3f  p1     = getPoint(v1x, v1y, v1z, bestIndex);
+                Point3f  p2     = getPoint(v2x, v2y, v2z, bestIndex);
+                Vector3f normal = computeNormal(p0, p1, p2);
+
                 assert(bestIndex >= 0 && "if a mask was active at least 1 intersection");
                 return {.u     = fl::clamp01(uArray[bestIndex]),
                         .v     = fl::clamp01(vArray[bestIndex]),
                         .w     = fl::clamp01(1.f - uArray[bestIndex] - vArray[bestIndex]),
                         .t     = minT,
-                        .index = static_cast<uint32_t>(bestIndex)};
+                        .index = static_cast<uint32_t>(bestIndex),
+                        .n     = normal};
             }
 #else
     #error "not implemented"
@@ -436,7 +482,10 @@ namespace dmt {
             if (t < -tol || t > tMax)
                 return Triisect::nothing();
 
-            return {.u = fl::clamp01(u), .v = fl::clamp01(v), .w = fl::clamp01(1.f - u - v), .t = t, .index = index};
+            // TODO move elsewhere
+            Vector3f normal = computeNormal(v0, v1, v2);
+
+            return {.u = fl::clamp01(u), .v = fl::clamp01(v), .w = fl::clamp01(1.f - u - v), .t = t, .index = index, .n = normal};
 #else
             // Woop's watertight algorithm https://jcgt.org/published/0002/01/05/paper.pdf
             // calculate dimension where the ray direction is maximal
@@ -529,7 +578,13 @@ namespace dmt {
         static DMT_FORCEINLINE Intersection DMT_FASTCALL fromTrisect(Triisect trisect, Ray const& ray, RGB color)
         {
             if (trisect)
-                return {.p = ray.o + trisect.t * ray.d, .t = trisect.t, .hit = true, .color = color};
+                return {
+                    .p     = ray.o + trisect.t * ray.d,
+                    .ng    = trisect.n,
+                    .t     = trisect.t,
+                    .hit   = true,
+                    .color = color,
+                };
             else
                 return {.p = {}, .t = 0, .hit = false};
         }

@@ -171,6 +171,7 @@ namespace dmt::bvh {
                         size_t midIdx = centroids.size() / 2;
 
                         primsMid = primsBeg + midIdx;
+                        assert(false);
                     }
 
                     // last resort tie breaker: Index median split

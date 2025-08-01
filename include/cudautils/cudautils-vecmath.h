@@ -567,6 +567,10 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Tuple3f floor(Tuple3f v);
     DMT_CORE_API DMT_CPU_GPU Tuple4f floor(Tuple4f v);
 
+    DMT_CORE_API DMT_CPU_GPU Tuple2f sqrt(Tuple2f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple3f sqrt(Tuple3f v);
+    DMT_CORE_API DMT_CPU_GPU Tuple4f sqrt(Tuple4f v);
+
     DMT_CORE_API DMT_CPU_GPU Tuple2f lerp(float t, Tuple2f zero, Tuple2f one);
     DMT_CORE_API DMT_CPU_GPU Tuple3f lerp(float t, Tuple3f zero, Tuple3f one);
     DMT_CORE_API DMT_CPU_GPU Tuple4f lerp(float t, Tuple4f zero, Tuple4f one);
@@ -669,6 +673,7 @@ namespace dmt {
     }
 
     DMT_CORE_API DMT_CPU_GPU Frame coordinateSystem(Normal3f xAxis);
+    DMT_CORE_API DMT_CPU_GPU void  gramSchmidt(Vector3f n, Vector3f* a, Vector3f* b);
 
     DMT_CORE_API DMT_CPU_GPU Quaternion slerp(float t, Quaternion zero, Quaternion one);
     inline float Dot(Vector3f const& a, Vector3f const& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }

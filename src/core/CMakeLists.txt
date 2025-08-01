@@ -11,6 +11,7 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-math.h
         ${CMAKE_SOURCE_DIR}/include/core/core-cudautils-cpubuild.h
         ${CMAKE_SOURCE_DIR}/include/core/core-trianglemesh.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-bsdf.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
@@ -18,6 +19,7 @@ target_sources(dmt-core
     core-trianglemesh.cpp
     core-math.cpp
     core-cudautils-cpubuild.cpp
+    core-bsdf.cpp
 )
 
 target_link_libraries(dmt-core 

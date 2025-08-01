@@ -331,6 +331,10 @@ namespace dmt {
     __host__ __device__ Tuple3f floor(Tuple3f v) { return {fromGLM(glm::floor(toGLM(v)))}; }
     __host__ __device__ Tuple4f floor(Tuple4f v) { return {fromGLM(glm::floor(toGLM(v)))}; }
 
+    __host__ __device__ Tuple2f sqrt(Tuple2f v) { return fromGLM(glm::sqrt(toGLM(v))); }
+    __host__ __device__ Tuple3f sqrt(Tuple3f v) { return fromGLM(glm::sqrt(toGLM(v))); }
+    __host__ __device__ Tuple4f sqrt(Tuple4f v) { return fromGLM(glm::sqrt(toGLM(v))); }
+
     __host__ __device__ Tuple2f lerp(float t, Tuple2f zero, Tuple2f one)
     {
         return {fromGLM(glm::mix(toGLM(one), toGLM(zero), t))};
@@ -620,6 +624,18 @@ namespace dmt {
         frame.yAxis    = {fromGLM(glm::normalize(y))};
         frame.zAxis    = {fromGLM(glm::normalize(z))};
         return frame;
+    }
+
+    __host__ __device__ void gramSchmidt(Vector3f n, Vector3f* a, Vector3f* b)
+    {
+        assert(a && b && fl::abs(normL2(n) - 1.f) < 1e-5f);
+        if (n.x != n.y || n.x != n.z)
+            *a = {n.z - n.y, n.x - n.z, n.y - n.x}; //(1,1,1)x N
+        else
+            *a = {n.z - n.y, n.x + n.z, -n.y - n.x}; //(-1,1,1)x N
+
+        *a = normalize(*a);
+        *b = cross(n, *a);
     }
 
     __host__ __device__ Quaternion slerp(float t, Quaternion zero, Quaternion one)

@@ -26,6 +26,10 @@ namespace dmt::fl {
     DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
     DMT_CPU_GPU inline constexpr float pi() { return std::numbers::pi_v<float>; }
     DMT_CPU_GPU inline constexpr float twoPi() { return 2.f * std::numbers::pi_v<float>; }
+    DMT_CPU_GPU inline constexpr float piOver4() { return 0.25f * std::numbers::pi_v<float>; }
+    DMT_CPU_GPU inline constexpr float piOver2() { return 0.5f * std::numbers::pi_v<float>; }
+    DMT_CPU_GPU inline constexpr float minNormalized() { return 1.175494351e-38f; }
+    DMT_CPU_GPU inline constexpr float rcpPi() { return 1.f / std::numbers::pi_v<float>; }
     /** Light speed (vacuum) */
     DMT_CPU_GPU inline constexpr float c() { return 299792458.f; };
     /** Planck's constant */
@@ -224,6 +228,24 @@ namespace dmt::fl {
 #endif
     }
 
+    DMT_CPU_GPU inline float sqrt(float a)
+    {
+#if defined(__CUDA_ARCH__)
+        return sqrtf(a);
+#else
+        return std::sqrt(a);
+#endif
+    }
+
+    DMT_CPU_GPU inline float safeSqrt(float a)
+    {
+#if defined(__CUDA_ARCH__)
+        return sqrtf(fmaxf(a, 0.f));
+#else
+        return std::sqrt(std::fmaxf(a, 0.f));
+#endif
+    }
+
     DMT_CPU_GPU inline float FMARoundUp(float a, float b, float c)
     {
 #if defined(__CUDA_ARCH__)
@@ -312,6 +334,7 @@ namespace dmt::fl {
 
     DMT_CORE_API DMT_CPU_GPU inline float xorf(float f, int32_t mask) { return bitsToFloat(floatToBits(f) & mask); }
 
+    DMT_CORE_API DMT_CPU_GPU float rsqrt(float x);
     DMT_CORE_API DMT_CPU_GPU float abs(float x);
     DMT_CORE_API DMT_CPU_GPU float rcp(float x);
     DMT_CORE_API DMT_CPU_GPU bool  nearZero(float x);

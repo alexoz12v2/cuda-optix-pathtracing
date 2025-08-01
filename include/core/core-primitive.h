@@ -15,9 +15,10 @@
 namespace dmt {
     struct Intersection
     {
-        Point3f p;
-        float   t;
-        bool    hit;
+        Point3f  p;
+        Vector3f ng;
+        float    t;
+        bool     hit;
         // TODO remove
         RGB color;
     };

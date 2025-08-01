@@ -1047,6 +1047,9 @@ namespace dmt::bvh {
 
         Primitive const* primitive = nullptr;
         float            nearest   = fl::infinity();
+
+        int dirIsNeg[3] = {ray.d.x < 0.f, ray.d.y < 0.f, ray.d.z < 0.f};
+
         while (!activeNodeStack.empty())
         {
             BVHBuildNode* current = activeNodeStack.back();
@@ -1104,6 +1107,119 @@ namespace dmt::bvh {
 
         // closesthit
         return primitive;
+    }
+
+    // TODO move elsewhere
+    static uint32_t partitionActiveList(BVHBuildNode** activeListIDs, float* activeListDistances, uint32_t activeListCount, float tMin)
+    {
+        uint32_t curr = 0;
+        uint32_t end  = activeListCount;
+        for (;;)
+        {
+            for (;;)
+            {
+                if (curr == end)
+                    return curr;
+
+                if (activeListDistances[curr] >= tMin)
+                    break;
+
+                ++curr;
+            }
+
+            do
+            {
+                --end;
+                if (curr == end)
+                    return curr;
+            } while (activeListDistances[curr] >= tMin);
+
+            float         tmpDist     = activeListDistances[curr];
+            BVHBuildNode* tmpID       = activeListIDs[curr];
+            activeListDistances[curr] = activeListDistances[end];
+            activeListIDs[curr]       = activeListIDs[end];
+            activeListDistances[end]  = tmpDist;
+            activeListIDs[end]        = tmpID;
+            ++curr;
+        }
+    }
+
+    Primitive const* intersectWideBVHBuild(Ray ray, BVHBuildNode* bvh, Intersection* outIsect)
+    {
+        Primitive const* intersectedPrim = nullptr;
+        BVHBuildNode*    activeListIDs[8]{};
+        float            activeListDistances[8]{};
+        BVHBuildNode*    current         = bvh;
+        uint32_t         activeListCount = 0;
+        float            tMinPrims       = fl::infinity();
+
+        assert(outIsect);
+        while (true)
+        {
+            if (current->childCount == 0)
+            {
+                bool intersected = false;
+                for (uint32_t idx = 0; idx < current->primitiveCount; ++idx)
+                {
+                    auto isect = current->primitives[idx]->intersect(ray, fl::infinity());
+                    if (isect.hit)
+                    {
+                        intersected = true;
+                        if (isect.t < tMinPrims)
+                        {
+                            *outIsect       = isect;
+                            tMinPrims       = isect.t;
+                            intersectedPrim = current->primitives[idx];
+                        }
+                    }
+                }
+
+                if (intersected)
+                    activeListCount = partitionActiveList(activeListIDs, activeListDistances, activeListCount, tMinPrims);
+            }
+            else
+            {
+                for (uint32_t idx = 0; idx < current->childCount; ++idx)
+                {
+                    float distance = fl::infinity();
+                    if (slabTest(ray.o, ray.d, current->children[idx]->bounds, &distance))
+                    {
+                        activeListIDs[activeListCount]       = current->children[idx];
+                        activeListDistances[activeListCount] = distance;
+                        ++activeListCount;
+                        assert(activeListCount <= 8);
+                    }
+                }
+            }
+
+            if (activeListCount == 0)
+                return intersectedPrim;
+            else
+            {
+                int32_t minIdx   = -1;
+                float   minValue = fl::infinity();
+                for (int32_t i = 0; i < activeListCount; ++i)
+                {
+                    if (minValue > activeListDistances[i])
+                    {
+                        minValue = activeListDistances[i];
+                        minIdx   = i;
+                    }
+                }
+
+                --activeListCount;
+                float         tmpDist                = activeListDistances[minIdx];
+                BVHBuildNode* tmpID                  = activeListIDs[minIdx];
+                activeListDistances[minIdx]          = activeListDistances[activeListCount];
+                activeListIDs[minIdx]                = activeListIDs[activeListCount];
+                activeListDistances[activeListCount] = tmpDist;
+                activeListIDs[activeListCount]       = tmpID;
+
+                current = activeListIDs[activeListCount];
+            }
+        }
+
+        return intersectedPrim;
     }
 
     std::pmr::vector<Primitive const*> extractPrimitivesFromBuild(BVHBuildNode* bvh, std::pmr::memory_resource* memory)

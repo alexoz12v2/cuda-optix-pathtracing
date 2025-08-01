@@ -4,6 +4,7 @@
 #include "platform/platform.h"
 #include "core/core-cudautils-cpubuild.h"
 #include "core/core-bvh-builder.h"
+#include "core/core-bsdf.h"
 #include "core/core-primitive.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -973,9 +974,17 @@ namespace dmt {
     {
         // TODO: Doesn't work
         Intersection     isect;
-        Primitive const* prim = bvh::intersectBVHBuild(ray, bvh, &isect, temp);
+        Primitive const* prim = bvh::intersectWideBVHBuild(ray, bvh, &isect);
         if (prim)
         {
+            // return isect.color;
+            //float pdf = 1.f;
+            //Vector3f wi = oren_nayar::sample(isect.ng, isect.ng, sampler.get2D(), &pdf);
+            //oren_nayar::BRDF bsdf = oren_nayar::makeParams(0.7f, RGB{0.4f, 0.25f, 0.2f}, isect.ng, wi);
+            //if (pdf != 0)
+            //    return oren_nayar::intensity(bsdf, ray.d, wi) / pdf;
+            //else
+            //    return {};
             return isect.color;
         }
         else
@@ -1115,8 +1124,8 @@ namespace dmt {
         return true;
     }
 
-#define DMT_DBG_PX_X 49
-#define DMT_DBG_PX_Y 54
+#define DMT_DBG_PX_X 75
+#define DMT_DBG_PX_Y 60
 
     void writeIntersectionTestImage(
         std::pmr::monotonic_buffer_resource&  scratch,

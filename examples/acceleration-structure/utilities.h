@@ -162,6 +162,8 @@ namespace dmt::bvh {
     std::pmr::vector<Primitive const*> extractPrimitivesFromBuild(
         BVHBuildNode*              bvh,
         std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+
+    Primitive const* intersectWideBVHBuild(Ray ray, BVHBuildNode* bvh, Intersection* outIsect);
 } // namespace dmt::bvh
 
 namespace dmt::numbers {

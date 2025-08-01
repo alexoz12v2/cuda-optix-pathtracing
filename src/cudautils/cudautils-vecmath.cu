@@ -794,7 +794,7 @@ namespace dmt {
     __host__ __device__ float Bounds3f::surfaceArea() const
     {
         Vector3f const d = diagonal();
-        return 2 * (d.x * d.y + d.x * d.z + d.y * d.z);
+        return 2 * (d.x * (d.y + d.z) + d.y * d.z);
     }
 
     __host__ __device__ float Bounds3f::volume() const
@@ -1351,9 +1351,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow = low[0];
-        ret.yLow = low[1];
-        ret.zLow = low[2];
+        ret.xLow             = low[0];
+        ret.yLow             = low[1];
+        ret.zLow             = low[2];
 #endif
         return ret;
     }
@@ -1384,9 +1384,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow = low[0];
-        ret.yLow = low[1];
-        ret.zLow = low[2];
+        ret.xLow             = low[0];
+        ret.yLow             = low[1];
+        ret.zLow             = low[2];
 #endif
         return ret;
     }
@@ -1417,9 +1417,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow = low[0];
-        ret.yLow = low[1];
-        ret.zLow = low[2];
+        ret.xLow             = low[0];
+        ret.yLow             = low[1];
+        ret.zLow             = low[2];
 #endif
         return ret;
     }

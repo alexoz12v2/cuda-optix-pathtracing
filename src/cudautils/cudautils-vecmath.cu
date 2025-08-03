@@ -1263,9 +1263,18 @@ namespace dmt {
         Normal3f         ret;
         glm::vec4        w{v.x, v.y, v.z, 0.f};
         glm::mat4 const& glmMat = toGLMmat(m);
-        ret.x                   = glmMat[0][0] * w.x + glmMat[1][0] * w.y + glmMat[2][0] * w.z + glmMat[3][0] * w.w;
-        ret.y                   = glmMat[0][1] * w.x + glmMat[1][1] * w.y + glmMat[2][1] * w.z + glmMat[3][1] * w.w;
-        ret.z                   = glmMat[0][2] * w.x + glmMat[1][2] * w.y + glmMat[2][2] * w.z + glmMat[3][2] * w.w;
+
+#if 0 // 1Mil dollar question: who is the transpose?
+        ret.x = glmMat[0][0] * w.x + glmMat[1][0] * w.y + glmMat[2][0] * w.z + glmMat[3][0] * w.w;
+        ret.y = glmMat[0][1] * w.x + glmMat[1][1] * w.y + glmMat[2][1] * w.z + glmMat[3][1] * w.w;
+        ret.z = glmMat[0][2] * w.x + glmMat[1][2] * w.y + glmMat[2][2] * w.z + glmMat[3][2] * w.w;
+#else
+        ret.x = glmMat[0][0] * w.x + glmMat[0][1] * w.y + glmMat[0][2] * w.z + glmMat[0][3] * w.w;
+        ret.y = glmMat[1][0] * w.x + glmMat[1][1] * w.y + glmMat[1][2] * w.z + glmMat[1][3] * w.w;
+        ret.z = glmMat[2][0] * w.x + glmMat[2][1] * w.y + glmMat[2][2] * w.z + glmMat[2][3] * w.w;
+#endif
+        ret = normalize(ret);
+
         return ret;
     }
 
@@ -1367,9 +1376,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1400,9 +1409,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1433,9 +1442,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }

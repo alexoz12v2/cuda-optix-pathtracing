@@ -58,7 +58,7 @@
     #define DMT_FORCEINLINE __attribute__((always_inline))
 #endif
 
-#if defined(__NVCC__)
+#if defined(__NVCC__) || defined(DMT_DEBUG)
     // CUDA NVCC doesn't support alternate calling conventions; default to nothing.
     #define DMT_FASTCALL
 

@@ -97,12 +97,12 @@ namespace dmt {
             .addPosition({half, half, -half})   // 6 right back bottom
             .addPosition({half, half, half});   // 7 right back top
 
-        mesh.addNormal({1, 0, 0})   // 0 right (6 normals total)
-            .addNormal({-1, 0, 0})  // 1 left
-            .addNormal({0, 1, 0})   // 2 forward
-            .addNormal({0, -1, 1})  // 3 back
-            .addNormal({0, 0, 1})   // 4 up
-            .addNormal({0, 0, -1}); // 5 down
+        mesh.addNormal({1, 0, 0})   // 0 right   (+X) (6 normals total)
+            .addNormal({-1, 0, 0})  // 1 left    (-X)
+            .addNormal({0, 1, 0})   // 2 back    (+Y)
+            .addNormal({0, -1, 0})  // 3 front   (-Y)
+            .addNormal({0, 0, 1})   // 4 up      (+Z)
+            .addNormal({0, 0, -1}); // 5 down    (-Z)
 
         // cross, starting from bottom left (open blender's cube on uv editor
         // and spreadsheet, face corner domain)
@@ -122,29 +122,18 @@ namespace dmt {
             .addUV({uLeft, vBottom});        // 13 bottom-left of front
 
         // Faces: each face has 2 triangles
-        // FRONT (+Z)
-        mesh.addIndexedTriangle({0, 2, 0}, {1, 2, 1}, {2, 2, 2})   // CCW: top-left -> bottom-left -> bottom-right
-            .addIndexedTriangle({0, 2, 0}, {2, 2, 2}, {3, 2, 12}); // top-left -> bottom-right -> top-right
-
-        // RIGHT (+X)
-        mesh.addIndexedTriangle({3, 0, 12}, {2, 0, 2}, {6, 0, 3}) //
-            .addIndexedTriangle({3, 0, 12}, {6, 0, 3}, {7, 0, 6});
-
-        // BACK (-Z)
-        mesh.addIndexedTriangle({7, 5, 6}, {6, 5, 3}, {5, 5, 4}) //
-            .addIndexedTriangle({7, 5, 6}, {5, 5, 4}, {4, 5, 5});
-
         // LEFT (-X)
-        mesh.addIndexedTriangle({4, 1, 5}, {5, 1, 4}, {1, 1, 11}) //
-            .addIndexedTriangle({4, 1, 5}, {1, 1, 11}, {0, 1, 8});
-
-        // TOP (+Y)
-        mesh.addIndexedTriangle({4, 4, 8}, {0, 4, 9}, {3, 4, 6}) //
-            .addIndexedTriangle({4, 4, 8}, {3, 4, 6}, {7, 4, 7});
-
-        // BOTTOM (-Y)
-        mesh.addIndexedTriangle({1, 5, 13}, {5, 5, 10}, {6, 5, 9}) //
-            .addIndexedTriangle({1, 5, 13}, {6, 5, 9}, {2, 5, 1});
+        mesh.addIndexedTriangle({1, 1, 9}, {5, 1, 10}, {4, 1, 11}).addIndexedTriangle({1, 1, 9}, {4, 1, 11}, {0, 1, 12});
+        // FRONT (+Y)
+        mesh.addIndexedTriangle({2, 3, 6}, {1, 3, 9}, {0, 3, 12}).addIndexedTriangle({2, 3, 6}, {0, 3, 12}, {3, 3, 3});
+        // RIGHT (+X)
+        mesh.addIndexedTriangle({6, 0, 5}, {2, 0, 6}, {3, 0, 3}).addIndexedTriangle({6, 0, 5}, {3, 0, 3}, {7, 0, 4});
+        // TOP (+Z)
+        mesh.addIndexedTriangle({3, 4, 3}, {0, 4, 12}, {4, 4, 13}).addIndexedTriangle({3, 4, 3}, {4, 4, 13}, {7, 4, 2});
+        // BACK (-Y)
+        mesh.addIndexedTriangle({7, 2, 2}, {4, 2, 13}, {5, 2, 0}).addIndexedTriangle({7, 2, 2}, {5, 2, 0}, {6, 2, 1});
+        // BOTTOM (-Z)
+        mesh.addIndexedTriangle({6, 5, 7}, {5, 5, 8}, {1, 5, 9}).addIndexedTriangle({6, 5, 7}, {1, 5, 9}, {2, 5, 6});
     }
 
     Scene::Scene(std::pmr::memory_resource* memory) : geometry{memory}, instances{memory}, m_memory{memory} {}

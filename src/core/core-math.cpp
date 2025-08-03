@@ -308,6 +308,40 @@ namespace dmt {
         return Transform{matrixFromAffine(affineTransform)};
     }
 
+
+    float lookupTableRead(float const* table, float x, int32_t size)
+    {
+        x = fl::clamp01(x) * (size - 1);
+
+        int32_t const index  = fminf(static_cast<int32_t>(x), size - 1);
+        int32_t const nIndex = fminf(index + 1, size - 1);
+        float const   t      = x - index;
+
+        // lerp formula
+        float const data0 = table[index];
+        if (t == 0.f)
+            return data0;
+
+        float const data1 = table[nIndex];
+        return (1.f - t) * data0 + t * data1;
+    }
+
+    float lookupTableRead2D(float const* table, float x, float y, int32_t sizex, int32_t sizey)
+    {
+        y = fl::clamp01(x) * (sizey - 1);
+
+        int32_t const index  = fminf(static_cast<int32_t>(y), sizey - 1);
+        int32_t const nIndex = fminf(index + 1, sizey - 1);
+        float const   t      = y - index;
+
+        // bilinear interp formula
+        float const data0 = lookupTableRead(table + sizex * index, x, sizex);
+        if (t == 0.f)
+            return data0;
+
+        float const data1 = lookupTableRead(table + sizex * nIndex, x, sizex);
+        return (1.f - t) * data0 + t * data1;
+    }
 } // namespace dmt
 
 namespace dmt::transforms {

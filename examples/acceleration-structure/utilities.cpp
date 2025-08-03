@@ -7,6 +7,7 @@
 #endif
 
 #include <utility>
+#include <random>
 
 #include <immintrin.h>
 
@@ -219,7 +220,6 @@ namespace dmt {
 
     ScanlineRange2D::End ScanlineRange2D::end() const { return {}; }
 
-    /// TODO test
     PiecewiseConstant1D::PiecewiseConstant1D(std::span<float const> func, float min, float max, std::pmr::memory_resource* memory) :
     m_buffer{makeUniqueRef<float[]>(memory, func.size() << 1)},
     m_funcCount(static_cast<decltype(m_funcCount)>(func.size())),
@@ -513,6 +513,64 @@ namespace dmt {
 } // namespace dmt
 
 namespace dmt::test {
+    void testGGXconductor(uint32_t numSamples, Vector3f wo)
+    {
+        Context ctx;
+        assert(ctx.isValid());
+
+        ctx.warn("--------- TESTING GGX CONDUCTOR BRDF -------------", {});
+        ctx.warn("it's directional-hemispherical albedo should be less than 1", {});
+
+        std::mt19937                          rng(42);
+        std::uniform_real_distribution<float> uDist(0.f, 1.f);
+
+        Normal3f const n{0, 0, 1};
+        RGB            etaGold{0.155f, 0.424f, 1.345};
+        RGB            etakGold{3.911f, 2.345f, 1.770f};
+
+        float sumR = 0.f, sumG = 0.f, sumB = 0.f;
+        ctx.log("  Initialized R = 0, G = 0, B = 0", {});
+
+        for (uint32_t sampleIdx = 0; sampleIdx < numSamples; ++sampleIdx)
+        {
+            Point2f u{uDist(rng), uDist(rng)}; // sampling for GGX
+            float   uc = uDist(rng);           // optional extra random number
+
+            ggx::BSDF bsdf = ggx::makeConductor(wo, n, n, 0.2f, 0.05f, Vector3f::xAxis(), etaGold, etakGold);
+
+
+            // Sample the BSDF properly
+            ggx::BSDFSample sample = ggx::sample(bsdf, wo, n, u, uc);
+
+            float    pdf = sample.pdf;
+            RGB      fr  = sample.f * bsdf.closure.sampleWeight;
+            Vector3f wi  = sample.wi;
+
+            if (pdf > 0.f && fr.max() > 0.f && wi.z > 0.f)
+            {
+                float cosThetaWi = dot(wi, bsdf.closure.N);
+                sumR += fr.r * cosThetaWi / pdf;
+                sumG += fr.g * cosThetaWi / pdf;
+                sumB += fr.b * cosThetaWi / pdf;
+            }
+
+            ctx.log("  Updated R = {} G = {} B = {}", std::make_tuple(sumR, sumG, sumB));
+        }
+
+        // Correct: do NOT multiply again by 2π — the GGX sampling already handles it
+        float integralR = sumR / numSamples;
+        float integralG = sumG / numSamples;
+        float integralB = sumB / numSamples;
+
+        ctx.log("  Integral R = {} G = {} B = {}", std::make_tuple(integralR, integralG, integralB));
+
+        if (!(integralR <= 1.0f + 1e-3f && integralG <= 1.0f + 1e-3f && integralB <= 1.0f + 1e-3f))
+        {
+            ctx.error("  directional-hemispherical albedo for GGX BSDF is not normalized", {});
+            assert(false && "directional-hemispherical albedo for GGX BSDF is not normalized");
+        }
+    }
+
     void bvhTestRays(dmt::BVHBuildNode* rootNode)
     {
         Context ctx;
@@ -1227,9 +1285,8 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
-            ->void
-        {
+            requires std::is_invocable_v<F, Primitive const*>
+        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

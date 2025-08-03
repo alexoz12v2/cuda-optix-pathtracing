@@ -273,14 +273,10 @@ namespace dmt::test {
         Context ctx;
         assert(ctx.isValid() && "Need valid context");
 
-        Bounds3f const sceneBounds = std::transform_reduce(
-            scene.begin(),
-            scene.end(),
-            bbEmpty(),
-            [](dmt::Bounds3f a, dmt::Bounds3f b) { return bbUnion(a, b); },
-            [](TriangleData const& t) {
-            return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)};
-            });
+        Bounds3f const
+            sceneBounds = std::transform_reduce(scene.begin(), scene.end(), bbEmpty(), [](dmt::Bounds3f a, dmt::Bounds3f b) {
+            return bbUnion(a, b);
+        }, [](TriangleData const& t) { return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)}; });
 
         Bounds3f const primsBounds = std::transform_reduce( //
             spanPrims.begin(),
@@ -551,18 +547,10 @@ namespace dmt::sampling {
 
     template <typename T>
     concept Sampler = requires(std::remove_cvref_t<T>& t) {
-        {
-            t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>())
-        };
-        {
-            t.get1D()
-        } -> std::floating_point;
-        {
-            t.get2D()
-        } -> std::same_as<Point2f>;
-        {
-            t.getPixel2D()
-        } -> std::same_as<Point2f>;
+        { t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>()) };
+        { t.get1D() } -> std::floating_point;
+        { t.get2D() } -> std::same_as<Point2f>;
+        { t.getPixel2D() } -> std::same_as<Point2f>;
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class HaltonOwen
@@ -624,17 +612,24 @@ namespace dmt::sampling {
 
         Point2f get2D()
         {
+            Point2f p{};
             if (m_dimension + 1 >= NumPrimes)
                 m_dimension = 2;
             int const dim = m_dimension;
             m_dimension += 2;
-            return {{sampleDim(dim, m_haltonIndex), sampleDim(dim + 1, m_haltonIndex)}};
+
+            p.x = sampleDim(dim, m_haltonIndex);
+            p.y = sampleDim(dim + 1, m_haltonIndex);
+            return p;
         }
 
         Point2f getPixel2D()
         {
-            return {{radicalInverse(DimPrimeIndices[0], m_haltonIndex >> m_baseExponents[0]),
-                     radicalInverse(DimPrimeIndices[1], m_haltonIndex / m_baseScales[1])}};
+            Point2f p{.5f, .5f};
+            p.x = radicalInverse(DimPrimeIndices[0], m_haltonIndex >> m_baseExponents[0]);
+            p.y = radicalInverse(DimPrimeIndices[1], m_haltonIndex / m_baseScales[1]);
+            assert(p.x <= 1.f && p.x >= 0.f && p.y <= 1.f && p.y >= 0.f && "Out of bounds");
+            return p;
         }
 
     private:
@@ -663,7 +658,9 @@ namespace dmt::sampling {
         static float sampleDim(int dim, int64_t haltonIndex)
         {
             namespace dn = dmt::numbers;
-            return owenScrambledRadicalInverse(dim, haltonIndex, dn::mixBits(1 + static_cast<uint64_t>(dim) << 4));
+            float const res = owenScrambledRadicalInverse(dim, haltonIndex, dn::mixBits(1 + static_cast<uint64_t>(dim) << 4));
+            assert(res >= 0 && res <= 1.f && "Owen scrabled radical inverse broken");
+            return res;
         }
 
     private:
@@ -701,12 +698,8 @@ namespace dmt::filtering {
     /// @note doesn't have copy control, pass around as reference
     template <typename T>
     concept Filter = requires(std::remove_cvref_t<T> const& t) {
-        {
-            t.evaluate(std::declval<Point2f>())
-        } -> std::floating_point;
-        {
-            t.radius()
-        } -> std::same_as<Vector2f>;
+        { t.evaluate(std::declval<Point2f>()) } -> std::floating_point;
+        { t.radius() } -> std::same_as<Vector2f>;
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class FilterSampler
@@ -871,9 +864,7 @@ namespace dmt::camera {
 namespace dmt::film {
     template <typename T>
     concept Film = requires(std::remove_cvref_t<T>& t) {
-        {
-            t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f)
-        };
+        { t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f) };
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class RGBFilm
@@ -991,24 +982,45 @@ namespace dmt {
     RGB incidentRadiance(Ray const& ray, BVHBuildNode* bvh, sampling::HaltonOwen& sampler, std::pmr::memory_resource* temp)
     {
         // TODO: Doesn't work
+        Context          ctx;
         Intersection     isect;
         Primitive const* prim = bvh::intersectWideBVHBuild(ray, bvh, &isect);
         if (prim)
         {
             // return isect.color;
-            //float pdf = 1.f;
-            //Vector3f wi = oren_nayar::sample(isect.ng, isect.ng, sampler.get2D(), &pdf);
-            //oren_nayar::BRDF bsdf = oren_nayar::makeParams(0.7f, RGB{0.4f, 0.25f, 0.2f}, isect.ng, wi);
-            //if (pdf != 0)
-            //    return oren_nayar::intensity(bsdf, ray.d, wi) / pdf;
-            //else
-            //    return {};
-            return isect.color;
+//#define DMT_TEST_OREN_NAYAR
+#if defined(DMT_TEST_OREN_NAYAR)
+            float            pdf  = 1.f;
+            oren_nayar::BRDF bsdf = oren_nayar::makeParams(0.7f, RGB{0.4f, 0.25f, 0.2f}, isect.ng, -ray.d, 100.f);
+            Vector3f         wi   = oren_nayar::sample(isect.ng, isect.ng, sampler.get2D(), &pdf);
+
+            float const cosThetaWi = dot(wi, isect.ng);
+            if (pdf != 0)
+                return oren_nayar::intensity(bsdf, -ray.d, wi) * cosThetaWi / pdf;
+#else
+            // BRUSHED GOLD
+            Vector3f const wo = -ray.d;
+            Point2f const  u  = sampler.get2D();
+            float const    uc = sampler.get1D();
+
+            RGB const eta = {0.155f, 0.424f, 1.345};
+            RGB const k   = {3.911f, 2.345f, 1.770f};
+
+            ggx::BSDF       bsdf   = ggx::makeConductor(wo, isect.ng, isect.ng, 0.2, 0.05, Vector3f::xAxis(), eta, k);
+            ggx::BSDFSample sample = ggx::sample(bsdf, wo, isect.ng, u, uc);
+            if (sample.pdf != 0)
+            {
+                float cosThetaWi = dot(sample.wi, isect.ng);
+                assert(cosThetaWi > 0.f);
+                return (sample.f * bsdf.closure.sampleWeight * cosThetaWi / sample.pdf).saturate0();
+            }
+#endif
+
+            ctx.error("Miss Me", {});
+            return {};
         }
-        else
-        {
-            return {.r = 0.255, .g = 0.102, .b = 0.898};
-        }
+
+        return {.r = 0.255, .g = 0.102, .b = 0.898};
     }
 
     // note: we are using float equality because the numbers should come from copying, no computation needed
@@ -1142,8 +1154,9 @@ namespace dmt {
         return true;
     }
 
-#define DMT_DBG_PX_X 75
-#define DMT_DBG_PX_Y 60
+#define DMT_DBG_PX_X       63
+#define DMT_DBG_PX_Y       54
+#define DMT_DBG_SAMPLE_IDX 0x12
 
     void writeIntersectionTestImage(
         std::pmr::monotonic_buffer_resource&  scratch,
@@ -1194,7 +1207,16 @@ namespace dmt {
                     }
                 }
 
-                RGB radiance = isect.hit ? isect.color : RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+                RGB radiance = {};
+                if (isect.hit)
+                {
+                    radiance = dot(-ray.d, isect.ng) > 0.f ? RGB{0, 0, 1} : RGB{1, 0, 0};
+                }
+                else
+                {
+                    radiance = RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+                }
+
                 maskImage[pixel.x + res.x * pixel.y] = isect.hit ? 255 : 0;
 
                 film.addSample(pixel, radiance, cs.filterWeight);
@@ -1220,7 +1242,7 @@ namespace dmt {
         static constexpr uint32_t Width              = 128;
         static constexpr uint32_t Height             = 128;
         static constexpr uint32_t NumChannels        = 3;
-        static constexpr int32_t  SamplesPerPixel    = 4;
+        static constexpr int32_t  SamplesPerPixel    = 128;
         static constexpr uint32_t ScratchBufferBytes = 4096;
 
         Context ctx;
@@ -1326,10 +1348,15 @@ namespace dmt {
                 ctx.log("Starting Pixel {{ {} {} }}",
                         std::make_tuple(pixel.x, pixel.y)); // TODO more samples when filter introduced
             if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
-                int i = 0;
-
-            for (int32_t sampleIndex = 0; sampleIndex < 1 /* SamplesPerPixel*/; ++sampleIndex)
             {
+                ctx.warn("Selected Pixel {} {}", std::make_tuple(pixel.x, pixel.y));
+                int i = 0;
+            }
+
+            for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
+            {
+                if (sampleIndex == DMT_DBG_SAMPLE_IDX)
+                    int i = 0;
                 sampler.startPixelSample(pixel, sampleIndex);
                 camera::CameraSample cs = camera::getCameraSample(sampler, pixel, filter);
                 cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
@@ -1339,6 +1366,12 @@ namespace dmt {
                 RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);
                 resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
+
+                if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
+                {
+                    ctx.warn("  radiance sample {}: {} {} {} W m-2 sr-1",
+                             std::make_tuple(sampleIndex, radiance.r, radiance.g, radiance.b));
+                }
             }
         }
 
@@ -1440,6 +1473,7 @@ int32_t guardedMain()
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();
         dmt::test::testOctahedralProj();
+        dmt::test::testGGXconductor(4096);
 
         dmt::runMainProgram();
 

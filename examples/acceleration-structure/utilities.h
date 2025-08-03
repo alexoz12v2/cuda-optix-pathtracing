@@ -5,6 +5,7 @@
 #include "core/core-math.h"
 #include "core/core-primitive.h"
 #include "core/core-dstd.h"
+#include "core/core-bsdf.h"
 
 #include <memory_resource>
 
@@ -143,6 +144,7 @@ namespace dmt {
 } // namespace dmt
 
 namespace dmt::test {
+    void testGGXconductor(uint32_t numSamples, Vector3f wo = normalize(Vector3f{-1, -1, 1}));
     void bvhTestRays(BVHBuildNode* rootNode);
     void testDistribution1D();
     void testDistribution2D();

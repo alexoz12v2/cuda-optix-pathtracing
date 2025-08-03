@@ -27,7 +27,7 @@ namespace dmt {
     class DMT_CORE_API DMT_INTERFACE Primitive
     {
     public:
-        virtual ~Primitive(){};
+        virtual ~Primitive() {};
 
         virtual Bounds3f     bounds() const                              = 0;
         virtual Intersection intersect(Ray const& ray, float tMax) const = 0;
@@ -92,6 +92,8 @@ namespace dmt {
     public:
         Scene const* scene;
         size_t       instanceIdx;
+
+        Vector3f normalFromIndex(size_t tri) const;
 
         std::tuple<Point3f, Point3f, Point3f> worldSpacePts(size_t _triIdx) const;
     };

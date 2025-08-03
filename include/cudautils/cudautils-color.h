@@ -21,7 +21,13 @@ namespace dmt {
 
         inline RGB saturate() const { return {fl::clamp01(r), fl::clamp01(g), fl::clamp01(b)}; }
 
+        inline RGB saturate0() const { return {fmaxf(r, 0.f), fmaxf(g, 0.f), fmaxf(b, 0.f)}; }
+
+        inline RGB abs() const { return {fl::abs(r), fl::abs(g), fl::abs(b)}; }
+
         inline float avg() const { return (r + g + b) / 3.f; }
+
+        inline float max() const { return fmaxf(fmaxf(r, g), b); }
 
         inline Vector3f& asVec() { return *reinterpret_cast<Vector3f*>(this); }
 

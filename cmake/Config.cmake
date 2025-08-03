@@ -396,9 +396,11 @@ function(dmt_set_target_optimization target properties_visibility)
 
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug") # you can also use the CONFIG generator expression
+      # NRVO has an issue with visual studio debugger, you cannot inspect the returned struct, hence disabling it
+      # https://developercommunity.visualstudio.com/t/When-a-custom-function-returns-a-custom-/10422600
       target_compile_options(${target} ${properties_visibility}
         $<$<COMPILE_LANGUAGE:CXX>:
-          $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi>
+          $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od /Zi /Zc:nrvo->
           $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O0 -g -fprofile-arcs -ftest-coverage>
         >
         $<$<COMPILE_LANGUAGE:CUDA>: -G -g -O0>

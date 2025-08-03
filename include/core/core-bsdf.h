@@ -14,6 +14,12 @@ namespace dmt {
         return (t != 0.0f) ? a * (1.0f / t) : fallback;
     }
 
+    inline Vector3f reflect(Vector3f wo, Vector3f n) { return -wo + 2 * dot(wo, n) * n; }
+
+    /// eta = Relative IOR of the material's interior.
+    /// etap = out parameter equal to eta if outside -> inside, or equal to 1/eta if inside -> outside
+    DMT_CORE_API bool refract(Vector3f wi, Normal3f n, float eta, float* etap, Vector3f* wt);
+
     /// Taken by cycles
     /// If the shading normal results in specular reflection in the lower hemisphere, raise the shading
     /// normal towards the geometry normal so that the specular reflection is just above the surface.
@@ -29,6 +35,8 @@ namespace dmt {
 
     DMT_CORE_API BsdfClosure makeClosure(RGB weight);
 } // namespace dmt
+
+// TODO test these function
 
 /// a more involved implementation is found in cycles, method `microfacet_fresnel` in `bsdf_microfacet.h`
 namespace dmt::fresnel {
@@ -47,17 +55,27 @@ namespace dmt::oren_nayar {
     struct BRDF
     {
         BsdfClosure closure;
-        RGB         multiscatterTerm;
-        float       roughness;
-        float       a;
-        float       b;
+
+        // Note: These are personal fixes, cause somehow the formula doesn't work
+        RGB   albedo;
+        float multiscatterMultiplier;
+
+        // official stuff
+        RGB   multiscatterTerm;
+        float roughness;
+        float a;
+        float b;
     };
 
     /// Evaluate, from qualitative parameters, the parametric representation of an Oren-Nayar BRDF surface
     /// roughness -> \sigma in paper (note: If 0 is given, it's equivalent to Lambert BRDF with additional cost)
     /// color     -> \rho albedo
-    DMT_CORE_API BRDF
-        makeParams(float roughness, RGB color, Vector3f ns, Vector3f wi, RGB weight = RGB::fromVec(Vector3f::one()));
+    DMT_CORE_API BRDF makeParams(float    roughness,
+                                 RGB      color,
+                                 Vector3f ns,
+                                 Vector3f wi,
+                                 float    multiscatterMultiplier = 1.f,
+                                 RGB      weight                 = RGB::fromVec(Vector3f::one()));
 
     /// ng geometric normal
     /// u  point uniformly distributed in unit square [0,1]
@@ -99,9 +117,28 @@ namespace dmt::ggx {
             struct Dielectric
             {
                 RGB reflectanceTint; // different from (1,1,1) if caustics
-                RGB transmittanceTimt;
+                RGB transmittanceTint;
             } d;
         } fresnel;
+    };
+
+    struct BSDFSample
+    {
+        /// sampled incident direction
+        Vector3f wi;
+
+        /// sampled (micro) normal direction
+        Vector3f wm;
+
+        /// computed BSDF value for sampled direction and normal
+        RGB f;
+
+        /// PDF of sampled value
+        float pdf;
+
+        /// relative real part of IOR of intersection. equal to 1 if reflection or conductor
+        /// > 1 if dielectric and outside -> inside, < 1 if dielectric and inside -> outside
+        float eta;
     };
 
     /// set closure, alphax and alphay (roughness), energy scale and index of refraction
@@ -129,7 +166,10 @@ namespace dmt::ggx {
         RGB      etak,
         RGB      weight = RGB::fromVec(Vector3f::one()));
 
+    /// @warning assumes `w` is in tangent space
     DMT_CORE_API float DMT_FASTCALL auxiliaryLambda(Vector3f w, float alphax, float alphay);
+
+    /// @warning assumes `w` is in tangent space
     DMT_CORE_API float DMT_FASTCALL smithG1(Vector3f w, float alphax, float alphay);
 
     /// Smith shadowing-masking term, here in the non-separable form.
@@ -137,9 +177,13 @@ namespace dmt::ggx {
     /// Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs.
     /// Eric Heitz, JCGT Vol. 3, No. 2, 2014.
     /// https://jcgt.org/published/0003/02/03/
+    /// @warning assumes `wo` and `wi` is in tangent space
     DMT_CORE_API float DMT_FASTCALL heightCorrG(Vector3f wo, Vector3f wi, float alphax, float alphay);
 
+    /// @warning assumes `wm` is in tangent space
     DMT_CORE_API float DMT_FASTCALL NDF(Vector3f wm, float alphax, float alphay);
+
+    /// @warning assumes `wm` is in tangent space
     DMT_CORE_API float DMT_FASTCALL PDF(Vector3f w, Vector3f wm, float alphax, float alphay);
 
     /// if this is true, then microsurface is basically planar, hence you shouldn't use roughnesses so low
@@ -155,7 +199,10 @@ namespace dmt::ggx {
     DMT_CORE_API Vector3f DMT_FASTCALL sampleMicroNormal(Vector3f wi, Point2f u, float alphax, float alphay);
 
     // TODO: sample and evaluate for dielectric and conductor
-    // DMT_CORE_API Vector3f DMT_FASTCALL sample();
-    // DMT_CORE_API RGB DMT_FASTCALL intensity();
-    // TODO sampling
+    /// eta is an indicator of refraction. it'll be one if refraction happened
+    /// u, uc uniformly distributed in [0,1]
+    DMT_CORE_API BSDFSample DMT_FASTCALL sample(BSDF const& bsdf, Vector3f w, Vector3f ng, Point2f u, float uc);
+
+    /// @Warning: here wi is the incoming direction of view vector, not incoming direction of light, as used in other functions
+    DMT_CORE_API RGB DMT_FASTCALL eval(BSDF const& bsdf, Vector3f wo, Vector3f wi, Vector3f ng, float* pdf);
 } // namespace dmt::ggx

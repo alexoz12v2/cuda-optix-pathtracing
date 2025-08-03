@@ -6,36 +6,37 @@
 
 namespace dmt {
     namespace triangle {
-        static Vector3f computeNormal(Point3f p0, Point3f p1, Point3f p2)
-        {
-            Vector3f edge1 = p1 - p0;
-            Vector3f edge2 = p2 - p0;
-            return normalize(cross(edge1, edge2)); // Right-handed normal
-        }
+        /// TODO REMOVE AND PUT NORMAL BUFFER EXTRACTION
+        //static Vector3f computeNormal(Point3f p0, Point3f p1, Point3f p2)
+        //{
+        //    Vector3f edge1 = p1 - p0;
+        //    Vector3f edge2 = p2 - p0;
+        //    return normalize(cross(edge1, edge2)); // Right-handed normal
+        //}
 
-        static float extract_component_m128(__m128 vec, int index)
-        {
-            float arr[4];
-            _mm_storeu_ps(arr, vec); // unaligned store
-            return arr[index];       // runtime index
-        }
+        //static float extract_component_m128(__m128 vec, int index)
+        //{
+        //    float arr[4];
+        //    _mm_storeu_ps(arr, vec); // unaligned store
+        //    return arr[index];       // runtime index
+        //}
 
-        static float extract_component_m256(__m256 vec, int index)
-        {
-            float arr[8];
-            _mm256_storeu_ps(arr, vec); // unaligned store
-            return arr[index];          // runtime index
-        }
+        //static float extract_component_m256(__m256 vec, int index)
+        //{
+        //    float arr[8];
+        //    _mm256_storeu_ps(arr, vec); // unaligned store
+        //    return arr[index];          // runtime index
+        //}
 
-        static Point3f getPoint(__m128 x, __m128 y, __m128 z, int index)
-        {
-            return {extract_component_m128(x, index), extract_component_m128(y, index), extract_component_m128(z, index)};
-        }
+        //static Point3f getPoint(__m128 x, __m128 y, __m128 z, int index)
+        //{
+        //    return {extract_component_m128(x, index), extract_component_m128(y, index), extract_component_m128(z, index)};
+        //}
 
-        static Point3f getPoint(__m256 x, __m256 y, __m256 z, int index)
-        {
-            return {extract_component_m256(x, index), extract_component_m256(y, index), extract_component_m256(z, index)};
-        }
+        //static Point3f getPoint(__m256 x, __m256 y, __m256 z, int index)
+        //{
+        //    return {extract_component_m256(x, index), extract_component_m256(y, index), extract_component_m256(z, index)};
+        //}
 
         static Bounds3f bounds(Point3f p0, Point3f p1, Point3f p2) { return bbUnion(makeBounds(p0, p1), p2); }
 
@@ -151,13 +152,12 @@ namespace dmt {
             float    w;
             float    t;
             uint32_t index;
-            Vector3f n;
 
             operator bool() const { return !fl::isInfOrNaN(u); }
 
             static constexpr Triisect nothing()
             {
-                return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0, .n = {}};
+                return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0};
             }
         };
 
@@ -287,19 +287,12 @@ namespace dmt {
                     }
                 }
 
-                // TODO move elsewhere
-                Point3f  p0     = getPoint(v0x, v0y, v0z, bestIndex);
-                Point3f  p1     = getPoint(v1x, v1y, v1z, bestIndex);
-                Point3f  p2     = getPoint(v2x, v2y, v2z, bestIndex);
-                Vector3f normal = computeNormal(p0, p1, p2);
-
                 assert(bestIndex >= 0 && "if a mask was active at least 1 intersection");
                 return {.u     = fl::clamp01(uArray[bestIndex]),
                         .v     = fl::clamp01(vArray[bestIndex]),
                         .w     = fl::clamp01(1.f - uArray[bestIndex] - vArray[bestIndex]),
                         .t     = minT,
-                        .index = static_cast<uint32_t>(bestIndex),
-                        .n     = normal};
+                        .index = static_cast<uint32_t>(bestIndex)};
             }
 #else
     #error "not implemented"
@@ -432,19 +425,12 @@ namespace dmt {
                     }
                 }
 
-                // TODO move elsewhere
-                Point3f  p0     = getPoint(v0x, v0y, v0z, bestIndex);
-                Point3f  p1     = getPoint(v1x, v1y, v1z, bestIndex);
-                Point3f  p2     = getPoint(v2x, v2y, v2z, bestIndex);
-                Vector3f normal = computeNormal(p0, p1, p2);
-
                 assert(bestIndex >= 0 && "if a mask was active at least 1 intersection");
                 return {.u     = fl::clamp01(uArray[bestIndex]),
                         .v     = fl::clamp01(vArray[bestIndex]),
                         .w     = fl::clamp01(1.f - uArray[bestIndex] - vArray[bestIndex]),
                         .t     = minT,
-                        .index = static_cast<uint32_t>(bestIndex),
-                        .n     = normal};
+                        .index = static_cast<uint32_t>(bestIndex)};
             }
 #else
     #error "not implemented"
@@ -482,10 +468,7 @@ namespace dmt {
             if (t < -tol || t > tMax)
                 return Triisect::nothing();
 
-            // TODO move elsewhere
-            Vector3f normal = computeNormal(v0, v1, v2);
-
-            return {.u = fl::clamp01(u), .v = fl::clamp01(v), .w = fl::clamp01(1.f - u - v), .t = t, .index = index, .n = normal};
+            return {.u = fl::clamp01(u), .v = fl::clamp01(v), .w = fl::clamp01(1.f - u - v), .t = t, .index = index};
 #else
             // Woop's watertight algorithm https://jcgt.org/published/0002/01/05/paper.pdf
             // calculate dimension where the ray direction is maximal
@@ -580,7 +563,7 @@ namespace dmt {
             if (trisect)
                 return {
                     .p     = ray.o + trisect.t * ray.d,
-                    .ng    = trisect.n,
+                    .ng    = {},
                     .t     = trisect.t,
                     .hit   = true,
                     .color = color,
@@ -675,6 +658,27 @@ namespace dmt {
         return {p0, p1, p2};
     }
 
+    Vector3f TriangleIndexedBase::normalFromIndex(size_t tri) const
+    {
+        auto const* instance = scene->instances[instanceIdx].get();
+        auto const* geo      = scene->geometry[instance->meshIdx].get();
+        auto const  index    = geo->getIndexedTri(tri);
+        Transform   t        = transformFromAffine(instance->affineTransform);
+
+        // Get raw normals and sum them as plain vectors
+        Vector3f n0 = geo->getNormal(index.v[0].normalIdx);
+        Vector3f n1 = geo->getNormal(index.v[1].normalIdx);
+        Vector3f n2 = geo->getNormal(index.v[2].normalIdx);
+
+        // normalize done by constructor
+        Normal3f avg = n0 + n1 + n2;
+
+        assert(fl::abs(normL2(avg) - 1.f) < 1e-5f && "sum of normals should still be unit length");
+        Normal3f transformed = t(avg);
+        assert(fl::abs(normL2(transformed) - 1.f) < 1e-5f && "transformed normal should still be unit length");
+        return transformed;
+    }
+
     Bounds3f TriangleIndexed::bounds() const
     {
         auto const [p0, p1, p2] = worldSpacePts(triIdx);
@@ -690,7 +694,11 @@ namespace dmt {
         auto const [p0, p1, p2] = worldSpacePts(triIdx);
 
         triangle::Triisect const trisect = triangle::intersect(ray, tMax, p0, p1, p2, 0);
-        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+
+        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        if (trisect)
+            ret.ng = normalFromIndex(triIdx);
+        return ret;
     }
 
     // clang-format off
@@ -758,7 +766,11 @@ namespace dmt {
         Point3f v2s[2]{};
         fillIndexedVerts<2>(this, triIdxs, v0s, v1s, v2s);
         triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0x3);
-        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+
+        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        if (trisect)
+            ret.ng = normalFromIndex(triIdxs[trisect.index]);
+        return ret;
     }
 
     Intersection TrianglesIndexed4::intersect(Ray const& ray, float tMax) const
@@ -768,7 +780,11 @@ namespace dmt {
         Point3f v2s[4]{};
         fillIndexedVerts<4>(this, triIdxs, v0s, v1s, v2s);
         triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
-        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+
+        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        if (trisect)
+            ret.ng = normalFromIndex(triIdxs[trisect.index]);
+        return ret;
     }
 
     Intersection TrianglesIndexed8::intersect(Ray const& ray, float tMax) const
@@ -778,6 +794,10 @@ namespace dmt {
         Point3f v2s[8]{};
         fillIndexedVerts<8>(this, triIdxs, v0s, v1s, v2s);
         triangle::Triisect trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
-        return triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+
+        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        if (trisect)
+            ret.ng = normalFromIndex(triIdxs[trisect.index]);
+        return ret;
     }
 } // namespace dmt

@@ -40,6 +40,22 @@ namespace dmt {
         return rand.x * T + rand.y * B + cosTheta * n;
     }
 
+    __host__ __device__ Vector3f sampleUniformHemisphere(Vector3f n, Point2f u, float* pdf)
+    {
+        assert(fl::abs(normL2(n) - 1.f) < 1e-5f && "Expected unit vector");
+        Point2f     xy = sampleUniformDisk(u);
+        float const z  = 1.f - dotSelf(xy);
+
+        xy *= fl::safeSqrt(z + 1.f);
+        Vector3f T{}, B{};
+        gramSchmidt(n, &T, &B);
+
+        Vector3f wo = xy.x * T + xy.y * B + z * n;
+        if (pdf)
+            *pdf = 1 / fl::twoPi();
+        return wo;
+    }
+
     __host__ __device__ float cosHemispherePDF(Vector3f n, Vector3f d)
     {
         assert(fl::abs(normL2(n) - 1.f) < 1e-5f && fl::abs(normL2(d) - 1.f) < 1e-5f);

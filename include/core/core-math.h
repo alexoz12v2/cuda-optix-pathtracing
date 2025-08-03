@@ -53,6 +53,9 @@ namespace dmt {
     DMT_CORE_API void      extractAffineTransform(Matrix4f const& m, float affineTransform[12]);
     DMT_CORE_API Matrix4f  matrixFromAffine(float const affineTransform[12]);
     DMT_CORE_API Transform transformFromAffine(float const affineTransform[12]);
+
+    DMT_CORE_API float lookupTableRead(float const* table, float x, int32_t size);
+    DMT_CORE_API float lookupTableRead2D(float const* table, float x, float y, int32_t sizex, int32_t sizey);
 } // namespace dmt
 
 namespace dmt::transforms {

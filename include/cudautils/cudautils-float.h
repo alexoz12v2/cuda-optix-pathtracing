@@ -131,6 +131,7 @@ namespace dmt::fl {
 
     DMT_CPU_GPU inline uint32_t signBit(float v) { return floatToBits(v) & 0x80000000; }
 
+    DMT_CPU_GPU inline float sqr(float v) { return v * v; }
 
     DMT_CPU_GPU inline float addRoundUp(float a, float b)
     {

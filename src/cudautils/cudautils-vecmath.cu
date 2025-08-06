@@ -70,6 +70,12 @@ namespace dmt {
     __host__ __device__ Vector3f operator-(Point3f a, Point3f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
     __host__ __device__ Vector4i operator-(Point4i a, Point4i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
     __host__ __device__ Vector4f operator-(Point4f a, Point4f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector2i operator-(Point2i a, Vector2i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector2f operator-(Point2f a, Vector2f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector3i operator-(Point3i a, Vector3i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector3f operator-(Point3f a, Vector3f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector4i operator-(Point4i a, Vector4i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector4f operator-(Point4f a, Vector4f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
     __host__ __device__ Vector2i operator-(Vector2i a, Vector2i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
     __host__ __device__ Vector2f operator-(Vector2f a, Vector2f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
     __host__ __device__ Vector3i operator-(Vector3i a, Vector3i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
@@ -611,6 +617,48 @@ namespace dmt {
         else
             return 2 * fl::asinClamp(normL2(b - a) / 2);
     }
+
+    // quaternion rotation
+    __host__ __device__ Quaternion fromRadians(float theta, Normal3f axis)
+    {
+        Quaternion  quat{};
+        float const sinHalfAngle = sinf(theta);
+
+        quat.w = cosf(theta * 0.5f);
+        quat.x = axis.x * sinHalfAngle;
+        quat.y = axis.y * sinHalfAngle;
+        quat.z = axis.z * sinHalfAngle;
+        assert(fl::abs(normL2(quat) - 1.f) < 1e-5f);
+
+        return quat;
+    }
+
+    __host__ __device__ Quaternion conj(Quaternion quat)
+    {
+        Quaternion quatConj = -quat;
+        quatConj.w          = quat.w;
+        return quatConj;
+    }
+
+    __host__ __device__ DMT_FASTCALL Vector3f rotate(Quaternion quat, Vector3f v)
+    {
+        Quaternion pure{};
+        pure.x                    = v.x;
+        pure.y                    = v.y;
+        pure.z                    = v.z;
+        Quaternion const quatConj = conj(quat);
+
+        pure = quat * pure * quatConj;
+
+        return {pure.x, pure.y, pure.z};
+    }
+
+    __host__ __device__ DMT_FASTCALL Normal3f rotate(Quaternion quat, Normal3f v)
+    {
+        return normalize(rotate(quat, v.asVec()));
+    }
+
+    // frame and other utilities
 
     __host__ __device__ Frame coordinateSystem(Normal3f xAxis)
     {

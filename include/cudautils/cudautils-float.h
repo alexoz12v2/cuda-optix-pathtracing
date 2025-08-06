@@ -343,6 +343,7 @@ namespace dmt::fl {
     // Helper to compute (a^2 + b^2)^1/2 without overflow or underflow
     DMT_CORE_API DMT_CPU_GPU float pythag(float a, float b);
 
+    DMT_CPU_GPU inline float safeacos(float v) { return clamp(acosf(v), -1, 1); }
 } // namespace dmt::fl
 
 namespace dmt {

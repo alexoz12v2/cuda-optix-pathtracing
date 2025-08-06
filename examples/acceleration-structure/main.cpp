@@ -6,8 +6,8 @@
 #include "core/core-bvh-builder.h"
 #include "core/core-bsdf.h"
 #include "core/core-primitive.h"
+#include "core/core-light.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
 #include <numeric>
@@ -979,7 +979,11 @@ namespace dmt {
     }
 
     // TODO proper path tracing
-    RGB incidentRadiance(Ray const& ray, BVHBuildNode* bvh, sampling::HaltonOwen& sampler, std::pmr::memory_resource* temp)
+    RGB incidentRadiance(Ray const&                 ray,
+                         BVHBuildNode*              bvh,
+                         sampling::HaltonOwen&      sampler,
+                         EnvLight const&            envLight,
+                         std::pmr::memory_resource* temp)
     {
         // TODO: Doesn't work
         Context          ctx;
@@ -1020,7 +1024,8 @@ namespace dmt {
             return {};
         }
 
-        return {.r = 0.255, .g = 0.102, .b = 0.898};
+        float pdf = 0.f;
+        return envLightEval(envLight, ray.d, &pdf);
     }
 
     // note: we are using float equality because the numbers should come from copying, no computation needed
@@ -1236,7 +1241,40 @@ namespace dmt {
         stbi_write_png(imagePath.toUnderlying(&scratch).c_str(), res.x, res.y, 1, maskImage.get(), 0);
     }
 
-    void runMainProgram()
+    static UniqueRef<RGB[]> background(int32_t*                   xRes,
+                                       int32_t*                   yRes,
+                                       std::pmr::memory_resource* memory,
+                                       std::pmr::memory_resource* temp)
+    {
+        // TODO better path
+        os::Path imagePath = os::Path::executableDir(temp);
+        imagePath /= "kloppenheim_02_2k.exr";
+        if (imagePath.isValid() && imagePath.isFile())
+        {
+            openEXR(imagePath, nullptr, xRes, yRes, temp);
+            auto image = makeUniqueRef<RGB[]>(memory, static_cast<size_t>(*xRes) * *yRes);
+            std::memset(image.get(), 0, static_cast<size_t>(*xRes) * *yRes * sizeof(RGB));
+
+            auto* raw = image.get();
+            if (openEXR(imagePath, &raw, xRes, yRes, temp))
+            {
+                Context ctx;
+                ctx.warn("Writing EXR image into PNG to check if there's a y flipping or something", {});
+                writePNG(os::Path::executableDir() / "background.png", image.get(), *xRes, *yRes);
+                return image;
+            }
+        }
+
+        *xRes = 4;
+        *yRes = 2;
+
+        auto constImage = makeUniqueRef<RGB[]>(memory, 4ull * 2);
+        for (int32_t i = 0; i < 4 * 2; ++i)
+            constImage[i] = RGB{.r = 0.255, .g = 0.102, .b = 0.898};
+        return constImage;
+    }
+
+    static void runMainProgram()
     {
         // primsView primitive coordinates defined in world space
         static constexpr uint32_t Width              = 128;
@@ -1329,12 +1367,17 @@ namespace dmt {
         // define camera (image plane physical dims, resolution given by image)
         Vector3f const cameraPosition{0.f, 0.f, 0.f};
         Normal3f const cameraDirection{0.f, 1.f, -0.5f};
-        float const    focalLength = 35e-3f; // 35 mm
-        float const    fovRadians  = fl::pi() / 2;
-        float const    aspectRatio = Width / Height;
+        float const    focalLength  = 20e-3f; // 20 mm
+        float const    sensorHeight = 36e-3f; // 36mm
+        float const    aspectRatio  = static_cast<float>(Width) / Height;
 
-        Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(fovRadians, aspectRatio, Width, Height, focalLength);
+        Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(focalLength, sensorHeight, Width, Height);
         Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
+
+        // TODO: remove, open background image (if possible)
+        int32_t  xResBackground = 0, yResBackground = 0;
+        auto     backImage = background(&xResBackground, &yResBackground, &pool, &scratch);
+        EnvLight backgroundLight{backImage.get(), xResBackground, yResBackground, {0, 0, 0, 1}, 1.f, &pool};
 
         // TODO: translate the BVH to be in camera-world (render) space, then switch renderFromCamera to use camera-world
         ctx.warn("Printing Global BVH", {});
@@ -1363,7 +1406,7 @@ namespace dmt {
                 cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
                 cs.filterWeight         = 1.f;
                 Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
-                RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, &scratch);
+                RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, backgroundLight, &scratch);
                 film.addSample(pixel, radiance, cs.filterWeight);
                 resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
 
@@ -1470,10 +1513,13 @@ int32_t guardedMain()
         dmt::test::bvhTestRays(rootNode);
         dmt::bvh::cleanup(rootNode);
 
+        dmt::test::testQuaternionRotation();
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();
         dmt::test::testOctahedralProj();
         dmt::test::testGGXconductor(4096);
+        dmt::test::testSphereLightPDFAnalyticCheck();
+        dmt::test::testEnvironmentalLightConstantValue();
 
         dmt::runMainProgram();
 

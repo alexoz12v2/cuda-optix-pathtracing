@@ -1,9 +1,10 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "cudautils/cudautils-vecmath.h"
-#include "cudautils/cudautils-transform.h"
-#include "cudautils/cudautils-color.h"
+#include "core/core-cudautils-cpubuild.h"
+#include "core/core-dstd.h"
+
+#include "platform/platform-memory.h"
 
 #if !defined(DMT_ARCH_X86_64)
     #error "Support only for AVX2 capable x86_64 CPU"
@@ -56,6 +57,90 @@ namespace dmt {
 
     DMT_CORE_API float lookupTableRead(float const* table, float x, int32_t size);
     DMT_CORE_API float lookupTableRead2D(float const* table, float x, float y, int32_t sizex, int32_t sizey);
+
+    DMT_CORE_API inline float smoothstep(float x)
+    {
+        if (x <= 0.f)
+            return 0.f;
+        if (x >= 1.f)
+            return 1.f;
+        float const x2 = x * x;
+        return 3.f * x2 - 2.f * x2 * x;
+    }
+
+    // distributions
+    /**
+     * @brief class to represent a 1D PDF and its CDF functions as
+     * <ul>
+     *  <li>PDF -> constant interpolated piecewise function</li>
+     *  <li>CDF -> linearly interpolated piecewise function</li>
+     * </ul>
+     * We store the absolute value of the sampled function and its CDF computed with a normalized running sum
+     * TODO: If necessary, define copy-control, otherwise, just avoid it and pass them with const&
+     */
+    class PiecewiseConstant1D
+    {
+    public:
+        DMT_CORE_API PiecewiseConstant1D(std::span<float const>     func,
+                                         float                      min,
+                                         float                      max,
+                                         std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+
+        float DMT_CORE_API    integral() const;
+        uint32_t DMT_CORE_API size() const;
+
+        /// @warning returns nan if x outside range min, max
+        float DMT_CORE_API invert(float x) const;
+
+        float DMT_CORE_API sample(float u, float* pdf = nullptr, int32_t* offset = nullptr) const;
+
+        DMT_FORCEINLINE std::span<float const> absFunc() const { return {m_buffer.get(), m_funcCount}; }
+        DMT_FORCEINLINE std::span<float const> CDF() const { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+        DMT_FORCEINLINE std::span<float const> absFunc() { return {m_buffer.get(), m_funcCount}; }
+        DMT_FORCEINLINE std::span<float const> CDF() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+
+    private:
+        DMT_FORCEINLINE std::span<float> absFunc_() { return {m_buffer.get(), m_funcCount}; }
+        DMT_FORCEINLINE std::span<float> CDF_() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+
+    private:
+        UniqueRef<float[]> m_buffer;    // first half abs(func), second half CDF
+        uint32_t           m_funcCount; // half the count of floats in buffer
+        float              m_min, m_max;
+        float              m_integral;
+    };
+
+    /**
+     * @brief class to represent a 2D PDF and its CDF functions by decomposing a 2D distribution
+     * proportional to the input function into
+     * - the marginal PDF (1D piecewise constant) over the first axis
+     * - a list, for each value in the first axis, of conditional PDFs, because p(y | x) = p(x, y) / p(x)
+     * @see PiecewiseConstant1D
+     */
+    class PiecewiseConstant2D
+    {
+    public:
+        DMT_CORE_API PiecewiseConstant2D(dstd::Array2D<float> const& data,
+                                         Bounds2f                    domain,
+                                         std::pmr::memory_resource*  memory = std::pmr::get_default_resource(),
+                                         std::pmr::memory_resource*  temp   = std::pmr::get_default_resource());
+
+        Bounds2f DMT_CORE_API domain() const;
+        Point2i DMT_CORE_API  resolution() const;
+        float DMT_CORE_API    integral() const;
+
+        /// @warning returns nan if p outside bounds
+        Point2f DMT_CORE_API invert(Point2f p) const;
+
+        Point2f DMT_CORE_API sample(Point2f u, float* pdf = nullptr, Point2i* offset = nullptr) const;
+
+        float DMT_CORE_API pdf(Point2f pr) const;
+
+    private: // assume variables are u and v, v -> marginal, u -> computed through conditional probability
+        Bounds2f                              m_domain;
+        std::pmr::vector<PiecewiseConstant1D> m_pConditionalV;
+        PiecewiseConstant1D                   m_pMarginalV;
+    };
 } // namespace dmt
 
 namespace dmt::transforms {
@@ -100,5 +185,5 @@ namespace dmt::transforms {
     DMT_CORE_API Transform DMT_FASTCALL worldFromCamera(Normal3f cameraDirection, Point3f cameraPosition);
 
     DMT_CORE_API Transform DMT_FASTCALL
-        cameraFromRaster_Perspective(float fovRadians, float aspectRatio, uint32_t xRes, uint32_t yRes, float focalLength);
+        cameraFromRaster_Perspective(float focalLength, float sensorHeight, uint32_t xRes, uint32_t yRes);
 } // namespace dmt::transforms

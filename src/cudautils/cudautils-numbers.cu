@@ -1,6 +1,148 @@
 #include "cudautils-numbers.h"
 
 namespace dmt {
+    __host__ __device__ float sphereLightPDF(float distSqr, float radiusSqr, Vector3f n, Vector3f rayD, bool hadTransmission)
+    {
+        static constexpr float _1Over2Pi = 1 / fl::twoPi();
+        if (distSqr > radiusSqr)
+            return _1Over2Pi / sin_sqr_to_one_minus_cos(radiusSqr / distSqr);
+        else
+            return hadTransmission ? _1Over2Pi * 0.5f : cosHemispherePDF(n, rayD);
+    }
+
+    __host__ __device__ Point2f mapToSphere(Normal3f co)
+    {
+        static constexpr float _1Over2Pi = 1 / fl::twoPi();
+
+        float const l = dotSelf(co);
+        float       u;
+        float       v;
+        if (l > 0.0f)
+        {
+            if (co.x == 0.0f && co.y == 0.0f)
+            {
+                u = 0.0f; /* Otherwise domain error. */
+            }
+            else
+            {
+                u = (0.5f - atan2f(co.x, co.y) * _1Over2Pi);
+            }
+            v = 1.0f - fl::safeacos(co.z / sqrtf(l)) * _1Over2Pi;
+        }
+        else
+        {
+            u = v = 0.0f;
+        }
+
+        return {u, v};
+    }
+
+    __host__ __device__ bool raySphereIntersect(
+        Point3f  rayO,
+        Vector3f rayD,
+        float    tMin,
+        float    tMax,
+        Point3f  sphereC,
+        float    sphereRadius,
+        Point3f* isect_p,
+        float*   isect_t)
+    {
+        // courtesy of cycles
+        Vector3f const d_vec       = sphereC - rayO;
+        float const    r_sq        = sphereRadius * sphereRadius;
+        float const    d_sq        = dot(d_vec, d_vec);
+        float const    d_cos_theta = dot(d_vec, rayD);
+
+        if (d_sq > r_sq && d_cos_theta < 0.0f)
+        {
+            // Ray origin outside sphere and points away from sphere.
+            return false;
+        }
+
+        float const d_sin_theta_sq = dotSelf(d_vec - d_cos_theta * rayD);
+
+        if (d_sin_theta_sq > r_sq)
+        {
+            // Closest point on ray outside sphere.
+            return false;
+        }
+
+        // Law of cosines
+        float const t = d_cos_theta - copysignf(sqrtf(r_sq - d_sin_theta_sq), d_sq - r_sq);
+
+        if (t > tMin && t < tMax)
+        {
+            *isect_t = t;
+            *isect_p = rayO + rayD * t;
+            return true;
+        }
+
+        return false;
+    }
+
+    __host__ __device__ Vector3f
+        sampleUniformCone(Vector3f const N, float const one_minus_cos_angle, Point2f const rand, float* cos_theta, float* pdf)
+    {
+        if (one_minus_cos_angle > 0)
+        {
+            // Remap radius to get a uniform distribution w.r.t. solid angle on the cone.
+            // The logic to derive this mapping is as follows:
+            //
+            // Sampling a cone is comparable to sampling the hemisphere, we just restrict theta. Therefore,
+            // the same trick of first sampling the unit disk and the projecting the result up towards the
+            // hemisphere by calculating the appropriate z coordinate still works.
+            //
+            // However, by itself this results in cosine-weighted hemisphere sampling, so we need some kind
+            // of remapping. Cosine-weighted hemisphere and uniform cone sampling have the same conditional
+            // PDF for phi (both are constant), so we only need to think about theta, which corresponds
+            // directly to the radius.
+            //
+            // To find this mapping, we consider the simplest sampling strategies for cosine-weighted
+            // hemispheres and uniform cones. In both, phi is chosen as `2pi * random()`. For the former,
+            // `r_disk(rand) = sqrt(rand)`. This is just naive disk sampling, since the projection to the
+            // hemisphere doesn't change the radius.
+            // For the latter, `r_cone(rand) = sin_from_cos(mix(cos_angle, 1, rand))`.
+            //
+            // So, to remap, we just invert r_disk `(-> rand(r_disk) = r_disk^2)` and insert it into
+            // r_cone: `r_cone(r_disk) = r_cone(rand(r_disk)) = sin_from_cos(mix(cos_angle, 1, r_disk^2))`.
+            // In practice, we need to replace `rand` with `1 - rand` to preserve the stratification,
+            // but since it's uniform, that's fine
+            Point2f     xy = sampleUniformDisk(rand);
+            float const r2 = dotSelf(xy);
+
+            /* Equivalent to `mix(cos_angle, 1.0f, 1.0f - r2)`. */
+            *cos_theta = 1.0f - r2 * one_minus_cos_angle;
+
+            /* Remap disk radius to cone radius, equivalent to `xy *= sin_theta / sqrt(r2)`. */
+            xy *= fl::safeSqrt(one_minus_cos_angle * (2.0f - one_minus_cos_angle * r2));
+
+            *pdf = 1.f / (fl::twoPi() * one_minus_cos_angle);
+
+            Vector3f T{};
+            Vector3f B{};
+            gramSchmidt(N, &T, &B);
+            return xy.x * T + xy.y * B + *cos_theta * N;
+        }
+
+        *cos_theta = 1.0f;
+        *pdf       = 1.0f;
+
+        return N;
+    }
+
+    __host__ __device__ Vector3f sampleUniformSphere(Point2f const rand)
+    {
+        float const z   = 1.0f - 2.0f * rand.x;
+        float const r   = fl::safeSqrt(1.f - z * z); // sin from cos
+        float const phi = fl::twoPi() * rand.y;
+
+        // polar to cartesian
+        float const xCartesian = r * cosf(phi);
+        float const yCartesian = r * sinf(phi);
+
+        return {xCartesian, yCartesian, z};
+    }
+
     __host__ __device__ Point2f sampleUniformDisk(Point2f u)
     {
         // remap x,y to -1,1

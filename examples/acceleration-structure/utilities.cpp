@@ -6,6 +6,12 @@
     #error "what"
 #endif
 
+#include <ImfRgbaFile.h>
+#include <ImfArray.h>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+
 #include <utility>
 #include <random>
 
@@ -220,296 +226,79 @@ namespace dmt {
 
     ScanlineRange2D::End ScanlineRange2D::end() const { return {}; }
 
-    PiecewiseConstant1D::PiecewiseConstant1D(std::span<float const> func, float min, float max, std::pmr::memory_resource* memory) :
-    m_buffer{makeUniqueRef<float[]>(memory, func.size() << 1)},
-    m_funcCount(static_cast<decltype(m_funcCount)>(func.size())),
-    m_min(min),
-    m_max(max)
+    bool openEXR(os::Path const& imagePath, RGB** buffer, int32_t* xRes, int32_t* yRes, std::pmr::memory_resource* temp)
     {
-        assert(isPOT(func.size()) && "PiecewiseConstant1D requires its source sampled function to have POT samples");
-        assert(func.size() == m_funcCount && "narrowing conversion of size lost values");
+        if (!imagePath.isValid() || !imagePath.isFile())
+            return false;
 
-        // First step: copy absolute value of function
-        float const* fPtr      = func.data();
-        float*       fDest     = m_buffer.get();
-        uint32_t     remaining = m_funcCount;
-
-        __m256 const nzero8 = _mm256_set1_ps(-0.f);
-        __m128 const nzero4 = _mm_set1_ps(-0.f);
-        while (remaining >= 8)
-        { // store abs
-            _mm256_storeu_ps(fDest, _mm256_andnot_ps(nzero8, _mm256_loadu_ps(fPtr)));
-            fPtr += 8;
-            fDest += 8;
-            remaining -= 8;
-        }
-
-        while (remaining >= 4)
+        try
         {
-            _mm_storeu_ps(fDest, _mm_andnot_ps(nzero4, _mm_loadu_ps(fPtr)));
-            fPtr += 4;
-            fDest += 4;
-            remaining -= 4;
-        }
+            auto const         str = imagePath.toUnderlying(temp);
+            Imf::RgbaInputFile file(str.c_str());
+            Imath::Box2i       dw = file.dataWindow();
 
-        while (remaining != 0)
-        {
-            *fDest++ = *fPtr++;
-            --remaining;
-        }
+            int32_t width  = dw.max.x - dw.min.x + 1;
+            int32_t height = dw.max.y - dw.min.y + 1;
 
-        // Second Step: CDF Computation https://en.algorithmica.org/hpc/algorithms/prefix/
-        // split the array into blocks of 8 (remaining later)
-        // cdf[0] = 0;
-        // for (size_t i = 1; i < n + 1; ++i)
-        //     cdf[i] = cdf[i - 1] + func[i - 1] * (max - min) / n;
-        uint32_t const numBlocksTimes8 = m_funcCount & ~0x7u;
-        fPtr                           = func.data();
-        float*       cdf               = m_buffer.get() + m_funcCount;
-        float        carry             = 0.f;
-        __m256 const normalizeFac      = _mm256_set1_ps((m_max - m_min) / m_funcCount);
-
-        for (uint32_t i = 0; i < numBlocksTimes8 >> 3u; ++i)
-        {
-            __m256 x = _mm256_mul_ps(_mm256_loadu_ps(fPtr), normalizeFac);
-
-            // In-lane prefix sum (lane 0: [0–3], lane 1: [4–7])
-            __m256 t;
-
-            t = _mm256_castsi256_ps(_mm256_slli_si256(_mm256_castps_si256(x), 4));
-            x = _mm256_add_ps(x, t);
-
-            t = _mm256_castsi256_ps(_mm256_slli_si256(_mm256_castps_si256(x), 8));
-            x = _mm256_add_ps(x, t);
-
-            // Extract lane 0 sum (last element of lane 0)
-            __m128 low       = _mm256_castps256_ps128(x);
-            float  lane0_sum = _mm_cvtss_f32(_mm_shuffle_ps(low, low, _MM_SHUFFLE(3, 3, 3, 3)));
-
-            // Broadcast lane0_sum to a vector
-            __m256 lane0_sum_vec = _mm256_set1_ps(lane0_sum);
-
-            // Create mask to zero out lane 0, keep lane 1
-            __m256 mask = _mm256_castsi256_ps(_mm256_setr_epi32(0, 0, 0, 0, -1, -1, -1, -1));
-
-            // Add lane0_sum only to lane 1 elements
-            x = _mm256_blendv_ps(x, _mm256_add_ps(x, lane0_sum_vec), mask);
-
-            // Step 2: Add carry from previous block
-            __m256 carryVec = _mm256_set1_ps(carry);
-            x               = _mm256_add_ps(x, carryVec);
-
-            _mm256_storeu_ps(cdf, x); // store result
-
-            // Step 3: Extract last value from x to use as carry for next block
-            // The last element in x is the total sum of this block
-            // To get it, extract the high 128-bit lane, then extract element 3
-
-            __m128 high = _mm256_extractf128_ps(x, 1);                              // get elements 4–7
-            float  last = _mm_cvtss_f32(_mm_shuffle_ps(high, high, 0b11'11'11'11)); // get element 7
-
-            carry = last;
-            fPtr += 8;
-            cdf += 8;
-        }
-        // handle remainder with carry and scalar ops
-        remaining = m_funcCount - numBlocksTimes8;
-        while (remaining != 0)
-        {
-            *cdf = *(cdf - 1) + *fPtr;
-            ++cdf;
-            ++fPtr;
-            --remaining;
-        }
-
-        // step 3: normalize CDF
-        //   funcInt = cdf[n];
-        //   if (funcInt == 0) for (size_t i = 1; i < n + 1; ++i) cdf[i] = Float(i) / Float(n);
-        //   else              for (size_t i = 1; i < n + 1; ++i) cdf[i] /= funcInt;
-        m_integral        = CDF_().back();
-        float const  fac  = dmt::fl::rcp(dmt::fl::nearZero(m_integral) ? m_funcCount : m_integral);
-        __m256 const vFac = _mm256_set1_ps(fac);
-
-        cdf       = m_buffer.get() + m_funcCount;
-        remaining = m_funcCount - numBlocksTimes8;
-
-        if (dmt::fl::nearZero(m_integral))
-        {
-            alignas(alignof(__m256)) float base[8]{0, 1, 2, 3, 4, 5, 6, 7};
-
-            __m256       vNum    = _mm256_load_ps(base);
-            __m256 const vOffset = _mm256_set1_ps(8.f);
-            for (uint32_t i = 0; i < numBlocksTimes8; ++i)
+            if (!buffer)
             {
-                _mm256_storeu_ps(cdf, _mm256_mul_ps(vNum, vFac));
-                vNum = _mm256_add_ps(vNum, vOffset);
-                cdf += 8;
+                assert(xRes && yRes);
+                *xRes = width;
+                *yRes = height;
+                return true;
+            }
+            else
+            {
+                assert(xRes && yRes && *xRes > 0 && *yRes > 0);
+                assert(*xRes == width && *yRes == height); // sanity check
+
+                auto pixels = makeUniqueRef<Imf::Array2D<Imf::Rgba>>(temp, height, width); // note: height x width
+                file.setFrameBuffer(&(*pixels)[0][0] - dw.min.x - dw.min.y * width, 1, width); // Adjust for dataWindow origin
+                file.readPixels(dw.min.y, dw.max.y);
+
+                for (int32_t y = 0; y < height; ++y)
+                {
+                    for (int32_t x = 0; x < width; ++x)
+                    {
+                        (*buffer)[x + y * width].r = static_cast<float>((*pixels)[y][x].r);
+                        (*buffer)[x + y * width].g = static_cast<float>((*pixels)[y][x].g);
+                        (*buffer)[x + y * width].b = static_cast<float>((*pixels)[y][x].b);
+                    }
+                }
+
+                return true;
             }
 
-            // Handle remainder scalars
-            for (size_t i = 0; i < remaining; ++i)
-                cdf[i] = static_cast<float>(numBlocksTimes8 + i) * fac;
-        }
-        else
+        } catch (...)
         {
-            for (uint32_t i = 0; i < numBlocksTimes8 >> 3; ++i)
+            return false;
+        }
+    }
+
+    bool writePNG(os::Path const& imgPath, RGB const* buffer, int32_t xRes, int32_t yRes, std::pmr::memory_resource* temp)
+    {
+        size_t const numBytes    = static_cast<size_t>(xRes) * yRes * 3;
+        int const    rowStride   = xRes * 3;
+        auto         imageBuffer = makeUniqueRef<unsigned char[]>(temp, numBytes);
+        if (!imageBuffer)
+            return false;
+
+        std::memset(imageBuffer.get(), 0, numBytes);
+        for (size_t y = 0; y < yRes; ++y)
+        {
+            for (size_t x = 0; x < xRes; ++x)
             {
-                _mm256_storeu_ps(cdf, _mm256_mul_ps(_mm256_loadu_ps(cdf), vFac));
-                cdf += 8;
+                size_t const bufferIdx = x + y * xRes;
+                size_t const imageIdx  = (y * xRes + x) * 3;
+
+                imageBuffer[imageIdx + 0] = static_cast<unsigned char>(fl::clamp01(buffer[bufferIdx].r) * 255.f);
+                imageBuffer[imageIdx + 1] = static_cast<unsigned char>(fl::clamp01(buffer[bufferIdx].g) * 255.f);
+                imageBuffer[imageIdx + 2] = static_cast<unsigned char>(fl::clamp01(buffer[bufferIdx].b) * 255.f);
             }
-
-            // Handle remainder scalars
-            for (size_t i = 0; i < remaining; ++i)
-                cdf[i] *= fac;
         }
+
+        return stbi_write_png(imgPath.toUnderlying(temp).c_str(), xRes, yRes, 3, imageBuffer.get(), rowStride);
     }
-
-    float PiecewiseConstant1D::integral() const { return m_integral; }
-
-    uint32_t PiecewiseConstant1D::size() const { return m_funcCount; }
-
-    float PiecewiseConstant1D::invert(float x) const
-    {
-        if (x < m_min || x > m_max)
-            return std::numeric_limits<float>::quiet_NaN();
-        float const   c      = (x - m_min) / (m_max - m_min) * m_funcCount;
-        int32_t const offset = dmt::fl::clamp(static_cast<int32_t>(c), 0, static_cast<int32_t>(m_funcCount - 1));
-
-        float const delta = c - offset;
-        auto        cdf   = CDF();
-        return dmt::fl::lerp(delta, cdf[offset], cdf[offset + 1]);
-    }
-
-    static int32_t findIntervalLessThan(int32_t sz, std::span<float const> cdf, float u)
-    {
-        int32_t size = sz - 2, first = 1;
-        while (size > 0)
-        {
-            // Evaluate predicate at midpoint and update _first_ and _size_
-            size_t half = (size_t)size >> 1, middle = first + half;
-            bool   predResult = cdf[middle] <= u;
-            first             = predResult ? middle + 1 : first;
-            size              = predResult ? size - (half + 1) : half;
-        }
-        return std::clamp(first - 1, 0, sz - 2);
-    }
-
-    float PiecewiseConstant1D::sample(float u, float* pdf, int32_t* offset) const
-    {
-        auto cdf  = CDF();
-        auto func = absFunc();
-
-        int32_t const off = findIntervalLessThan(m_funcCount, cdf, u);
-        if (offset)
-            *offset = off;
-
-        // compute offset along CDF segment (linear interp formula)
-        float du = u - cdf[off];
-        if (cdf[off + 1] - cdf[off] > 0)
-            du /= cdf[off + 1] - cdf[off];
-
-        if (pdf)
-            *pdf = m_integral > 0 ? func[off] / m_integral : 0;
-
-        return dmt::fl::lerp((off + du) / m_funcCount, m_min, m_max);
-    }
-
-    // PiecewiseConstant2D
-    static std::pmr::vector<PiecewiseConstant1D> makePConditional(dstd::Array2D<float> const& data,
-                                                                  Bounds2f                    domain,
-                                                                  std::pmr::memory_resource*  memory)
-    {
-        std::pmr::vector<PiecewiseConstant1D> nrvo{memory};
-        nrvo.reserve(data.ySize());
-        for (uint32_t i = 0; i < data.ySize(); ++i)
-            nrvo.emplace_back(data.rowSpan(i), domain.pMin[0], domain.pMax[0], memory);
-
-        return nrvo;
-    }
-
-    static std::pmr::vector<float> makeMarginalFunc(std::span<PiecewiseConstant1D> pConditionalV,
-                                                    std::pmr::memory_resource*     memory)
-    {
-        std::pmr::vector<float> marginalFunc{pConditionalV.size(), memory};
-        for (uint32_t i = 0; i < marginalFunc.size(); ++i)
-            marginalFunc[i] = pConditionalV[i].integral();
-        return marginalFunc;
-    }
-
-    PiecewiseConstant2D::PiecewiseConstant2D(dstd::Array2D<float> const& data,
-                                             Bounds2f                    domain,
-                                             std::pmr::memory_resource*  memory,
-                                             std::pmr::memory_resource*  temp) :
-    m_domain(domain),
-    m_pConditionalV(makePConditional(data, domain, memory)),
-    m_pMarginalV(makeMarginalFunc(m_pConditionalV, temp), domain.pMin[1], domain.pMax[1], memory)
-    {
-        assert(isPOT(data.xSize()) && isPOT(data.ySize()) && "We want powers of two");
-    }
-
-    Point2f PiecewiseConstant2D::sample(Point2f u, float* pdf, Point2i* offset) const
-    {
-        float   pdfs[2];
-        Point2i uv;
-        float   d1 = m_pMarginalV.sample(u[1], &pdfs[1], &uv[1]);
-        float   d0 = m_pConditionalV[uv[1]].sample(u[0], &pdfs[0], &uv[0]);
-
-        if (pdf) // p(x,y) = p(x|y) * p(y)
-            *pdf = pdfs[0] * pdfs[1];
-        if (offset)
-            *offset = uv;
-
-        return {{d0, d1}};
-    }
-
-    float PiecewiseConstant2D::pdf(Point2f pr) const
-    {
-        // take the chosen conditional pdf, take its generating, unnormalized function, and divide it by marginal integral.
-        // this is equivalent to doing p(x,y) = p(x|y) * p(y)
-        // project onto domain and take indices to marginal and conditional
-        Point2f const p{{m_domain.offset(pr)}};
-        int32_t const iu = clamp(static_cast<int32_t>(p[0] * m_pConditionalV[0].size()),
-                                 0,
-                                 static_cast<int32_t>(m_pConditionalV[0].size() - 1));
-        int32_t const iv = clamp(static_cast<int32_t>(p[1] * m_pMarginalV.size()),
-                                 0,
-                                 static_cast<int32_t>(m_pMarginalV.size() - 1));
-        // absFunc[iv] stores p(x|y=at(iv)) * p(y=at(iv))
-        // hence absFunc[iv][iu], is the unnormalized p(x|y) * p(y) evaluated for y=at(iv), x=at(iu)
-        // to normalize that, we need to divide by total integral, which is equal to the integral of the marginal
-        return m_pConditionalV[iv].absFunc()[iu] / m_pMarginalV.integral();
-    }
-
-    Point2f PiecewiseConstant2D::invert(Point2f p) const
-    {
-        static Point2f const outside{{std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()}};
-        // first invert the marginal
-        float const mInv = m_pMarginalV.invert(p[1]);
-        if (fl::isNaN(mInv))
-            return outside;
-
-        float const percentageOverMarginalDomain = (p[1] - m_domain.pMin[1]) / (m_domain.pMax[1] - m_domain.pMin[1]);
-        if (percentageOverMarginalDomain < 0.f || percentageOverMarginalDomain > 1.f)
-            return outside;
-
-        int32_t const condIndex = clamp(static_cast<int32_t>(percentageOverMarginalDomain * m_pConditionalV.size()),
-                                        0,
-                                        static_cast<int32_t>(m_pConditionalV.size() - 1));
-        float const   cInv      = m_pConditionalV[condIndex].invert(p[0]);
-        if (fl::isNaN(cInv))
-            return outside;
-
-        return {{cInv, mInv}};
-    }
-
-    Bounds2f PiecewiseConstant2D::domain() const { return m_domain; }
-
-    Point2i PiecewiseConstant2D::resolution() const
-    {
-        return {{static_cast<int32_t>(m_pConditionalV[0].size()), static_cast<int32_t>(m_pMarginalV.size())}};
-    }
-
-    float PiecewiseConstant2D::integral() const { return m_pMarginalV.integral(); }
 } // namespace dmt
 
 namespace dmt::test {
@@ -1041,6 +830,170 @@ namespace dmt::test {
             testRayAgainstAllGroupedVsUngrouped(ungroupedPrims, groupedPrims, ray);
     }
 
+    void testSphereLightPDFAnalyticCheck()
+    {
+        Context ctx;
+        assert(ctx.isValid() && "invalid context");
+        static constexpr float tol = 0.05f; // 5%
+
+        ctx.log(" -- Testing sphereLightPDF() against analytic solid angle (tolerance = {}\x25) --",
+                std::make_tuple(tol * 100.0f));
+
+        // Setup: unit strength, small spherical light
+        Transform lightFromRender = Transform{}.translate({0.f, 0.f, 3.f});
+        Light light = dmt::makePointLight(lightFromRender, RGB::fromScalar(1.f), 0.1f /* radius */, 1.f /* factor */);
+
+        // Receiver setup
+        Point3f const  origin{0.f, 0.f, 0.f};
+        Vector3f const n = normalize(Vector3f{0.001f, 0.f, 1.f});
+
+        LightSampleContext lsCtx;
+        lsCtx.p               = origin;
+        lsCtx.n               = n;
+        lsCtx.hadTransmission = false;
+        lsCtx.ray.o           = origin;
+        lsCtx.ray.d           = normalize(light.co - origin);
+
+        Point2f u{0.5f, 0.5f};
+
+        LightSample sample{};
+        bool        success = dmt::lightSampleFromContext(light, lsCtx, u, &sample);
+        assert(success && "lightSampleFromContext failed");
+
+        ctx.log("sample.p  = {} {} {}", std::make_tuple(sample.p.x, sample.p.y, sample.p.z));
+        ctx.log("sample.d  = {} {} {}", std::make_tuple(sample.d.x, sample.d.y, sample.d.z));
+        ctx.log("sample.ng = {} {} {}", std::make_tuple(sample.ng.x, sample.ng.y, sample.ng.z));
+
+        // Manually compute solid angle
+        float dist         = normL2(light.co - origin);
+        float distSqr      = dist * dist;
+        float r            = light.data.point.radius;
+        float sinThetaMax2 = r * r / distSqr;
+        float cosThetaMax  = std::sqrt(std::max(0.f, 1.0f - sinThetaMax2));
+        float omega        = 2 * fl::pi() * (1.0f - cosThetaMax);
+        float pdfRef       = 1.0f / omega;
+
+        float pdfSampled = sample.pdf;
+
+        float err = std::abs(pdfSampled - pdfRef) / pdfRef;
+        if (err > tol)
+        {
+            ctx.error("sphereLightPDF() does not match analytic solid angle", {});
+            ctx.warn("sample.pdf = {}, pdfRef = {}, err = {}", std::make_tuple(pdfSampled, pdfRef, err));
+            assert(false && "PDF mismatch");
+        }
+
+        // Evaluate radiance contribution
+        RGB eval = dmt::lightEval(light, &sample);
+
+        float cosThetaI = std::max(dot(n, sample.d), 0.f);
+        float cosThetaO = std::max(dot(sample.ng, -sample.d), 0.f);
+        float G         = cosThetaI * cosThetaO / distSqr;
+
+        RGB final = eval * (G / pdfSampled);
+
+        ctx.warn("sphereLightPDF() agrees with solid angle model within {}\x25", std::make_tuple(tol * 100.f));
+        ctx.log(" \xe2\x84\xa6 (solid angle) = {}", std::make_tuple(omega));
+        ctx.log("Distance        = {}", std::make_tuple(dist));
+        ctx.log(" cos(\xce\xb8)          = {}", std::make_tuple(cosThetaI));
+        ctx.log(" G               = {}", std::make_tuple(G));
+        ctx.log(" Eval            = ({}, {}, {})", std::make_tuple(eval.r, eval.g, eval.b));
+        ctx.log(" Final Radiance Over single sample = ({}, {}, {}) (the light is small)",
+                std::make_tuple(final.r, final.g, final.b));
+        if (final.max() == 0.f)
+        {
+            ctx.error("There should be some light", {});
+            assert(false);
+        }
+    }
+
+    static void checkUniformDist2D(PiecewiseConstant2D const& distrib)
+    {
+        static constexpr int32_t numSteps   = 1024;
+        float const              yStep      = (distrib.domain().pMax[1] - distrib.domain().pMin[1]) / numSteps;
+        float const              xStep      = (distrib.domain().pMax[0] - distrib.domain().pMin[0]) / numSteps;
+        float const              firstValue = distrib.pdf(distrib.domain().pMin);
+
+        for (float y = distrib.domain().pMin[1]; y < distrib.domain().pMax[1]; y += yStep)
+        {
+            for (float x = distrib.domain().pMin[0]; x < distrib.domain().pMax[0]; x += xStep)
+            {
+                float value = distrib.pdf({x, y});
+                assert(fl::abs(firstValue - value) < 1e-5f);
+            }
+        }
+    }
+
+    void testEnvironmentalLightConstantValue()
+    {
+        Context ctx;
+        assert(ctx.isValid());
+        ctx.warn("Beginning testing of Environmental Lights", {});
+
+        RGB dummy[4 * 2]{};
+        for (uint32_t i = 0; i < 4 * 2; ++i)
+            dummy[i] = {1, 0, 0}; // red everywhere
+        Quaternion qIdentity{0, 0, 0, 1};
+        EnvLight   light{dummy, 4, 2, qIdentity, 1.f};
+        ctx.warn("  Should manually check that distribution is uniform", {});
+        checkUniformDist2D(light.distrib);
+
+        LightSampleContext lsCtx{Ray{}, Point3f::zero(), Vector3f::yAxis(), false};
+        LightSample        sample{};
+        Point2f            u{0.5, 0.5};
+
+        bool sampled = envLightSampleFromContext(light, lsCtx, u, &sample);
+        if (!sampled)
+        {
+            ctx.error("Sampling procedure of image failed. That's not possible as there are no black pixels", {});
+            assert(false);
+        }
+        ctx.log("  Sampled From Env Direction {} {} {} in UV {} {} with PDF {}",
+                std::make_tuple(sample.d.x, sample.d.y, sample.d.z, sample.uv.x, sample.uv.y, sample.pdf));
+
+        assert(sample.pdf > 0.f);
+        assert(fl::abs(normL2(sample.d) - 1.f) < 1e-5f);
+
+        RGB const sampledEval = envLightEval(light, &sample);
+        ctx.log("  evaluated sample as RGB {} {} {}", std::make_tuple(sampledEval.r, sampledEval.g, sampledEval.b));
+        assert((sampledEval - RGB{1, 0, 0}).max() < 1e-5f);
+
+        ctx.log("  testing arbitrary direction equirectangular evaluation", {});
+        float          pdf = 0.f;
+        Vector3f const wi  = normalize(Vector3f{0, 0, 1});
+
+        RGB const color = envLightEval(light, wi, &pdf);
+        assert(pdf > 0.f);
+        assert(color.max() > 0.f);
+
+        ctx.warn("Ending testing of Environmental Lights", {});
+    }
+
+    void testQuaternionRotation()
+    {
+        Quaternion _45DegRot{};
+        _45DegRot.w = cosf(fl::pi() * 0.125f);
+        _45DegRot.z = sinf(fl::pi() * 0.125f);
+
+        Quaternion _45DegRotConj{};
+        _45DegRotConj.w = _45DegRot.w;
+        _45DegRotConj.z = -_45DegRot.z;
+
+        Vector3f const start    = Vector3f::yAxis();
+        Vector3f const expected = {-sqrtf(2) / 2, sqrtf(2) / 2, 0};
+
+        Vector3f actual{};
+        {
+            Quaternion const pureStart{start.x, start.y, start.z, 0.f};
+            Quaternion const pureActual = _45DegRot * pureStart * _45DegRotConj;
+
+            actual.x = pureActual.x;
+            actual.y = pureActual.y;
+            actual.z = pureActual.z;
+        }
+
+        assert(fl::abs(normL2(actual - expected)) < 1e-5f);
+    }
 } // namespace dmt::test
 
 namespace dmt::bvh {
@@ -1211,9 +1164,10 @@ namespace dmt::bvh {
         uint32_t         activeListCount = 0;
         float            tMinPrims       = fl::infinity();
 
-        assert(outIsect);
+        assert(outIsect && current);
         while (true)
         {
+            assert(current);
             if (current->childCount == 0)
             {
                 bool intersected = false;
@@ -1266,6 +1220,7 @@ namespace dmt::bvh {
                 }
 
                 --activeListCount;
+                assert(minIdx >= 0 && minIdx < 8 && activeListCount < 8 && activeListCount >= 0);
                 float         tmpDist                = activeListDistances[minIdx];
                 BVHBuildNode* tmpID                  = activeListIDs[minIdx];
                 activeListDistances[minIdx]          = activeListDistances[activeListCount];

@@ -2,6 +2,8 @@
 
 #include "core/core-macros.h"
 
+#include "platform/platform-memory.h"
+
 #include <type_traits>
 #include <optional>
 

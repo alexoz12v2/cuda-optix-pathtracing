@@ -223,6 +223,7 @@ namespace dmt {
     struct DMT_CORE_API Point4f : public Tuple4f { Point4f() = default; DMT_CPU_GPU Point4f(Tuple4f t) : Tuple4f(t) {} explicit DMT_CPU_GPU operator Vector4f(); DMT_CPU_GPU Point4f(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {} };
 
     // https://eater.net/quaternions
+    // https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
     struct DMT_CORE_API Quaternion : public Tuple4f { Quaternion() = default; DMT_CPU_GPU Quaternion(Tuple4f t) : Tuple4f(t) {} DMT_CPU_GPU Quaternion(float x, float y, float z, float w) : Tuple4f{x, y, z, w } {}};
     // clang-format on
 
@@ -307,6 +308,12 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Vector3f   operator-(Point3f a, Point3f b);
     DMT_CORE_API DMT_CPU_GPU Vector4i   operator-(Point4i a, Point4i b);
     DMT_CORE_API DMT_CPU_GPU Vector4f   operator-(Point4f a, Point4f b);
+    DMT_CORE_API DMT_CPU_GPU Vector2i   operator-(Point2i a, Vector2i b);
+    DMT_CORE_API DMT_CPU_GPU Vector2f   operator-(Point2f a, Vector2f b);
+    DMT_CORE_API DMT_CPU_GPU Vector3i   operator-(Point3i a, Vector3i b);
+    DMT_CORE_API DMT_CPU_GPU Vector3f   operator-(Point3f a, Vector3f b);
+    DMT_CORE_API DMT_CPU_GPU Vector4i   operator-(Point4i a, Vector4i b);
+    DMT_CORE_API DMT_CPU_GPU Vector4f   operator-(Point4f a, Vector4f b);
     DMT_CORE_API DMT_CPU_GPU Vector2i   operator-(Vector2i a, Vector2i b);
     DMT_CORE_API DMT_CPU_GPU Vector2f   operator-(Vector2f a, Vector2f b);
     DMT_CORE_API DMT_CPU_GPU Vector3i   operator-(Vector3i a, Vector3i b);
@@ -443,10 +450,9 @@ namespace dmt {
     template <VectorScalable T>
     DMT_CPU_GPU inline T& operator/=(T& v, typename T::value_type k)
     {
-        T ret;
         for (int32_t i = 0; i < T::numComponents(); ++i)
-            ret[i] /= k;
-        return ret;
+            v[i] /= k;
+        return v;
     }
 
     // Vector Types: Component Operations -----------------------------------------------------------------------------
@@ -958,6 +964,12 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Normal3f mul(Matrix4f const& m, Normal3f const& v);
     DMT_CORE_API DMT_CPU_GPU Normal3f mulTranspose(Matrix4f const& m, Normal3f const& v);
     DMT_CORE_API DMT_CPU_GPU Point3f  mul(Matrix4f const& m, Point3f const& p);
+
+    // quaternion rotations
+    DMT_CORE_API DMT_CPU_GPU Quaternion            fromRadians(float theta, Normal3f axis);
+    DMT_CORE_API DMT_CPU_GPU Quaternion            conj(Quaternion quat);
+    DMT_CORE_API DMT_CPU_GPU DMT_FASTCALL Vector3f rotate(Quaternion quat, Vector3f v);
+    DMT_CORE_API DMT_CPU_GPU DMT_FASTCALL Normal3f rotate(Quaternion quat, Normal3f v);
 
 // Vector Types: Interval -----------------------------------------------------------------------------------------
 #if !defined(DMT_ARCH_X86_64)

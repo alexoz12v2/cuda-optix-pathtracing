@@ -178,7 +178,7 @@ namespace dmt::oren_nayar {
         // energy compensation for multiscatter term
         float const    Eavg = params.a * params.a + _2piM5_6Over3 * params.b;
         Vector3f const Ems  = _1OverPi * params.albedo.mul(params.albedo) * (Eavg / (1.f - Eavg)) /
-                             (Vector3f::one() - params.albedo.asVec() * (1.f - Eavg));
+                             (Vector3f{1, 1, 1} - params.albedo.asVec() * (1.f - Eavg));
         float const nv          = fmaxf(dot(ns, wi), 0.f);
         float const Ev          = params.a * fl::pi() + params.b * G(nv);
         params.multiscatterTerm = RGB::fromVec(Ems * (1.f - Ev));
@@ -629,7 +629,7 @@ namespace dmt::ggx {
             eval1.pdf = pdfReflect;
         }
 
-        if (isSingular) // MIS large values
+        if (singular) // MIS large values
         {
             eval1.f *= 1e4f;
             eval1.pdf *= 1e4f;

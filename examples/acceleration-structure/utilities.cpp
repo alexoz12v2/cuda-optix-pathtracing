@@ -996,7 +996,106 @@ namespace dmt::test {
     }
 } // namespace dmt::test
 
+void swap_avx256(__m256* a, __m256* b)
+{
+    __m256 tmp = *a;
+    *a         = *b;
+    *b         = tmp;
+}
+
+
+__m256 neg_avx256(__m256 x)
+{
+    //-0.0 has only the sign bit set
+    __m256 sign_mask = _mm256_set1_ps(-0.0f);
+    //Flip the sign bit
+    return _mm256_xor_ps(x, sign_mask);
+}
+
 namespace dmt::bvh {
+
+    //8 predetermined orders per node cluster
+    void traverseRay(Ray ray, BVHWiVeSoA* bvh, std::pmr::memory_resource* _temp)
+    {
+        std::pmr::vector<uint32_t> nodeStack{_temp};
+        std::pmr::vector<uint32_t> tminStack{_temp};
+        nodeStack.reserve(64);
+        tminStack.reserve(64);
+        uint32_t nodeRootIndex = 0;
+        nodeStack.push_back(nodeRootIndex);
+
+        while (true)
+        {
+            uint32_t currNodeIndex = nodeStack.back();
+            nodeStack.pop_back();
+
+            if (!(bvh->leaf[currNodeIndex]))
+            {
+                traverseCluster(bvh, ray, currNodeIndex);
+            }
+            else if (intersectLeaf(bvh, ray, currNodeIndex))
+            {
+                //compress the stack keeping only elements with a node entry
+                //distance closer compared to the primitive distance
+            }
+            if (nodeStack.empty())
+                return;
+        }
+    }
+
+    void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index)
+    {
+        __m256 txmin, txmax;
+        __m256 tymin, tymax;
+        __m256 tzmin, tzmax;
+
+
+        if (ray.d.x < 0)
+            swap_avx256(&(bvh->bxmax[index]), &(bvh->bxmax[index]));
+        if (ray.d.y < 0)
+            swap_avx256(&(bvh->bymax[index]), &(bvh->bymax[index]));
+        if (ray.d.z < 0)
+            swap_avx256(&(bvh->bzmax[index]), &(bvh->bzmax[index]));
+
+        //set rayx info
+        __m256 rorgx    = _mm256_set1_ps(ray.o.x);
+        __m256 ridx     = _mm256_set1_ps(ray.d_inv.x);
+        __m256 ridx_neg = neg_avx256(ridx);
+
+        //set parametric variable
+        txmin = _mm256_sub_ps(bvh->bxmin[index], rorgx);
+        txmin = _mm256_mul_ps(txmin, ridx_neg);
+        txmax = _mm256_sub_ps(bvh->bxmax[index], rorgx);
+        txmax = _mm256_mul_ps(txmax, ridx);
+
+        //set rayy info
+        __m256 rorgy    = _mm256_set1_ps(ray.o.y);
+        __m256 ridy     = _mm256_set1_ps(ray.d_inv.y);
+        __m256 ridy_neg = neg_avx256(ridy);
+
+        //set parametric variable
+        tymin = _mm256_sub_ps(bvh->bymin[index], rorgy);
+        tymin = _mm256_mul_ps(tymin, ridy_neg);
+        tymax = _mm256_sub_ps(bvh->bymax[index], rorgy);
+        tymax = _mm256_mul_ps(tymax, ridy);
+
+        //set rayz info
+        __m256 rorgz    = _mm256_set1_ps(ray.o.z);
+        __m256 ridz     = _mm256_set1_ps(ray.d_inv.z);
+        __m256 ridz_neg = neg_avx256(ridz);
+
+        //set parametric variable
+        tzmin = _mm256_sub_ps(bvh->bzmin[index], rorgz);
+        tzmin = _mm256_mul_ps(tzmin, ridz_neg);
+        tzmax = _mm256_sub_ps(bvh->bzmax[index], rorgz);
+        tzmax = _mm256_mul_ps(tzmax, ridz);
+
+        //I need to clip the tmin and tmax with the tnear and tfar
+        //_mm256_min_ps
+    }
+
+    bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index) {}
+
     BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* _temp)
     {
         std::pmr::vector<BVHBuildNode*> activeNodeStack{_temp};
@@ -1155,6 +1254,7 @@ namespace dmt::bvh {
         }
     }
 
+
     Primitive const* intersectWideBVHBuild(Ray ray, BVHBuildNode* bvh, Intersection* outIsect)
     {
         Primitive const* intersectedPrim = nullptr;
@@ -1240,8 +1340,9 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>
-        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
+            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
+            ->void
+        {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

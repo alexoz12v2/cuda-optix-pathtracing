@@ -453,28 +453,21 @@ int32_t guardedMain()
                     return 1;
 
                 // COMPILE
-                std::pmr::vector<std::pmr::string> options{
-                    "-std=c++20",
-                    "-arch",
-                    "compute_60",
-                    "-optix-ir",
-                    "-lineinfo",
-                    "-G",
-                    "--use_fast_math",
-                    "-default-device",
-                    "-rdc",
-                    "true",
-                    "--include-path=" +
+                std::pmr::vector<std::pmr::string> options
+                {
+                    "-std=c++20", "-arch", "compute_60", "-optix-ir", "-lineinfo", "-G", "--use_fast_math",
+                        "-default-device", "-rdc", "true",
+                        "--include-path=" +
 #if defined(_WIN32)
-                        optixHeaderDir.toUnderlying().substr(4),
+                            optixHeaderDir.toUnderlying().substr(4),
 #else
-                        optixHeaderDir.toUnderlying(),
+                            optixHeaderDir.toUnderlying(),
 #endif
-                    "--include-path=" +
+                        "--include-path=" +
 #if defined(_WIN32)
-                        optixSphereHeaderDir.toUnderlying().substr(4),
+                            optixSphereHeaderDir.toUnderlying().substr(4),
 #else
-                        optixSphereHeaderDir.toUnderlying(),
+                            optixSphereHeaderDir.toUnderlying(),
 #endif
                 };
 

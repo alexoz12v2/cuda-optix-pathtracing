@@ -995,6 +995,7 @@ namespace dmt {
         uintptr_t             medium = 0; // information about hasDifferentials embedded in the low bit
         Point3f               o{};
         Vector3f              d{{0, 0, 1}};
+        Vector3f              d_inv{{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(), 1}};
         float                 time = 0;
     };
 

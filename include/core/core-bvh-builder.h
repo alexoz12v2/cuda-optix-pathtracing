@@ -29,6 +29,24 @@ namespace dmt {
         uint32_t         childCount;
         uint32_t         primitiveCount;
     };
+
+    struct DMT_CORE_API BVHWiVeSoA
+    {
+        //WiveClusters 8nodes
+        //bounding box information
+        std::pmr::vector<__m256> bxmin;
+        std::pmr::vector<__m256> bxmax;
+        std::pmr::vector<__m256> bymin;
+        std::pmr::vector<__m256> bymax;
+        std::pmr::vector<__m256> bzmin;
+        std::pmr::vector<__m256> bzmax;
+        //parametric information
+        std::pmr::vector<__m256> txmin;
+        std::pmr::vector<__m256> txmax;
+        //data information
+        std::pmr::vector<__m256> data; //32bit*8node->32bit:1bit flag active node,24bit for the permutation info, 1bit flag->inner node/leaf node,6bit for the offset
+        std::pmr::vector<uint8_t> leaf;
+    };
     static_assert(std::is_trivial_v<BVHBuildNode> && std::is_standard_layout_v<BVHBuildNode>,
                   "needed to use aggregate init and memset/memcpy");
 } // namespace dmt

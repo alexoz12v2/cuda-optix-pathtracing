@@ -1424,9 +1424,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1457,9 +1457,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }
@@ -1490,9 +1490,9 @@ namespace dmt {
         _mm_storeu_ps(&ret.zLow, highSum);
         alignas(16) float low[4];
         _mm_storeu_ps(low, lowSum);
-        ret.xLow             = low[0];
-        ret.yLow             = low[1];
-        ret.zLow             = low[2];
+        ret.xLow = low[0];
+        ret.yLow = low[1];
+        ret.zLow = low[2];
 #endif
         return ret;
     }

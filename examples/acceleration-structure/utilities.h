@@ -110,6 +110,8 @@ namespace dmt::bvh {
         std::pmr::memory_resource* memory = std::pmr::get_default_resource());
 
     Primitive const* intersectWideBVHBuild(Ray ray, BVHBuildNode* bvh, Intersection* outIsect);
+
+    void traverseRay(Ray ray, BVHWiVeSoA* bvh, std::pmr::memory_resource* _temp);
 } // namespace dmt::bvh
 
 namespace dmt::numbers {

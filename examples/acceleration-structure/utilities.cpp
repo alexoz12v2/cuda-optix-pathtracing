@@ -996,7 +996,7 @@ namespace dmt::test {
     }
 } // namespace dmt::test
 
-void swap_avx256(__m256* a, __m256* b)
+static void swap_avx256(__m256* a, __m256* b)
 {
     __m256 tmp = *a;
     *a         = *b;
@@ -1004,7 +1004,7 @@ void swap_avx256(__m256* a, __m256* b)
 }
 
 
-__m256 neg_avx256(__m256 x)
+static __m256 neg_avx256(__m256 x)
 {
     //-0.0 has only the sign bit set
     __m256 sign_mask = _mm256_set1_ps(-0.0f);
@@ -1013,6 +1013,10 @@ __m256 neg_avx256(__m256 x)
 }
 
 namespace dmt::bvh {
+
+    void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index);
+
+    bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index);
 
     //8 predetermined orders per node cluster
     void traverseRay(Ray ray, BVHWiVeSoA* bvh, std::pmr::memory_resource* _temp)
@@ -1043,12 +1047,11 @@ namespace dmt::bvh {
         }
     }
 
-    void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index)
+    static void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index)
     {
         __m256 txmin, txmax;
         __m256 tymin, tymax;
         __m256 tzmin, tzmax;
-
 
         if (ray.d.x < 0)
             swap_avx256(&(bvh->bxmax[index]), &(bvh->bxmax[index]));
@@ -1094,7 +1097,7 @@ namespace dmt::bvh {
         //_mm256_min_ps
     }
 
-    bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index) {}
+    static bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index) { return false; }
 
     BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* _temp)
     {
@@ -1340,9 +1343,8 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
-            ->void
-        {
+            requires std::is_invocable_v<F, Primitive const*>
+        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

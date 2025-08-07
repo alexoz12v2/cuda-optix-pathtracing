@@ -5,9 +5,9 @@ namespace dmt {
     static void DMT_FASTCALL
         directionConesUnion(Vector3f w0, float cosTheta_0, Vector3f w1, float cosTheta_1, Vector3f* w, float* cosTheta)
     {
-        // assume both cones are valid
-        assert(fl::abs(normL2(w0) - 1.f) < 1e-5f && cosTheta_0 >= -1.f && cosTheta_0 <= 1.f);
-        assert(fl::abs(normL2(w1) - 1.f) < 1e-5f && cosTheta_1 >= -1.f && cosTheta_1 <= 1.f);
+        // assume both cones are valid (or not w = 0 means empty bounds (TEST))
+        // assert(fl::abs(normL2(w0) - 1.f) < 1e-5f && cosTheta_0 >= -1.f && cosTheta_0 <= 1.f);
+        // assert(fl::abs(normL2(w1) - 1.f) < 1e-5f && cosTheta_1 >= -1.f && cosTheta_1 <= 1.f);
         assert(w && cosTheta);
 
         // if one cone is inside another, then return the outer one
@@ -55,6 +55,15 @@ namespace dmt {
         // conservative approach: The falloff angle is the maximum one (minimum cosine)
         lb.cosTheta_e = fmaxf(lb0.cosTheta_e, lb1.cosTheta_e);
 
+        lb.phi = lb0.phi + lb1.phi;
+
+        return lb;
+    }
+
+    static LightBounds lbEmpty()
+    {
+        LightBounds lb{};
+        lb.bounds = bbEmpty();
         return lb;
     }
 
@@ -168,25 +177,388 @@ namespace dmt {
         return lb;
     }
 
-    float energyVarianceFromLight(Light const& light)
+    // -- LightTreeBuildNode utils --
+    DMT_FASTCALL float adaptiveSplittingHeuristic(LightTreeBuildNode const& node, Point3f p)
     {
-        float var = fl::infinity();
-        if (light.type == LightType::ePoint)
+        if (node.leaf)
+            return 1.f;
+
+        // intersect line (point - centroid) with 2 planes of the AABB. the two intersections are a (tMin) and b (tMax)
+        // alternative: approximate AABB with a sphere bounds, therefore a/b = sqrt(distance squared clamped) -/+ haldDiagonal of AABB
+        Point3f const  pc       = node.lb.bounds.centroid();
+        Vector3f const wi       = normalize(p - pc);
+        float const    halfDiag = normL2(node.lb.bounds.diagonal()) * 0.5f;
+        float const    dist     = fl::safeSqrt(fmaxf(dotSelf(p - pc), halfDiag));
+
+        float const a = fmaxf(dist - halfDiag, 0.f);
+        float const b = dist + halfDiag;
+
+        float gExpected2 = 0.f;
+        float gVariance  = 0.f;
+        if (a > 0 && b > 0)
         {
-            // we sample from uniform sphere if we had a transmission (f(w) = 1/4pi) and cosWeighted hemisphere (f(w) = z/pi for z>=0) otherwise
-            // the former has variance of 1, while the latter has variance of 0.611, hence take the higest to be conservative
+            float const a3 = a * a * a;
+            float const b3 = b * b * b;
+
+            float const a_minus_b   = a - b;
+            float const a3_minus_b3 = a_minus_b * (a * a + a * b + b * b);
+
+            gExpected2 = fl::sqr(fl::rcp(a * b));
+            gVariance  = a3_minus_b3 / (3 * a_minus_b * a3 * b3) - gExpected2;
         }
-        else if (light.type == LightType::eSpot)
+
+        float const eExpected2 = fl::sqr(node.lb.phi / node.numEmitters);
+        float const eVariance  = node.varPhi;
+
+        float const sigma2 = (eVariance * gVariance + eVariance * gExpected2 + eExpected2 * gVariance) *
+                             fl::sqr(node.numEmitters);
+        float const probSigma = std::pow(fmaxf(fl::rcp(1 + fl::sqrt(sigma2)), 0.f), 0.25f);
+        assert(probSigma >= 0.f && probSigma <= 1.f);
+        return probSigma;
+    }
+
+    /// regularization factor to favour less thin boxes
+    DMT_FORCEINLINE static float lightTreeBounds_Kr(Bounds3f const& b, int32_t axis)
+    {
+        return maxComponent(b.diagonal()) / b.diagonal()[axis];
+    }
+
+    /// spatial cost function factor
+    DMT_FORCEINLINE static float lightTreeBounds_Ma(Bounds3f const& b) { return b.surfaceArea(); }
+
+    /// orientation cost function factor
+    DMT_FORCEINLINE static float lightTreeBounds_Momega(float cosTheta_e, float cosTheta_o)
+    {
+        assert(cosTheta_o >= cosTheta_e);
+        float const theta_e = fl::safeacos(cosTheta_e);
+        float const theta_o = fl::safeacos(cosTheta_o);
+        float const theta_w = fminf(theta_o + theta_e, fl::pi());
+
+        float const sinTheta_o    = sinf(theta_o);
+        float const cosTheta_diff = sinf(theta_o - 2 * theta_w);
+
+        float const Momega = fl::twoPi() * (1 - cosTheta_o) +
+                             fl::piOver2() *
+                                 (2 * theta_w * sinTheta_o - cosTheta_diff - 2 * theta_o * sinTheta_o + cosTheta_o);
+        return Momega;
+    }
+
+    DMT_FASTCALL float summedAreaOrientationHeuristic(
+        LightBounds const& lbLeft,
+        LightBounds const& lbRight,
+        float              parent_Kr,
+        float              parent_Ma,
+        float              parent_Momega)
+    {
+        float const Ma_L = lightTreeBounds_Ma(lbLeft.bounds);
+        float const Ma_R = lightTreeBounds_Ma(lbRight.bounds);
+
+        float const Momega_L = lightTreeBounds_Momega(lbLeft.cosTheta_e, lbLeft.cosTheta_o);
+        float const Momega_R = lightTreeBounds_Momega(lbRight.cosTheta_e, lbRight.cosTheta_o);
+
+        float const cost = parent_Kr * (lbLeft.phi * Ma_L * Momega_L + lbRight.phi * Ma_R * Momega_R) /
+                           (parent_Ma * parent_Momega);
+        return cost;
+    }
+
+    static LightBounds lbUnionAll(std::span<Light> lights)
+    {
+        LightBounds lb = makeLBFromLight(lights[0]);
+        for (size_t i = 1; i < lights.size(); ++i)
+            lb = lbUnion(makeLBFromLight(lights[i]), lb);
+        return lb;
+    }
+
+    static LightTreeBuildNode makeLeaf(Light const* ptr, uint32_t idx)
+    {
+        assert(ptr);
+        LightTreeBuildNode node{};
+        node.leaf             = 1;
+        node.data.emitter.idx = idx;
+        node.data.emitter.ptr = ptr;
+        node.lb               = makeLBFromLight(*ptr);
+
+        return node;
+    }
+
+    static LightTreeBuildNode makeInterior()
+    {
+        LightTreeBuildNode node{};
+        return node;
+    }
+
+    static size_t lightTreeBuildRecursive(
+        std::span<Light>                      lights,
+        uint32_t                              start,
+        uint32_t                              end,
+        uint32_t                              trail,
+        uint32_t                              tzcount,
+        std::pmr::vector<LightTreeBuildNode>* nodes,
+        std::pmr::vector<LightTrailPair>*     bitTrails,
+        std::pmr::memory_resource*            temp)
+    {
+        assert(lights.size() > 0);
+        LightTreeBuildNode& current = nodes->back();
+        if (lights.size() == 1)
         {
+            assert(start == end + 1);
+            current = makeLeaf(lights.data(), start);
+            bitTrails->emplace_back(start, trail);
+
+            return 1;
         }
-        else if (light.type == LightType::eMesh)
+        else // Binning
         {
-            assert(false && "not yet implemented!");
+            int32_t const axis     = current.lb.bounds.maxDimention();
+            float const   splitLen = current.lb.bounds.diagonal()[axis] / LightTreeNumBins;
+
+            float const Kr     = lightTreeBounds_Kr(current.lb.bounds, axis);
+            float const Ma     = lightTreeBounds_Ma(current.lb.bounds);
+            float const Momega = lightTreeBounds_Momega(current.lb.cosTheta_e, current.lb.cosTheta_o);
+
+            LightBounds lbLeft = lbEmpty(), lbRight = lbEmpty();
+            float       minSplitPos = 0.f;
+            float       minCost     = fl::infinity();
+            for (uint32_t i = 1; i < LightTreeNumBins - 1; ++i)
+            {
+                float const splitPos  = static_cast<float>(i) * splitLen;
+                LightBounds lbLeftTmp = lbEmpty(), lbRightTmp = lbEmpty();
+                for (Light const& light : lights)
+                {
+                    if (light.co[axis] < splitPos) // left
+                        lbLeftTmp = lbUnion(lbLeftTmp, makeLBFromLight(light));
+                    else
+                        lbRightTmp = lbUnion(lbRightTmp, makeLBFromLight(light));
+                }
+
+                if (float cost = summedAreaOrientationHeuristic(lbLeftTmp, lbRightTmp, Kr, Ma, Momega); cost < minCost)
+                {
+                    minCost     = cost;
+                    minSplitPos = splitPos;
+                    lbLeft      = lbLeftTmp;
+                    lbRight     = lbRightTmp;
+                }
+            }
+            assert(minSplitPos != 0);
+
+            Light*   midPtr = std::partition(lights.data() + start,
+                                           lights.data() + end,
+                                           [axis, s = minSplitPos](Light const& a) { return a.co[axis] < s; });
+            uint32_t mid    = midPtr - (lights.data() + start);
+
+            if (mid == start)
+            {
+                ++mid;
+                assert(mid <= end);
+            }
+
+            // recursion
+            nodes->emplace_back(makeInterior());
+            LightTreeBuildNode& left      = nodes->back();
+            uint32_t const      leftTrail = trail;
+            assert(leftTrail > trail);
+            current.data.children[0] = &left;
+            current.numEmitters += lightTreeBuildRecursive(lights, start, mid, leftTrail, ++tzcount, nodes, bitTrails, temp);
+
+            if (mid != end)
+            {
+                nodes->emplace_back(makeInterior());
+                LightTreeBuildNode& right      = nodes->back();
+                uint32_t const      rightTrail = trail | (1u << tzcount);
+                current.data.children[1]       = &left;
+                current.numEmitters += lightTreeBuildRecursive(lights, mid, end, rightTrail, ++tzcount, nodes, bitTrails, temp);
+            }
+            else
+            {
+                assert(!current.data.children[1]);
+            }
+
+            return current.numEmitters;
+        }
+    }
+
+    static float sampleVariance(std::pmr::vector<float> const& phis)
+    {
+        assert(phis.size() > 1);
+        float mean     = 0.f;
+        float variance = 0.f;
+
+        for (float f : phis)
+            mean += f;
+        mean /= phis.size();
+
+        for (float f : phis)
+            variance += fl::sqr(f - mean);
+        variance /= (phis.size() - 1);
+
+        return variance;
+    }
+
+    static void fillPhisRecursive(LightTreeBuildNode& node, std::pmr::vector<float>* phis)
+    {
+        assert(phis && !node.leaf && node.data.children[0] && node.data.children[1]);
+        if (node.data.children[0]->leaf)
+            phis->push_back(node.data.children[0]->lb.phi);
+        else
+            fillPhisRecursive(*node.data.children[0], phis);
+
+        if (node.data.children[1]->leaf)
+            phis->push_back(node.data.children[0]->lb.phi);
+        else
+            fillPhisRecursive(*node.data.children[1], phis);
+    }
+
+    static void lightTreeComputeVariances(std::pmr::vector<LightTreeBuildNode>* nodes, std::pmr::memory_resource* temp)
+    {
+        // TODO maybe: use a map LightTreeBuildNode -> some phis?
+        std::pmr::vector<float> phis{temp};
+        phis.reserve((*nodes)[0].numEmitters);
+        for (LightTreeBuildNode& node : *nodes)
+        {
+            if (!node.leaf)
+            {
+                phis.clear();
+                fillPhisRecursive(node, &phis);
+                node.varPhi = sampleVariance(phis);
+            }
+        }
+    }
+
+    size_t lightTreeBuild(std::span<Light>                      lights,
+                          std::pmr::vector<LightTreeBuildNode>* nodes,
+                          std::pmr::vector<LightTrailPair>*     bitTrails,
+                          std::pmr::memory_resource*            temp)
+    {
+        if (nodes->size() != 0 || bitTrails->size() != 0)
+            return 0;
+
+        nodes->reserve(64);
+        bitTrails->reserve(64);
+
+        // top down pass to construct the whole tree and bit trails
+        nodes->emplace_back(makeInterior());
+        auto& node         = nodes->back();
+        node.lb            = lbUnionAll(lights);
+        size_t numEmitters = lightTreeBuildRecursive(lights, 0, lights.size(), 0, 0, nodes, bitTrails, temp);
+        assert(numEmitters == lights.size());
+
+        std::sort(bitTrails->begin(), bitTrails->end(), [](LightTrailPair p0, LightTrailPair p1) {
+            return p0.lightIdx < p1.lightIdx;
+        });
+
+        // bottom up pass to precompute variances (leaf nodes have leaf.lb.phi)
+        lightTreeComputeVariances(nodes, temp);
+        return numEmitters;
+    }
+
+    LightSplit lightTreeAdaptiveSplit(LightTreeBuildNode const& ltRoot, Point3f p, float precision, std::pmr::memory_resource* memory)
+    {
+        LightSplit split{};
+        if (ltRoot.leaf)
+        {
+            split.count    = 1;
+            split.nodes[0] = &ltRoot;
         }
         else
         {
-            assert(false && "invalid light type!");
+            // breadth-first visit
+            std::pmr::vector<LightTreeBuildNode const*> parentStack{memory}, siblingStack{memory};
+            parentStack.reserve(64), siblingStack.reserve(64);
+            siblingStack.push_back(&ltRoot);
+            while ((!siblingStack.empty() && !parentStack.empty()) || split.count < LightTreeMaxSplitSize)
+            {
+                if (!siblingStack.empty())
+                {
+                    LightTreeBuildNode const* sibling = siblingStack.back();
+                    siblingStack.pop_back();
+                    bool enough = adaptiveSplittingHeuristic(*sibling, p) >= precision;
+                    if (split.count + 1 == LightTreeMaxSplitSize || enough)
+                    {
+                        split.nodes[split.count] = sibling;
+                        ++split.count;
+                        assert(split.count <= LightTreeMaxSplitSize);
+                    }
+                    else
+                    {
+                        assert(!enough);
+                        if (!sibling->leaf)
+                            parentStack.push_back(sibling);
+                    }
+                }
+                else if (!parentStack.empty())
+                {
+                    LightTreeBuildNode const* parent = parentStack.back();
+                    parentStack.pop_back();
+
+                    assert(!parent->leaf && parent->data.children[0] && parent->data.children[1]);
+                    siblingStack.push_back(parent->data.children[0]);
+                    siblingStack.push_back(parent->data.children[1]);
+                }
+            }
         }
-        return var;
+
+        return split;
+    }
+
+    SelectedLights DMT_FASTCALL selectLightsFromSplit(LightSplit const& lightSplit, Point3f p, Vector3f n, float u, float startPMF)
+    {
+        assert(fl::abs(normL2(n) - 1.f) < 1e-5f);
+        SelectedLights selectedLights{};
+        uint32_t       moreLights = lightSplit.count;
+        uint32_t       splitIndex = 0;
+        while (selectedLights.count < LightTreeMaxSplitSize && moreLights) // I think that moreLights is sufficient
+        {
+            LightTreeBuildNode const* node        = lightSplit.nodes[splitIndex];
+            float                     pmf         = startPMF;
+            bool                      pathSampled = true;
+            ++splitIndex;
+            while (!pathSampled)
+            {
+                if (!node->leaf)
+                {
+                    float const importances[2]{lbImportance(node->data.children[0]->lb, p, n),
+                                               lbImportance(node->data.children[1]->lb, p, n)};
+                    if (importances[0] == 0.f && importances[1] == 0.f)
+                        pathSampled = true;
+                    else
+                    {
+                        float   nodePMF     = 0;
+                        int32_t chosenChild = sampleDiscrete(importances, 2, u, &nodePMF, &u);
+                        assert(chosenChild >= 0 && chosenChild <= 1);
+                        pmf *= nodePMF;
+                        node = node->data.children[chosenChild];
+                    }
+                }
+                else
+                {
+                    pathSampled = true;
+                    --moreLights;
+                    if (lbImportance(node->lb, p, n) > 0.f)
+                    {
+                        selectedLights.indices[selectedLights.count] = node->data.emitter.idx;
+                        selectedLights.pmfs[selectedLights.count]    = pmf;
+                        ++selectedLights.count;
+                    }
+                }
+            }
+        }
+
+        return selectedLights;
+    }
+
+    float lightSelectionPMF(LightTreeBuildNode const& ltRoot, Point3f p, Vector3f n, uint32_t trail, float startPMF)
+    {
+        assert(fl::abs(normL2(n) - 1.f) < 1e-5f);
+        LightTreeBuildNode const* node = &ltRoot;
+        while (!node->leaf)
+        {
+            float const importances[2]{lbImportance(node->data.children[0]->lb, p, n),
+                                       lbImportance(node->data.children[1]->lb, p, n)};
+            startPMF *= importances[trail & 1] / (importances[0] + importances[1]);
+            node = node->data.children[trail & 1];
+            trail >>= 1;
+        }
+
+        return startPMF;
     }
 } // namespace dmt

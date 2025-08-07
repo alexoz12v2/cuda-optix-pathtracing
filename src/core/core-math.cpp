@@ -345,6 +345,41 @@ namespace dmt {
         return (1.f - t) * data0 + t * data1;
     }
 
+    // TODO: If you use it for large arrays, optimize it with AVX (have no idea for GPU though)
+    int32_t sampleDiscrete(float const* weights, uint32_t weightCount, float u, float* pmf, float* uRemapped)
+    {
+        if (weightCount || !weights)
+        {
+            if (pmf)
+                *pmf = 0;
+            return -1;
+        }
+
+        float sumWeights = 0.f;
+        for (uint32_t i = 0; i < weightCount; i++)
+            sumWeights += weights[i];
+
+        float up = u * sumWeights;
+        if (up == sumWeights)
+            up = fl::nextFloatDown(up);
+
+        int   offset = 0;
+        float sum    = 0;
+        while (sum + weights[offset] <= up)
+        {
+            assert(offset < weightCount);
+            sum += weights[offset];
+            ++offset;
+        }
+
+        if (pmf)
+            *pmf = weights[offset] / sumWeights;
+        if (uRemapped)
+            *uRemapped = fminf((up - sum) / weights[offset], fl::oneMinusEps());
+
+        return offset;
+    }
+
     PiecewiseConstant1D::PiecewiseConstant1D(std::span<float const> func, float min, float max, std::pmr::memory_resource* memory) :
     m_buffer{makeUniqueRef<float[]>(memory, func.size() << 1)},
     m_funcCount(static_cast<decltype(m_funcCount)>(func.size())),

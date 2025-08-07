@@ -58,6 +58,11 @@ namespace dmt {
     DMT_CORE_API float lookupTableRead(float const* table, float x, int32_t size);
     DMT_CORE_API float lookupTableRead2D(float const* table, float x, float y, int32_t sizex, int32_t sizey);
 
+    /// Maybe move to `cudautils`. This is used to sample from a PMF whose waveform is known, starting from a uniformly distributed random
+    /// number in a continuous domain. Furthermore, such initial sample is remapped such that it can be reused
+    /// How is it remapped: The offset between the 2 bounding CDF values is in itself still a random number, which can be remapped in the 0,1 range
+    DMT_CORE_API int32_t sampleDiscrete(float const* weights, uint32_t weightCount, float u, float* pmf, float* uRemapped);
+
     DMT_CORE_API inline float smoothstep(float x)
     {
         if (x <= 0.f)

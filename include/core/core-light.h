@@ -50,8 +50,8 @@ namespace dmt {
     {
         Point3f co;
         Transform lightFromRender; // has position in last column (we assume that this is affine), but we keep it anyways
-        RGB       strength;
-        LightType type;
+        RGB                strength;
+        LightType          type;
         union DMT_CORE_API LightData
         {
             PointLight point;

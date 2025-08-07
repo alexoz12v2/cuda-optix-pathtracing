@@ -1012,14 +1012,31 @@ static __m256 neg_avx256(__m256 x)
     return _mm256_xor_ps(x, sign_mask);
 }
 
+static void shift()
+
+static __m256 permute(__m256 vec, uint32_t indices)
+{
+    uint8_t idx[8];
+    for (int i = 0; i < 8; i++)
+    {
+        idx[i] = (indices >> (i * 3)) & 0x7; // Extract 3 bits per index
+    }
+
+    // Load into __m256i
+    __m256i perm_idx = _mm256_setr_epi32(idx[0], idx[1], idx[2], idx[3], idx[4], idx[5], idx[6], idx[7]);
+
+    // Perform the permutation
+    return _mm256_permutevar8x32_ps(vec, perm_idx);
+}
+
 namespace dmt::bvh {
 
-    void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index);
+    void traverseCluster(BVHWiVeCluster cluster, Ray ray);
 
-    bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index);
+    bool intersectLeaf(BVHWiVe* bvh, Ray ray, uint32_t index);
 
     //8 predetermined orders per node cluster
-    void traverseRay(Ray ray, BVHWiVeSoA* bvh, std::pmr::memory_resource* _temp)
+    void traverseRay(Ray ray, BVHWiVe* bvh, std::pmr::memory_resource* _temp)
     {
         std::pmr::vector<uint32_t> nodeStack{_temp};
         std::pmr::vector<uint32_t> tminStack{_temp};
@@ -1047,18 +1064,26 @@ namespace dmt::bvh {
         }
     }
 
-    static void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index)
+    static void traverseCluster(BVHWiVeCluster cluster, Ray ray)
     {
+        //loading bounding box
+        __m256 bxmax = _mm256_load_ps(cluster.bxmax);
+        __m256 bymax = _mm256_load_ps(cluster.bymax);
+        __m256 bzmax = _mm256_load_ps(cluster.bzmax);
+        __m256 bxmin = _mm256_load_ps(cluster.bxmin);
+        __m256 bymin = _mm256_load_ps(cluster.bymin);
+        __m256 bzmin = _mm256_load_ps(cluster.bzmin);
+
         __m256 txmin, txmax;
         __m256 tymin, tymax;
         __m256 tzmin, tzmax;
 
         if (ray.d.x < 0)
-            swap_avx256(&(bvh->bxmax[index]), &(bvh->bxmax[index]));
+            swap_avx256(&bxmax, &bxmin);
         if (ray.d.y < 0)
-            swap_avx256(&(bvh->bymax[index]), &(bvh->bymax[index]));
+            swap_avx256(&bymax, &bymin);
         if (ray.d.z < 0)
-            swap_avx256(&(bvh->bzmax[index]), &(bvh->bzmax[index]));
+            swap_avx256(&bzmax, &bzmin);
 
         //set rayx info
         __m256 rorgx    = _mm256_set1_ps(ray.o.x);
@@ -1066,9 +1091,9 @@ namespace dmt::bvh {
         __m256 ridx_neg = neg_avx256(ridx);
 
         //set parametric variable
-        txmin = _mm256_sub_ps(bvh->bxmin[index], rorgx);
+        txmin = _mm256_sub_ps(bxmin, rorgx);
         txmin = _mm256_mul_ps(txmin, ridx_neg);
-        txmax = _mm256_sub_ps(bvh->bxmax[index], rorgx);
+        txmax = _mm256_sub_ps(bxmax, rorgx);
         txmax = _mm256_mul_ps(txmax, ridx);
 
         //set rayy info
@@ -1077,9 +1102,9 @@ namespace dmt::bvh {
         __m256 ridy_neg = neg_avx256(ridy);
 
         //set parametric variable
-        tymin = _mm256_sub_ps(bvh->bymin[index], rorgy);
+        tymin = _mm256_sub_ps(bymin, rorgy);
         tymin = _mm256_mul_ps(tymin, ridy_neg);
-        tymax = _mm256_sub_ps(bvh->bymax[index], rorgy);
+        tymax = _mm256_sub_ps(bymax, rorgy);
         tymax = _mm256_mul_ps(tymax, ridy);
 
         //set rayz info
@@ -1088,9 +1113,9 @@ namespace dmt::bvh {
         __m256 ridz_neg = neg_avx256(ridz);
 
         //set parametric variable
-        tzmin = _mm256_sub_ps(bvh->bzmin[index], rorgz);
+        tzmin = _mm256_sub_ps(bzmin, rorgz);
         tzmin = _mm256_mul_ps(tzmin, ridz_neg);
-        tzmax = _mm256_sub_ps(bvh->bzmax[index], rorgz);
+        tzmax = _mm256_sub_ps(bzmax, rorgz);
         tzmax = _mm256_mul_ps(tzmax, ridz);
 
         //I need to clip the tmin and tmax with the tnear and tfar
@@ -1343,8 +1368,9 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>
-        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
+            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
+            ->void
+        {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

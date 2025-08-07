@@ -14,6 +14,7 @@
 
 namespace dmt {
     inline constexpr int     BranchingFactor       = 8;
+    inline constexpr int     SIMDWidth             = 8;
     inline constexpr int     LeavesBranchingFactor = 12;
     inline constexpr int32_t MinNumBin             = 16;
     inline constexpr int32_t MaxNumBin             = 128;
@@ -30,22 +31,26 @@ namespace dmt {
         uint32_t         primitiveCount;
     };
 
-    struct DMT_CORE_API BVHWiVeSoA
+    struct DMT_CORE_API BVHWiVe
+    {
+        BVHWiVeCluster bvhClusters[256];
+    };
+
+    struct DMT_CORE_API alignas(32) BVHWiVeCluster
     {
         //WiveClusters 8nodes
         //bounding box information
-        std::pmr::vector<__m256> bxmin;
-        std::pmr::vector<__m256> bxmax;
-        std::pmr::vector<__m256> bymin;
-        std::pmr::vector<__m256> bymax;
-        std::pmr::vector<__m256> bzmin;
-        std::pmr::vector<__m256> bzmax;
+        float bxmin[SIMDWidth];
+        float bxmax[SIMDWidth];
+        float bymin[SIMDWidth];
+        float bymax[SIMDWidth];
+        float bzmin[SIMDWidth];
+        float bzmax[SIMDWidth];
         //parametric information
-        std::pmr::vector<__m256> txmin;
-        std::pmr::vector<__m256> txmax;
+        float txmin[SIMDWidth];
+        float txmax[SIMDWidth];
         //data information
-        std::pmr::vector<__m256> data; //32bit*8node->32bit:1bit flag active node,24bit for the permutation info, 1bit flag->inner node/leaf node,6bit for the offset
-        std::pmr::vector<uint8_t> leaf;
+        uint32_t data[8]; //32bit*8node->32bit:1bit flag active node,24bit for the permutation info, 1bit flag->inner node/leaf node,6bit for the offset
     };
     static_assert(std::is_trivial_v<BVHBuildNode> && std::is_standard_layout_v<BVHBuildNode>,
                   "needed to use aggregate init and memset/memcpy");

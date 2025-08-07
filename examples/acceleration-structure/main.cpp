@@ -273,10 +273,14 @@ namespace dmt::test {
         Context ctx;
         assert(ctx.isValid() && "Need valid context");
 
-        Bounds3f const
-            sceneBounds = std::transform_reduce(scene.begin(), scene.end(), bbEmpty(), [](dmt::Bounds3f a, dmt::Bounds3f b) {
-            return bbUnion(a, b);
-        }, [](TriangleData const& t) { return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)}; });
+        Bounds3f const sceneBounds = std::transform_reduce(
+            scene.begin(),
+            scene.end(),
+            bbEmpty(),
+            [](dmt::Bounds3f a, dmt::Bounds3f b) { return bbUnion(a, b); },
+            [](TriangleData const& t) {
+            return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)};
+            });
 
         Bounds3f const primsBounds = std::transform_reduce( //
             spanPrims.begin(),
@@ -547,10 +551,18 @@ namespace dmt::sampling {
 
     template <typename T>
     concept Sampler = requires(std::remove_cvref_t<T>& t) {
-        { t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>()) };
-        { t.get1D() } -> std::floating_point;
-        { t.get2D() } -> std::same_as<Point2f>;
-        { t.getPixel2D() } -> std::same_as<Point2f>;
+        {
+            t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>())
+        };
+        {
+            t.get1D()
+        } -> std::floating_point;
+        {
+            t.get2D()
+        } -> std::same_as<Point2f>;
+        {
+            t.getPixel2D()
+        } -> std::same_as<Point2f>;
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class HaltonOwen
@@ -698,8 +710,12 @@ namespace dmt::filtering {
     /// @note doesn't have copy control, pass around as reference
     template <typename T>
     concept Filter = requires(std::remove_cvref_t<T> const& t) {
-        { t.evaluate(std::declval<Point2f>()) } -> std::floating_point;
-        { t.radius() } -> std::same_as<Vector2f>;
+        {
+            t.evaluate(std::declval<Point2f>())
+        } -> std::floating_point;
+        {
+            t.radius()
+        } -> std::same_as<Vector2f>;
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class FilterSampler
@@ -864,7 +880,9 @@ namespace dmt::camera {
 namespace dmt::film {
     template <typename T>
     concept Film = requires(std::remove_cvref_t<T>& t) {
-        { t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f) };
+        {
+            t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f)
+        };
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class RGBFilm

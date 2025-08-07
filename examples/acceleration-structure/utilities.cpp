@@ -1052,7 +1052,7 @@ namespace dmt::bvh {
 
             if (!(bvh->leaf[currNodeIndex]))
             {
-                traverseCluster(bvh, ray, currNodeIndex);
+                traverseCluster(bvh, ray);
             }
             else if (intersectLeaf(bvh, ray, currNodeIndex))
             {
@@ -1119,7 +1119,12 @@ namespace dmt::bvh {
         tzmax = _mm256_mul_ps(tzmax, ridz);
 
         //I need to clip the tmin and tmax with the tnear and tfar
-        //_mm256_min_ps
+        //find tmax and tmin
+        __m256 tmax = _mm256_min_ps(txmax, tymax);
+        tmax = _mm256_min_ps(tmax, tzmax);
+        __m256 tmin = _mm256_min_ps(txmin, tymin);
+        tmin = _mm256_min_ps(tmin, tzmin);
+
     }
 
     static bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index) { return false; }

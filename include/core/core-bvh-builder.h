@@ -50,7 +50,7 @@ namespace dmt {
         float txmin[SIMDWidth];
         float txmax[SIMDWidth];
         //data information
-        uint32_t data[8]; //32bit*8node->32bit:1bit flag active node,24bit for the permutation info, 1bit flag->inner node/leaf node,6bit for the offset
+        uint32_t data[SIMDWidth]; //32bit*8node->32bit:1bit flag active node,24bit for the permutation info, 1bit flag->inner node/leaf node,6bit for the offset
     };
     static_assert(std::is_trivial_v<BVHBuildNode> && std::is_standard_layout_v<BVHBuildNode>,
                   "needed to use aggregate init and memset/memcpy");
@@ -83,4 +83,5 @@ namespace dmt::bvh {
                                              std::span<BVHBuildNode*>   nodes,
                                              std::pmr::memory_resource* temp,
                                              std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+    DMT_CORE_API void traverseRay(Ray ray, BVHWiVe* bvh, std::pmr::memory_resource* _temp);
 } // namespace dmt::bvh

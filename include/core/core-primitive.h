@@ -16,11 +16,13 @@ namespace dmt {
     struct Intersection
     {
         Point3f  p;
+        Point2f  uv;
         Vector3f ng;
+        Vector3f dpdu;
+        Vector3f dpdv;
         float    t;
         bool     hit;
-        // TODO remove
-        RGB color;
+        RGB      color;
     };
     static_assert(std::is_standard_layout_v<Intersection> && std::is_trivial_v<Intersection>);
 
@@ -94,6 +96,8 @@ namespace dmt {
         size_t       instanceIdx;
 
         Vector3f normalFromIndex(size_t tri) const;
+        Point2f  uvFromIndex(size_t tri, float u, float v) const;
+        void     compute_dpdu_dpdv(size_t triIdx, Vector3f* dpdu, Vector3f* dpdv) const;
 
         std::tuple<Point3f, Point3f, Point3f> worldSpacePts(size_t _triIdx) const;
     };

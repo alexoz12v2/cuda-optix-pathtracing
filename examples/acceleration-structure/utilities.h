@@ -94,6 +94,7 @@ namespace dmt::test {
     void testSphereLightPDFAnalyticCheck();
     void testEnvironmentalLightConstantValue();
     void testQuaternionRotation();
+    void testMipmappedTexturePrinting();
 } // namespace dmt::test
 
 namespace dmt::bvh {

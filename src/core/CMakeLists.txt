@@ -14,6 +14,7 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-bsdf.h
         ${CMAKE_SOURCE_DIR}/include/core/core-light.h
         ${CMAKE_SOURCE_DIR}/include/core/core-light-tree-builder.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-texture.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
@@ -24,6 +25,7 @@ target_sources(dmt-core
     core-bsdf.cpp
     core-light.cpp
     core-light-tree-builder.cpp
+    core-texture.cpp
 )
 
 target_link_libraries(dmt-core 

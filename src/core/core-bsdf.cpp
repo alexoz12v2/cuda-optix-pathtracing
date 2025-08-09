@@ -34,11 +34,11 @@ namespace dmt {
         return {.weight = weight, .N{0, 0, 1}, .sampleWeight = maxComponent(max(weight.asVec(), Vector3f::zero()))};
     }
 
-    Vector3f ensureValidSpecularReflection(Vector3f const Ng, Vector3f const I, Vector3f N)
+    Vector3f ensureValidSpecularReflection(Vector3f Ng, Vector3f const I, Vector3f N)
     {
         Vector3f const R = 2 * dot(N, I) * N - I;
 
-        float const Iz = dot(I, Ng);
+        float Iz = dot(I, Ng);
         assert(Iz >= 0);
 
         // Reflection rays may always be at least as shallow as the incoming ray.

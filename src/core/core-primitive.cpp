@@ -558,18 +558,20 @@ namespace dmt {
 #endif
         }
 
-        static DMT_FORCEINLINE Intersection DMT_FASTCALL fromTrisect(Triisect trisect, Ray const& ray, RGB color)
+        static DMT_FORCEINLINE Intersection DMT_FASTCALL
+            fromTrisect(Triisect trisect, Ray const& ray, RGB color, Point2f uv = {0, 0})
         {
+            Intersection isect{};
             if (trisect)
-                return {
-                    .p     = ray.o + trisect.t * ray.d,
-                    .ng    = {},
-                    .t     = trisect.t,
-                    .hit   = true,
-                    .color = color,
-                };
-            else
-                return {.p = {}, .t = 0, .hit = false};
+            {
+                isect.p     = ray.o + trisect.t * ray.d;
+                isect.ng    = {};
+                isect.t     = trisect.t;
+                isect.hit   = true;
+                isect.color = color;
+                isect.uv    = uv;
+            }
+            return isect;
         }
     } // namespace triangle
 
@@ -679,6 +681,73 @@ namespace dmt {
         return transformed;
     }
 
+    Point2f TriangleIndexedBase::uvFromIndex(size_t tri, float u, float v) const
+    {
+        auto const*   instance = scene->instances[instanceIdx].get();
+        auto const*   geo      = scene->geometry[instance->meshIdx].get();
+        auto const    index    = geo->getIndexedTri(tri);
+        Point2f const uv0      = geo->getUV(index.v[0].uvIdx);
+        Point2f const uv1      = geo->getUV(index.v[1].uvIdx);
+        Point2f const uv2      = geo->getUV(index.v[2].uvIdx);
+
+        // Perform the barycentric interpolation.
+        float const w0 = 1.0f - u - v;
+        float const w1 = u;
+        float const w2 = v;
+
+        Point2f const interpolatedUV = w0 * uv0 + w1 * uv1 + w2 * uv2;
+
+        return interpolatedUV;
+    }
+
+    static void coordinateSystemFallback(Vector3f const& n, Vector3f* t, Vector3f* b)
+    {
+        if (fabsf(n.x) > fabsf(n.z))
+            *t = Vector3f(-n.y, n.x, 0.f);
+        else
+            *t = Vector3f(0.f, -n.z, n.y);
+
+        *t = normalize(*t);
+        *b = cross(n, *t);
+    }
+
+    void TriangleIndexedBase::compute_dpdu_dpdv(size_t triIdx, Vector3f* dpdu, Vector3f* dpdv) const
+    {
+        assert(dpdu && dpdv);
+        Transform           m    = transformFromAffine(scene->instances[instanceIdx]->affineTransform);
+        TriangleMesh const& mesh = *scene->geometry[scene->instances[instanceIdx]->meshIdx];
+        IndexedTri const    tri  = mesh.getIndexedTri(triIdx);
+
+        // Positions
+        Point3f p0 = m(mesh.getPosition(tri[0].positionIdx));
+        Point3f p1 = m(mesh.getPosition(tri[1].positionIdx));
+        Point3f p2 = m(mesh.getPosition(tri[2].positionIdx));
+
+        // UVs
+        Point2f uv0 = mesh.getUV(tri[0].uvIdx);
+        Point2f uv1 = mesh.getUV(tri[1].uvIdx);
+        Point2f uv2 = mesh.getUV(tri[2].uvIdx);
+
+        Vector2f duv1 = uv1 - uv0;
+        Vector2f duv2 = uv2 - uv0;
+
+        Vector3f dp1 = p1 - p0;
+        Vector3f dp2 = p2 - p0;
+
+        float det = duv1.x * duv2.y - duv1.y * duv2.x;
+        if (fl::abs(det) < 1e-8f)
+        {
+            // UVs are degenerate — fallback to geometric basis
+            Vector3f ng = normalize(cross(p2 - p0, p1 - p0));
+            coordinateSystemFallback(ng, dpdu, dpdv); // builds arbitrary tangent frame
+            return;
+        }
+
+        float invDet = 1.0f / det;
+        *dpdu        = (duv2.y * dp1 - duv1.y * dp2) * invDet;
+        *dpdv        = (-duv2.x * dp1 + duv1.x * dp2) * invDet;
+    }
+
     Bounds3f TriangleIndexed::bounds() const
     {
         auto const [p0, p1, p2] = worldSpacePts(triIdx);
@@ -695,9 +764,15 @@ namespace dmt {
 
         triangle::Triisect const trisect = triangle::intersect(ray, tMax, p0, p1, p2, 0);
 
-        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        auto ret = triangle::fromTrisect(trisect,
+                                         ray,
+                                         scene->instances[instanceIdx]->color,
+                                         uvFromIndex(triIdx, trisect.u, trisect.v));
         if (trisect)
+        {
             ret.ng = normalFromIndex(triIdx);
+            compute_dpdu_dpdv(triIdx, &ret.dpdu, &ret.dpdv);
+        }
         return ret;
     }
 
@@ -767,9 +842,15 @@ namespace dmt {
         fillIndexedVerts<2>(this, triIdxs, v0s, v1s, v2s);
         triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0x3);
 
-        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        auto ret = triangle::fromTrisect(trisect,
+                                         ray,
+                                         scene->instances[instanceIdx]->color,
+                                         uvFromIndex(triIdxs[trisect.index], trisect.u, trisect.v));
         if (trisect)
+        {
             ret.ng = normalFromIndex(triIdxs[trisect.index]);
+            compute_dpdu_dpdv(triIdxs[trisect.index], &ret.dpdu, &ret.dpdv);
+        }
         return ret;
     }
 
@@ -781,9 +862,15 @@ namespace dmt {
         fillIndexedVerts<4>(this, triIdxs, v0s, v1s, v2s);
         triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
 
-        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        auto ret = triangle::fromTrisect(trisect,
+                                         ray,
+                                         scene->instances[instanceIdx]->color,
+                                         uvFromIndex(triIdxs[trisect.index], trisect.u, trisect.v));
         if (trisect)
+        {
             ret.ng = normalFromIndex(triIdxs[trisect.index]);
+            compute_dpdu_dpdv(triIdxs[trisect.index], &ret.dpdu, &ret.dpdv);
+        }
         return ret;
     }
 
@@ -795,9 +882,15 @@ namespace dmt {
         fillIndexedVerts<8>(this, triIdxs, v0s, v1s, v2s);
         triangle::Triisect trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
 
-        auto ret = triangle::fromTrisect(trisect, ray, scene->instances[instanceIdx]->color);
+        auto ret = triangle::fromTrisect(trisect,
+                                         ray,
+                                         scene->instances[instanceIdx]->color,
+                                         uvFromIndex(triIdxs[trisect.index], trisect.u, trisect.v));
         if (trisect)
+        {
             ret.ng = normalFromIndex(triIdxs[trisect.index]);
+            compute_dpdu_dpdv(triIdxs[trisect.index], &ret.dpdu, &ret.dpdv);
+        }
         return ret;
     }
 } // namespace dmt

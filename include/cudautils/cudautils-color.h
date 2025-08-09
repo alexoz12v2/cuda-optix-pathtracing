@@ -90,6 +90,7 @@ namespace dmt {
     inline RGB  operator/(RGB rgb, float scalar) { return {rgb.r / scalar, rgb.g / scalar, rgb.b / scalar}; }
     inline RGB  operator*(RGB a, RGB b) { return {a.r * b.r, a.g * b.g, a.b * b.b}; }
     inline RGB  operator/(RGB a, RGB b) { return {a.r / b.r, a.g / b.g, a.b / b.b}; }
+    inline RGB  lerp(RGB a, RGB b, float t) { return t <= 0.f ? a : (t >= 1.f ? b : ((1.f - t) * a + t * b)); }
     inline bool operator==(RGB rgb, RGB other) { return rgb.r == other.r && rgb.g == other.g && rgb.b == other.b; }
 
 #if 0

@@ -2,6 +2,8 @@
 
 #include "platform/platform-context.h"
 
+#include "core/core-texture.h"
+
 #if !defined(DMT_ARCH_X86_64)
     #error "what"
 #endif
@@ -993,6 +995,259 @@ namespace dmt::test {
         }
 
         assert(fl::abs(normL2(actual - expected)) < 1e-5f);
+    }
+
+    void testMipmappedTexturePrinting()
+    {
+        Context ctx;
+        assert(ctx.isValid());
+        os::Path imageDirectory = os::Path::executableDir();
+        imageDirectory /= "tex";
+        os::Path const diffuse = imageDirectory / "white_sandstone_bricks_03_diff_4k.exr";
+        if (!diffuse.isValid() || !diffuse.isFile())
+            return;
+
+        ctx.warn("MIP Image test started", {});
+
+        auto*   mem  = std::pmr::get_default_resource();
+        int32_t xRes = 0;
+        int32_t yRes = 0;
+        // First probe for resolution
+        if (!openEXR(diffuse, nullptr, &xRes, &yRes) || xRes <= 0 || yRes <= 0)
+        {
+            ctx.error("Couldn't probe EXR file \"{}\"", std::make_tuple(diffuse.toUnderlying()));
+            return;
+        }
+
+        // allocate image and actually load it
+        size_t           basePixelCount = size_t(xRes) * size_t(yRes);
+        UniqueRef<RGB[]> image          = makeUniqueRef<RGB[]>(mem, basePixelCount);
+        if (!image)
+        {
+            ctx.error("Failed to allocate memory for image.", {});
+            return;
+        }
+
+        RGB* ptr = image.get();
+        if (!openEXR(diffuse, &ptr, &xRes, &yRes))
+        {
+            ctx.error("Couldn't open file at \"{}\"", std::make_tuple(diffuse.toUnderlying()));
+            return;
+        }
+
+        // Build mipmapped texture using the PBRT-style function you have
+        ImageTexturev2 tex = makeRGBMipmappedTexture(image.get(), xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, mem);
+        if (!tex.data.rgb || !tex.isRGB || tex.width <= 0 || tex.height <= 0)
+        {
+            ctx.error("Failed to create mipmapped texture.", {});
+            return;
+        }
+        assert(tex.width == xRes && tex.height == yRes);
+
+        // --- First writePNG: combined mip atlas ---
+        {
+            uint32_t combinedHeight = 0;
+            uint32_t combinedWidth  = 0;
+            if (tex.width > tex.height) // the bigger at 3/2, the smaller sum all levels
+            {
+                combinedWidth = tex.width + tex.width / 2;
+                for (uint32_t level = 1; level < tex.mipLevels; ++level)
+                    combinedHeight += fmaxf(tex.height >> level, 1);
+            }
+            else
+            {
+                combinedHeight = tex.height + tex.height / 2;
+                for (uint32_t level = 1; level < tex.mipLevels; ++level)
+                    combinedWidth += fmaxf(tex.width >> level, 1);
+            }
+            size_t           totalPixelCount = static_cast<size_t>(combinedWidth) * combinedHeight;
+            UniqueRef<RGB[]> combinedBuf     = makeUniqueRef<RGB[]>(mem, totalPixelCount);
+            if (!combinedBuf)
+            {
+                ctx.warn("Couldn't allocate combined mip atlas buffer", {});
+            }
+            else
+            {
+
+                // Fill with black initially
+                for (size_t i = 0; i < totalPixelCount; ++i)
+                    combinedBuf[i] = RGB(0.f, 0.f, 0.f);
+
+                if (tex.width > tex.height)
+                {
+                    // Layout: level 0 left, level 1 right of it, others stacked below level 1
+                    uint32_t levelW = tex.width;
+                    uint32_t levelH = tex.height;
+
+                    // Place level 0 at (0, 0)
+                    {
+                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 0);
+                        for (uint32_t y = 0; y < levelH; ++y)
+                        {
+                            for (uint32_t x = 0; x < levelW; ++x)
+                            {
+                                combinedBuf[x + y * combinedWidth] = levelBuf[encodeMorton2D(x, y)];
+                            }
+                        }
+                    }
+
+                    // Place level 1 at (tex.width, 0)
+                    uint32_t xOffset = tex.width;
+                    uint32_t yOffset = 0;
+                    levelW           = std::max(1, tex.width >> 1);
+                    levelH           = std::max(1, tex.height >> 1);
+                    {
+                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 1);
+                        for (uint32_t y = 0; y < levelH; ++y)
+                        {
+                            for (uint32_t x = 0; x < levelW; ++x)
+                            {
+                                combinedBuf[(x + xOffset) + (y + yOffset) * combinedWidth] = levelBuf[encodeMorton2D(x, y)];
+                            }
+                        }
+                    }
+
+                    // Remaining levels stacked below level 1's rectangle
+                    yOffset = levelH;
+                    for (uint32_t level = 2; level < tex.mipLevels; ++level)
+                    {
+                        levelW        = std::max(1, tex.width >> level);
+                        levelH        = std::max(1, tex.height >> level);
+                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, level);
+
+                        for (uint32_t y = 0; y < levelH; ++y)
+                        {
+                            for (uint32_t x = 0; x < levelW; ++x)
+                            {
+                                combinedBuf[(x + xOffset) + (y + yOffset) * combinedWidth] = levelBuf[encodeMorton2D(x, y)];
+                            }
+                        }
+                        yOffset += levelH;
+                    }
+                }
+                else
+                {
+                    // Layout: level 0 top, level 1 below it, others stacked to the right of level 1
+                    uint32_t levelW = tex.width;
+                    uint32_t levelH = tex.height;
+
+                    // Place level 0 at (0, 0)
+                    {
+                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 0);
+                        for (uint32_t y = 0; y < levelH; ++y)
+                        {
+                            for (uint32_t x = 0; x < levelW; ++x)
+                            {
+                                combinedBuf[x + y * combinedWidth] = levelBuf[encodeMorton2D(x, y)];
+                            }
+                        }
+                    }
+
+                    // Place level 1 at (0, tex.height)
+                    uint32_t xOffset = 0;
+                    uint32_t yOffset = tex.height;
+                    levelW           = std::max(1, tex.width >> 1);
+                    levelH           = std::max(1, tex.height >> 1);
+                    {
+                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 1);
+                        for (uint32_t y = 0; y < levelH; ++y)
+                        {
+                            for (uint32_t x = 0; x < levelW; ++x)
+                            {
+                                combinedBuf[(x + xOffset) + (y + yOffset) * combinedWidth] = levelBuf[encodeMorton2D(x, y)];
+                            }
+                        }
+                    }
+
+                    // Remaining levels stacked to the right of level 1's rectangle
+                    xOffset = levelW;
+                    for (uint32_t level = 2; level < tex.mipLevels; ++level)
+                    {
+                        levelW        = std::max(1, tex.width >> level);
+                        levelH        = std::max(1, tex.height >> level);
+                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, level);
+
+                        for (uint32_t y = 0; y < levelH; ++y)
+                        {
+                            for (uint32_t x = 0; x < levelW; ++x)
+                            {
+                                combinedBuf[(x + xOffset) + (y + yOffset) * combinedWidth] = levelBuf[encodeMorton2D(x, y)];
+                            }
+                        }
+                        xOffset += levelW;
+                    }
+                }
+
+                auto const path = os::Path::executableDir() / "mip_atlas.png";
+                writePNG(path, combinedBuf.get(), combinedWidth, combinedHeight);
+                ctx.log("  Written MIP Atlas image to {}", std::make_tuple(path.toUnderlying()));
+            }
+        }
+
+        // --- Test 2: Write each mip level to a separate PNG file ---
+        {
+            uint32_t levelW = tex.width;
+            uint32_t levelH = tex.height;
+
+            for (int level = 0; level < tex.mipLevels; ++level)
+            {
+                size_t           levelPixelCount = size_t(levelW) * size_t(levelH);
+                UniqueRef<RGB[]> scanlineBuf     = makeUniqueRef<RGB[]>(mem, levelPixelCount);
+                if (!scanlineBuf)
+                {
+                    ctx.warn("Couldn't allocate memory for writing mip level {}", std::make_tuple(level));
+                    // advance sizes and continue
+                    levelW = std::max(1u, levelW >> 1);
+                    levelH = std::max(1u, levelH >> 1);
+                    continue;
+                }
+
+                RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, level);
+
+                for (uint32_t yy = 0; yy < levelH; ++yy)
+                {
+                    for (uint32_t xx = 0; xx < levelW; ++xx)
+                    {
+                        uint32_t mortonIndex = encodeMorton2D(xx, yy);
+                        assert(mortonIndex < levelPixelCount);
+                        scanlineBuf.get()[xx + size_t(yy) * levelW] = levelBuf[mortonIndex];
+                    }
+                }
+
+                std::pmr::string name(mem);
+                name.reserve(64);
+                name.append("my_mipmapped_thing_level_");
+                name.append(std::to_string(level));
+                name.append(".png");
+
+                auto const path = os::Path::executableDir() / name.c_str();
+                writePNG(path, scanlineBuf.get(), levelW, levelH);
+                ctx.log("  Written MIP Level {} image to {}", std::make_tuple(level, path.toUnderlying()));
+
+                levelW = std::max(1u, levelW >> 1);
+                levelH = std::max(1u, levelH >> 1);
+            }
+        }
+
+        // --- Test 3: Basic evalRGB test ---
+        {
+            TextureEvalContext evalCtx{};
+            evalCtx.uv.x = 0.5f;
+            evalCtx.uv.y = 0.5f;
+            // use simple differentials that correspond to 1 texel in base level
+            evalCtx.dUV.dudx = 1.0f / float(tex.width);
+            evalCtx.dUV.dudy = 0.0f;
+            evalCtx.dUV.dvdx = 0.0f;
+            evalCtx.dUV.dvdy = 1.0f / float(tex.height);
+
+            RGB result = tex.evalRGB(evalCtx);
+            ctx.warn("Evaluated texture at center: R={}, G={}, B={}", std::make_tuple(result.r, result.g, result.b));
+        }
+
+        // free texture memory (your function)
+        freeImageTexture(tex, mem);
+
+        ctx.warn("MIP Image test finished", {});
     }
 } // namespace dmt::test
 

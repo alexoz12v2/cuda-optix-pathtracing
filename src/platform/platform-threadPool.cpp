@@ -66,6 +66,7 @@ namespace dmt {
                 //    ctx.trace("index: {}", std::make_tuple(index));
                 copy.func(copy.data, index);
                 copy.func = nullptr;
+                --threadPool->m_numJobs;
                 if (otherRemaining)
                 {
                     threadPool->m_cv.notify_all(); // 👈 Wake up another worker if more work is pending
@@ -211,6 +212,7 @@ namespace dmt {
                 {
                     blob->jobs[l] = job;
                     ++blob->counter;
+                    ++m_numJobs;
                     return true;
                 }
             }
@@ -229,6 +231,17 @@ namespace dmt {
         }
 
         return false; // Should never happen
+    }
+
+    void ThreadPoolV2::waitForAll(uint32_t sleepMillis)
+    {
+        while (true)
+        {
+            std::lock_guard<SpinLock> lk{m_mtx};
+            if (m_numJobs == 0)
+                return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleepMillis));
+        }
     }
 
     Job ThreadPoolV2::nextJob(bool& otherJobsRemaining, EJobLayer& outLayer)
@@ -252,7 +265,6 @@ namespace dmt {
 
                         blob->jobs[j].func = nullptr;
                         --blob->counter;
-                        --m_numJobs;
 
                         // Optional: compact blob if needed
 

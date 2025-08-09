@@ -765,9 +765,15 @@ namespace dmt {
     // Vector Types: Frame --------------------------------------------------------------------------------------------
     __host__ __device__ Frame::Frame(Normal3f x, Normal3f y, Normal3f z) : xAxis(x), yAxis(y), zAxis(z) {}
 
-    __host__ __device__ Frame    Frame::fromXZ(Normal3f x, Normal3f z) { return {x, cross(z, x), z}; }
-    __host__ __device__ Frame    Frame::fromXY(Normal3f x, Normal3f y) { return {x, y, cross(x, y)}; }
-    __host__ __device__ Frame    Frame::fromZ(Normal3f z) { return coordinateSystem(z); }
+    __host__ __device__ Frame Frame::fromXZ(Normal3f x, Normal3f z) { return {x, cross(z, x), z}; }
+    __host__ __device__ Frame Frame::fromXY(Normal3f x, Normal3f y) { return {x, y, cross(x, y)}; }
+    __host__ __device__ Frame Frame::fromZ(Normal3f z)
+    {
+        Frame frame{};
+        frame.zAxis = z;
+        gramSchmidt(frame.zAxis.asVec(), &frame.xAxis.asVec(), &frame.yAxis.asVec());
+        return frame;
+    }
     __host__ __device__ Vector3f Frame::toLocal(Vector3f v) const
     {
         return {{dot(v, xAxis), dot(v, yAxis), dot(v, zAxis)}};

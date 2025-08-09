@@ -7,6 +7,7 @@
 #include "core/core-bsdf.h"
 #include "core/core-primitive.h"
 #include "core/core-light.h"
+#include "core/core-texture.h"
 
 #include <stb_image_write.h>
 
@@ -670,11 +671,10 @@ namespace dmt::sampling {
         static constexpr std::array<int32_t, NumDimensions> DimPrimeIndices{0, 1};
 
         int64_t m_haltonIndex = 0;
-        int32_t m_samplesPerPixel;
-        int32_t m_dimension = 0;
-        int32_t m_multInvs[NumDimensions];
-        int32_t m_baseScales[NumDimensions];
-        int32_t m_baseExponents[NumDimensions];
+        int32_t m_dimension   = 0;
+        int32_t m_multInvs[NumDimensions]{};
+        int32_t m_baseScales[NumDimensions]{};
+        int32_t m_baseExponents[NumDimensions]{};
     };
     static_assert(Sampler<HaltonOwen>);
 
@@ -848,7 +848,7 @@ namespace dmt::camera {
     }
 
     // WARNING: DOESN'T WORK
-    Ray generateRay(CameraSample cs, Transform const& cameraFromRaster, Transform const& renderFromCamera)
+    Ray generateRay(CameraSample const& cs, Transform const& cameraFromRaster, Transform const& renderFromCamera)
     {
         Point3f const pxImage{{cs.pFilm.x, cs.pFilm.y, 0}};
         Point3f const pCamera{{cameraFromRaster(pxImage)}};
@@ -961,6 +961,8 @@ namespace dmt::film {
             px.weightSum += weight;
         }
 
+        Point2i resolution() const { return m_resolution; }
+
     private:
         UniqueRef<Pixel[]> m_pixels;
         Point2i            m_resolution;
@@ -970,6 +972,63 @@ namespace dmt::film {
 } // namespace dmt::film
 
 namespace dmt {
+    // TODO move elsewhere
+    // returns a partially constructed `ApproxDifferentialsContext`, where only `p` and `n` are to change every time
+    // IF camera is lensless, ray origin is the same for all differentials,
+    ApproxDifferentialsContext minDifferentialsFromCamera(Transform const&     cameraFromRaster,
+                                                          Transform const&     renderFromCamera,
+                                                          film::RGBFilm const& film,
+                                                          uint32_t             samplesPerPixel)
+    {
+        static constexpr uint32_t CellNum = 512;
+
+        ApproxDifferentialsContext ret{};
+        ret.samplesPerPixel     = samplesPerPixel;
+        ret.minPosDifferentialX = Vector3f::s(fl::infinity());
+        ret.minPosDifferentialY = Vector3f::s(fl::infinity());
+        ret.minDirDifferentialX = Vector3f::s(fl::infinity());
+        ret.minDirDifferentialY = Vector3f::s(fl::infinity());
+
+        Vector3f const       dxCamera = cameraFromRaster(Point3f{1, 0, 0}) - cameraFromRaster(Point3f{0, 0, 0});
+        Vector3f const       dyCamera = cameraFromRaster(Point3f{0, 1, 0}) - cameraFromRaster(Point3f{0, 0, 0});
+        camera::CameraSample sample{};
+        sample.pLens        = {0.5f, 0.5f};
+        sample.time         = 0.5f;
+        sample.filterWeight = 1.f;
+
+        for (uint32_t i = 0; i < CellNum; ++i)
+        {
+            sample.pFilm.x = static_cast<float>(i) / (CellNum - 1) * film.resolution().x;
+            sample.pFilm.y = static_cast<float>(i) / (CellNum - 1) * film.resolution().y;
+
+            Ray const      ray      = camera::generateRay(sample, cameraFromRaster, renderFromCamera);
+            Point3f const  rxOrigin = ray.o, ryOrigin = ray.o; // TOOD holds only for lensless perspective cameras
+            Vector3f const rxDirection = normalize(renderFromCamera(renderFromCamera.applyInverse(ray.d) + dxCamera));
+            Vector3f const ryDirection = normalize(renderFromCamera(renderFromCamera.applyInverse(ray.d) + dyCamera));
+
+            Vector3f dox = renderFromCamera.applyInverse(rxOrigin - ray.o);
+            Vector3f doy = renderFromCamera.applyInverse(ryOrigin - ray.o);
+            if (dotSelf(dox) < dotSelf(ret.minPosDifferentialX))
+                ret.minPosDifferentialX = dox;
+            if (dotSelf(doy) < dotSelf(ret.minPosDifferentialY))
+                ret.minPosDifferentialY = doy;
+
+            Frame const f = Frame::fromZ(ray.d);
+
+            Vector3f const df = normalize(f.toLocal(ray.d)); // should be 0 0 1
+            assert(fl::abs(df.z - 1.f) < 1e-5f && fl::nearZero(df.x) && fl::nearZero(df.y));
+            Vector3f const dxf = normalize(f.toLocal(rxDirection));
+            Vector3f const dyf = normalize(f.toLocal(ryDirection));
+
+            if (dotSelf(dxf - df) < dotSelf(ret.minDirDifferentialX))
+                ret.minDirDifferentialX = dxf - df;
+            if (dotSelf(dyf - df) < dotSelf(ret.minDirDifferentialY))
+                ret.minDirDifferentialY = dyf - df;
+        }
+
+        return ret;
+    }
+
     void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
     {
         // https://developercommunity.visualstudio.com/t/monotonic_buffer_resourcerelease-does/10624172
@@ -979,11 +1038,13 @@ namespace dmt {
     }
 
     // TODO proper path tracing
-    RGB incidentRadiance(Ray const&                 ray,
-                         BVHBuildNode*              bvh,
-                         sampling::HaltonOwen&      sampler,
-                         EnvLight const&            envLight,
-                         std::pmr::memory_resource* temp)
+    RGB incidentRadiance(Ray const&                        ray,
+                         BVHBuildNode*                     bvh,
+                         sampling::HaltonOwen&             sampler,
+                         EnvLight const&                   envLight,
+                         ApproxDifferentialsContext const& diffCtx,
+                         ImageTexturev2 const&             tex,
+                         std::pmr::memory_resource*        temp)
     {
         // TODO: Doesn't work
         Context          ctx;
@@ -993,6 +1054,7 @@ namespace dmt {
         {
             // return isect.color;
 //#define DMT_TEST_OREN_NAYAR
+#define DMT_TEST_TEXTURES
 #if defined(DMT_TEST_OREN_NAYAR)
             float            pdf  = 1.f;
             oren_nayar::BRDF bsdf = oren_nayar::makeParams(0.7f, RGB{0.4f, 0.25f, 0.2f}, isect.ng, -ray.d, 100.f);
@@ -1016,11 +1078,50 @@ namespace dmt {
             {
                 float cosThetaWi = dot(sample.wi, isect.ng);
                 assert(cosThetaWi > 0.f);
+    #if !defined(DMT_TEST_TEXTURES)
                 return (sample.f * bsdf.closure.sampleWeight * cosThetaWi / sample.pdf).saturate0();
+    #else
+                RGB                mult    = (sample.f * bsdf.closure.sampleWeight * cosThetaWi / sample.pdf);
+                float              multLum = 0.2627f * mult.r + 0.6870f * mult.g + 0.0593 * mult.b;
+                TextureEvalContext texCtx{};
+                texCtx.p  = isect.p;
+                texCtx.n  = isect.ng; // TODO should be shading normal
+                texCtx.uv = isect.uv;
+
+                // compute all differentials we need
+                UVDifferentialsContext uvDiffCtx{};
+                uvDiffCtx.dpdu = isect.dpdu;
+                uvDiffCtx.dpdv = isect.dpdv;
+
+                // for dpdx, dpdy, use approximagtion, which needs a bunch of data
+                ApproxDifferentialsContext approxCtx = diffCtx;
+                approxCtx.p                          = isect.p;
+                approxCtx.n                          = isect.ng; // TODO should be shading normal
+                approximate_dp_dxy(approxCtx, &uvDiffCtx.dpdx, &uvDiffCtx.dpdy);
+
+                texCtx.dpdx = uvDiffCtx.dpdx;
+                texCtx.dpdy = uvDiffCtx.dpdy;
+                texCtx.dUV  = duv_From_dp_dxy(uvDiffCtx);
+
+                if (tex.width == 0)
+                {
+                    CheckerTexture chtex{};
+                    chtex.scaleU = 16.f;
+                    chtex.scaleV = 16.f;
+                    chtex.color1 = {0.6f, 0.1f, 0.05f};
+                    chtex.color2 = {0.8f, 0.8f, 0.75f};
+
+                    return chtex.evalRGB(texCtx) * multLum;
+                }
+                else
+                {
+                    return tex.evalRGB(texCtx) * multLum;
+                }
+    #endif
             }
 #endif
 
-            ctx.error("Miss Me", {});
+            //ctx.error("Miss Me", {});
             return {};
         }
 
@@ -1274,11 +1375,150 @@ namespace dmt {
         return constImage;
     }
 
+    static ImageTexturev2 openTestTexture()
+    {
+        ImageTexturev2 tex{};
+        Context        ctx;
+        assert(ctx.isValid());
+        os::Path imageDirectory = os::Path::executableDir();
+        imageDirectory /= "tex";
+        os::Path const diffuse = imageDirectory / "white_sandstone_bricks_03_diff_4k.exr";
+        if (!diffuse.isValid() || !diffuse.isFile())
+            return tex;
+
+        auto*   mem  = std::pmr::get_default_resource();
+        int32_t xRes = 0;
+        int32_t yRes = 0;
+        // First probe for resolution
+        if (!openEXR(diffuse, nullptr, &xRes, &yRes) || xRes <= 0 || yRes <= 0)
+        {
+            ctx.error("Couldn't probe EXR file \"{}\"", std::make_tuple(diffuse.toUnderlying()));
+            return tex;
+        }
+
+        // allocate image and actually load it
+        size_t           basePixelCount = size_t(xRes) * size_t(yRes);
+        UniqueRef<RGB[]> image          = makeUniqueRef<RGB[]>(mem, basePixelCount);
+        if (!image)
+        {
+            ctx.error("Failed to allocate memory for image.", {});
+            return tex;
+        }
+
+        RGB* ptr = image.get();
+        if (!openEXR(diffuse, &ptr, &xRes, &yRes))
+        {
+            ctx.error("Couldn't open file at \"{}\"", std::make_tuple(diffuse.toUnderlying()));
+            return tex;
+        }
+        tex = makeRGBMipmappedTexture(image.get(), xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, mem);
+        return tex;
+    }
+
+    static void pixelEval(
+        dmt::Point2i                           pixel,
+        int32_t const                          SamplesPerPixel,
+        dmt::sampling::HaltonOwen&             sampler,
+        dmt::filtering::Mitchell const&        filter,
+        dmt::Transform const&                  cameraFromRaster,
+        dmt::Transform const&                  renderFromCamera,
+        dmt::BVHBuildNode*                     bvhRoot,
+        dmt::EnvLight const&                   backgroundLight,
+        dmt::ApproxDifferentialsContext const& diffCtx,
+        dmt::ImageTexturev2 const&             tex,
+        dmt::film::RGBFilm&                    film)
+    {
+        Context ctx;
+        UniqueRef<unsigned char[]> monotonicBufferMemory = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), 4096);
+        // TODO reduce logging. remove later
+        if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
+            ctx.log("Starting Pixel {{ {} {} }}", std::make_tuple(pixel.x, pixel.y)); // TODO more samples when filter introduced
+        if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
+        {
+            ctx.warn("Selected Pixel {} {}", std::make_tuple(pixel.x, pixel.y));
+            int i = 0;
+        }
+
+        for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
+        {
+            std::pmr::monotonic_buffer_resource scratch{monotonicBufferMemory.get(), 4096, std::pmr::null_memory_resource()};
+
+            if (sampleIndex == DMT_DBG_SAMPLE_IDX)
+                int i = 0;
+            sampler.startPixelSample(pixel, sampleIndex);
+            camera::CameraSample cs = camera::getCameraSample(sampler, pixel, filter);
+            cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
+            cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
+            cs.filterWeight         = 1.f;
+            Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
+            RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, backgroundLight, diffCtx, tex, &scratch);
+            film.addSample(pixel, radiance, cs.filterWeight);
+
+            if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
+            {
+                ctx.warn("  radiance sample {}: {} {} {} W m-2 sr-1",
+                         std::make_tuple(sampleIndex, radiance.r, radiance.g, radiance.b));
+            }
+        }
+    }
+
+    namespace job {
+
+        struct EvalTileData
+        {
+            dmt::Point2i                    StartPixel;
+            dmt::Point2i                    tileResolution;
+            int32_t                         SamplesPerPixel;
+            dmt::sampling::HaltonOwen*      samplers;
+            dmt::filtering::Mitchell const* filter;
+            dmt::Transform const*           cameraFromRaster;
+            dmt::Transform const*           renderFromCamera;
+            dmt::BVHBuildNode*              bvhRoot;
+            dmt::EnvLight const*            backgroundLight;
+            dmt::ApproxDifferentialsContext diffCtx;
+            dmt::ImageTexturev2 const*      tex;
+            dmt::film::RGBFilm*             film;
+        };
+
+        static void evalTile(uintptr_t _data, uint32_t tid)
+        {
+            EvalTileData& data = *std::bit_cast<EvalTileData*>(_data);
+
+            dmt::sampling::HaltonOwen& sampler = data.samplers[tid];
+
+            int32_t xEnd = data.StartPixel.x + data.tileResolution.x;
+            int32_t yEnd = data.StartPixel.y + data.tileResolution.y;
+
+            for (int32_t y = data.StartPixel.y; y < yEnd; ++y)
+            {
+                for (int32_t x = data.StartPixel.x; x < xEnd; ++x)
+                {
+                    pixelEval({x, y},
+                              data.SamplesPerPixel,
+                              sampler,
+                              *data.filter,
+                              *data.cameraFromRaster,
+                              *data.renderFromCamera,
+                              data.bvhRoot,
+                              *data.backgroundLight,
+                              data.diffCtx,
+                              *data.tex,
+                              *data.film);
+                }
+            }
+        }
+    } // namespace job
+
     static void runMainProgram()
     {
         // primsView primitive coordinates defined in world space
         static constexpr uint32_t Width              = 128;
         static constexpr uint32_t Height             = 128;
+        static constexpr uint32_t TileWidth          = 32;
+        static constexpr uint32_t TileHeight         = 32;
+        static constexpr uint32_t NumTileX           = ceilDiv(Width, TileWidth);
+        static constexpr uint32_t NumTileY           = ceilDiv(Height, TileHeight);
+        static constexpr uint32_t NumJobs            = NumTileX * NumTileY;
         static constexpr uint32_t NumChannels        = 3;
         static constexpr int32_t  SamplesPerPixel    = 128;
         static constexpr uint32_t ScratchBufferBytes = 4096;
@@ -1358,10 +1598,9 @@ namespace dmt {
         bvh::buildCombined(bvhRoot, perInstanceBvhNodes, &scratch, &pool);
 
         // rendering resources
-        ThreadPoolV2         threadpool{std::thread::hardware_concurrency(), &pool};
-        film::RGBFilm        film{{{Width, Height}}, 1e5f, &pool};
-        sampling::HaltonOwen sampler{SamplesPerPixel, {{Width, Height}}, 123432};
-        filtering::Mitchell  filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f, &pool, &scratch};
+        ThreadPoolV2        threadpool{std::thread::hardware_concurrency(), &pool};
+        film::RGBFilm       film{{{Width, Height}}, 1e5f, &pool};
+        filtering::Mitchell filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f, &pool, &scratch};
         resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
 
         // define camera (image plane physical dims, resolution given by image)
@@ -1373,6 +1612,8 @@ namespace dmt {
 
         Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(focalLength, sensorHeight, Width, Height);
         Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
+        ApproxDifferentialsContext diffCtx = minDifferentialsFromCamera(cameraFromRaster, renderFromCamera, film, SamplesPerPixel);
+        ImageTexturev2 tex = openTestTexture();
 
         // TODO: remove, open background image (if possible)
         int32_t  xResBackground = 0, yResBackground = 0;
@@ -1383,57 +1624,74 @@ namespace dmt {
         ctx.warn("Printing Global BVH", {});
         ddbg::printBVHToString(bvhRoot);
 
+#if defined(DMT_SINGLE_THREADED)
+        sampling::HaltonOwen sampler{SamplesPerPixel, {{Width, Height}}, 123432};
         // for each pixel, for each sample within the pixel (halton + owen scrambling)
         for (Point2i pixel : ScanlineRange2D({{Width, Height}}))
         {
-            // TODO reduce logging. remove later
-            if (pixel.x % 32 == 0 && pixel.y % 32 == 0)
-                ctx.log("Starting Pixel {{ {} {} }}",
-                        std::make_tuple(pixel.x, pixel.y)); // TODO more samples when filter introduced
-            if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
-            {
-                ctx.warn("Selected Pixel {} {}", std::make_tuple(pixel.x, pixel.y));
-                int i = 0;
-            }
-
-            for (int32_t sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
-            {
-                if (sampleIndex == DMT_DBG_SAMPLE_IDX)
-                    int i = 0;
-                sampler.startPixelSample(pixel, sampleIndex);
-                camera::CameraSample cs = camera::getCameraSample(sampler, pixel, filter);
-                cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
-                cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
-                cs.filterWeight         = 1.f;
-                Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
-                RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, backgroundLight, &scratch);
-                film.addSample(pixel, radiance, cs.filterWeight);
-                resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
-
-                if (pixel.x == DMT_DBG_PX_X && pixel.y == DMT_DBG_PX_Y)
-                {
-                    ctx.warn("  radiance sample {}: {} {} {} W m-2 sr-1",
-                             std::make_tuple(sampleIndex, radiance.r, radiance.g, radiance.b));
-                }
-            }
+            pixelEval(pixel,
+                      SamplesPerPixel,
+                      sampler,
+                      filter,
+                      cameraFromRaster,
+                      renderFromCamera,
+                      bvhRoot,
+                      backgroundLight,
+                      diffCtx,
+                      tex,
+                      film);
         }
+#else
+        UniqueRef<job::EvalTileData[]> jobData = makeUniqueRef<job::EvalTileData[]>(&pool, NumJobs);
+        UniqueRef<sampling::HaltonOwen[]> tlsSamplers = makeUniqueRef<sampling::HaltonOwen[]>(&pool, threadpool.numThreads());
+        for (uint32_t tidx = 0; tidx < threadpool.numThreads(); ++tidx)
+        {
+            int seed = 18123 * sinf(32424 * tidx);
+            std::construct_at<sampling::HaltonOwen>(&tlsSamplers[tidx], SamplesPerPixel, Point2i{Width, Height}, seed);
+        }
+
+        Point2i startPix{0, 0};
+        Point2i tileSize{TileWidth, TileHeight};
+        for (uint32_t job = 0; job < NumJobs; ++job)
+        {
+            jobData[job].StartPixel       = startPix;
+            jobData[job].tileResolution   = tileSize;
+            jobData[job].SamplesPerPixel  = SamplesPerPixel;
+            jobData[job].samplers         = tlsSamplers.get();
+            jobData[job].filter           = &filter;
+            jobData[job].cameraFromRaster = &cameraFromRaster;
+            jobData[job].renderFromCamera = &renderFromCamera;
+            jobData[job].bvhRoot          = bvhRoot;
+            jobData[job].backgroundLight  = &backgroundLight;
+            jobData[job].diffCtx          = diffCtx;
+            jobData[job].tex              = &tex;
+            jobData[job].film             = &film;
+            if (job != 0 && job % NumTileX == 0)
+            {
+                startPix.x = 0;
+                startPix.y += TileHeight;
+                tileSize.x = Width;
+                tileSize.y = fminf(TileHeight, Height - startPix.y);
+            }
+            else
+            {
+                startPix.x += TileWidth;
+                tileSize.x = fminf(TileWidth, Width - startPix.x);
+            }
+
+            threadpool.addJob({job::evalTile, std::bit_cast<uintptr_t>(&jobData[job])}, EJobLayer::ePriority0);
+        }
+        threadpool.kickJobs();
+        threadpool.waitForAll();
+        ctx.warn("ALL SHOULD BE FINISHED", {});
+#endif
 
         os::Path imagePath = os::Path::executableDir(&pool);
         imagePath /= "image.png";
         ctx.log("Writing image into path \"{}\"", std::make_tuple(imagePath.toUnderlying(&scratch)));
         film.writeImage(imagePath);
 
-        writeIntersectionTestImage(scratch,
-                                   scratchBuffer.get(),
-                                   ScratchBufferBytes,
-                                   pool,
-                                   primitives,
-                                   Width,
-                                   Height,
-                                   sampler,
-                                   filter,
-                                   cameraFromRaster,
-                                   renderFromCamera);
+        // writeIntersectionTestImage(scratch, scratchBuffer.get(), ScratchBufferBytes, pool, primitives, Width, Height, sampler, filter, cameraFromRaster, renderFromCamera);
         bvh::cleanup(bvhRoot, &pool);
     }
 } // namespace dmt
@@ -1513,6 +1771,7 @@ int32_t guardedMain()
         dmt::test::bvhTestRays(rootNode);
         dmt::bvh::cleanup(rootNode);
 
+#if defined(DMT_ENABLE_EXE_TESTS)
         dmt::test::testQuaternionRotation();
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();
@@ -1520,6 +1779,8 @@ int32_t guardedMain()
         dmt::test::testGGXconductor(4096);
         dmt::test::testSphereLightPDFAnalyticCheck();
         dmt::test::testEnvironmentalLightConstantValue();
+        dmt::test::testMipmappedTexturePrinting();
+#endif
 
         dmt::runMainProgram();
 

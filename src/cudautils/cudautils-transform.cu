@@ -59,6 +59,70 @@ namespace dmt {
         return t;
     }
 
+    __host__ __device__ Transform Transform::rotateFromTo(Vector3f from, Vector3f to)
+    {
+        assert(fl::abs(normL2(from) - 1) < 1e-5f && fl::abs(normL2(to) - 1) < 1e-5f);
+        static constexpr float eps = 1e-6f;
+
+        float const cosTheta = dot(from, to);
+        if (cosTheta > 1.f - eps) // case 1: vectorsa already aligned
+            return Transform{};
+        else if (cosTheta < -1.f + eps) // case 2: vectors are the opposite
+        {
+            Vector3f orthogonal = Vector3f(1.0f, 0.0f, 0.0f);
+            if (absDot(from, orthogonal) > 0.99f)
+                orthogonal = Vector3f(0.0f, 1.0f, 0.0f);
+            Vector3f axis = normalize(cross(from, orthogonal));
+            float    x = axis.x, y = axis.y, z = axis.z;
+            float    xx = x * x, yy = y * y, zz = z * z;
+            float    xy = x * y, yz = y * z, zx = z * x;
+            float    c = -1.0f;
+            float    t = 1 - c;
+
+            // clang-format off
+            Matrix4f R{
+                t * xx + c, t * xy - z, t * zx + y, 0,
+                t * xy + z, t * yy + c, t * yz - x, 0,
+                t * zx - y, t * yz + x, t * zz + c, 0,
+                0, 0, 0, 1
+            };
+            // clang-format on
+            return Transform(R);
+        }
+        else // general case
+        {
+            Vector3f const v         = cross(from, to);
+            float const    s         = normL2(v);
+            float const    oneMinusC = 1.f - cosTheta;
+
+            float x = v.x, y = v.y, z = v.z;
+            float vx[9] = {0, -z, y, z, 0, -x, -y, x, 0};
+
+            // Compute [v]_x^2
+            // clang-format off
+            float vx2[9] = {
+                -y*y - z*z, x*y,       x*z, 
+                x*y,       -x*x - z*z, y*z, 
+                x*z,        y*z,      -x*x - y*y };
+            // clang-format on
+
+            // Rodrigues' formula: R = I + [v]_x + [v]_x^2 * ((1 - c) / s^2)
+            float    k = oneMinusC / (s * s);
+            Matrix4f R = Matrix4f::identity();
+            R.m[0] += vx[0] + vx2[0] * k;
+            R.m[4] += vx[1] + vx2[1] * k;
+            R.m[8] += vx[2] + vx2[2] * k;
+            R.m[1] += vx[3] + vx2[3] * k;
+            R.m[5] += vx[4] + vx2[4] * k;
+            R.m[9] += vx[5] + vx2[5] * k;
+            R.m[2] += vx[6] + vx2[6] * k;
+            R.m[6] += vx[7] + vx2[7] * k;
+            R.m[10] += vx[8] + vx2[8] * k;
+
+            return Transform(R);
+        }
+    }
+
     // Combine with another transform
     __host__ __device__ void Transform::combine_(Transform const& other)
     {
@@ -184,8 +248,9 @@ namespace dmt {
     {
         Ray      ret = ray; // NRVO
         Point3fi o   = applyInverse(Point3fi{ray.o});
-        ret.d        = applyInverse(ray.d);
+        ret.d        = normalize(applyInverse(ray.d));
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
+        ret.d_inv = 1.f / ret.d; // TODO better
 
         ret.o = o.midpoint();
         return ret;
@@ -195,9 +260,10 @@ namespace dmt {
     {
         RayDifferential ret = ray; // NRVO
         Point3fi        o   = applyInverse(Point3fi{ray.o});
-        ret.d               = applyInverse(ret.d);
+        ret.d               = normalize(applyInverse(ret.d));
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
-        ret.o = o.midpoint();
+        ret.o     = o.midpoint();
+        ret.d_inv = 1.f / ret.d; // TODO better
         // TODO: if differentials are not here, is it correct to skip their transformation
         if (ray.hasDifferentials)
         {
@@ -232,8 +298,9 @@ namespace dmt {
         ret.d        = operator()(ray.d);
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
 
-        ret.o = o.midpoint();
-        ret.d = normalize(ret.d); // Maybe not necessary?
+        ret.o     = o.midpoint();
+        ret.d     = normalize(ret.d); // Maybe not necessary?
+        ret.d_inv = 1.f / ret.d;      // TODO better
         return ret;
     }
 
@@ -243,7 +310,8 @@ namespace dmt {
         Point3fi        o   = operator()(Point3fi{ray.o});
         ret.d               = operator()(ret.d);
         adjustRangeToErrorBounds(ret.d, o, optInOut_tMax);
-        ret.o = o.midpoint();
+        ret.d_inv = 1.f / ret.d; // TODO better
+        ret.o     = o.midpoint();
         // TODO: if differentials are not here, is it correct to skip their transformation
         if (ray.hasDifferentials)
         {

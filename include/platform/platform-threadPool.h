@@ -61,7 +61,7 @@ namespace dmt::os {
 } // namespace dmt::os
 
 namespace dmt {
-    using JobSignature = void (*)(uintptr_t data, uint32_t tid);
+    using JobSignature = void (*)(uintptr_t data, uint32_t tidx);
 
     /**
      * Enum containing tagged job priorities. Since Thread Pool based job scheduling
@@ -122,8 +122,11 @@ namespace dmt {
         ThreadPoolV2& operator=(ThreadPoolV2&&) noexcept = delete;
         DMT_PLATFORM_API ~ThreadPoolV2() noexcept;
 
+        DMT_PLATFORM_API DMT_FORCEINLINE uint32_t numThreads() const { return m_numThreads; }
+
         DMT_PLATFORM_API bool addJob(Job const& job, EJobLayer layer);
         DMT_PLATFORM_API void cleanup();
+        DMT_PLATFORM_API void waitForAll(uint32_t waitMillis = 16);
         DMT_PLATFORM_API void kickJobs();
         DMT_PLATFORM_API void pauseJobs();
         DMT_PLATFORM_API bool otherLayerActive(EJobLayer& layer) const;

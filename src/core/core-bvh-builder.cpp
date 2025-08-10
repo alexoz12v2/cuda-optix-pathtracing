@@ -77,15 +77,18 @@ namespace dmt::bvh {
                 BVHBuildNode      node;
                 Primitive const **beg, **end;
             };
+            uint8_t idxNode = 0;
             std::pmr::vector<WorkingStackItem> childCandidates{_temp};
             childCandidates.reserve(BranchingFactor);
             childCandidates.emplace_back();
             std::memset(&childCandidates.back().node, 0, sizeof(BVHBuildNode));
-            childCandidates.back().node.bounds = bbUnionPrimitives(std::span{_primsBeg, _primsEnd});
-            childCandidates.back().beg         = _primsBeg;
-            childCandidates.back().end         = _primsEnd;
+            childCandidates.back().node.bounds    = bbUnionPrimitives(std::span{_primsBeg, _primsEnd});
+            childCandidates.back().node.splitAxis[idxNode] = childCandidates.back().node.bounds.maxDimention();
+            childCandidates.back().beg            = _primsBeg;
+            childCandidates.back().end            = _primsEnd;
 
             bool shouldContinue = true;
+
             while (childCandidates.size() < BranchingFactor && shouldContinue)
             {
                 auto maybeNode = dstd::move_to_back_and_pop_if(childCandidates, [](WorkingStackItem const& wItem) {
@@ -96,11 +99,13 @@ namespace dmt::bvh {
                     shouldContinue = false;
                 else
                 {
-                    BVHBuildNode const& current  = maybeNode->node;
-                    Primitive const**   primsBeg = maybeNode->beg;
-                    Primitive const**   primsEnd = maybeNode->end;
-                    int32_t const       axis     = current.bounds.maxDimention(); // common estimate
-                    Primitive const**   primsMid = primsBeg;
+                    BVHBuildNode&     current  = maybeNode->node;
+                    Primitive const** primsBeg = maybeNode->beg;
+                    Primitive const** primsEnd = maybeNode->end;
+                    //int32_t const       axis     = current.bounds.maxDimention(); // common estimate
+                    int32_t const     axis     = current.splitAxis[0];
+                    Primitive const** primsMid = primsBeg;
+
 
                     // check for degenerate bounding box (flat in one dimension)
                     Bounds3f const& bounds     = current.bounds;
@@ -158,6 +163,7 @@ namespace dmt::bvh {
                             }
                         }
 
+                        current.splitAxis[0] = bestAxis;
                         // 1. Collect centroid values
                         std::pmr::vector<std::pair<float, Primitive const*>> centroids{_temp};
                         centroids.reserve(nextPOT(static_cast<uint64_t>(std::distance(primsBeg, primsEnd))));

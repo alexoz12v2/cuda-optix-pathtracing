@@ -29,6 +29,7 @@ namespace dmt {
         BVHBuildNode*    children[BranchingFactor];
         uint32_t         childCount;
         uint32_t         primitiveCount;
+        uint8_t          splitAxis[BranchingFactor-1];
     };
 
     struct DMT_CORE_API BVHWiVe
@@ -79,9 +80,13 @@ namespace dmt::bvh {
         std::pmr::memory_resource*              temp,
         std::pmr::memory_resource*              memory = std::pmr::get_default_resource());
 
+    DMT_CORE_API BVHWiVe* buildBVHWive(BVHBuildNode*              bvh,
+                                       std::pmr::memory_resource* temp,
+                                       std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+
     DMT_CORE_API BVHBuildNode* buildCombined(BVHBuildNode*              root,
                                              std::span<BVHBuildNode*>   nodes,
                                              std::pmr::memory_resource* temp,
                                              std::pmr::memory_resource* memory = std::pmr::get_default_resource());
-    DMT_CORE_API void traverseRay(Ray ray, BVHWiVe* bvh, std::pmr::memory_resource* _temp);
+    DMT_CORE_API void          traverseRay(Ray ray, BVHWiVe* bvh, std::pmr::memory_resource* _temp);
 } // namespace dmt::bvh

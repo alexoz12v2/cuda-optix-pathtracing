@@ -997,12 +997,12 @@ namespace dmt::test {
 } // namespace dmt::test
 
 //get the sign bit of a float
-inline uint32_t floatSignBit(float f) 
-{    
+inline uint32_t floatSignBit(float f)
+{
     uint32_t bits;
-    //std::bit_cast?   
+    //std::bit_cast?
     std::memcpy(&bits, &f, sizeof(float));
-    return bits >> 31;  // Extract sign bit
+    return bits >> 31; // Extract sign bit
 }
 
 static void swap_avx256(__m256* a, __m256* b)
@@ -1042,7 +1042,7 @@ static __m256 permute_avx(__m256 vec, __m256i indices)
     return _mm256_permutevar8x32_ps(vec, indices);
 }
 
-inline uint32_t extract_lane_dynamic_avx(const __m256i vec, unsigned int idx) 
+inline uint32_t extract_lane_dynamic_avx(const __m256i vec, unsigned int idx)
 {
     //copy the lower elements of idx into idx128
     __m128i idx128 = _mm_cvtsi32_si128(idx);
@@ -1091,13 +1091,13 @@ namespace dmt::bvh {
     static void traverseCluster(BVHWiVeCluster cluster, Ray ray)
     {
         //loading bounding box
-        __m256 bxmax = _mm256_load_ps(cluster.bxmax);
-        __m256 bymax = _mm256_load_ps(cluster.bymax);
-        __m256 bzmax = _mm256_load_ps(cluster.bzmax);
-        __m256 bxmin = _mm256_load_ps(cluster.bxmin);
-        __m256 bymin = _mm256_load_ps(cluster.bymin);
-        __m256 bzmin = _mm256_load_ps(cluster.bzmin);
-        __m256i data = _mm256_load_si256(reinterpret_cast<const __m256i*>(cluster.data));
+        __m256  bxmax = _mm256_load_ps(cluster.bxmax);
+        __m256  bymax = _mm256_load_ps(cluster.bymax);
+        __m256  bzmax = _mm256_load_ps(cluster.bzmax);
+        __m256  bxmin = _mm256_load_ps(cluster.bxmin);
+        __m256  bymin = _mm256_load_ps(cluster.bymin);
+        __m256  bzmin = _mm256_load_ps(cluster.bzmin);
+        __m256i data  = _mm256_load_si256(reinterpret_cast<__m256i const*>(cluster.data));
 
         __m256 txmin, txmax;
         __m256 tymin, tymax;
@@ -1146,30 +1146,46 @@ namespace dmt::bvh {
         //I need to clip the tmin and tmax with the tnear and tfar
         //find tmax and tmin
         __m256 tmax = _mm256_min_ps(txmax, tymax);
-        tmax = _mm256_min_ps(tmax, tzmax);
+        tmax        = _mm256_min_ps(tmax, tzmax);
         __m256 tmin = _mm256_min_ps(txmin, tymin);
-        tmin = _mm256_min_ps(tmin, tzmin);
-        //extract sign ray 
-        uint8_t sr = floatSignBit(ray.d.x) + floatSignBit(ray.d.y) << 1 + floatSignBit(ray.d.z) << 2;
+        tmin        = _mm256_min_ps(tmin, tzmin);
+        //extract sign ray
+        uint8_t sr     = floatSignBit(ray.d.x) + floatSignBit(ray.d.y) << 1 + floatSignBit(ray.d.z) << 2;
         __m256i ordIdx = shift(sr, data);
-        tmax = permute_avx(tmax, ordIdx);
-        tmin = permute_avx(tmin, ordIdx);
-        
+        tmax           = permute_avx(tmax, ordIdx);
+        tmin           = permute_avx(tmin, ordIdx);
+        //flip the sign for tmin
+        neg_avx256(tmin);
+        //get the mask with the slab test
+        __m256 mask = _mm256_cmp_ps(tmin, tmax, _CMP_LE_OQ);
     }
 
     static __m256i shift(uint8_t idx, __m256i data)
     {
         uint32_t ord = extract_lane_dynamic_avx(data, idx);
         uint32_t ord_v[SIMDWidth];
-        
-        for(int i = 0; i < SIMDWidth; i++)
-            ord_v[i] = (ord << i*3) & 0x7;
-        
-        
-        return _mm256_load_si256(reinterpret_cast<const __m256i*>(ord_v));
+
+        for (int i = 0; i < SIMDWidth; i++)
+            ord_v[i] = (ord >> i * 3) & 0x7;
+
+
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(ord_v));
     }
 
     static bool intersectLeaf(BVHWiVeCluster bvh, Ray ray, uint32_t index) { return false; }
+
+    DMT_CORE_API BVHWiVe* buildBVHWive(BVHBuildNode*              bvh,
+                                       std::pmr::memory_resource* _temp,
+                                       std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+    {
+        std::pmr::vector<BVHBuildNode*> activeNodeStack{_temp};
+        activeNodeStack.reserve(64);
+        activeNodeStack.push_back(bvh);
+
+        while (!activeNodeStack.empty())
+        {
+        }
+    }
 
     BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* _temp)
     {

@@ -641,6 +641,27 @@ function(dmt_win32_add_custom_application_manifest target)
   )
 endfunction()
 
+
+function(dmt_add_cli target)
+  add_executable(${target})
+  set_target_properties(${target} PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+    DEBUG_POSTFIX -d
+    OUTPUT_NAME "${target}"
+    FOLDER "Examples/${v_target_name}"
+    VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+  # put the executable file in the right place
+  # set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+  target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
+
+  dmt_set_target_compiler_versions(${target} PRIVATE)
+  dmt_set_target_warnings(${target} PRIVATE)
+  dmt_set_target_optimization(${target} PRIVATE)
+  dmt_add_compile_definitions(${target} PRIVATE)
+endfunction()
+
+
 # usage: dmt_add_example creates an executable with no sources, configured and prepared to be
 function(dmt_add_example target)
   string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")

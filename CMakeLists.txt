@@ -140,6 +140,7 @@ add_subdirectory(src)
 
 # build examples
 add_subdirectory(examples)
+add_subdirectory(cli)
 
 dmt_set_option(DMT_ENABLE_TESTS ON BOOL "ON To turn on tests, OFF to disable them")
 if(DMT_ENABLE_TESTS)

@@ -77,15 +77,14 @@ namespace dmt::bvh {
                 BVHBuildNode      node;
                 Primitive const **beg, **end;
             };
-            uint8_t idxNode = 0;
+            uint8_t                            idxNode = 0;
             std::pmr::vector<WorkingStackItem> childCandidates{_temp};
             childCandidates.reserve(BranchingFactor);
             childCandidates.emplace_back();
             std::memset(&childCandidates.back().node, 0, sizeof(BVHBuildNode));
-            childCandidates.back().node.bounds    = bbUnionPrimitives(std::span{_primsBeg, _primsEnd});
-            childCandidates.back().node.splitAxis[idxNode] = childCandidates.back().node.bounds.maxDimention();
-            childCandidates.back().beg            = _primsBeg;
-            childCandidates.back().end            = _primsEnd;
+            childCandidates.back().node.bounds = bbUnionPrimitives(std::span{_primsBeg, _primsEnd});
+            childCandidates.back().beg         = _primsBeg;
+            childCandidates.back().end         = _primsEnd;
 
             bool shouldContinue = true;
 
@@ -102,8 +101,7 @@ namespace dmt::bvh {
                     BVHBuildNode&     current  = maybeNode->node;
                     Primitive const** primsBeg = maybeNode->beg;
                     Primitive const** primsEnd = maybeNode->end;
-                    //int32_t const       axis     = current.bounds.maxDimention(); // common estimate
-                    int32_t const     axis     = current.splitAxis[0];
+                    int32_t const     axis     = current.bounds.maxDimention(); // common estimate
                     Primitive const** primsMid = primsBeg;
 
 
@@ -125,11 +123,9 @@ namespace dmt::bvh {
                         {
 
                             float const splitPosition = current.bounds.pMin[axis] + (i + 1) * splitLength;
-                            float const splitCost     = evaluateSAH(
-                                std::span{primsBeg, primsEnd},
-                                [](Primitive const* p) { return p->bounds(); },
-                                axis,
-                                splitPosition);
+                            float const splitCost = evaluateSAH(std::span{primsBeg, primsEnd}, [](Primitive const* p) {
+                                return p->bounds();
+                            }, axis, splitPosition);
                             if (splitCost < minimumSplitCost)
                             {
                                 minimumSplitCost     = splitCost;
@@ -163,7 +159,6 @@ namespace dmt::bvh {
                             }
                         }
 
-                        current.splitAxis[0] = bestAxis;
                         // 1. Collect centroid values
                         std::pmr::vector<std::pair<float, Primitive const*>> centroids{_temp};
                         centroids.reserve(nextPOT(static_cast<uint64_t>(std::distance(primsBeg, primsEnd))));
@@ -209,7 +204,7 @@ namespace dmt::bvh {
                     last->end         = primsMid;
                     last->node.bounds = bbUnionPrimitives(std::span{primsBeg, primsMid});
                 } // end else (maybeNode)
-            }     // end while (on workItem list)
+            } // end while (on workItem list)
 
             for (auto const& workItem : childCandidates)
             {
@@ -272,11 +267,9 @@ namespace dmt::bvh {
                 {
                     float const splitPosition = bounds.pMin[axis] + (i + 1) * splitLength;
 
-                    float splitCost = evaluateSAH(
-                        currNodes,
-                        [](BVHBuildNode const* p) { return p->bounds; },
-                        axis,
-                        splitPosition);
+                    float splitCost = evaluateSAH(currNodes, [](BVHBuildNode const* p) {
+                        return p->bounds;
+                    }, axis, splitPosition);
 
                     if (splitCost < minimumSplitCost)
                     {
@@ -387,6 +380,7 @@ namespace dmt::bvh {
             while (i < triCount)
             {
                 size_t const remaining = triCount - i;
+#if defined(DMT_GROUP_PRIMITIVES)
                 if (remaining >= 8)
                 {
                     auto* grouped = std::construct_at(
@@ -424,10 +418,13 @@ namespace dmt::bvh {
                     i += 2;
                 }
                 else
+#endif
                 {
                     auto* single = std::construct_at(
                         reinterpret_cast<TriangleIndexed*>(memory->allocate(sizeof(TriangleIndexed))));
-                    *single = *tris[i]; // shallow copy
+                    single->scene       = &scene;
+                    single->instanceIdx = instanceIdx;
+                    *single             = *tris[i]; // shallow copy
                     outPrims.push_back(UniqueRef<TriangleIndexed>(single, PmrDeleter::create<TriangleIndexed>(memory)));
                     i += 1;
                 }
@@ -465,7 +462,7 @@ namespace dmt::bvh {
         TriangleMesh const& mesh       = *scene.geometry[instance->meshIdx];
         size_t const        primsStart = outPrims.size();
 
-        std::pmr::vector<Primitive const*> middlePrims{temp};
+        std::pmr::vector<Primitive*> middlePrims{temp};
 
         middlePrims.reserve(mesh.triCount());
         outPrims.reserve(primsStart + mesh.triCount());
@@ -484,16 +481,291 @@ namespace dmt::bvh {
 
         auto* root = reinterpret_cast<BVHBuildNode*>(memory->allocate(sizeof(BVHBuildNode)));
         std::memset(root, 0, sizeof(BVHBuildNode));
-        root->bounds = instance->bounds;
+        root->bounds          = instance->bounds;
+        Primitive const** beg = const_cast<Primitive const**>(middlePrims.data());
+        Primitive const** end = const_cast<Primitive const**>(middlePrims.data() + middlePrims.size());
 
-        buildRecursive(middlePrims.data(), middlePrims.data() + middlePrims.size(), root, memory, temp);
+        buildRecursive(beg, end, root, memory, temp);
 
         // Traverse the BVH, and, for each node having 2, 4, 8 TriangleIndexed primitives, group them into TrianglesIndexed2,
         // TrianglesIndexed4, TrianglesIndexed8
         // Once done, copy to outPrims, transfering pointer ownership
+#if defined(DMT_GROUP_PRIMITIVES)
         groupPrimitivesRecursive(scene, instanceIdx, root, middlePrims, outPrims, memory);
+#else
+        for (uint32_t i = 0; i < middlePrims.size(); ++i)
+            outPrims.push_back(UniqueRef<Primitive>{middlePrims[i], PmrDeleter::create<Primitive>(memory)});
+#endif
 
         return root;
+    }
+
+    static uint32_t countBVHBuildNodesRecursive(BVHBuildNode* bvh)
+    {
+        if (!bvh || bvh->childCount == 0)
+            return 0;
+
+        uint32_t count = bvh->childCount;
+        for (uint32_t i = 0; i < bvh->childCount; ++i)
+            count += countBVHBuildNodesRecursive(bvh->children[i]);
+
+        return count;
+    }
+
+    static void buildPermutationsBoxproj(Bounds3f const* children, uint32_t childCount, std::array<uint32_t, 8>& outPerm)
+    {
+        static_assert(BranchingFactor == SIMDWidth && SIMDWidth == 8);
+
+        uint32_t const dummyIndex = childCount;
+        for (int32_t mask = 0; mask < 8; ++mask)
+        {
+            Vector3f dir{};
+            dir.x = (mask & 1) ? -1.f : 1.f;
+            dir.y = (mask & 2) ? -1.f : 1.f;
+            dir.z = (mask & 4) ? -1.f : 1.f;
+
+            std::array<std::pair<double, int>, 8> kv{};
+            for (uint32_t i = 0; i < 8; ++i)
+            {
+                if (children[i].isEmpty())
+                    kv[i] = {fl::infinity(), i};
+                else
+                {
+                    double const nearCornerx = (dir.x > 0.f) ? children[i].pMin.x : children[i].pMax.x;
+                    double const nearCornery = (dir.y > 0.f) ? children[i].pMin.y : children[i].pMax.y;
+                    double const nearCornerz = (dir.z > 0.f) ? children[i].pMin.z : children[i].pMax.z;
+
+                    double key = nearCornerx * dir.x + nearCornery * dir.y + nearCornerz * dir.z;
+                    if (!std::isfinite(key))
+                        key = std::isnan(key) ? fl::infinity() : key;
+
+                    kv[i] = {key, i};
+                }
+            }
+
+            std::stable_sort(kv.begin(), kv.end(), [](auto const& a, auto const& b) {
+                if (a.first < b.first)
+                    return true;
+                if (a.first > b.first)
+                    return false;
+                return a.second < b.second;
+            });
+
+            uint32_t packed = 0;
+            for (int32_t slot = 0; slot < 8; ++slot)
+            {
+                int32_t const  idx   = kv[slot].second;
+                uint32_t const field = (static_cast<uint32_t>(idx) & 0x7u);
+                packed |= (field << (slot * 3));
+            }
+            outPerm[mask] = packed;
+        }
+    }
+
+    // --- Two-pass builder ---
+    struct IndexMapPair
+    {
+        uint32_t index;
+        uint8_t  isLeaf;
+    };
+
+    // Helper: walk tree and assign node -> finalBufferIndex (DFS, preserves DFS order)
+    static uint32_t assignNodeIndicesDFS(BVHBuildNode* root, std::unordered_map<BVHBuildNode*, IndexMapPair>& outIndexMap)
+    {
+        uint32_t                   counter = 0;
+        std::vector<BVHBuildNode*> st;
+        st.push_back(root);
+
+        // we will do a pre-order DFS where we assign index when visiting the node
+        while (!st.empty())
+        {
+            BVHBuildNode* node = st.back();
+            st.pop_back();
+
+            // assign index
+            outIndexMap[node].index  = counter++;
+            outIndexMap[node].isLeaf = node->childCount == 0 ? 0xff : 0;
+            // push children in reverse so child 0 processed first (optional)
+            for (int i = (int)node->childCount - 1; i >= 0; --i)
+                st.push_back(node->children[i]);
+        }
+        return counter;
+    }
+
+    // Build the BVH WiVe clusters in two passes
+    BVHWiVeCluster* buildBVHWive(BVHBuildNode* root, std::pmr::memory_resource* _temp, std::pmr::memory_resource* memory)
+    {
+        if (!root)
+            return nullptr;
+
+        // PASS 1: assign indices to nodes (DFS order)
+        std::unordered_map<BVHBuildNode*, IndexMapPair> indexMap;
+        indexMap.reserve(4096);
+        uint32_t nodeCount = assignNodeIndicesDFS(root, indexMap);
+
+        // We will allocate one extra slot for the global dummy cluster at the very end
+        uint32_t const dummyClusterIndex = nodeCount; // global index of dummy cluster
+        uint32_t       totalClusters     = nodeCount + 1u;
+
+        // allocate buffer
+        auto* buffer = reinterpret_cast<BVHWiVeCluster*>(
+            memory->allocate(totalClusters * sizeof(BVHWiVeCluster), alignof(BVHWiVeCluster)));
+        if (!buffer)
+            return nullptr;
+        std::memset(buffer, 0, totalClusters * sizeof(BVHWiVeCluster));
+
+        // Initialize the global dummy cluster at the last index: set lanes to empty bounds
+        {
+            BVHWiVeCluster& d = buffer[dummyClusterIndex];
+            for (int i = 0; i < 8; ++i)
+            {
+                d.bxmin[i]       = fl::infinity();
+                d.bxmax[i]       = -fl::infinity();
+                d.bymin[i]       = fl::infinity();
+                d.bymax[i]       = -fl::infinity();
+                d.bzmin[i]       = fl::infinity();
+                d.bzmax[i]       = -fl::infinity();
+                d.slotEntries[i] = 0; // no children
+            }
+        }
+
+        // PASS 2: build clusters using the known indices
+        // We'll traverse the tree again in DFS order, using the same assignment as pass1 (pre-order).
+        std::pmr::vector<BVHBuildNode*> st{_temp};
+        st.push_back(root);
+
+        while (!st.empty())
+        {
+            BVHBuildNode* node = st.back();
+            st.pop_back();
+
+            uint32_t        nodeIndex = indexMap[node].index;
+            BVHWiVeCluster& out       = buffer[nodeIndex];
+
+            // copy children bounds into lanes; pad with bbEmpty()
+            uint32_t childCount = node->childCount;
+            if (childCount > 0)
+            {
+                Bounds3f childrenBounds[8];
+                for (uint32_t i = 0; i < childCount; ++i)
+                {
+                    childrenBounds[i] = node->children[i]->bounds;
+                    // also push children onto the stack so we process them in the same DFS order
+                    st.push_back(node->children[i]);
+                }
+                for (uint32_t i = childCount; i < 8; ++i)
+                    childrenBounds[i] = bbEmpty();
+
+                // copy lane-wise arrays (x min/max, etc.)
+                for (uint32_t i = 0; i < 8; ++i)
+                {
+                    out.bxmin[i] = childrenBounds[i].pMin.x;
+                    out.bxmax[i] = childrenBounds[i].pMax.x;
+                    out.bymin[i] = childrenBounds[i].pMin.y;
+                    out.bymax[i] = childrenBounds[i].pMax.y;
+                    out.bzmin[i] = childrenBounds[i].pMin.z;
+                    out.bzmax[i] = childrenBounds[i].pMax.z;
+                }
+
+                // build the 8 permutations for this node (one per mask), the low 24-bit word per mask
+                std::array<uint32_t, 8> perms24{};
+                buildPermutationsBoxproj(childrenBounds, childCount, perms24);
+
+                // Now compute global child offsets for each lane index 0..7.
+                // For a packed permutation (per mask) that contains lane indices (0..7),
+                // we must translate laneIndex -> global cluster index.
+                // For lanes >= childCount (padding), we point them to the dummy cluster global index.
+                uint32_t laneGlobalIndex[8]{};
+                uint8_t  laneGlobalIsLeaf[8]{};
+                for (uint32_t lane = 0; lane < 8; ++lane)
+                {
+                    if (lane < childCount)
+                    {
+                        BVHBuildNode* childNode = node->children[lane];
+                        laneGlobalIndex[lane]   = indexMap[childNode].index;
+                        laneGlobalIsLeaf[lane]  = indexMap[childNode].isLeaf;
+                    }
+                    else
+                    {
+                        laneGlobalIndex[lane]  = dummyClusterIndex;
+                        laneGlobalIsLeaf[lane] = 0xfe;
+                    }
+                }
+
+                for (int mask = 0; mask < 8; ++mask)
+                {
+                    uint32_t packed24 = perms24[mask] & 0x00FF'FFFFu; // low 24 bits
+                    assert((perms24[mask] & 0x00FF'FFFFu) == packed24);
+                    for (int slot = 0; slot < 8; ++slot)
+                    {
+                        uint32_t slotIndex3bit = (packed24 >> (slot * 3)) & 0x7u; // 0..7
+                        uint32_t childGlobal   = laneGlobalIndex[slotIndex3bit];  // translate lane -> global cluster
+                        // isLeaf (8 bit) + offset (32 bit) + permLow24 (24 bit)
+                        uint64_t entry = ((uint64_t)childGlobal << 24) | (uint64_t)packed24;
+                        entry |= (((uint64_t)laneGlobalIsLeaf[slotIndex3bit]) << 56);
+
+                        out.slotEntries[slot] = entry; // example: storing last mask's entries (adapt as needed)
+                    }
+                }
+            }
+            else // LEAF NODE
+            {
+                assert(node->primitiveCount > 0);
+                assert(dynamic_cast<TriangleIndexed const*>(node->primitives[0]));
+                BVHWiVeLeaf&   out         = reinterpret_cast<BVHWiVeLeaf*>(buffer)[nodeIndex];
+                Scene const*   scene       = dynamic_cast<TriangleIndexed const*>(node->primitives[0])->scene;
+                uint32_t const instanceIdx = static_cast<uint32_t>(
+                    dynamic_cast<TriangleIndexed const*>(node->primitives[0])->instanceIdx);
+                TriangleMesh const& mesh  = *scene->geometry[scene->instances[instanceIdx]->meshIdx];
+                Transform           xform = transformFromAffine(scene->instances[instanceIdx]->affineTransform);
+
+                out.instanceIdx = instanceIdx;
+                out.triCount    = static_cast<uint8_t>(node->primitiveCount);
+
+                for (uint32_t tri = 0; tri < out.triCount; ++tri)
+                {
+                    TriangleIndexed const* triangle = dynamic_cast<TriangleIndexed const*>(node->primitives[tri]);
+                    assert(triangle && scene == triangle->scene && instanceIdx == triangle->instanceIdx);
+                    out.triIdx[tri] = triangle->triIdx;
+                    auto index      = mesh.getIndexedTri(triangle->triIdx);
+                    out.v0s[tri]    = xform(mesh.getPosition(index.v[0].positionIdx));
+                    out.v1s[tri]    = xform(mesh.getPosition(index.v[1].positionIdx));
+                    out.v2s[tri]    = xform(mesh.getPosition(index.v[2].positionIdx));
+                }
+            }
+        }
+
+        return buffer;
+    }
+
+    bool traverseRay(Ray const&                 ray,
+                     BVHWiVeCluster const*      bvh,
+                     uint32_t                   nodeCount,
+                     uint32_t*                  instanceIdx,
+                     size_t*                    triIdx,
+                     std::pmr::memory_resource* temp)
+    {
+        BVHWiVeCluster const* current = &bvh[0];
+
+        std::pmr::vector<BVHWiVeCluster const*> stack{temp};
+
+        bool isInner = true;
+        while (true)
+        {
+            if (isInner)
+            {
+                __m256 const bxmin = _mm256_loadu_ps(current->bxmin);
+                __m256 const bxmax = _mm256_loadu_ps(current->bxmax);
+                __m256 const bymin = _mm256_loadu_ps(current->bymin);
+                __m256 const bymax = _mm256_loadu_ps(current->bymax);
+                __m256 const bzmin = _mm256_loadu_ps(current->bzmin);
+                __m256 const bzmax = _mm256_loadu_ps(current->bzmax);
+            }
+            else
+            {
+            }
+        }
+        return false;
     }
 
     BVHBuildNode* build(std::span<Primitive const*> const prims,
@@ -506,12 +778,9 @@ namespace dmt::bvh {
 
         auto* root = reinterpret_cast<BVHBuildNode*>(memory->allocate(sizeof(BVHBuildNode)));
         std::memset(root, 0, sizeof(BVHBuildNode));
-        root->bounds = std::transform_reduce(
-            shufflingPrims.begin(),
-            shufflingPrims.end(),
-            bbEmpty(),
-            [](Bounds3f a, Bounds3f b) { return bbUnion(a, b); },
-            [](Primitive const* p) { return p->bounds(); });
+        root->bounds = std::transform_reduce(shufflingPrims.begin(), shufflingPrims.end(), bbEmpty(), [](Bounds3f a, Bounds3f b) {
+            return bbUnion(a, b);
+        }, [](Primitive const* p) { return p->bounds(); });
         buildRecursive(shufflingPrims.data(), shufflingPrims.data() + shufflingPrims.size(), root, memory, temp);
         return root;
     }

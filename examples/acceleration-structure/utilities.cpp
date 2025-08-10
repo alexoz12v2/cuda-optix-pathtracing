@@ -1297,7 +1297,7 @@ static __m256 permute_avx(__m256 vec, __m256i indices)
     return _mm256_permutevar8x32_ps(vec, indices);
 }
 
-inline uint32_t extract_lane_dynamic_avx(const __m256i vec, unsigned int idx)
+inline uint32_t extract_lane_dynamic_avx(__m256i const vec, unsigned int idx)
 {
     //copy the lower elements of idx into idx128
     __m128i idx128 = _mm_cvtsi32_si128(idx);
@@ -1308,13 +1308,16 @@ inline uint32_t extract_lane_dynamic_avx(const __m256i vec, unsigned int idx)
 
 namespace dmt::bvh {
 
+#if 0
     void traverseCluster(BVHWiVeCluster cluster, Ray ray);
 
     bool intersectLeaf(BVHWiVe* bvh, Ray ray, uint32_t index);
+#endif
 
     __m256i shift(uint8_t idx, __m256i data);
 
-    //8 predetermined orders per node cluster
+//8 predetermined orders per node cluster
+#if 0
     void traverseRay(Ray ray, BVHWiVe* bvh, std::pmr::memory_resource* _temp)
     {
         std::pmr::vector<uint32_t> nodeStack{_temp};
@@ -1428,19 +1431,7 @@ namespace dmt::bvh {
     }
 
     static bool intersectLeaf(BVHWiVeCluster bvh, Ray ray, uint32_t index) { return false; }
-
-    DMT_CORE_API BVHWiVe* buildBVHWive(BVHBuildNode*              bvh,
-                                       std::pmr::memory_resource* _temp,
-                                       std::pmr::memory_resource* memory = std::pmr::get_default_resource())
-    {
-        std::pmr::vector<BVHBuildNode*> activeNodeStack{_temp};
-        activeNodeStack.reserve(64);
-        activeNodeStack.push_back(bvh);
-
-        while (!activeNodeStack.empty())
-        {
-        }
-    }
+#endif
 
     BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* _temp)
     {
@@ -1686,9 +1677,8 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
-            ->void
-        {
+            requires std::is_invocable_v<F, Primitive const*>
+        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

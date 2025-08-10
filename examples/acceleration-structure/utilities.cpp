@@ -1251,6 +1251,15 @@ namespace dmt::test {
     }
 } // namespace dmt::test
 
+//get the sign bit of a float
+inline uint32_t floatSignBit(float f)
+{
+    uint32_t bits;
+    //std::bit_cast?
+    std::memcpy(&bits, &f, sizeof(float));
+    return bits >> 31; // Extract sign bit
+}
+
 static void swap_avx256(__m256* a, __m256* b)
 {
     __m256 tmp = *a;
@@ -1267,14 +1276,46 @@ static __m256 neg_avx256(__m256 x)
     return _mm256_xor_ps(x, sign_mask);
 }
 
+static __m256 permute_avx(__m256 vec, uint32_t indices)
+{
+    uint8_t idx[8];
+    for (int i = 0; i < 8; i++)
+    {
+        idx[i] = (indices >> (i * 3)) & 0x7; // Extract 3 bits per index
+    }
+
+    // Load into __m256i
+    __m256i perm_idx = _mm256_setr_epi32(idx[0], idx[1], idx[2], idx[3], idx[4], idx[5], idx[6], idx[7]);
+
+    // Perform the permutation
+    return _mm256_permutevar8x32_ps(vec, perm_idx);
+}
+
+static __m256 permute_avx(__m256 vec, __m256i indices)
+{
+    // Perform the permutation
+    return _mm256_permutevar8x32_ps(vec, indices);
+}
+
+inline uint32_t extract_lane_dynamic_avx(const __m256i vec, unsigned int idx)
+{
+    //copy the lower elements of idx into idx128
+    __m128i idx128 = _mm_cvtsi32_si128(idx);
+    //extract into permuted the order stored in vec
+    __m256i permuted = _mm256_permutevar8x32_epi32(vec, _mm256_castsi128_si256(idx128));
+    return _mm_cvtsi128_si32(_mm256_castsi256_si128(permuted));
+}
+
 namespace dmt::bvh {
 
-    void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index);
+    void traverseCluster(BVHWiVeCluster cluster, Ray ray);
 
-    bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index);
+    bool intersectLeaf(BVHWiVe* bvh, Ray ray, uint32_t index);
+
+    __m256i shift(uint8_t idx, __m256i data);
 
     //8 predetermined orders per node cluster
-    void traverseRay(Ray ray, BVHWiVeSoA* bvh, std::pmr::memory_resource* _temp)
+    void traverseRay(Ray ray, BVHWiVe* bvh, std::pmr::memory_resource* _temp)
     {
         std::pmr::vector<uint32_t> nodeStack{_temp};
         std::pmr::vector<uint32_t> tminStack{_temp};
@@ -1290,7 +1331,7 @@ namespace dmt::bvh {
 
             if (!(bvh->leaf[currNodeIndex]))
             {
-                traverseCluster(bvh, ray, currNodeIndex);
+                traverseCluster(bvh, ray);
             }
             else if (intersectLeaf(bvh, ray, currNodeIndex))
             {
@@ -1302,18 +1343,27 @@ namespace dmt::bvh {
         }
     }
 
-    static void traverseCluster(BVHWiVeSoA* bvh, Ray ray, uint32_t index)
+    static void traverseCluster(BVHWiVeCluster cluster, Ray ray)
     {
+        //loading bounding box
+        __m256  bxmax = _mm256_load_ps(cluster.bxmax);
+        __m256  bymax = _mm256_load_ps(cluster.bymax);
+        __m256  bzmax = _mm256_load_ps(cluster.bzmax);
+        __m256  bxmin = _mm256_load_ps(cluster.bxmin);
+        __m256  bymin = _mm256_load_ps(cluster.bymin);
+        __m256  bzmin = _mm256_load_ps(cluster.bzmin);
+        __m256i data  = _mm256_load_si256(reinterpret_cast<__m256i const*>(cluster.data));
+
         __m256 txmin, txmax;
         __m256 tymin, tymax;
         __m256 tzmin, tzmax;
 
         if (ray.d.x < 0)
-            swap_avx256(&(bvh->bxmax[index]), &(bvh->bxmax[index]));
+            swap_avx256(&bxmax, &bxmin);
         if (ray.d.y < 0)
-            swap_avx256(&(bvh->bymax[index]), &(bvh->bymax[index]));
+            swap_avx256(&bymax, &bymin);
         if (ray.d.z < 0)
-            swap_avx256(&(bvh->bzmax[index]), &(bvh->bzmax[index]));
+            swap_avx256(&bzmax, &bzmin);
 
         //set rayx info
         __m256 rorgx    = _mm256_set1_ps(ray.o.x);
@@ -1321,9 +1371,9 @@ namespace dmt::bvh {
         __m256 ridx_neg = neg_avx256(ridx);
 
         //set parametric variable
-        txmin = _mm256_sub_ps(bvh->bxmin[index], rorgx);
+        txmin = _mm256_sub_ps(bxmin, rorgx);
         txmin = _mm256_mul_ps(txmin, ridx_neg);
-        txmax = _mm256_sub_ps(bvh->bxmax[index], rorgx);
+        txmax = _mm256_sub_ps(bxmax, rorgx);
         txmax = _mm256_mul_ps(txmax, ridx);
 
         //set rayy info
@@ -1332,9 +1382,9 @@ namespace dmt::bvh {
         __m256 ridy_neg = neg_avx256(ridy);
 
         //set parametric variable
-        tymin = _mm256_sub_ps(bvh->bymin[index], rorgy);
+        tymin = _mm256_sub_ps(bymin, rorgy);
         tymin = _mm256_mul_ps(tymin, ridy_neg);
-        tymax = _mm256_sub_ps(bvh->bymax[index], rorgy);
+        tymax = _mm256_sub_ps(bymax, rorgy);
         tymax = _mm256_mul_ps(tymax, ridy);
 
         //set rayz info
@@ -1343,16 +1393,54 @@ namespace dmt::bvh {
         __m256 ridz_neg = neg_avx256(ridz);
 
         //set parametric variable
-        tzmin = _mm256_sub_ps(bvh->bzmin[index], rorgz);
+        tzmin = _mm256_sub_ps(bzmin, rorgz);
         tzmin = _mm256_mul_ps(tzmin, ridz_neg);
-        tzmax = _mm256_sub_ps(bvh->bzmax[index], rorgz);
+        tzmax = _mm256_sub_ps(bzmax, rorgz);
         tzmax = _mm256_mul_ps(tzmax, ridz);
 
         //I need to clip the tmin and tmax with the tnear and tfar
-        //_mm256_min_ps
+        //find tmax and tmin
+        __m256 tmax = _mm256_min_ps(txmax, tymax);
+        tmax        = _mm256_min_ps(tmax, tzmax);
+        __m256 tmin = _mm256_min_ps(txmin, tymin);
+        tmin        = _mm256_min_ps(tmin, tzmin);
+        //extract sign ray
+        uint8_t sr     = floatSignBit(ray.d.x) + floatSignBit(ray.d.y) << 1 + floatSignBit(ray.d.z) << 2;
+        __m256i ordIdx = shift(sr, data);
+        tmax           = permute_avx(tmax, ordIdx);
+        tmin           = permute_avx(tmin, ordIdx);
+        //flip the sign for tmin
+        neg_avx256(tmin);
+        //get the mask with the slab test
+        __m256 mask = _mm256_cmp_ps(tmin, tmax, _CMP_LE_OQ);
     }
 
-    static bool intersectLeaf(BVHWiVeSoA* bvh, Ray ray, uint32_t index) { return false; }
+    static __m256i shift(uint8_t idx, __m256i data)
+    {
+        uint32_t ord = extract_lane_dynamic_avx(data, idx);
+        uint32_t ord_v[SIMDWidth];
+
+        for (int i = 0; i < SIMDWidth; i++)
+            ord_v[i] = (ord >> i * 3) & 0x7;
+
+
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(ord_v));
+    }
+
+    static bool intersectLeaf(BVHWiVeCluster bvh, Ray ray, uint32_t index) { return false; }
+
+    DMT_CORE_API BVHWiVe* buildBVHWive(BVHBuildNode*              bvh,
+                                       std::pmr::memory_resource* _temp,
+                                       std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+    {
+        std::pmr::vector<BVHBuildNode*> activeNodeStack{_temp};
+        activeNodeStack.reserve(64);
+        activeNodeStack.push_back(bvh);
+
+        while (!activeNodeStack.empty())
+        {
+        }
+    }
 
     BVHBuildNode* traverseBVHBuild(Ray ray, BVHBuildNode* bvh, std::pmr::memory_resource* _temp)
     {
@@ -1598,8 +1686,9 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>
-        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
+            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
+            ->void
+        {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

@@ -17,6 +17,10 @@
 #include <string>
 #include <iomanip>
 
+#define DMT_DBG_PX_X       0x4f
+#define DMT_DBG_PX_Y       0x2b
+#define DMT_DBG_SAMPLE_IDX 0x70
+
 namespace dmt::ddbg {
     void printTrianglePrimitives(std::span<Primitive const*> bvhPrimitives)
     {
@@ -844,6 +848,10 @@ namespace dmt::camera {
                                           .pLens        = sampler.get2D(),
                                           .time         = sampler.get1D(),
                                           .filterWeight = fs.weight};
+        assert(res.pFilm.x >= pPixel.x + 0.5f - filter.radius().x);
+        assert(res.pFilm.x <= pPixel.x + 0.5f + filter.radius().x);
+        assert(res.pFilm.y >= pPixel.y + 0.5f - filter.radius().y);
+        assert(res.pFilm.y <= pPixel.y + 0.5f + filter.radius().y);
         return res;
     }
 
@@ -1050,8 +1058,10 @@ namespace dmt {
         Context          ctx;
         Intersection     isect;
         Primitive const* prim = bvh::intersectWideBVHBuild(ray, bvh, &isect);
-        if (prim)
+        // TODO: If you are inside an object, you need to accept also negative dot products
+        if (prim && dot(-ray.d, isect.ng) > 0)
         {
+            assert(fl::abs(normL2(isect.ng) - 1.f) < 1e-5f && "Geometric normal not of unit length");
             // return isect.color;
 //#define DMT_TEST_OREN_NAYAR
 #define DMT_TEST_TEXTURES
@@ -1260,10 +1270,6 @@ namespace dmt {
         return true;
     }
 
-#define DMT_DBG_PX_X       63
-#define DMT_DBG_PX_Y       54
-#define DMT_DBG_SAMPLE_IDX 0x12
-
     void writeIntersectionTestImage(
         std::pmr::monotonic_buffer_resource&  scratch,
         unsigned char*                        scratchBuffer,
@@ -1447,9 +1453,9 @@ namespace dmt {
                 int i = 0;
             sampler.startPixelSample(pixel, sampleIndex);
             camera::CameraSample cs = camera::getCameraSample(sampler, pixel, filter);
-            cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
-            cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
-            cs.filterWeight         = 1.f;
+            //cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
+            //cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
+            //cs.filterWeight         = 1.f;
             Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
             RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, backgroundLight, diffCtx, tex, &scratch);
             film.addSample(pixel, radiance, cs.filterWeight);
@@ -1624,6 +1630,7 @@ namespace dmt {
         ctx.warn("Printing Global BVH", {});
         ddbg::printBVHToString(bvhRoot);
 
+//#define DMT_SINGLE_THREADED
 #if defined(DMT_SINGLE_THREADED)
         sampling::HaltonOwen sampler{SamplesPerPixel, {{Width, Height}}, 123432};
         // for each pixel, for each sample within the pixel (halton + owen scrambling)

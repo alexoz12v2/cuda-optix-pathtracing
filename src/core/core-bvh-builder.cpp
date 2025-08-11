@@ -738,6 +738,13 @@ namespace dmt::bvh {
         return buffer;
     }
 
+    static DMT_FORCEINLINE void swap_avx(__m256& a, __m256& b)
+    {
+        __m256 tmp = a;
+        a          = b;
+        b          = tmp;
+    }
+
     bool traverseRay(Ray const&                 ray,
                      BVHWiVeCluster const*      bvh,
                      uint32_t                   nodeCount,
@@ -749,17 +756,42 @@ namespace dmt::bvh {
 
         std::pmr::vector<BVHWiVeCluster const*> stack{temp};
 
+        __m256 const rayIDirX = _mm256_set1_ps(ray.d_inv.x);
+        __m256 const rayIDirY = _mm256_set1_ps(ray.d_inv.y);
+        __m256 const rayIDirZ = _mm256_set1_ps(ray.d_inv.z);
+        __m256 const rayOrgX  = _mm256_set1_ps(ray.o.x);
+        __m256 const rayOrgY  = _mm256_set1_ps(ray.o.y);
+        __m256 const rayOrgZ  = _mm256_set1_ps(ray.o.z);
+        bool const   raySignX = ray.d.x < 0.f;
+        bool const   raySignY = ray.d.y < 0.f;
+        bool const   raySignZ = ray.d.z < 0.f;
+
         bool isInner = true;
         while (true)
         {
             if (isInner)
             {
-                __m256 const bxmin = _mm256_loadu_ps(current->bxmin);
-                __m256 const bxmax = _mm256_loadu_ps(current->bxmax);
-                __m256 const bymin = _mm256_loadu_ps(current->bymin);
-                __m256 const bymax = _mm256_loadu_ps(current->bymax);
-                __m256 const bzmin = _mm256_loadu_ps(current->bzmin);
-                __m256 const bzmax = _mm256_loadu_ps(current->bzmax);
+                // traverse cluster: push all intersecting elements in sign heuristic order (first should be top)
+                __m256 bxmin = _mm256_loadu_ps(current->bxmin);
+                __m256 bxmax = _mm256_loadu_ps(current->bxmax);
+                __m256 bymin = _mm256_loadu_ps(current->bymin);
+                __m256 bymax = _mm256_loadu_ps(current->bymax);
+                __m256 bzmin = _mm256_loadu_ps(current->bzmin);
+                __m256 bzmax = _mm256_loadu_ps(current->bzmax);
+
+                if (raySignX)
+                    swap_avx(bxmin, bxmax);
+                if (raySignY)
+                    swap_avx(bymin, bymax);
+                if (raySignZ)
+                    swap_avx(bzmin, bzmax);
+
+                __m256 txMin = _mm256_mul_ps(_mm256_sub_ps(bxmin, rayOrgX), _mm256_mul_ps(_mm256_set1_ps(-1.f), rayIDirX));
+                __m256 txMax = _mm256_mul_ps(_mm256_sub_ps(bxmax, rayOrgX), rayIDirX);
+                __m256 tyMin = _mm256_mul_ps(_mm256_sub_ps(bymin, rayOrgY), _mm256_mul_ps(_mm256_set1_ps(-1.f), rayIDirY));
+                __m256 tyMax = _mm256_mul_ps(_mm256_sub_ps(bymax, rayOrgY), rayIDirY);
+                __m256 tzMin = _mm256_mul_ps(_mm256_sub_ps(bzmin, rayOrgZ), _mm256_mul_ps(_mm256_set1_ps(-1.f), rayIDirZ));
+                __m256 tzMax = _mm256_mul_ps(_mm256_sub_ps(bzmax, rayOrgZ), rayIDirZ);
             }
             else
             {

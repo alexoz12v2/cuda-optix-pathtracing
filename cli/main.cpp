@@ -2,6 +2,10 @@
 #define DMT_WINDOWS_CLI
 #include "platform/platform.h"
 #include "core/core-bvh-builder.h"
+#include "core/core-cudautils-cpubuild.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 namespace dmt {
     void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
@@ -80,8 +84,10 @@ namespace dmt {
             return bvhRoot;
         }
     }
-
 } // namespace dmt
+
+#define DMT_DBG_PX_X 64
+#define DMT_DBG_PX_Y 56
 
 int32_t guardedMain()
 {
@@ -102,10 +108,50 @@ int32_t guardedMain()
         std::pmr::monotonic_buffer_resource  scratch{monotonicBuf.get(), 4096, std::pmr::null_memory_resource()};
 
         dmt::Scene           scene;
-        dmt::BVHBuildNode*   bvhRoot = dmt::buildBVHBuildLayout(scene, pool);
-        dmt::BVHWiVeCluster* bvh     = dmt::bvh::buildBVHWive(bvhRoot, &scratch, &pool);
+        dmt::BVHBuildNode*   bvhRoot   = dmt::buildBVHBuildLayout(scene, pool);
+        uint32_t             nodeCount = 0;
+        dmt::BVHWiVeCluster* bvh       = dmt::bvh::buildBVHWive(bvhRoot, &nodeCount, &scratch, &pool);
 
-        int i = 0;
+        static constexpr uint32_t       Width = 128, Height = 128, Channels = 1;
+        dmt::os::Path                   imagePath = dmt::os::Path::executableDir() / "wive.png";
+        dmt::UniqueRef<unsigned char[]> buffer = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(),
+                                                                                     static_cast<size_t>(Width) *
+                                                                                         Height * Channels);
+        // define camera (image plane physical dims, resolution given by image)
+        dmt::Vector3f const cameraPosition{0.f, 0.f, 0.f};
+        dmt::Normal3f const cameraDirection{0.f, 1.f, -0.5f};
+        float const         focalLength  = 20e-3f; // 20 mm
+        float const         sensorHeight = 36e-3f; // 36mm
+        float const         aspectRatio  = static_cast<float>(Width) / Height;
+
+        dmt::Transform const
+            cameraFromRaster = dmt::transforms::cameraFromRaster_Perspective(focalLength, sensorHeight, Width, Height);
+        dmt::Transform const renderFromCamera = dmt::transforms::worldFromCamera(cameraDirection, cameraPosition);
+
+        std::memset(buffer.get(), 0, static_cast<size_t>(Width) * Height * Channels);
+        for (int32_t y = 0; y < Height; ++y)
+        {
+            for (int32_t x = 0; x < Width; ++x)
+            {
+                if (x == DMT_DBG_PX_X && y == DMT_DBG_PX_Y)
+                    int i = 0;
+                using namespace dmt;
+                Point3f const pxImage{x + 0.5f, y + 0.5f, 0};
+                Point3f const pCamera{cameraFromRaster(pxImage)};
+                Ray           ray{Point3f{0, 0, 0}, normalize(pCamera), 0};
+                float         tMax = 1e5f;
+                ray                = renderFromCamera(ray, &tMax);
+
+                // Test
+                uint32_t instanceIdx = 0;
+                size_t   triIdx      = 0;
+                auto     trisect     = dmt::triangle::Triisect::nothing();
+                if (dmt::bvh::traverseRay(ray, bvh, nodeCount, &instanceIdx, &triIdx, &trisect))
+                    buffer[x + static_cast<int64_t>(y) * Width] = 255;
+            }
+        }
+
+        stbi_write_png(imagePath.toUnderlying().c_str(), Width, Height, 1, buffer.get(), Width);
     }
     return 0;
 }

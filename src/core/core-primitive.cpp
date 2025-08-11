@@ -143,25 +143,7 @@ namespace dmt {
 
 #define DMT_MOLLER_TRUMBORE
 
-        struct Triisect
-        {
-            static constexpr float tol = 1e-7f; // or 6
-
-            float    u;
-            float    v;
-            float    w;
-            float    t;
-            uint32_t index;
-
-            operator bool() const { return !fl::isInfOrNaN(u); }
-
-            static constexpr Triisect nothing()
-            {
-                return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0};
-            }
-        };
-
-        static DMT_FORCEINLINE Triisect DMT_FASTCALL
+        Triisect DMT_FASTCALL
             intersect4(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask)
         {
 #if defined DMT_MOLLER_TRUMBORE
@@ -300,8 +282,7 @@ namespace dmt {
 #endif
         }
 
-        static DMT_FORCEINLINE Triisect DMT_FASTCALL
-            intersect8(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s)
+        Triisect DMT_FASTCALL intersect8(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s)
         {
 #if defined DMT_MOLLER_TRUMBORE
             // constants
@@ -438,8 +419,7 @@ namespace dmt {
 #endif
         }
 
-        static DMT_FORCEINLINE Triisect DMT_FASTCALL
-            intersect(Ray const& ray, float tMax, Point3f v0, Point3f v1, Point3f v2, uint32_t index)
+        Triisect DMT_FASTCALL intersect(Ray const& ray, float tMax, Point3f v0, Point3f v1, Point3f v2, uint32_t index)
         {
 #if defined DMT_MOLLER_TRUMBORE
             // moller trumbore algorithm https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
@@ -558,8 +538,7 @@ namespace dmt {
 #endif
         }
 
-        static DMT_FORCEINLINE Intersection DMT_FASTCALL
-            fromTrisect(Triisect trisect, Ray const& ray, RGB color, Point2f uv = {0, 0})
+        Intersection DMT_FASTCALL fromTrisect(Triisect trisect, Ray const& ray, RGB color, Point2f uv)
         {
             Intersection isect{};
             if (trisect)

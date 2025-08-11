@@ -29,7 +29,7 @@ namespace dmt {
     class DMT_CORE_API DMT_INTERFACE Primitive
     {
     public:
-        virtual ~Primitive(){};
+        virtual ~Primitive() {};
 
         virtual Bounds3f     bounds() const                              = 0;
         virtual Intersection intersect(Ray const& ray, float tMax) const = 0;
@@ -138,3 +138,35 @@ namespace dmt {
         size_t triIdxs[8];
     };
 } // namespace dmt
+
+namespace dmt::triangle {
+    struct DMT_CORE_API Triisect
+    {
+        static constexpr float tol = 1e-7f; // or 6
+
+        float    u;
+        float    v;
+        float    w;
+        float    t;
+        uint32_t index;
+
+        operator bool() const { return !fl::isInfOrNaN(u); }
+
+        static constexpr Triisect nothing()
+        {
+            return {.u = fl::infinity(), .v = fl::infinity(), .w = fl::infinity(), .t = fl::infinity(), .index = 0};
+        }
+    };
+
+
+    Intersection DMT_FASTCALL DMT_CORE_API fromTrisect(Triisect trisect, Ray const& ray, RGB color, Point2f uv = {0, 0});
+
+    Triisect DMT_FASTCALL DMT_CORE_API intersect(Ray const& ray, float tMax, Point3f v0, Point3f v1, Point3f v2, uint32_t index);
+
+    // 0x3 -> intersect2, 0xf -> intersect4
+    Triisect DMT_FASTCALL DMT_CORE_API
+        intersect4(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask);
+
+    Triisect DMT_FASTCALL DMT_CORE_API
+        intersect8(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s);
+} // namespace dmt::triangle

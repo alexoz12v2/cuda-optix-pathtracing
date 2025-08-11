@@ -593,7 +593,10 @@ namespace dmt::bvh {
     }
 
     // Build the BVH WiVe clusters in two passes
-    BVHWiVeCluster* buildBVHWive(BVHBuildNode* root, std::pmr::memory_resource* _temp, std::pmr::memory_resource* memory)
+    BVHWiVeCluster* buildBVHWive(BVHBuildNode*              root,
+                                 uint32_t*                  pnodeCount,
+                                 std::pmr::memory_resource* _temp,
+                                 std::pmr::memory_resource* memory)
     {
         if (!root)
             return nullptr;
@@ -602,6 +605,8 @@ namespace dmt::bvh {
         std::unordered_map<BVHBuildNode*, IndexMapPair> indexMap;
         indexMap.reserve(4096);
         uint32_t nodeCount = assignNodeIndicesDFS(root, indexMap);
+        if (pnodeCount)
+            *pnodeCount = nodeCount;
 
         // We will allocate one extra slot for the global dummy cluster at the very end
         uint32_t const dummyClusterIndex = nodeCount; // global index of dummy cluster
@@ -745,33 +750,106 @@ namespace dmt::bvh {
         b          = tmp;
     }
 
+    static DMT_FORCEINLINE __m256i expand_mask_i32(int32_t packedMask)
+    {
+        uint8_t idx8[8];
+        for (int i = 0; i < 8; i++)
+        {
+            idx8[i] = (packedMask >> (3 * i)) & 0x7; // isolate 3 bits
+        }
+        // Load 8 bytes into low 64 bits of XMM
+        __m128i m8 = _mm_loadl_epi64((__m128i const*)idx8);
+        // Zero-extend to 8x 32-bit ints
+        return _mm256_cvtepu8_epi32(m8);
+    }
+
+    static std::array<__m256i, 256> initPermTable()
+    {
+        std::array<__m256i, 256> permTable{};
+        for (int m = 0; m < 256; ++m)
+        {
+            int idxs[8];
+            int p = 0;
+            // push indices of set bits in low-to-high lane order (0..7)
+            for (int i = 0; i < 8; ++i)
+            {
+                if (m & (1 << i))
+                    idxs[p++] = i;
+            }
+            // fill remaining slots with a safe value (e.g. 0). They will be ignored
+            // because we will only process 'p' lanes afterward.
+            for (; p < 8; ++p)
+                idxs[p] = 0;
+
+            // _mm256_setr_epi32 would be ideal (sets from low->high) but many toolchains
+            // expose only _mm256_set_epi32 (high->low). Use setr if available:
+            permTable[m] = _mm256_setr_epi32(idxs[0], idxs[1], idxs[2], idxs[3], idxs[4], idxs[5], idxs[6], idxs[7]);
+        }
+        return permTable;
+    }
+
+    static std::array<__m256i, 256> s_permTable = initPermTable();
+
+    struct StackEntry
+    {
+        BVHWiVeCluster const* node;
+        bool                  isInner;
+        float                 tmin; // nearest possible t for this entry
+        // optionally store other metadata if needed
+    };
+
     bool traverseRay(Ray const&                 ray,
                      BVHWiVeCluster const*      bvh,
                      uint32_t                   nodeCount,
                      uint32_t*                  instanceIdx,
                      size_t*                    triIdx,
+                     triangle::Triisect*        outTri,
                      std::pmr::memory_resource* temp)
     {
-        BVHWiVeCluster const* current = &bvh[0];
+        std::pmr::vector<StackEntry> stack{temp};
+        stack.reserve(64);
 
-        std::pmr::vector<BVHWiVeCluster const*> stack{temp};
+        __m256 const  rayIDirX  = _mm256_set1_ps(ray.d_inv.x);
+        __m256 const  rayIDirY  = _mm256_set1_ps(ray.d_inv.y);
+        __m256 const  rayIDirZ  = _mm256_set1_ps(ray.d_inv.z);
+        __m256 const  rayOrgX   = _mm256_set1_ps(ray.o.x);
+        __m256 const  rayOrgY   = _mm256_set1_ps(ray.o.y);
+        __m256 const  rayOrgZ   = _mm256_set1_ps(ray.o.z);
+        uint8_t const raySignX  = ray.d.x < 0.f;
+        uint8_t const raySignY  = ray.d.y < 0.f;
+        uint8_t const raySignZ  = ray.d.z < 0.f;
+        uint8_t const signIndex = (raySignZ << 2) | (raySignY << 1) | raySignX;
 
-        __m256 const rayIDirX = _mm256_set1_ps(ray.d_inv.x);
-        __m256 const rayIDirY = _mm256_set1_ps(ray.d_inv.y);
-        __m256 const rayIDirZ = _mm256_set1_ps(ray.d_inv.z);
-        __m256 const rayOrgX  = _mm256_set1_ps(ray.o.x);
-        __m256 const rayOrgY  = _mm256_set1_ps(ray.o.y);
-        __m256 const rayOrgZ  = _mm256_set1_ps(ray.o.z);
-        bool const   raySignX = ray.d.x < 0.f;
-        bool const   raySignY = ray.d.y < 0.f;
-        bool const   raySignZ = ray.d.z < 0.f;
+        float const initial_tNear = 1e-5f;
+        float       scalar_tFar   = 1e5f; // scalar cutoff updated from leaf hits
+        __m256      tNear         = _mm256_set1_ps(initial_tNear);
+        __m256      tFarVec       = _mm256_set1_ps(scalar_tFar); // will be updated when isect changes
 
-        bool isInner = true;
-        while (true)
+        int const     scale  = sizeof(uint64_t);
+        __m256i const vindex = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+
+        // current best intersection
+        auto isect = triangle::Triisect::nothing();
+        isect.t    = scalar_tFar;
+
+        // start stack with root
+        stack.push_back({&bvh[0], true, 0.0f});
+
+        while (!stack.empty())
         {
-            if (isInner)
+            // pop an entry (LIFO)
+            StackEntry entry = stack.back();
+            stack.pop_back();
+
+            // prune early if entry's nearest possible t is >= current best hit
+            if (entry.tmin >= isect.t)
+                continue;
+
+            if (entry.isInner)
             {
-                // traverse cluster: push all intersecting elements in sign heuristic order (first should be top)
+                BVHWiVeCluster const* current = entry.node;
+
+                // load cluster AABB arrays (8 lanes)
                 __m256 bxmin = _mm256_loadu_ps(current->bxmin);
                 __m256 bxmax = _mm256_loadu_ps(current->bxmax);
                 __m256 bymin = _mm256_loadu_ps(current->bymin);
@@ -786,17 +864,147 @@ namespace dmt::bvh {
                 if (raySignZ)
                     swap_avx(bzmin, bzmax);
 
-                __m256 txMin = _mm256_mul_ps(_mm256_sub_ps(bxmin, rayOrgX), _mm256_mul_ps(_mm256_set1_ps(-1.f), rayIDirX));
-                __m256 txMax = _mm256_mul_ps(_mm256_sub_ps(bxmax, rayOrgX), rayIDirX);
-                __m256 tyMin = _mm256_mul_ps(_mm256_sub_ps(bymin, rayOrgY), _mm256_mul_ps(_mm256_set1_ps(-1.f), rayIDirY));
-                __m256 tyMax = _mm256_mul_ps(_mm256_sub_ps(bymax, rayOrgY), rayIDirY);
-                __m256 tzMin = _mm256_mul_ps(_mm256_sub_ps(bzmin, rayOrgZ), _mm256_mul_ps(_mm256_set1_ps(-1.f), rayIDirZ));
-                __m256 tzMax = _mm256_mul_ps(_mm256_sub_ps(bzmax, rayOrgZ), rayIDirZ);
+                // use current scalar_tFar as broadcasted vector (we update tFarVec below when isect changes)
+                tFarVec = _mm256_set1_ps(isect.t);
+
+                __m256 const txMin = _mm256_max_ps(_mm256_mul_ps(_mm256_sub_ps(bxmin, rayOrgX), rayIDirX), tNear);
+                __m256 const txMax = _mm256_min_ps(_mm256_mul_ps(_mm256_sub_ps(bxmax, rayOrgX), rayIDirX), tFarVec);
+                __m256 const tyMin = _mm256_max_ps(_mm256_mul_ps(_mm256_sub_ps(bymin, rayOrgY), rayIDirY), tNear);
+                __m256 const tyMax = _mm256_min_ps(_mm256_mul_ps(_mm256_sub_ps(bymax, rayOrgY), rayIDirY), tFarVec);
+                __m256 const tzMin = _mm256_max_ps(_mm256_mul_ps(_mm256_sub_ps(bzmin, rayOrgZ), rayIDirZ), tNear);
+                __m256 const tzMax = _mm256_min_ps(_mm256_mul_ps(_mm256_sub_ps(bzmax, rayOrgZ), rayIDirZ), tFarVec);
+
+                // sign-order permutation for this cluster
+                uint32_t packedEntries = static_cast<uint32_t>(current->slotEntries[signIndex]) & 0x00ff'ffff;
+                __m256i  perm          = expand_mask_i32(static_cast<int32_t>(packedEntries));
+
+                // apply sign permutation to tMin/tMax
+                __m256 tMin_p = _mm256_permutevar8x32_ps(_mm256_max_ps(_mm256_max_ps(txMin, tyMin), tzMin), perm);
+                __m256 tMax_p = _mm256_permutevar8x32_ps(_mm256_min_ps(_mm256_min_ps(txMax, tyMax), tzMax), perm);
+
+                // intersection mask and compress to low lanes
+                __m256 cmpMaskVec = _mm256_cmp_ps(tMin_p, tMax_p, _CMP_LT_OQ);
+                int    mask8      = _mm256_movemask_ps(cmpMaskVec);
+                if (mask8 == 0)
+                    continue;
+
+                __m256i packPerm = s_permTable[mask8];
+
+                __m256 packed_tMin = _mm256_permutevar8x32_ps(tMin_p, packPerm);
+                // __m256 packed_tMax = _mm256_permutevar8x32_ps(tMax_p, packPerm); // unused here, but could be used
+
+                // gather node offsets and flags (these gathers fetch 8 x int32 entries)
+                int const* baseOff = reinterpret_cast<int const*>(
+                    reinterpret_cast<unsigned char const*>(current->slotEntries) + 3);
+                __m256i gathered_node = _mm256_i32gather_epi32(baseOff, vindex, scale);
+                __m256i node_perm     = _mm256_permutevar8x32_epi32(gathered_node, perm); // sign-ordered nodes
+                __m256i packed_node   = _mm256_permutevar8x32_epi32(node_perm, packPerm); // compress active lanes
+
+                int const* flagOff = reinterpret_cast<int const*>(
+                    reinterpret_cast<unsigned char const*>(current->slotEntries) + 4);
+                __m256i gathered_flags = _mm256_i32gather_epi32(flagOff, vindex, scale);
+                __m256i flags_perm     = _mm256_srli_epi32(_mm256_permutevar8x32_epi32(gathered_flags, perm), 24);
+                __m256i packed_flags   = _mm256_permutevar8x32_epi32(flags_perm, packPerm);
+
+                // store packed arrays to read lanes cheaply
+                alignas(32) int   nodesArr[8];
+                alignas(32) int   flagsArr[8];
+                alignas(32) float tminArr[8];
+                _mm256_store_si256((__m256i*)nodesArr, packed_node);
+                _mm256_store_si256((__m256i*)flagsArr, packed_flags);
+                _mm256_store_ps(tminArr, packed_tMin);
+
+                int k = _mm_popcnt_u64(static_cast<int64_t>(mask8)); // number active
+
+                // push in reverse order so that lane 0 (nearest) is on top of stack after all pushes:
+                for (int lane = k - 1; lane >= 0; --lane)
+                {
+                    int   nodeVal      = nodesArr[lane];        // node index (or pointer offset)
+                    int   flagVal      = flagsArr[lane] & 0xff; // flags stored in low byte
+                    bool  childIsInner = (flagVal == 0);        // adapt to your flags scheme
+                    float childTmin    = tminArr[lane];
+
+                    // small sanity: if childTmin >= current best, skip pushing it
+                    if (childTmin >= isect.t)
+                        continue;
+
+                    // push the child entry (node pointer resolved from gathered nodeVal)
+                    // Here we assume nodeVal is an index into bvh[].
+                    BVHWiVeCluster const* childPtr = &bvh[nodeVal];
+                    stack.push_back({childPtr, childIsInner, childTmin});
+                }
             }
             else
             {
+                // leaf node processing
+                BVHWiVeLeaf const* leaf = reinterpret_cast<BVHWiVeLeaf const*>(entry.node);
+
+                uint8_t  remaining = leaf->triCount;
+                uint32_t currIdx   = 0;
+
+                // If you have vectorized triangle intersection helpers, use them.
+                // Here I assume triangle::intersect4/intersect exist and return Triisect
+                // with .hit boolean and .t and indices.
+                while (remaining >= 4)
+                {
+                    auto sect = triangle::intersect4(ray, isect.t, leaf->v0s + currIdx, leaf->v1s + currIdx, leaf->v2s + currIdx, 0xF);
+                    remaining -= 4;
+                    currIdx += 4;
+                    if (sect && sect.t < isect.t)
+                    {
+                        isect = sect;
+                        // update scalar cutoff
+                        scalar_tFar  = isect.t;
+                        *instanceIdx = leaf->instanceIdx;
+                        *triIdx      = leaf->triIdx[sect.index];
+                    }
+                }
+                while (remaining >= 2)
+                {
+                    auto sect = triangle::intersect4(ray, isect.t, leaf->v0s + currIdx, leaf->v1s + currIdx, leaf->v2s + currIdx, 0x3);
+                    remaining -= 2;
+                    currIdx += 2;
+                    if (sect && sect.t < isect.t)
+                    {
+                        isect        = sect;
+                        scalar_tFar  = isect.t;
+                        *instanceIdx = leaf->instanceIdx;
+                        *triIdx      = leaf->triIdx[sect.index];
+                    }
+                }
+                while (remaining > 0)
+                {
+                    auto sect = triangle::intersect(ray, isect.t, leaf->v0s[currIdx], leaf->v1s[currIdx], leaf->v2s[currIdx], 0);
+                    --remaining;
+                    ++currIdx;
+                    if (sect && sect.t < isect.t)
+                    {
+                        isect        = sect;
+                        scalar_tFar  = isect.t;
+                        *instanceIdx = leaf->instanceIdx;
+                        *triIdx      = leaf->triIdx[sect.index];
+                    }
+                }
+
+                // If we found a hit in this leaf, update tFarVec used for AABB tests
+                tFarVec = _mm256_set1_ps(scalar_tFar);
+
+                // Optional pruning: pop any stacked entries that can't beat the new isect.t
+                // (we'll actually check at top of loop, so explicit prune is optional; but we can drop any strictly worse)
+                while (!stack.empty() && stack.back().tmin >= isect.t)
+                    stack.pop_back();
+
+                // continue traversal to possibly find a closer hit
             }
+        } // while stack
+
+        // After traversal, if we found a hit, write out hit info and return true
+        if (isect && isect.t < 1e5f)
+        {
+            *outTri = isect;
+            return true;
         }
+
         return false;
     }
 

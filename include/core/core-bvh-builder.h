@@ -102,6 +102,7 @@ namespace dmt::bvh {
         std::pmr::memory_resource*              memory = std::pmr::get_default_resource());
 
     DMT_CORE_API BVHWiVeCluster* buildBVHWive(BVHBuildNode*              bvh,
+                                              uint32_t* nodeCount,
                                               std::pmr::memory_resource* temp,
                                               std::pmr::memory_resource* memory = std::pmr::get_default_resource());
 
@@ -116,5 +117,6 @@ namespace dmt::bvh {
                                   uint32_t                   nodeCount,
                                   uint32_t*                  instanceIdx,
                                   size_t*                    triIdx,
+                                  triangle::Triisect*        outTri,
                                   std::pmr::memory_resource* temp = std::pmr::get_default_resource());
 } // namespace dmt::bvh

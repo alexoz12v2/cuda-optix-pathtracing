@@ -17,8 +17,8 @@
 #include <string>
 #include <iomanip>
 
-#define DMT_DBG_PX_X       0x4f
-#define DMT_DBG_PX_Y       0x2b
+#define DMT_DBG_PX_X       64
+#define DMT_DBG_PX_Y       56
 #define DMT_DBG_SAMPLE_IDX 0x70
 
 namespace dmt::ddbg {
@@ -278,14 +278,10 @@ namespace dmt::test {
         Context ctx;
         assert(ctx.isValid() && "Need valid context");
 
-        Bounds3f const sceneBounds = std::transform_reduce(
-            scene.begin(),
-            scene.end(),
-            bbEmpty(),
-            [](dmt::Bounds3f a, dmt::Bounds3f b) { return bbUnion(a, b); },
-            [](TriangleData const& t) {
-            return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)};
-            });
+        Bounds3f const
+            sceneBounds = std::transform_reduce(scene.begin(), scene.end(), bbEmpty(), [](dmt::Bounds3f a, dmt::Bounds3f b) {
+            return bbUnion(a, b);
+        }, [](TriangleData const& t) { return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)}; });
 
         Bounds3f const primsBounds = std::transform_reduce( //
             spanPrims.begin(),
@@ -556,18 +552,10 @@ namespace dmt::sampling {
 
     template <typename T>
     concept Sampler = requires(std::remove_cvref_t<T>& t) {
-        {
-            t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>())
-        };
-        {
-            t.get1D()
-        } -> std::floating_point;
-        {
-            t.get2D()
-        } -> std::same_as<Point2f>;
-        {
-            t.getPixel2D()
-        } -> std::same_as<Point2f>;
+        { t.startPixelSample(std::declval<Point2i>(), std::declval<int32_t>(), std::declval<int32_t>()) };
+        { t.get1D() } -> std::floating_point;
+        { t.get2D() } -> std::same_as<Point2f>;
+        { t.getPixel2D() } -> std::same_as<Point2f>;
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class HaltonOwen
@@ -714,12 +702,8 @@ namespace dmt::filtering {
     /// @note doesn't have copy control, pass around as reference
     template <typename T>
     concept Filter = requires(std::remove_cvref_t<T> const& t) {
-        {
-            t.evaluate(std::declval<Point2f>())
-        } -> std::floating_point;
-        {
-            t.radius()
-        } -> std::same_as<Vector2f>;
+        { t.evaluate(std::declval<Point2f>()) } -> std::floating_point;
+        { t.radius() } -> std::same_as<Vector2f>;
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class FilterSampler
@@ -888,9 +872,7 @@ namespace dmt::camera {
 namespace dmt::film {
     template <typename T>
     concept Film = requires(std::remove_cvref_t<T>& t) {
-        {
-            t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f)
-        };
+        { t.addSample(std::declval<Point2i>(), std::declval<RGB>(), 0.f) };
     } && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     class RGBFilm
@@ -1471,9 +1453,11 @@ namespace dmt {
                 int i = 0;
             sampler.startPixelSample(pixel, sampleIndex);
             camera::CameraSample cs = camera::getCameraSample(sampler, pixel, filter);
-            //cs.pFilm.x              = static_cast<float>(pixel.x) + 0.5f;
-            //cs.pFilm.y              = static_cast<float>(pixel.y) + 0.5f;
-            //cs.filterWeight         = 1.f;
+#if 1
+            cs.pFilm.x      = static_cast<float>(pixel.x) + 0.5f;
+            cs.pFilm.y      = static_cast<float>(pixel.y) + 0.5f;
+            cs.filterWeight = 1.f;
+#endif
             Ray const ray{camera::generateRay(cs, cameraFromRaster, renderFromCamera)};
             RGB const radiance = incidentRadiance(ray, bvhRoot, sampler, backgroundLight, diffCtx, tex, &scratch);
             film.addSample(pixel, radiance, cs.filterWeight);
@@ -1614,6 +1598,7 @@ namespace dmt {
         {
             ctx.warn("BVH[{}]", std::make_tuple(instanceIdx));
             perInstanceBvhNodes.push_back(bvh::buildForInstance(scene, instanceIdx, primitives, &scratch, &pool));
+            resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
             ddbg::printBVHToString(perInstanceBvhNodes.back());
         }
 
@@ -1745,6 +1730,7 @@ int32_t guardedMain()
         ctx.warn("No morton reordering of primitives, still to test", {});
 #endif
 
+#if defined(DMT_ENABLE_EXE_TESTS)
         auto primsGrouped     = dmt::makePrimitivesFromTriangles(scene);
         auto primsGroupedView = dmt::ddbg::rawPtrsCopy(primsGrouped);
 
@@ -1796,7 +1782,6 @@ int32_t guardedMain()
         dmt::test::bvhTestRays(rootNode);
         dmt::bvh::cleanup(rootNode);
 
-#if defined(DMT_ENABLE_EXE_TESTS)
         dmt::test::testQuaternionRotation();
         dmt::test::testDistribution1D();
         dmt::test::testDistribution2D();

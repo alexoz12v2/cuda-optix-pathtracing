@@ -371,13 +371,11 @@ namespace dmt {
         float const phi   = std::atan2(wLight.y, wLight.x);
 
         // map to [0,1]^2
-        Point2f const uv
-        {
-            0.5f * (1.f + phi / fl::pi()), // phi in [-pi, pi]
+        Point2f const uv{0.5f * (1.f + phi / fl::pi()), // phi in [-pi, pi]
 #if defined(DMT_EQUIRECTANGULAR_FLIP_Y)
-                1.f - theta / fl::pi()
+                         1.f - theta / fl::pi()
 #else
-                theta / fl::pi()
+                         theta / fl::pi()
 #endif
         };
 

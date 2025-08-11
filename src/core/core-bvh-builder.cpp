@@ -697,17 +697,17 @@ namespace dmt::bvh {
                     }
                 }
 
-                for (int mask = 0; mask < 8; ++mask)
+                for (int slot = 0; slot < 8; ++slot)
                 {
-                    uint32_t packed24 = perms24[mask] & 0x00FF'FFFFu; // low 24 bits
-                    assert((perms24[mask] & 0x00FF'FFFFu) == packed24);
-                    uint32_t slotIndex3bit = (packed24 >> (mask * 3)) & 0x7u; // 0..7
-                    uint32_t childGlobal   = laneGlobalIndex[slotIndex3bit];  // translate lane -> global cluster
-                    // isLeaf (8 bit) + offset (32 bit) + permLow24 (24 bit)
-                    uint64_t entry = ((uint64_t)childGlobal << 24) | (uint64_t)packed24;
-                    entry |= (((uint64_t)laneGlobalIsLeaf[slotIndex3bit]) << 56);
+                    uint32_t permMask24 = perms24[slot] & 0x00FF'FFFFu; // already slot-major
 
-                    out.slotEntries[mask] = entry; // example: storing last mask's entries (adapt as needed)
+                    uint32_t childGlobal = laneGlobalIndex[slot];
+                    uint8_t  leafFlag    = laneGlobalIsLeaf[slot];
+
+                    uint64_t entry = ((uint64_t)childGlobal << 24) | permMask24;
+                    entry |= ((uint64_t)leafFlag << 56);
+
+                    out.slotEntries[slot] = entry;
                 }
             }
             else // LEAF NODE

@@ -17,8 +17,8 @@
 #include <string>
 #include <iomanip>
 
-#define DMT_DBG_PX_X       50
-#define DMT_DBG_PX_Y       58
+#define DMT_DBG_PX_X       84
+#define DMT_DBG_PX_Y       84
 #define DMT_DBG_SAMPLE_IDX 0x70
 
 namespace dmt::ddbg {
@@ -1528,7 +1528,7 @@ namespace dmt {
         static constexpr uint32_t NumTileY           = ceilDiv(Height, TileHeight);
         static constexpr uint32_t NumJobs            = NumTileX * NumTileY;
         static constexpr uint32_t NumChannels        = 3;
-        static constexpr int32_t  SamplesPerPixel    = 128;
+        static constexpr int32_t  SamplesPerPixel    = 1;
         static constexpr uint32_t ScratchBufferBytes = 4096;
 
         Context ctx;

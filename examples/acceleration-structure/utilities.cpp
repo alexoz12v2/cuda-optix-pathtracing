@@ -25,6 +25,9 @@ namespace dmt {
         float tmin = -std::numeric_limits<float>::infinity();
         float tmax = std::numeric_limits<float>::infinity();
 
+        float tmins[3]{};
+        float tmaxs[3]{};
+
         for (int i = 0; i < 3; ++i)
         {
             float invD = 1.0f / rayDirection[i];
@@ -34,8 +37,10 @@ namespace dmt {
             if (invD < 0.0f)
                 std::swap(t0, t1);
 
-            tmin = std::max(tmin, t0);
-            tmax = std::min(tmax, t1);
+            tmins[i] = t0;
+            tmaxs[i] = t1;
+            tmin     = std::max(tmin, t0);
+            tmax     = std::min(tmax, t1);
 
             if (tmax < tmin)
                 return false; // No intersection

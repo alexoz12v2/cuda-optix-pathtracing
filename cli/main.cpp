@@ -86,8 +86,8 @@ namespace dmt {
     }
 } // namespace dmt
 
-#define DMT_DBG_PX_X 64
-#define DMT_DBG_PX_Y 56
+#define DMT_DBG_PX_X 50
+#define DMT_DBG_PX_Y 58
 
 int32_t guardedMain()
 {

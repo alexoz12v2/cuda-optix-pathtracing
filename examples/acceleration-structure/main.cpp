@@ -17,8 +17,8 @@
 #include <string>
 #include <iomanip>
 
-#define DMT_DBG_PX_X       64
-#define DMT_DBG_PX_Y       56
+#define DMT_DBG_PX_X       50
+#define DMT_DBG_PX_Y       58
 #define DMT_DBG_SAMPLE_IDX 0x70
 
 namespace dmt::ddbg {
@@ -1633,7 +1633,7 @@ namespace dmt {
         ctx.warn("Printing Global BVH", {});
         ddbg::printBVHToString(bvhRoot);
 
-//#define DMT_SINGLE_THREADED
+#define DMT_SINGLE_THREADED
 #if defined(DMT_SINGLE_THREADED)
         sampling::HaltonOwen sampler{SamplesPerPixel, {{Width, Height}}, 123432};
         // for each pixel, for each sample within the pixel (halton + owen scrambling)

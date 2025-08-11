@@ -701,16 +701,13 @@ namespace dmt::bvh {
                 {
                     uint32_t packed24 = perms24[mask] & 0x00FF'FFFFu; // low 24 bits
                     assert((perms24[mask] & 0x00FF'FFFFu) == packed24);
-                    for (int slot = 0; slot < 8; ++slot)
-                    {
-                        uint32_t slotIndex3bit = (packed24 >> (slot * 3)) & 0x7u; // 0..7
-                        uint32_t childGlobal   = laneGlobalIndex[slotIndex3bit];  // translate lane -> global cluster
-                        // isLeaf (8 bit) + offset (32 bit) + permLow24 (24 bit)
-                        uint64_t entry = ((uint64_t)childGlobal << 24) | (uint64_t)packed24;
-                        entry |= (((uint64_t)laneGlobalIsLeaf[slotIndex3bit]) << 56);
+                    uint32_t slotIndex3bit = (packed24 >> (mask * 3)) & 0x7u; // 0..7
+                    uint32_t childGlobal   = laneGlobalIndex[slotIndex3bit];  // translate lane -> global cluster
+                    // isLeaf (8 bit) + offset (32 bit) + permLow24 (24 bit)
+                    uint64_t entry = ((uint64_t)childGlobal << 24) | (uint64_t)packed24;
+                    entry |= (((uint64_t)laneGlobalIsLeaf[slotIndex3bit]) << 56);
 
-                        out.slotEntries[slot] = entry; // example: storing last mask's entries (adapt as needed)
-                    }
+                    out.slotEntries[mask] = entry; // example: storing last mask's entries (adapt as needed)
                 }
             }
             else // LEAF NODE
@@ -883,7 +880,7 @@ namespace dmt::bvh {
                 __m256 tMax_p = _mm256_permutevar8x32_ps(_mm256_min_ps(_mm256_min_ps(txMax, tyMax), tzMax), perm);
 
                 // intersection mask and compress to low lanes
-                __m256 cmpMaskVec = _mm256_cmp_ps(tMin_p, tMax_p, _CMP_LT_OQ);
+                __m256 cmpMaskVec = _mm256_cmp_ps(tMin_p, tMax_p, _CMP_LE_OQ);
                 int    mask8      = _mm256_movemask_ps(cmpMaskVec);
                 if (mask8 == 0)
                     continue;
@@ -931,7 +928,7 @@ namespace dmt::bvh {
                     // push the child entry (node pointer resolved from gathered nodeVal)
                     // Here we assume nodeVal is an index into bvh[].
                     BVHWiVeCluster const* childPtr = &bvh[nodeVal];
-                    stack.push_back({childPtr, childIsInner, childTmin});
+                    stack.emplace_back(childPtr, childIsInner, childTmin);
                 }
             }
             else

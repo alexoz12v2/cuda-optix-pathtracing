@@ -15,6 +15,7 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-light.h
         ${CMAKE_SOURCE_DIR}/include/core/core-light-tree-builder.h
         ${CMAKE_SOURCE_DIR}/include/core/core-texture.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-mesh-parser.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
@@ -26,12 +27,15 @@ target_sources(dmt-core
     core-light.cpp
     core-light-tree-builder.cpp
     core-texture.cpp
+    core-mesh-parser.cpp
 )
 
 target_link_libraries(dmt-core 
   PUBLIC
     dmt-platform
     dmt-cudautils
+  PRIVATE
+    FBXSDK::fbxsdk
 )
 
 set_target_properties(dmt-core PROPERTIES FOLDER "Modules/Core")

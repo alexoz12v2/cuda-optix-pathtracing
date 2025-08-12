@@ -307,7 +307,7 @@ namespace dmt {
 
     // ctx.dUV contains dudx, dudy, dvdx, dvdy
     // texWidth/texHeight are base-level resolution (not mip-resolved)
-    inline LODResult computeTextureLOD_from_dudv(float dudx, float dudy, float dvdx, float dvdy, int texWidth, int texHeight)
+    static inline LODResult computeTextureLOD_from_dudv(float dudx, float dudy, float dvdx, float dvdy, int texWidth, int texHeight)
     {
         // Convert derivatives to texel units (important!)
         // a = dstdx_texel = (dudx * texWidth, dvdx * texHeight)
@@ -433,7 +433,7 @@ namespace dmt {
         float uRadius = std::sqrt(C * invDet);
         float vRadius = std::sqrt(A * invDet);
 
-#if 1 // Debug radii
+#if 0 // Debug radii
         if (uRadius > 20.0f || vRadius > 20.0f)
         {
             Context ctx;
@@ -514,7 +514,7 @@ namespace dmt {
         // choose 2 level of details and perform 2 EWA filtering lookup
         auto lodRes = computeTextureLOD_from_dudv(ctx.dUV.dudx, ctx.dUV.dudy, ctx.dUV.dvdx, ctx.dUV.dvdy, width, height);
 
-#if 1
+#if 0
         Context actx;
         // clang-format off
         actx.log(" [TEXTURE SAMPLING]: st {} {} | p {} {} {} |", std::make_tuple(st.x, st.y, ctx.p.x, ctx.p.y, ctx.p.z));

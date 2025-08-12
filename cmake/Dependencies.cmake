@@ -9,6 +9,8 @@ macro(dmt_setup_dependencies)
   find_package(CUDAToolkit REQUIRED)
   find_package(OptiX80 REQUIRED)
 
+  find_package(FBXSdk REQUIRED)
+
   if(NOT TARGET Catch2::Catch2WithMain)
     FetchContent_Declare(Catch2
       GIT_REPOSITORY https://github.com/catchorg/Catch2.git

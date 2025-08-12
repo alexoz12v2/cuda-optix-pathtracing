@@ -1622,7 +1622,14 @@ namespace dmt {
         Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(focalLength, sensorHeight, Width, Height);
         Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
         ApproxDifferentialsContext diffCtx = minDifferentialsFromCamera(cameraFromRaster, renderFromCamera, film, SamplesPerPixel);
-        ImageTexturev2 tex = openTestTexture();
+
+        ctx.warn(" -- Opening texture --", {});
+        auto           start = std::chrono::high_resolution_clock::now();
+        ImageTexturev2 tex   = openTestTexture();
+        auto           end   = std::chrono::high_resolution_clock::now();
+
+        uint32_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        ctx.warn(" -- Opened texture in {} ms --", std::make_tuple(millis));
 
         // TODO: remove, open background image (if possible)
         int32_t  xResBackground = 0, yResBackground = 0;

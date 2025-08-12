@@ -1041,8 +1041,14 @@ namespace dmt::test {
         }
 
         // Build mipmapped texture using the PBRT-style function you have
-        ImageTexturev2 tex = makeRGBMipmappedTexture(image.get(), xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, mem);
-        if (!tex.data.rgb || !tex.isRGB || tex.width <= 0 || tex.height <= 0)
+        ImageTexturev2 tex = makeRGBMipmappedTexture(image.get(),
+                                                     xRes,
+                                                     yRes,
+                                                     TexWrapMode::eClamp,
+                                                     TexWrapMode::eClamp,
+                                                     TexFormat::FloatRGB,
+                                                     mem);
+        if (!tex.data || !tex.isRGB || tex.width <= 0 || tex.height <= 0)
         {
             ctx.error("Failed to create mipmapped texture.", {});
             return;
@@ -1086,7 +1092,7 @@ namespace dmt::test {
 
                     // Place level 0 at (0, 0)
                     {
-                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 0);
+                        RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, 0);
                         for (uint32_t y = 0; y < levelH; ++y)
                         {
                             for (uint32_t x = 0; x < levelW; ++x)
@@ -1102,7 +1108,7 @@ namespace dmt::test {
                     levelW           = std::max(1, tex.width >> 1);
                     levelH           = std::max(1, tex.height >> 1);
                     {
-                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 1);
+                        RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, 1);
                         for (uint32_t y = 0; y < levelH; ++y)
                         {
                             for (uint32_t x = 0; x < levelW; ++x)
@@ -1116,9 +1122,9 @@ namespace dmt::test {
                     yOffset = levelH;
                     for (uint32_t level = 2; level < tex.mipLevels; ++level)
                     {
-                        levelW        = std::max(1, tex.width >> level);
-                        levelH        = std::max(1, tex.height >> level);
-                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, level);
+                        levelW = std::max(1, tex.width >> level);
+                        levelH = std::max(1, tex.height >> level);
+                        RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, level);
 
                         for (uint32_t y = 0; y < levelH; ++y)
                         {
@@ -1138,7 +1144,7 @@ namespace dmt::test {
 
                     // Place level 0 at (0, 0)
                     {
-                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 0);
+                        RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, 0);
                         for (uint32_t y = 0; y < levelH; ++y)
                         {
                             for (uint32_t x = 0; x < levelW; ++x)
@@ -1154,7 +1160,7 @@ namespace dmt::test {
                     levelW           = std::max(1, tex.width >> 1);
                     levelH           = std::max(1, tex.height >> 1);
                     {
-                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, 1);
+                        RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, 1);
                         for (uint32_t y = 0; y < levelH; ++y)
                         {
                             for (uint32_t x = 0; x < levelW; ++x)
@@ -1168,9 +1174,9 @@ namespace dmt::test {
                     xOffset = levelW;
                     for (uint32_t level = 2; level < tex.mipLevels; ++level)
                     {
-                        levelW        = std::max(1, tex.width >> level);
-                        levelH        = std::max(1, tex.height >> level);
-                        RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, level);
+                        levelW = std::max(1, tex.width >> level);
+                        levelH = std::max(1, tex.height >> level);
+                        RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, level);
 
                         for (uint32_t y = 0; y < levelH; ++y)
                         {
@@ -1207,7 +1213,7 @@ namespace dmt::test {
                     continue;
                 }
 
-                RGB* levelBuf = tex.data.rgb + mortonLevelOffset(tex.width, tex.height, level);
+                RGB* levelBuf = reinterpret_cast<RGB*>(tex.data) + mortonLevelOffset(tex.width, tex.height, level);
 
                 for (uint32_t yy = 0; yy < levelH; ++yy)
                 {

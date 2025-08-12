@@ -1,3 +1,22 @@
+# platform specific implementation files
+if(DEFINED DMT_OS_WINDOWS)
+  set(core_os_private_sources
+    core-texture-cache.win32.cpp
+  )
+  set(core_unused_sources
+    core-texture-cache.linux.cpp
+  )
+elseif(DEFINED DMT_OS_LINUX)
+  set(core_os_private_sources
+    core-texture-cache.linux.cpp
+  )
+  set(core_unused_sources
+    core-texture-cache.win32.cpp
+  )
+endif()
+set_source_files_properties(${core_unused_sources} PROPERTIES HEADER_FILE_ONLY TRUE)
+
+# target definition
 dmt_add_module_library(dmt-core core SHARED)
 target_sources(dmt-core
   PUBLIC
@@ -16,6 +35,7 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-light-tree-builder.h
         ${CMAKE_SOURCE_DIR}/include/core/core-texture.h
         ${CMAKE_SOURCE_DIR}/include/core/core-mesh-parser.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-texture-cache.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
@@ -28,6 +48,8 @@ target_sources(dmt-core
     core-light-tree-builder.cpp
     core-texture.cpp
     core-mesh-parser.cpp
+    ${core_os_private_sources}
+    ${core_unused_sources}
 )
 
 target_link_libraries(dmt-core 
@@ -41,3 +63,5 @@ target_link_libraries(dmt-core
 set_target_properties(dmt-core PROPERTIES FOLDER "Modules/Core")
 
 install(TARGETS dmt-core FILE_SET core_headers)
+
+source_group("Unused" FILES ${core_unused_sources})

@@ -1417,7 +1417,7 @@ namespace dmt {
             ctx.error("Couldn't open file at \"{}\"", std::make_tuple(diffuse.toUnderlying()));
             return tex;
         }
-        tex = makeRGBMipmappedTexture(image.get(), xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, mem);
+        tex = makeRGBMipmappedTexture(image.get(), xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, TexFormat::FloatRGB, mem);
         return tex;
     }
 
@@ -1794,8 +1794,8 @@ int32_t guardedMain()
         dmt::test::testDistribution2D();
         dmt::test::testOctahedralProj();
         dmt::test::testGGXconductor(4096);
-        dmt::test::testSphereLightPDFAnalyticCheck();
         dmt::test::testEnvironmentalLightConstantValue();
+        dmt::test::testSphereLightPDFAnalyticCheck();
         dmt::test::testMipmappedTexturePrinting();
 #endif
 

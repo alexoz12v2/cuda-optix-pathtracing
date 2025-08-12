@@ -1,6 +1,66 @@
 #include "core-texture.h"
 
 namespace dmt {
+    struct Byte3
+    {
+        Byte3() = default;
+        Byte3(RGB rgb) :
+        r{static_cast<uint8_t>(fminf(rgb.r * 255.f, 255.f))},
+        g{static_cast<uint8_t>(fminf(rgb.g * 255.f, 255.f))},
+        b{static_cast<uint8_t>(fminf(rgb.b * 255.f, 255.f))}
+        {
+        }
+
+        explicit operator RGB() const
+        {
+            RGB rgb{};
+            rgb.r = static_cast<float>(r) / 255.f;
+            rgb.g = static_cast<float>(g) / 255.f;
+            rgb.b = static_cast<float>(b) / 255.f;
+            return rgb;
+        }
+
+        uint8_t r, g, b;
+    };
+
+    static uint8_t toByte(float t) { return static_cast<uint8_t>(fl::clamp(t * 255.f, 0, 255.f)); }
+
+    struct Half3
+    {
+        Half3() = default;
+        Half3(RGB rgb) : r{rgb.r}, g{rgb.g}, b{rgb.b} {}
+
+        explicit operator RGB() const
+        {
+            RGB rgb{};
+            rgb.r = static_cast<float>(r);
+            rgb.g = static_cast<float>(g);
+            rgb.b = static_cast<float>(b);
+            return rgb;
+        }
+
+        Half r, g, b;
+    };
+
+    static uint32_t bytesPerPixel(TexFormat texFormat)
+    {
+        using enum TexFormat;
+        switch (texFormat)
+        {
+            case FloatRGB: return 12;
+            case HalfRGB: return 6;
+            case ByteRGB: return 3;
+            case FloatGray: return 4;
+            case HalfGray: return 2;
+            case ByteGray: [[fallthrough]];
+            default: return 1;
+        }
+    }
+
+    template <typename T>
+    concept PixelType = std::is_same_v<T, RGB> || std::is_same_v<T, Half3> || std::is_same_v<T, Byte3> ||
+                        std::is_same_v<T, float> || std::is_same_v<T, Half> || std::is_same_v<T, uint8_t>;
+
     void approximate_dp_dxy(ApproxDifferentialsContext const& apctx, Vector3f* dpdx, Vector3f* dpdy)
     {
         assert(fl::abs(normL2(apctx.n) - 1.f) < 1e-5f && dpdx && dpdy);
@@ -146,12 +206,18 @@ namespace dmt {
         return total;
     }
 
+    template <typename T>
+    struct Tag
+    {
+    };
+
     ImageTexturev2 makeRGBMipmappedTexture(
-        RGB const*                 image,
+        void const*                image,
         int32_t                    xRes,
         int32_t                    yRes,
         TexWrapMode                wrapModeX,
         TexWrapMode                wrapModeY,
+        TexFormat                  texFormat,
         std::pmr::memory_resource* memory)
     {
         assert(memory && image && xRes > 0 && yRes > 0);
@@ -166,6 +232,7 @@ namespace dmt {
         tex.deviceIdx = -1; // TODO: upload to GPU later
         tex.wrapModeX = wrapModeX;
         tex.wrapModeY = wrapModeY;
+        tex.texFormat = texFormat;
 
         // Mip levels: stop when both dims hit 1
         int levels = 0;
@@ -185,20 +252,33 @@ namespace dmt {
 
         // Allocate exact space for the mip chain
         size_t totalPixels = mipChainPixelCount(xRes, yRes);
-        size_t totalBytes  = totalPixels * sizeof(RGB);
+        size_t pixelSize   = bytesPerPixel(tex.texFormat);
+        size_t totalBytes  = totalPixels * pixelSize;
         void*  buffer      = memory->allocate(totalBytes, 32);
         if (!buffer)
             return tex;
 
-        tex.data.rgb = reinterpret_cast<RGB*>(buffer);
+        tex.data = buffer;
 
         // --- Copy level 0 (base image) in Morton order ---
+        auto const copyPixel = [pixelSize, xRes](void* dst, void const* src, uint32_t u, uint32_t v) {
+            uint32_t mortonIdx = encodeMorton2D(u, v);
+            std::memcpy(reinterpret_cast<unsigned char*>(dst) + pixelSize * mortonIdx,
+                        reinterpret_cast<unsigned char const*>(src) + (u + static_cast<size_t>(v) * xRes) * pixelSize,
+                        pixelSize);
+        };
+
+        auto const extractPixel = [pixelSize]<PixelType T>(void const* src, uint32_t u, uint32_t v, Tag<T>) -> T {
+            uint32_t mortonIdx = encodeMorton2D(u, v);
+            auto const* ref = reinterpret_cast<T const*>(reinterpret_cast<unsigned char const*>(src) + pixelSize * mortonIdx);
+            return *ref;
+        };
+
         for (int v = 0; v < yRes; ++v)
         {
             for (int u = 0; u < xRes; ++u)
             {
-                uint32_t mortonIdx      = encodeMorton2D(u, v);
-                tex.data.rgb[mortonIdx] = image[u + v * xRes];
+                copyPixel(tex.data, image, u, v);
             }
         }
 
@@ -210,19 +290,114 @@ namespace dmt {
             int currW = xRes >> level;
             int currH = yRes >> level;
 
-            RGB* prevLevel = tex.data.rgb + mortonLevelOffset(xRes, yRes, level - 1);
-            RGB* currLevel = tex.data.rgb + mortonLevelOffset(xRes, yRes, level);
+            auto* prevLevel = reinterpret_cast<unsigned char*>(tex.data) +
+                              mortonLevelOffset(xRes, yRes, level - 1) * pixelSize;
+            auto* currLevel = reinterpret_cast<unsigned char*>(tex.data) + mortonLevelOffset(xRes, yRes, level) * pixelSize;
 
             for (int v = 0; v < currH; ++v)
             {
                 for (int u = 0; u < currW; ++u)
-                { // clang-format off
-                    RGB c00 = prevLevel[encodeMorton2D(u * 2,     v * 2)];
-                    RGB c10 = prevLevel[encodeMorton2D(u * 2 + 1, v * 2)];
-                    RGB c01 = prevLevel[encodeMorton2D(u * 2,     v * 2 + 1)];
-                    RGB c11 = prevLevel[encodeMorton2D(u * 2 + 1, v * 2 + 1)];
-                    // clang-format on
-                    currLevel[encodeMorton2D(u, v)] = 0.25f * (c00 + c10 + c01 + c11);
+                {
+                    using enum TexFormat;
+                    RGB   c00{}, c10{}, c01{}, c11{};
+                    float f00{}, f10{}, f01{}, f11{};
+                    switch (tex.texFormat)
+                    {
+                        case FloatRGB:
+                            c00 = extractPixel(prevLevel, u * 2, v * 2, Tag<RGB>{});
+                            c10 = extractPixel(prevLevel, u * 2 + 1, v * 2, Tag<RGB>{});
+                            c01 = extractPixel(prevLevel, u * 2, v * 2 + 1, Tag<RGB>{});
+                            c11 = extractPixel(prevLevel, u * 2 + 1, v * 2 + 1, Tag<RGB>{});
+                            break;
+                        case HalfRGB:
+                            c00 = static_cast<RGB>(extractPixel(prevLevel, u * 2, v * 2, Tag<Half3>{}));
+                            c10 = static_cast<RGB>(extractPixel(prevLevel, u * 2 + 1, v * 2, Tag<Half3>{}));
+                            c01 = static_cast<RGB>(extractPixel(prevLevel, u * 2, v * 2 + 1, Tag<Half3>{}));
+                            c11 = static_cast<RGB>(extractPixel(prevLevel, u * 2 + 1, v * 2 + 1, Tag<Half3>{}));
+                            break;
+                        case ByteRGB:
+                            c00 = static_cast<RGB>(extractPixel(prevLevel, u * 2, v * 2, Tag<Byte3>{}));
+                            c10 = static_cast<RGB>(extractPixel(prevLevel, u * 2 + 1, v * 2, Tag<Byte3>{}));
+                            c01 = static_cast<RGB>(extractPixel(prevLevel, u * 2, v * 2 + 1, Tag<Byte3>{}));
+                            c11 = static_cast<RGB>(extractPixel(prevLevel, u * 2 + 1, v * 2 + 1, Tag<Byte3>{}));
+                            break;
+                        case FloatGray:
+                            f00 = extractPixel(prevLevel, u * 2, v * 2, Tag<float>{});
+                            f10 = extractPixel(prevLevel, u * 2 + 1, v * 2, Tag<float>{});
+                            f01 = extractPixel(prevLevel, u * 2, v * 2 + 1, Tag<float>{});
+                            f11 = extractPixel(prevLevel, u * 2 + 1, v * 2 + 1, Tag<float>{});
+                            break;
+                        case HalfGray:
+                            f00 = static_cast<float>(extractPixel(prevLevel, u * 2, v * 2, Tag<Half>{}));
+                            f10 = static_cast<float>(extractPixel(prevLevel, u * 2 + 1, v * 2, Tag<Half>{}));
+                            f01 = static_cast<float>(extractPixel(prevLevel, u * 2, v * 2 + 1, Tag<Half>{}));
+                            f11 = static_cast<float>(extractPixel(prevLevel, u * 2 + 1, v * 2 + 1, Tag<Half>{}));
+                            break;
+                        case ByteGray:
+                            f00 = static_cast<float>(extractPixel(prevLevel, u * 2, v * 2, Tag<uint8_t>{})) / 255.f;
+                            f10 = static_cast<float>(extractPixel(prevLevel, u * 2 + 1, v * 2, Tag<uint8_t>{})) / 255.f;
+                            f01 = static_cast<float>(extractPixel(prevLevel, u * 2, v * 2 + 1, Tag<uint8_t>{})) / 255.f;
+                            f11 = static_cast<float>(extractPixel(prevLevel, u * 2 + 1, v * 2 + 1, Tag<uint8_t>{})) / 255.f;
+                            break;
+                    }
+
+                    RGB toEncode = RGB::fromScalar(0.25f);
+                    switch (tex.texFormat)
+                    {
+                        case FloatRGB: [[fallthrough]];
+                        case HalfRGB: [[fallthrough]];
+                        case ByteRGB: toEncode *= c00 + c10 + c01 + c11; break;
+                        case FloatGray: [[fallthrough]];
+                        case HalfGray: [[fallthrough]];
+                        case ByteGray: toEncode *= f00 + f10 + f01 + f11; break;
+                    }
+
+                    void* dst = currLevel + encodeMorton2D(u, v) * pixelSize;
+                    switch (tex.texFormat)
+                    {
+                        case FloatRGB:
+                        {
+                            assert(pixelSize == sizeof(RGB));
+                            std::memcpy(dst, &toEncode, pixelSize);
+                            break;
+                        }
+                        case HalfRGB:
+                        {
+                            Half const half[3]{Half{toEncode.r}, Half{toEncode.g}, Half{toEncode.b}};
+                            assert(pixelSize == 3 * sizeof(Half));
+                            std::memcpy(dst, &half, pixelSize);
+                            break;
+                        }
+                        case ByteRGB:
+                        {
+                            uint8_t const byte[3]{toByte(toEncode.r), toByte(toEncode.g), toByte(toEncode.b)};
+                            assert(pixelSize == 3 * sizeof(uint8_t));
+                            std::memcpy(dst, &byte, pixelSize);
+                            break;
+                        }
+                        case FloatGray:
+                        {
+                            assert(toEncode.r == toEncode.g && toEncode.g == toEncode.b);
+                            std::memcpy(dst, &toEncode.r, pixelSize);
+                            break;
+                        }
+                        case HalfGray:
+                        {
+                            assert(toEncode.r == toEncode.g && toEncode.g == toEncode.b);
+                            assert(pixelSize == sizeof(Half));
+                            Half const half{toEncode.r};
+                            std::memcpy(dst, &half, pixelSize);
+                            break;
+                        }
+                        case ByteGray:
+                        {
+                            assert(toEncode.r == toEncode.g && toEncode.g == toEncode.b);
+                            assert(pixelSize == sizeof(uint8_t));
+                            uint8_t const byte = toEncode.r * 255.f;
+                            std::memcpy(dst, &byte, pixelSize);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -233,14 +408,9 @@ namespace dmt {
     void freeImageTexture(ImageTexturev2& tex, std::pmr::memory_resource* memory)
     {
         size_t totalPixels = mipChainPixelCount(tex.width, tex.height);
-        size_t totalBytes  = totalPixels;
-        if (tex.isRGB)
-            totalBytes *= sizeof(RGB);
-        else if (tex.isNormal)
-            totalBytes *= sizeof(OctahedralNorm);
-        else
-            totalBytes *= sizeof(float);
-        memory->deallocate(tex.data.L, totalBytes, 32);
+        size_t totalBytes  = totalPixels * bytesPerPixel(tex.texFormat);
+
+        memory->deallocate(tex.data, totalBytes, 32);
         std::memset(&tex, 0, sizeof(ImageTexturev2));
     }
 
@@ -248,11 +418,20 @@ namespace dmt {
     {
         if (isRGB || isNormal)
             return 0.f;
-        // TODO
-        return 0.f;
+
+        return evalRGB(ctx).r;
     }
 
-    static RGB sampleMortonTexel(int s, int t, Point2i levelRes, TexWrapMode wrapX, TexWrapMode wrapY, RGB const* mortonLevelBuffer)
+    static RGB sampleMortonTexel(
+        int         s,
+        int         t,
+        Point2i     levelRes,
+        TexWrapMode wrapX,
+        TexWrapMode wrapY,
+        TexFormat   format,           // NEW: source format
+        bool        isNormalMap,      // for special handling if needed
+        void const* mortonLevelBuffer // NEW: generic pointer
+    )
     {
         constexpr auto wrapCoord = [](int coord, int size, TexWrapMode mode) -> int {
             switch (mode)
@@ -279,7 +458,70 @@ namespace dmt {
         int v = wrapCoord(t, levelRes.y, wrapY);
 
         uint32_t mortonIdx = encodeMorton2D(u, v);
-        return mortonLevelBuffer[mortonIdx];
+
+        RGB result{};
+        switch (format)
+        {
+            case TexFormat::FloatRGB:
+            {
+                auto data = static_cast<RGB const*>(mortonLevelBuffer);
+                result    = data[mortonIdx];
+                break;
+            }
+            case TexFormat::HalfRGB:
+            {
+                auto         data = static_cast<Half3 const*>(mortonLevelBuffer);
+                Half3 const& h    = data[mortonIdx];
+                result.r          = static_cast<float>(h.r);
+                result.g          = static_cast<float>(h.g);
+                result.b          = static_cast<float>(h.b);
+                break;
+            }
+            case TexFormat::ByteRGB:
+            {
+                auto         data = static_cast<Byte3 const*>(mortonLevelBuffer);
+                Byte3 const& b8   = data[mortonIdx];
+                result.r          = b8.r / 255.0f;
+                result.g          = b8.g / 255.0f;
+                result.b          = b8.b / 255.0f;
+                break;
+            }
+            case TexFormat::FloatGray:
+            {
+                auto  data = static_cast<float const*>(mortonLevelBuffer);
+                float g    = data[mortonIdx];
+                result     = {g, g, g};
+                break;
+            }
+            case TexFormat::HalfGray:
+            {
+                auto  data = static_cast<Half const*>(mortonLevelBuffer);
+                float g    = static_cast<float>(data[mortonIdx]);
+                result     = {g, g, g};
+                break;
+            }
+            case TexFormat::ByteGray:
+            {
+                auto  data = static_cast<uint8_t const*>(mortonLevelBuffer);
+                float g    = data[mortonIdx] / 255.0f;
+                result     = {g, g, g};
+                break;
+            }
+            default:
+                // Return magenta to signal error
+                result = {1.0f, 0.0f, 1.0f};
+                break;
+        }
+
+        // Optional: if normal map in [0..1], remap to [-1..1]
+        if (isNormalMap)
+        {
+            result.r = result.r * 2.0f - 1.0f;
+            result.g = result.g * 2.0f - 1.0f;
+            result.b = result.b * 2.0f - 1.0f;
+        }
+
+        return result;
     }
 
     // TODO __constant__ memory for GPU
@@ -371,7 +613,7 @@ namespace dmt {
         float lod1 = (sigma1 > 0.f) ? std::log2(sigma1) : -INFINITY;
         float lod2 = (sigma2 > 0.f) ? std::log2(sigma2) : -INFINITY;
 
-        LODResult res;
+        LODResult res{};
         res.sigma_max = std::max(sigma1, sigma2);
         res.sigma_min = std::min(sigma1, sigma2);
         res.lod_major = std::max(0.f, lod1);
@@ -382,15 +624,45 @@ namespace dmt {
     // TODO with all types of data (normals are an exception)
     static RGB EWA(ImageTexturev2 const* tex, int32_t ilod, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in)
     {
+        using enum TexFormat;
+
+        size_t const pixelSize    = bytesPerPixel(tex->texFormat);
+        auto const   extractPixel = [pixelSize]<PixelType T>(void const* src, uint32_t u, uint32_t v, Tag<T>) -> T {
+            uint32_t mortonIdx = encodeMorton2D(u, v);
+            auto const* ref = reinterpret_cast<T const*>(reinterpret_cast<unsigned char const*>(src) + pixelSize * mortonIdx);
+            return *ref;
+        };
         // If beyond last level: return a single texel
         if (ilod >= tex->mipLevels)
         {
-            size_t off = mortonLevelOffset(tex->width, tex->height, tex->mipLevels - 1);
-            return tex->data.rgb[off];
+            size_t      off = mortonLevelOffset(tex->width, tex->height, tex->mipLevels - 1);
+            void const* src = reinterpret_cast<unsigned char const*>(tex->data) + off * pixelSize;
+            switch (tex->texFormat)
+            {
+                case FloatRGB: return extractPixel(src, 0, 0, Tag<RGB>{});
+                case HalfRGB: return static_cast<RGB>(extractPixel(src, 0, 0, Tag<Half3>{}));
+                case ByteRGB: return static_cast<RGB>(extractPixel(src, 0, 0, Tag<Byte3>{}));
+                case FloatGray:
+                {
+                    float f = extractPixel(src, 0, 0, Tag<float>{});
+                    return RGB::fromScalar(f);
+                }
+                case HalfGray:
+                {
+                    float f = static_cast<float>(extractPixel(src, 0, 0, Tag<Half>{}));
+                    return RGB::fromScalar(f);
+                }
+                case ByteGray:
+                {
+                    float f = fl::clamp01(extractPixel(src, 0, 0, Tag<uint8_t>{}) / 255.f);
+                    return RGB::fromScalar(f);
+                }
+            }
         }
 
         // Pointer to this mip level
-        RGB const* mortonLevelBuffer = tex->data.rgb + mortonLevelOffset(tex->width, tex->height, ilod);
+        auto const* mortonLevelBuffer = reinterpret_cast<unsigned char const*>(tex->data) +
+                                        mortonLevelOffset(tex->width, tex->height, ilod) * pixelSize;
 
         // Mip level resolution
         Point2i levelRes = {std::max(1, tex->width >> ilod), std::max(1, tex->height >> ilod)};
@@ -418,6 +690,8 @@ namespace dmt {
                                      levelRes,
                                      tex->wrapModeX,
                                      tex->wrapModeY,
+                                     tex->texFormat,
+                                     tex->isNormal,
                                      mortonLevelBuffer);
         }
         A *= invF;
@@ -463,8 +737,8 @@ namespace dmt {
                     int   idx = int(r2c * float(EWA_LUT_SIZE - 1));
                     idx       = std::min(std::max(idx, 0), int(EWA_LUT_SIZE - 1));
 
-                    float w     = EwaWeightLUT[idx];
-                    RGB   texel = sampleMortonTexel(s, t, levelRes, tex->wrapModeX, tex->wrapModeY, mortonLevelBuffer);
+                    float w = EwaWeightLUT[idx];
+                    RGB texel = sampleMortonTexel(s, t, levelRes, tex->wrapModeX, tex->wrapModeY, tex->texFormat, tex->isNormal, mortonLevelBuffer);
                     sum += texel * w;
                     sumW += w;
                 }
@@ -478,6 +752,8 @@ namespace dmt {
                                      levelRes,
                                      tex->wrapModeX,
                                      tex->wrapModeY,
+                                     tex->texFormat,
+                                     tex->isNormal,
                                      mortonLevelBuffer);
         }
 

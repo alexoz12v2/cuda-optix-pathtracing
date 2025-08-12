@@ -132,17 +132,24 @@ namespace dmt {
     inline constexpr int32_t EWA_LUT_SIZE = 128;
     extern DMT_CORE_API std::array<float, EWA_LUT_SIZE> EwaWeightLUT;
 
+    enum class TexFormat : uint8_t
+    {
+        FloatRGB = 0,
+        HalfRGB,
+        ByteRGB,
+        FloatGray,
+        HalfGray,
+        ByteGray,
+
+        Count
+    };
+
     struct DMT_CORE_API ImageTexturev2
     {
         float evalFloat(TextureEvalContext const& ctx) const;
         RGB   evalRGB(TextureEvalContext const& ctx) const;
 
-        union Data
-        {
-            float*          L;
-            OctahedralNorm* ns;
-            RGB*            rgb;
-        } data; /// mipmapped image data, stored in morton order
+        void* data; /// mipmapped image data, stored in morton order
 
         int32_t     width;          /// original image x resolution (POT)
         int32_t     height;         /// original image y resolution (POT)
@@ -152,6 +159,7 @@ namespace dmt {
         int32_t     deviceIdx;      /// if -1, then CPU resident texture, otherwise index of device (TODO later)
         TexWrapMode wrapModeX;
         TexWrapMode wrapModeY;
+        TexFormat   texFormat;
     };
 
     // ---- Image Texture Utils ----
@@ -160,16 +168,17 @@ namespace dmt {
     /// Compute total number of pixels in the mip chain
     DMT_CORE_API size_t mipChainPixelCount(int w, int h);
 
-    /// Compute offset into the mipmapped array for the start of a given level
+    /// Compute offset in pixels into the mipmapped array for the start of a given level
     DMT_CORE_API size_t mortonLevelOffset(int baseW, int baseH, int level);
 
     /// assumes color has been already linearized and that image is stored in row major order
     DMT_CORE_API ImageTexturev2 makeRGBMipmappedTexture(
-        RGB const*                 image,
+        void const*                image,
         int32_t                    xRes,
         int32_t                    yRes,
         TexWrapMode                wrapModeX,
         TexWrapMode                wrapModeY,
+        TexFormat                  texFormat,
         std::pmr::memory_resource* memory);
 
     /// the texture object must be initialized and the memory reosurce given must be the same with which you created it

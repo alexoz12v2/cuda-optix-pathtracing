@@ -56,6 +56,7 @@ target_link_libraries(dmt-core
   PUBLIC
     dmt-platform
     dmt-cudautils
+    gx::gx
   PRIVATE
     FBXSDK::fbxsdk
 )

@@ -121,4 +121,8 @@ macro(dmt_setup_dependencies)
   if(NOT TARGET qoi)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/qoi)
   endif()
+
+  if(NOT TARGET gx)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/extern/gx)
+  endif()
 endmacro()

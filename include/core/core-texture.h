@@ -165,6 +165,8 @@ namespace dmt {
     // ---- Image Texture Utils ----
     inline constexpr float MaxAnisotropy = 8.f;
 
+    DMT_CORE_API uint32_t bytesPerPixel(TexFormat texFormat);
+
     /// Compute total number of pixels in the mip chain
     DMT_CORE_API size_t mipChainPixelCount(int w, int h);
 

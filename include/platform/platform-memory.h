@@ -355,9 +355,10 @@ namespace dmt {
         bool     isValid() const;
         uint32_t numBlocks() const;
 
+        DMT_FORCEINLINE size_t reservedSize() const { return m_reservedSize; }
+
     protected:
         void* do_allocate(size_t _Bytes, size_t _Align) override;
-        void* NewFunction(uint32_t& blkNum, size_t& blkStart, size_t numBlocksRequired, bool& retFlag);
         void  do_deallocate(void* _Ptr, size_t _Bytes, size_t _Align) override;
         bool  do_is_equal(memory_resource const& _That) const noexcept override;
 

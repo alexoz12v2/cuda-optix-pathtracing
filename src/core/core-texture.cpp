@@ -42,7 +42,7 @@ namespace dmt {
         Half r, g, b;
     };
 
-    static uint32_t bytesPerPixel(TexFormat texFormat)
+    uint32_t bytesPerPixel(TexFormat texFormat)
     {
         using enum TexFormat;
         switch (texFormat)

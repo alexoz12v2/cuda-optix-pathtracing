@@ -3,9 +3,14 @@
 #include "platform/platform.h"
 #include "core/core-bvh-builder.h"
 #include "core/core-cudautils-cpubuild.h"
+#include "core/core-texture-cache.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_WINDOWS_UTF8
+
 #include <stb_image_write.h>
+#include <stb_image.h>
 
 namespace dmt {
     void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
@@ -84,6 +89,52 @@ namespace dmt {
             return bvhRoot;
         }
     }
+
+    static void testTextureCache()
+    {
+        std::pmr::unsynchronized_pool_resource poolList;
+        std::pmr::unsynchronized_pool_resource poolMap;
+
+        auto* texTmpMem = std::pmr::get_default_resource();
+
+        // 256 MB cache
+        TextureCache texCache{1ull << 28, &poolMap, &poolList};
+        int          width = 0, height = 0, comp = 0;
+        os::Path     image = os::Path::executableDir();
+        image /= "white.png";
+        uint8_t* data = stbi_load(image.toUnderlying().c_str(), &width, &height, &comp, 3);
+        if (!data)
+        {
+            // Todo context logging for CLI Windows
+            std::cerr << "Couldn't load image data" << std::endl;
+            return;
+        }
+        if (!isPOT(width) || !isPOT(height))
+        {
+            std::cerr << "We currently support only power of two resolution textures" << std::endl;
+            stbi_image_free(data);
+            return;
+        }
+
+        auto tex = makeRGBMipmappedTexture(data, width, height, TexWrapMode::eClamp, TexWrapMode::eClamp, TexFormat::ByteRGB, texTmpMem);
+        if (!tex.data)
+        {
+            std::cerr << "Couldn't construct mipmapped image data" << std::endl;
+            stbi_image_free(data);
+            return;
+        }
+
+        if (!texCache.MipcFiles.createCacheFile(baseKeyFromPath(image), tex))
+        {
+            std::cerr << "Couldn't create mipc file data" << std::endl;
+            stbi_image_free(data);
+            return;
+        }
+
+        std::cout << "created mipc file data, see it on Temp and continue..." << std::endl;
+        std::cin.get();
+        stbi_image_free(data);
+    }
 } // namespace dmt
 
 #define DMT_DBG_PX_X 50
@@ -152,6 +203,8 @@ int32_t guardedMain()
         }
 
         stbi_write_png(imagePath.toUnderlying().c_str(), Width, Height, 1, buffer.get(), Width);
+
+        dmt::testTextureCache();
     }
     return 0;
 }

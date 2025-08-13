@@ -18,8 +18,16 @@ namespace dmt {
         void operator()(void* raw) const;
     };
 
+    class DMT_CORE_API FbxSceneDeleter
+    {
+    public:
+        void operator()(void* raw) const;
+    };
+
     using dFbxManager    = std::unique_ptr<void, FbxDeleter>;
     using dFbxIOSettings = std::unique_ptr<void, FbxSettingsDeleter>;
+    using dFbxScene      = std::unique_ptr<void, FbxSceneDeleter>;
+
 
     dFbxManager DMT_CORE_API createFBXInstance();
 
@@ -44,8 +52,11 @@ namespace dmt {
         MeshFbxPasser(dFbxManager& mng, char* fileName);
         ~MeshFbxPasser();
 
+        bool ImportFBX(dFbxManager& inst, char* fileName);
+
     private:
         std::pmr::string m_fileName;
         dFbxIOSettings   m_settings;
+        dFbxScene        m_scene;
     };
 } // namespace dmt

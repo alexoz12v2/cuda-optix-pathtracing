@@ -92,8 +92,12 @@ namespace dmt {
     // code when the times comes
     template <typename T>
     concept Texture = requires(T const& tex, TextureEvalContext const& texEvalCtx) {
-        { tex.evalFloat(texEvalCtx) } -> std::same_as<float>;
-        { tex.evalRGB(texEvalCtx) } -> std::same_as<RGB>;
+        {
+            tex.evalFloat(texEvalCtx)
+        } -> std::same_as<float>;
+        {
+            tex.evalRGB(texEvalCtx)
+        } -> std::same_as<RGB>;
     };
 
     enum class TextureType

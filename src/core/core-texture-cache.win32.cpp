@@ -8,6 +8,10 @@
 #include <sddl.h> // https://learn.microsoft.com/en-us/windows/win32/api/sddl/nf-sddl-convertstringsecuritydescriptortosecuritydescriptorw
 
 namespace dmt {
+
+    inline constexpr uint32_t staticBytes = 8192;
+    static unsigned char      s_tempBuffer[staticBytes]{};
+
     static uint32_t pidUpTo5WChars(wchar_t* out)
     {
         uint32_t id = GetCurrentProcessId();
@@ -37,6 +41,7 @@ namespace dmt {
         {
             width  = std::max<int32_t>(1, width >> 1);
             height = std::max<int32_t>(1, height >> 1);
+            --level;
         }
 
         size_t bytes = static_cast<size_t>(pixelBytes) * width * height;
@@ -46,7 +51,7 @@ namespace dmt {
 
     static UniqueRef<wchar_t[]> tempMIPCDirectory(std::pmr::memory_resource* tmp, size_t* total, size_t* len)
     {
-        static constexpr size_t PathMaxCharCount = 2ull * MAX_PATH;
+        static constexpr size_t PathMaxCharCount = nextPOT<size_t>(MAX_PATH);
         static constexpr size_t MipcacheNumel    = 10; // ".mipcache_"
         static wchar_t const s_mipcacheBaseDir[MipcacheNumel] = {L'.', L'm', L'i', L'p', L'c', L'a', L'c', L'h', L'e', L'_'};
 
@@ -163,13 +168,84 @@ namespace dmt {
         return false;
     }
 
-    MipCacheFile::MipCacheFile(std::pmr::memory_resource* mapMemory) : m_keyfdmap{mapMemory} {}
+    MipCacheFile::MipCacheFile(std::pmr::memory_resource* mapMemory) : m_keyfdmap{mapMemory}, m_sectorSize{0} {}
 
-    bool MipCacheFile::createCacheFile(uint64_t baseKey, ImageTexturev2 const& tex, std::pmr::memory_resource* tmp)
+    class SectorBufferedWriter
     {
+    public:
+        SectorBufferedWriter(HANDLE file, size_t sectorSize, size_t bufferMultiplier, std::pmr::memory_resource* tmp) :
+        m_file(file),
+        m_sectorSize(sectorSize),
+        m_bufferSize(sectorSize * bufferMultiplier),
+        m_buffer(makeUniqueRef<unsigned char[]>(tmp, m_bufferSize)),
+        m_offset(0)
+        {
+        }
+
+        bool write(void const* data, size_t bytes)
+        {
+            unsigned char const* src     = reinterpret_cast<unsigned char const*>(data);
+            size_t               written = 0;
+
+            while (written < bytes)
+            {
+                size_t space  = m_bufferSize - m_offset;
+                size_t toCopy = std::min(space, bytes - written);
+                std::memcpy(m_buffer.get() + m_offset, src + written, toCopy);
+                m_offset += toCopy;
+                written += toCopy;
+
+                if (m_offset == m_bufferSize)
+                {
+                    if (!flushBuffer())
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        bool flush(bool padToSector = true)
+        {
+            if (m_offset == 0)
+                return true; // nothing to flush
+
+            size_t writeSize = m_offset;
+            if (padToSector)
+                writeSize = (writeSize + m_sectorSize - 1) & ~(m_sectorSize - 1);
+
+            if (writeSize > m_bufferSize)
+            {
+                assert(false); // should never happen
+                return false;
+            }
+
+            if (writeSize > m_offset)
+                std::memset(m_buffer.get() + m_offset, 0, writeSize - m_offset);
+
+            DWORD bytesWritten = 0;
+            if (!WriteFile(m_file, m_buffer.get(), static_cast<DWORD>(writeSize), &bytesWritten, nullptr))
+                return false;
+            assert(bytesWritten == writeSize);
+            m_offset = 0;
+            return true;
+        }
+
+    private:
+        bool flushBuffer() { return flush(true); }
+
+        HANDLE                     m_file;
+        size_t                     m_sectorSize;
+        size_t                     m_bufferSize;
+        UniqueRef<unsigned char[]> m_buffer;
+        size_t                     m_offset;
+    };
+
+    bool MipCacheFile::createCacheFile(uint64_t baseKey, ImageTexturev2 const& tex)
+    {
+        std::pmr::monotonic_buffer_resource scratch{s_tempBuffer, staticBytes, std::pmr::null_memory_resource()};
         // check that directory reserved for this process, in temp, exists => .mipcache_<pid>
         size_t total = 0, len = 0;
-        auto   tempDirectory = tempMIPCDirectory(tmp, &total, &len);
+        auto   tempDirectory = tempMIPCDirectory(&scratch, &total, &len);
         if (!tempDirectory)
             return false;
 
@@ -224,14 +300,21 @@ namespace dmt {
         // FILE_FLAG_NO_BUFFERING requires that:
         // - File size changes are aligned to sector size(usually 512 or 4096 bytes)
         // - Reads / writes must also be aligned and multiples of that size.
-        DWORD   sectorsPerCluster, bytesPerSector, freeClusters, totalClusters;
-        wchar_t driveLetter[12]{};
-        if (!fillDriveOrUNC(driveLetter, tempDirectory.get() + 4))
-            return false;
-        if (!GetDiskFreeSpaceW(driveLetter, &sectorsPerCluster, &bytesPerSector, &freeClusters, &totalClusters))
-            return false;
-        uint64_t const sectorSize  = bytesPerSector; // Usually 512 or 4096
-        uint64_t const alignedSize = (totalSize + (sectorSize - 1)) & ~(sectorSize - 1);
+        if (!m_sectorSize)
+        {
+            DWORD   sectorsPerCluster, bytesPerSector, freeClusters, totalClusters;
+            wchar_t driveLetter[12]{};
+            if (!fillDriveOrUNC(driveLetter, tempDirectory.get() + 4))
+                return false;
+            if (!GetDiskFreeSpaceW(driveLetter, &sectorsPerCluster, &bytesPerSector, &freeClusters, &totalClusters))
+                return false;
+            uint64_t const sectorSize = bytesPerSector; // Usually 512 or 4096
+
+            // Assumes sector size doesn't change during execution
+            m_sectorSize = sectorSize;
+        }
+
+        uint64_t const alignedSize = (totalSize + (m_sectorSize - 1)) & ~(m_sectorSize - 1);
 
         mipc::Header const header{.magic             = mipc::MAGIC,
                                   .version           = mipc::VERSION,
@@ -250,45 +333,41 @@ namespace dmt {
             return false;
         }
 
-        // copy header on a buffer multiple of sector size
-        size_t const headerBufferSize = (headerSize + (sectorSize - 1)) & ~(sectorSize - 1);
-        DWORD        written          = 0;
-        assert(static_cast<DWORD>(headerBufferSize) == headerBufferSize);
+        if (!SetFilePointerEx(hFile, {0ull}, nullptr, FILE_BEGIN))
         {
-            auto headerRef = makeUniqueRef<unsigned char[]>(tmp, headerBufferSize);
-            std::memcpy(headerRef.get(), &header, headerSize);
-            if (size_t diff = headerBufferSize - headerSize; diff != 0)
-                std::memset(headerRef.get() + headerSize, 0, diff);
-
-            // write header
-            if (!SetFilePointerEx(hFile, {0ull}, nullptr, FILE_BEGIN) ||
-                !WriteFile(hFile, headerRef.get(), static_cast<DWORD>(headerBufferSize), &written, nullptr))
-            {
-                CloseHandle(hFile);
-                return false;
-            }
-            assert(written == headerBufferSize);
+            CloseHandle(hFile);
+            return false;
         }
 
-        // write mips one by one, assuming each is not more than 4 GB
-        LARGE_INTEGER offset{.QuadPart = static_cast<LONGLONG>(headerSize)};
+        SectorBufferedWriter writer(hFile, m_sectorSize, 4, &scratch);
+
+        // write header
+        if (!writer.write(&header, sizeof(header)))
+        {
+            CloseHandle(hFile);
+            return false;
+        }
+
+        // write mips
+        size_t const pixelSize = bytesPerPixel(header.texFormat);
         for (uint32_t level = 0; level < tex.mipLevels; ++level)
         {
             uint32_t const mipSize = mipBytes(tex.width, tex.height, level, tex.texFormat);
-            void const*    mipData = reinterpret_cast<unsigned char const*>(tex.data) +
-                                  mortonLevelOffset(tex.width, tex.height, level);
-            if (!SetFilePointerEx(hFile, offset, nullptr, FILE_BEGIN) ||
-                WriteFile(hFile, mipData, mipSize, &written, nullptr))
+            auto const     mipData = reinterpret_cast<unsigned char const*>(tex.data) +
+                                 mortonLevelOffset(tex.width, tex.height, level) * pixelSize;
+            if (!writer.write(mipData, mipSize))
             {
                 CloseHandle(hFile);
                 return false;
             }
-            assert(mipSize == written);
-            assert(mipSize % sectorSize == 0 && "fkdlsfdjlfkjasdlkfjlsdjfadlksfjlk");
-            offset.QuadPart += mipSize;
         }
 
-        // TODO zero out the unused part of the file?
+        // flush remaining
+        if (!writer.flush())
+        {
+            CloseHandle(hFile);
+            return false;
+        }
 
         // note: not returning the file handle, hence we are keeping it open. When the process terminates, it will be
         // deleted and FILE_FLAG_DELETE_ON_CLOSE will kick in
@@ -297,49 +376,77 @@ namespace dmt {
         return m_keyfdmap.contains(baseKey);
     }
 
-    bool MipCacheFile::copyMipOfKey(uint64_t fileKey, int32_t level, void* outBuffer, uint32_t* inOutBytes, size_t* inOutOffset) const
+    int32_t MipCacheFile::copyMipOfKey(uint64_t fileKey, int32_t level, void* outBuffer, uint32_t* inOutBytes, size_t* inOutOffset) const
     {
         if (!m_keyfdmap.contains(fileKey))
             return false;
+
         HANDLE hFile     = std::bit_cast<HANDLE>(m_keyfdmap.at(fileKey));
         DWORD  bytesRead = 0;
 
         assert(inOutBytes && inOutOffset);
+        uint64_t const sectorSize = m_sectorSize; // must be > 0
+
         if (!outBuffer)
         {
+            std::pmr::monotonic_buffer_resource scratch{s_tempBuffer, staticBytes, std::pmr::null_memory_resource()};
             // read header
-            mipc::Header header{};
-            if (!SetFilePointerEx(hFile, {0ull}, nullptr, FILE_BEGIN) ||
-                !ReadFile(hFile, &header, static_cast<DWORD>(sizeof(header)), &bytesRead, nullptr))
-                return false;
+            mipc::Header   header{};
+            uint32_t const headerAlignedSize = (sizeof(header) + m_sectorSize - 1) & ~(m_sectorSize - 1);
+            auto           headerBuffer      = makeUniqueRef<unsigned char[]>(&scratch, headerAlignedSize);
+            assert(headerBuffer);
 
-            // compute offset and size of mip and return them
-            LARGE_INTEGER const offset{
-                .QuadPart = static_cast<LONGLONG>(
-                    sizeof(header) +
-                    mortonLevelOffset(static_cast<int32_t>(header.width), static_cast<int32_t>(header.height), level))};
-            uint32_t const mipSize = mipBytes(static_cast<int32_t>(header.width),
-                                              static_cast<int32_t>(header.height),
-                                              level,
-                                              header.texFormat);
-            // if you called to compute the size needed for the buffer, return it together with offset
-            *inOutBytes  = mipSize;
-            *inOutOffset = offset.QuadPart;
-            return true;
+            if (!SetFilePointerEx(hFile, {0ull}, nullptr, FILE_BEGIN) ||
+                !ReadFile(hFile, headerBuffer.get(), headerAlignedSize, &bytesRead, nullptr))
+                return false;
+            std::memcpy(&header, headerBuffer.get(), sizeof(mipc::Header));
+
+            // compute unaligned offset and size
+            size_t const mipOffsetUnaligned = sizeof(header) + mortonLevelOffset(static_cast<int32_t>(header.width),
+                                                                                 static_cast<int32_t>(header.height),
+                                                                                 level) *
+                                                                   bytesPerPixel(header.texFormat);
+            uint32_t const mipSizeUnaligned = mipBytes(static_cast<int32_t>(header.width),
+                                                       static_cast<int32_t>(header.height),
+                                                       level,
+                                                       header.texFormat);
+
+            // align offset down and size up to sector size
+            size_t const   offsetAligned = mipOffsetUnaligned / sectorSize * sectorSize;
+            uint32_t const sizeAligned   = static_cast<uint32_t>(
+                ((mipOffsetUnaligned + mipSizeUnaligned + sectorSize - 1) / sectorSize) * sectorSize - offsetAligned);
+
+            *inOutBytes  = sizeAligned;   // caller allocates this much
+            *inOutOffset = offsetAligned; // aligned read start
+
+            return mipOffsetUnaligned - offsetAligned;
         }
         else
         {
-            // move file pointer to mip offset and copy mip
-            LARGE_INTEGER const offset{.QuadPart = static_cast<LONGLONG>(*inOutOffset)};
+            // move file pointer to sector-aligned offset
+            LARGE_INTEGER offsetAligned{};
+            offsetAligned.QuadPart = static_cast<LONGLONG>(*inOutOffset);
             assert(*inOutBytes > 0);
-            if (!SetFilePointerEx(hFile, offset, nullptr, FILE_BEGIN) ||
+
+            if (!SetFilePointerEx(hFile, offsetAligned, nullptr, FILE_BEGIN) ||
                 !ReadFile(hFile, outBuffer, *inOutBytes, &bytesRead, nullptr))
                 return false;
+
+            // optionally, you could return the relative "start of actual data" inside buffer
+            // but your caller already knows offset difference = actualOffset - alignedOffset
 
             return true;
         }
     }
 
+    MipCacheFile::~MipCacheFile() noexcept
+    {
+        for (auto const& [key, value] : m_keyfdmap)
+        {
+            HANDLE hFile = std::bit_cast<HANDLE>(value);
+            CloseHandle(hFile);
+        }
+    }
 
     TextureCache::TextureCache(size_t cacheSize, std::pmr::memory_resource* cacheMem, std::pmr::memory_resource* listMem) :
     MipcFiles{cacheMem},
@@ -374,14 +481,16 @@ namespace dmt {
                 lk.downgrade_to_shared();
             }
 
-            return it->second.data;
+            return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
         }
 
         // 2. handle cache miss
         lk.upgrade_to_exclusive();
-        uint32_t mipSize   = 0;
-        size_t   mipOffset = 0;
-        if (!MipcFiles.copyMipOfKey(baseKey, mipLevel, nullptr, &mipSize, &mipOffset))
+        uint32_t mipSize            = 0;
+        size_t   mipOffset          = 0;
+        int32_t  mipUnalignedOffset = 0;
+        if (mipUnalignedOffset = MipcFiles.copyMipOfKey(baseKey, mipLevel, nullptr, &mipSize, &mipOffset);
+            !mipUnalignedOffset)
         {
             assert(false && "you shouldn't request something which doesn't exist");
             return nullptr; // no file
@@ -419,7 +528,7 @@ namespace dmt {
             return nullptr; // memory failure
 
         // create entry in LRU map and push_back onto list the key
-        auto const& [it, wasInserted] = m_cache.try_emplace(key, baseKey, buffer, mipLevel, mipSize);
+        auto const& [it, wasInserted] = m_cache.try_emplace(key, baseKey, buffer, mipUnalignedOffset, mipLevel, mipSize);
 
         if (!wasInserted || !MipcFiles.copyMipOfKey(baseKey, mipLevel, it->second.data, &mipSize, &mipOffset))
         {
@@ -435,6 +544,6 @@ namespace dmt {
         m_available -= mipSize;
 
         outBytes = mipSize;
-        return it->second.data;
+        return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
     }
 } // namespace dmt

@@ -52,20 +52,29 @@ namespace dmt {
     {
     public:
         explicit DMT_CORE_API MipCacheFile(std::pmr::memory_resource* mapMemory = std::pmr::get_default_resource());
+        MipCacheFile(MipCacheFile const&)                = delete;
+        MipCacheFile(MipCacheFile&&) noexcept            = delete;
+        MipCacheFile& operator=(MipCacheFile const&)     = delete;
+        MipCacheFile& operator=(MipCacheFile&&) noexcept = delete;
+        /// closes all handles in the m_keyfdmap, which means deletes all files
+        DMT_CORE_API ~MipCacheFile() noexcept;
 
         // TODO add overload which takes the cache directory
-        bool DMT_CORE_API createCacheFile(uint64_t                   baseKey,
-                                          ImageTexturev2 const&      tex,
-                                          std::pmr::memory_resource* tmp = std::pmr::get_default_resource());
+        bool DMT_CORE_API createCacheFile(uint64_t baseKey, ImageTexturev2 const& tex);
 
         /// if buffer is not nullptr, then inOutOffset and inOutBytes will be used to avoid reading the header twice
+        /// when you use nullptr, the function returns the startOffset from the data returned in the end where you actually
+        /// see image data. The start is just filler given by the fact we are reading with a file offset multiple of sector size
+        /// (we are disabling file buffering)
         /// note: inOutBytes being uint32 means assuming all mips occupy max 4 GB
-        bool DMT_CORE_API
+        /// Uses a static, common buffer to read the header -> *NOT* thread safe (TextureCache should use exclusive lock)
+        int32_t DMT_CORE_API
             copyMipOfKey(uint64_t fileKey, int32_t level, void* outBuffer, uint32_t* inOutBytes, size_t* inOutOffset) const;
 
     private:
         /// associate the file key to its file descriptor/HANDLE
         std::pmr::unordered_map<uint64_t, uintptr_t> m_keyfdmap;
+        size_t                                       m_sectorSize;
     };
     static_assert(alignof(MipCacheFile) == 8);
 
@@ -90,6 +99,7 @@ namespace dmt {
         {
             uint64_t baseKey;
             void*    data;
+            int32_t  startOffset;
             int32_t  miplevel;
             uint32_t numBytes; // assuming each mip is less than 4 GB
         };

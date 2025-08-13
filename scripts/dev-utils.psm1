@@ -6,10 +6,10 @@
 function Add-SourceToModule {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
         [string] $ModuleName,
 
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
         [Alias("Name")]
         [AllowEmptyCollection()]
         [AllowNull()]
@@ -106,10 +106,78 @@ function Add-SourceToModule {
     }
 
     end {
-        if ($config -and $config -in @("Debug-VS", "Debug-WinNinja")) {
-            Write-Host "Valid cmake configuration preset $config was given, running configure step..."
-            $proc = Start-Process -FilePath "cmake.exe" -WorkingDirectory .\build -ArgumentList "..","--preset",$config -Wait -PassThru -NoNewWindow
-            return $proc.ExitCode
+        if ($config -in @("Debug-VS", "Debug-WinNinja")) {
+            Write-Host "Running CMake with config: $config"
+            Start-ProcessWithOutput -FilePath "cmake.exe" -ArgumentsList "..", "--preset", $config
         }
+    }
+}
+
+Function Start-ProcessWithOutput {
+    param (
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+
+        [Parameter()]
+        [string[]]$ArgumentsList
+    )
+
+    begin {
+        $tmp = [System.IO.Path]::GetTempFileName()
+
+        # Start a background job that tails the output file
+        $readJob = Start-ThreadJob `
+            -ScriptBlock {
+            param($Path)
+            Get-Content -Path $Path -Wait
+        } `
+            -ArgumentList $tmp
+
+        # Start the process, redirecting stdout to the temp file
+        $process = Start-Process `
+            -FilePath $FilePath `
+            -ArgumentList $ArgumentsList `
+            -NoNewWindow `
+            -RedirectStandardOutput $tmp `
+            -PassThru
+    }
+
+    process {
+        do {
+            # Get new output lines from the read job
+            $lines = $readJob | Receive-Job
+            foreach ($line in $lines) {
+                if ($line) {
+                    if ($line -match 'error|CMake Error') {
+                        Write-Host "[cmake] $line" -ForegroundColor Red
+                    }
+                    else {
+                        Write-Host "[cmake] $line"
+                    }
+                }
+            }
+            Start-Sleep -Milliseconds 200
+        } while (-not $process.HasExited -or -not ($readJob | Receive-Job -OutVariable temp) -eq $null)
+    }
+
+    end {
+        # Drain remaining output
+        $lines = $readJob | Receive-Job -Keep
+        foreach ($line in $lines) {
+            if ($line) {
+                if ($line -match 'error|CMake Error') {
+                    Write-Host "[cmake] $line" -ForegroundColor Red
+                }
+                else {
+                    Write-Host "[cmake] $line"
+                }
+            }
+        }
+    }
+
+    clean {
+        $readJob | Remove-Job -Force
+        Remove-Item -Path $tmp -Force
+        return $process.ExitCode
     }
 }

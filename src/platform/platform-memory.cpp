@@ -74,13 +74,15 @@ namespace dmt {
     size_t SyncPoolAllocator::bitmapReservedSize() const
     {
         assert(m_blockSize && m_reservedSize >= m_blockSize);
-        return ceilDiv(m_reservedSize, static_cast<size_t>(m_blockSize)) >> 2; // 2 bits per block
+        // 2 bits per block, meaning each byte holds 4 blocks. we need to ceildiv to not lose up to 3 bytes
+        return (ceilDiv(m_reservedSize, static_cast<size_t>(m_blockSize)) + 3) >> 2;
     }
 
     size_t SyncPoolAllocator::bitmapCommittedSize() const
     {
         assert(m_blockSize && m_committedSize >= m_blockSize);
-        return ceilDiv(m_committedSize, static_cast<size_t>(m_blockSize)) >> 2; // 2 bits per block
+        // 2 bits per block, meaning each byte holds 4 blocks. we need to ceildiv to not lose up to 3 bytes
+        return (ceilDiv(m_committedSize, static_cast<size_t>(m_blockSize)) + 3) >> 2;
     }
 
     uint32_t SyncPoolAllocator::numBlocks() const
@@ -181,7 +183,7 @@ namespace dmt {
         // if you didn't find any free block in the currently committed memory, check that the remainng size to be committed hosts enough additional blocks
         size_t const oldNumBlock      = numBlocks();
         size_t const additionalMemory = numBlocksRequired * m_blockSize;
-        size_t const additionalBitmap = numBlocksRequired >> 2;
+        size_t const additionalBitmap = ceilDiv(numBlocksRequired, 4ull);
 
         if (additionalMemory > m_reservedSize - m_committedSize)
             return nullptr;
@@ -236,8 +238,13 @@ namespace dmt {
     bool SyncPoolAllocator::grow(size_t additionalMemory, size_t additionalBitmap)
     {
         assert(additionalMemory + m_committedSize <= m_reservedSize);
-        void* memAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(m_memory) + m_committedSize);
-        void* bitAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(m_memory) + bitmapCommittedSize());
+
+        // address of the next memory chunk to commit (blocks area)
+        void* memAddr = std::bit_cast<void*>(reinterpret_cast<uintptr_t>(m_memory) + m_committedSize);
+
+        // address of next byte in the bitmap to commit
+        void* bitAddr = std::bit_cast<void*>(reinterpret_cast<uintptr_t>(m_bitmap) + bitmapCommittedSize());
+
         if (!os::commitPhysicalMemory(memAddr, additionalMemory))
             return false;
         if (!os::commitPhysicalMemory(bitAddr, additionalBitmap))
@@ -253,6 +260,7 @@ namespace dmt {
     uint8_t SyncPoolAllocator::extractBitPairState(size_t blkIdx) const
     {
         auto const [bitmapOffset, bitmapShamt] = bitPairOffsetAndMaskFromBlock(blkIdx);
+        assert(bitmapOffset < bitmapCommittedSize());
         uint8_t const state = (reinterpret_cast<uint8_t const*>(m_bitmap)[bitmapOffset] >> bitmapShamt) & bitmapMask;
         return state;
     }
@@ -280,7 +288,7 @@ namespace dmt {
         // if pointer != nullptr, from the pointer, find out the offset from start of the committed memory area
         // if outside, issue a warning and return
         size_t offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(m_memory);
-        if (offset > m_committedSize)
+        if (offset >= m_committedSize)
             return;
 
         // if inside, compute the starting index inside the committed bitmap,

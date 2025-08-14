@@ -336,7 +336,7 @@ namespace dmt::test {
 
 
             // Sample the BSDF properly
-            ggx::BSDFSample sample = ggx::sample(bsdf, wo, n, u, uc);
+            BSDFSample sample = ggx::sample(bsdf, wo, n, u, uc);
 
             float    pdf = sample.pdf;
             RGB      fr  = sample.f * bsdf.closure.sampleWeight;

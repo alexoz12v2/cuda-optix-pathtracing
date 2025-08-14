@@ -1082,8 +1082,8 @@ namespace dmt {
             RGB const eta = {0.155f, 0.424f, 1.345};
             RGB const k   = {3.911f, 2.345f, 1.770f};
 
-            ggx::BSDF       bsdf   = ggx::makeConductor(wo, isect.ng, isect.ng, 0.2, 0.05, Vector3f::xAxis(), eta, k);
-            ggx::BSDFSample sample = ggx::sample(bsdf, wo, isect.ng, u, uc);
+            ggx::BSDF  bsdf   = ggx::makeConductor(wo, isect.ng, isect.ng, 0.2, 0.05, Vector3f::xAxis(), eta, k);
+            BSDFSample sample = ggx::sample(bsdf, wo, isect.ng, u, uc);
             if (sample.pdf != 0)
             {
                 float cosThetaWi = dot(sample.wi, isect.ng);

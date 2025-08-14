@@ -1,0 +1,72 @@
+{
+  "camera": {
+    "focalLength": 20 // millimetres
+    "sensorSize": 36 // millimetres
+    "direction": [3.12, 3.234, 1.34] // array of 3 floats normalize
+  },
+  "film": {
+    "resolutionX": 1238, // integer
+    "resolutionY": 2313, // integer
+  },
+  "textures": {
+    "tex": "path\img"
+  },
+  "materials": {
+    "mat-name": {
+      "diffuse": "tex",// mandatory
+      "metallic": 0.0,// mandatory
+      "normal": [0.3, 0.3, 0.2],// mandatory
+      "roughness": 0.3, // mandatory
+      "ior": 1.4, // optional: default: glass
+      "eta": [3, 2, 1], // optional, default: gold
+      "etak": [3, 1, 2], // optional, default: gold
+      "ggx-anisotropy": 2, // default 1
+      "ggx-dielectic": {
+        "reflectance-tint": [1,1,1],
+        "transmittance-tint": [1,1,1]
+      }, // if present oren-nayar-dielectric absent
+      "oren-nayar-dielectric": {
+        "multiscatter-multiplier": 1.3
+      }
+    }
+  },
+  "objects": {
+    "nomeAcaso": {
+      "type": "FBX",
+      "path": "rel/to/this/file",
+      "material": "mat-name"
+    },
+    "altro": {
+      "type": "unit-cube"
+    }
+  },
+  "lights": {
+    "lightname": {
+      "type": "spot",
+      "light-angle": 45,
+      "penumbra-angle": 12
+    }
+  },
+  "envlight": "path\img\equi",
+  "transforms": {
+    "other": {
+      "built-in": "identity"
+    },
+    "position1": {
+      "from": "other",
+      "rotateX": "45" // degrees
+    }
+  },
+  "world": [
+    {
+      "transform": "position1",
+      "instances": ["nomeAcaso"],
+      "lights": [""],
+      "embedded": {
+        "transform": "position1",
+        "instances": ["nomeAcaso"],
+        "lights": [""]
+      }
+    }
+  ]
+}

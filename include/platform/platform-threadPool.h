@@ -29,7 +29,7 @@ namespace dmt::os {
     class DMT_PLATFORM_API Thread
     {
     public:
-        using ThreadFunc = void (*)(void*); // Raw function pointer for triviality
+        using ThreadFunc = void (*)(void*);
         struct Internal
         {
             ThreadFunc func;

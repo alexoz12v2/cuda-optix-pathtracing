@@ -261,7 +261,7 @@ namespace dmt {
         return cost;
     }
 
-    static LightBounds lbUnionAll(std::span<Light> lights)
+    static LightBounds lbUnionAll(std::span<Light const> lights)
     {
         LightBounds lb = makeLBFromLight(lights[0]);
         for (size_t i = 1; i < lights.size(); ++i)

@@ -63,6 +63,8 @@ target_link_libraries(dmt-core
     gx::gx
   PRIVATE
     FBXSDK::fbxsdk
+    stb::stb
+    OpenEXR::OpenEXR
 )
 
 set_target_properties(dmt-core PROPERTIES FOLDER "Modules/Core")

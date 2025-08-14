@@ -742,7 +742,12 @@ namespace dmt {
         // Mip level resolution
         Point2i levelRes = {std::max(1, tex->width >> ilod), std::max(1, tex->height >> ilod)};
 
-        EWAParams params{mortonLevelBuffer, levelRes, tex->wrapModeX, tex->wrapModeY, tex->texFormat, tex->isNormal};
+        EWAParams params{mortonLevelBuffer,
+                         levelRes,
+                         tex->wrapModeX,
+                         tex->wrapModeY,
+                         tex->texFormat,
+                         static_cast<bool>(tex->isNormal)};
 
         return EWAFormula(params, st_in, dst0_in, dst1_in);
     }

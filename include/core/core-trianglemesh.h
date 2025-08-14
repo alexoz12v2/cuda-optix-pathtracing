@@ -3,6 +3,8 @@
 #include "core/core-macros.h"
 #include "core/core-cudautils-cpubuild.h"
 #include "core/core-math.h"
+#include "core/core-material.h"
+#include "core/core-light.h"
 
 #include "platform/platform-memory.h"
 
@@ -102,6 +104,8 @@ namespace dmt {
 
         std::pmr::vector<UniqueRef<TriangleMesh>> geometry;
         std::pmr::vector<UniqueRef<Instance>>     instances;
+        std::pmr::vector<SurfaceMaterial>         materials;
+        std::pmr::vector<Light>                   lights;
 
     private:
         std::pmr::memory_resource* m_memory;

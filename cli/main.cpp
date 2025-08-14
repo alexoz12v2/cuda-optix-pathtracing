@@ -4,6 +4,7 @@
 #include "core/core-bvh-builder.h"
 #include "core/core-cudautils-cpubuild.h"
 #include "core/core-texture-cache.h"
+#include "core/core-render.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -111,14 +112,6 @@ namespace dmt {
 } // namespace dmt
 
 namespace dmt {
-    void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
-    {
-        // https://developercommunity.visualstudio.com/t/monotonic_buffer_resourcerelease-does/10624172
-        auto* upstream = resource.upstream_resource();
-        std::destroy_at(&resource);
-        std::construct_at(&resource, ptr, bytes, upstream);
-    }
-
     static BVHBuildNode* buildBVHBuildLayout(Scene& scene, std::pmr::synchronized_pool_resource& pool)
     {
         UniqueRef<unsigned char[]> bufTmp = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), 4096);
@@ -492,6 +485,14 @@ int32_t guardedMain()
 
         dmt::testTextureCache();
         dmt::testTextureCacheLRU();
+
+        std::cout << "[Main Thread] Starting Render Thread" << std::endl;
+        std::cin.get();
+        {
+            dmt::Renderer renderer;
+            renderer.startRenderThread();
+        }
+        std::cout << "[Main Thread] Render Thread joined" << std::endl;
     }
     return 0;
 }

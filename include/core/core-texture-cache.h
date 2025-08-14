@@ -68,8 +68,13 @@ namespace dmt {
         /// (we are disabling file buffering)
         /// note: inOutBytes being uint32 means assuming all mips occupy max 4 GB
         /// Uses a static, common buffer to read the header -> *NOT* thread safe (TextureCache should use exclusive lock)
-        int32_t DMT_CORE_API
-            copyMipOfKey(uint64_t fileKey, int32_t level, void* outBuffer, uint32_t* inOutBytes, size_t* inOutOffset) const;
+        /// when called with nullptr, it also returns the texFormat
+        int32_t DMT_CORE_API copyMipOfKey(uint64_t   fileKey,
+                                          int32_t    level,
+                                          void*      outBuffer,
+                                          uint32_t*  inOutBytes,
+                                          size_t*    inOutOffset,
+                                          TexFormat* outFormat) const;
 
     private:
         /// associate the file key to its file descriptor/HANDLE
@@ -97,15 +102,16 @@ namespace dmt {
 
         struct Entry
         {
-            uint64_t baseKey;
-            void*    data;
-            int32_t  startOffset;
-            int32_t  miplevel;
-            uint32_t numBytes; // assuming each mip is less than 4 GB
+            uint64_t  baseKey;
+            void*     data;
+            int32_t   startOffset;
+            int32_t   miplevel;
+            uint32_t  numBytes; // assuming each mip is less than 4 GB
+            TexFormat texFormat;
         };
 
     public:
-        DMT_CORE_API void const* getOrInsert(uint64_t baseKey, int32_t mipLevel, uint32_t& outBytes);
+        DMT_CORE_API void const* getOrInsert(uint64_t baseKey, int32_t mipLevel, uint32_t& outBytes, TexFormat& outTexFormat);
 
     public:
         /// only one thread, the one parsing the scene before kicking jobs onto workers, should interact with this

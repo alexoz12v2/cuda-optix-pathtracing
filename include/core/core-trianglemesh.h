@@ -9,9 +9,10 @@
 namespace dmt {
     struct DMT_CORE_API VertexIndex
     {
-        size_t positionIdx;
-        size_t normalIdx;
-        size_t uvIdx;
+        size_t  positionIdx;
+        size_t  normalIdx;
+        size_t  uvIdx;
+        int32_t matIdx;
     };
     static_assert(std::is_trivial_v<VertexIndex> && std::is_standard_layout_v<VertexIndex>);
 

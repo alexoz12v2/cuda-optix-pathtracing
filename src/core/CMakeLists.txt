@@ -36,6 +36,7 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-texture.h
         ${CMAKE_SOURCE_DIR}/include/core/core-mesh-parser.h
         ${CMAKE_SOURCE_DIR}/include/core/core-texture-cache.h
+	${CMAKE_SOURCE_DIR}/include/core/core-material.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
@@ -48,6 +49,7 @@ target_sources(dmt-core
     core-light-tree-builder.cpp
     core-texture.cpp
     core-mesh-parser.cpp
+    core-material.cpp
     ${core_os_private_sources}
     ${core_unused_sources}
 )

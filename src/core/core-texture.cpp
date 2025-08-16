@@ -237,12 +237,7 @@ namespace dmt {
         // Mip levels: stop when both dims hit 1
         int levels = 0;
         int w = xRes, h = yRes;
-#if defined(DMT_IGNORE_ANISOTROPY)
-    #error "you should modify EWA implementation!"
-        while (w > 0 && h > 0) // PBRT uses (w > 0 || h > 0) ie create more levels for anisotropy textures
-#else
         while (w > 0 || h > 0) // better for EWA (more memory usage though)
-#endif
         {
             ++levels;
             w >>= 1;
@@ -539,17 +534,9 @@ namespace dmt {
     // computed when DLL is brought up to memory
     std::array<float, EWA_LUT_SIZE> EwaWeightLUT = makeEwaWeightLUT(2.f);
 
-    struct LODResult
-    {
-        float sigma_max; // major axis length (texels)
-        float sigma_min; // minor axis length (texels)
-        float lod_major; // = max(0, log2(sigma_max))
-        float lod_minor; // = max(0, log2(sigma_min))  <-- PBRT/EWA uses this typically
-    };
-
     // ctx.dUV contains dudx, dudy, dvdx, dvdy
     // texWidth/texHeight are base-level resolution (not mip-resolved)
-    static inline LODResult computeTextureLOD_from_dudv(float dudx, float dudy, float dvdx, float dvdy, int texWidth, int texHeight)
+    LODResult computeTextureLOD_from_dudv(float dudx, float dudy, float dvdx, float dvdy, int texWidth, int texHeight)
     {
         // Convert derivatives to texel units (important!)
         // a = dstdx_texel = (dudx * texWidth, dvdx * texHeight)
@@ -621,6 +608,94 @@ namespace dmt {
         return res;
     }
 
+    DMT_CORE_API RGB EWAFormula(EWAParams const& p, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in)
+    {
+        using enum TexFormat;
+
+        // Scale derivatives to mip level texel space
+        Vector2f dst0 = {dst0_in.x * p.levelRes.x, dst0_in.y * p.levelRes.y};
+        Vector2f dst1 = {dst1_in.x * p.levelRes.x, dst1_in.y * p.levelRes.y};
+
+        // Map st to texel space (centered at -0.5)
+        float sx = st_in.x * float(p.levelRes.x) - 0.5f;
+        float sy = st_in.y * float(p.levelRes.y) - 0.5f;
+
+        // Ellipse coefficients (PBRT style)
+        float A = dst0.y * dst0.y + dst1.y * dst1.y;
+        float B = -2.0f * (dst0.x * dst0.y + dst1.x * dst1.y);
+        float C = dst0.x * dst0.x + dst1.x * dst1.x;
+
+        // Normalize
+        float invF = 1.0f / (A * C - 0.25f * B * B);
+        if (!(invF > 0.0f))
+        {
+            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
+                                     int(std::floor(sy + 0.5f)),
+                                     p.levelRes,
+                                     p.wrapX,
+                                     p.wrapY,
+                                     p.texFormat,
+                                     p.isNormal,
+                                     p.mortonLevelBuffer);
+        }
+        A *= invF;
+        B *= invF;
+        C *= invF;
+
+        // Add 1 for pixel reconstruction filter
+        A += 1.0f;
+        C += 1.0f;
+
+        // Bounding box
+        float invDet  = 1.0f / (A * C - 0.25f * B * B);
+        float uRadius = std::sqrt(C * invDet);
+        float vRadius = std::sqrt(A * invDet);
+
+        int s0 = int(std::ceil(sx - uRadius));
+        int s1 = int(std::floor(sx + uRadius));
+        int t0 = int(std::ceil(sy - vRadius));
+        int t1 = int(std::floor(sy + vRadius));
+
+        RGB   sum{};
+        float sumW = 0.0f;
+
+        for (int t = t0; t <= t1; ++t)
+        {
+            float tt = float(t) - sy;
+            for (int s = s0; s <= s1; ++s)
+            {
+                float ss = float(s) - sx;
+                float r2 = A * ss * ss + B * ss * tt + C * tt * tt;
+
+                if (r2 < 1.0f)
+                {
+                    float r2c = std::clamp(r2, 0.0f, 0.999999f);
+                    int   idx = int(r2c * float(EWA_LUT_SIZE - 1));
+                    idx       = std::min(std::max(idx, 0), int(EWA_LUT_SIZE - 1));
+
+                    float w = EwaWeightLUT[idx];
+                    RGB texel = sampleMortonTexel(s, t, p.levelRes, p.wrapX, p.wrapY, p.texFormat, p.isNormal, p.mortonLevelBuffer);
+                    sum += texel * w;
+                    sumW += w;
+                }
+            }
+        }
+
+        if (!(sumW > 0.0f))
+        {
+            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
+                                     int(std::floor(sy + 0.5f)),
+                                     p.levelRes,
+                                     p.wrapX,
+                                     p.wrapY,
+                                     p.texFormat,
+                                     p.isNormal,
+                                     p.mortonLevelBuffer);
+        }
+
+        return sum / sumW;
+    }
+
     // TODO with all types of data (normals are an exception)
     static RGB EWA(ImageTexturev2 const* tex, int32_t ilod, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in)
     {
@@ -667,97 +742,14 @@ namespace dmt {
         // Mip level resolution
         Point2i levelRes = {std::max(1, tex->width >> ilod), std::max(1, tex->height >> ilod)};
 
-        // Scale derivatives to this mip level in texel space
-        Vector2f dst0 = {dst0_in.x * levelRes.x, dst0_in.y * levelRes.y};
-        Vector2f dst1 = {dst1_in.x * levelRes.x, dst1_in.y * levelRes.y};
+        EWAParams params{mortonLevelBuffer,
+                         levelRes,
+                         tex->wrapModeX,
+                         tex->wrapModeY,
+                         tex->texFormat,
+                         static_cast<bool>(tex->isNormal)};
 
-        // Map st to texel space (centered at -0.5)
-        float sx = st_in.x * float(levelRes.x) - 0.5f;
-        float sy = st_in.y * float(levelRes.y) - 0.5f;
-
-        // Ellipse coefficients (PBRT style)
-        float A = dst0.y * dst0.y + dst1.y * dst1.y;
-        float B = -2.0f * (dst0.x * dst0.y + dst1.x * dst1.y);
-        float C = dst0.x * dst0.x + dst1.x * dst1.x;
-
-        // Normalize
-        float invF = 1.0f / (A * C - 0.25f * B * B);
-        if (!(invF > 0.0f))
-        {
-            // Degenerate: nearest
-            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
-                                     int(std::floor(sy + 0.5f)),
-                                     levelRes,
-                                     tex->wrapModeX,
-                                     tex->wrapModeY,
-                                     tex->texFormat,
-                                     tex->isNormal,
-                                     mortonLevelBuffer);
-        }
-        A *= invF;
-        B *= invF;
-        C *= invF;
-
-        // Add 1 to major diag terms for pixel reconstruction filter
-        A += 1.0f;
-        C += 1.0f;
-
-        // Bounding box extents
-        float invDet  = 1.0f / (A * C - 0.25f * B * B);
-        float uRadius = std::sqrt(C * invDet);
-        float vRadius = std::sqrt(A * invDet);
-
-#if 0 // Debug radii
-        if (uRadius > 20.0f || vRadius > 20.0f)
-        {
-            Context ctx;
-            ctx.warn("    LOD {} | uRad={} vRad={} | A={} B={} C={}", std::make_tuple(ilod, uRadius, vRadius, A, B, C));
-        }
-#endif
-
-        int s0 = int(std::ceil(sx - uRadius));
-        int s1 = int(std::floor(sx + uRadius));
-        int t0 = int(std::ceil(sy - vRadius));
-        int t1 = int(std::floor(sy + vRadius));
-
-        RGB   sum{};
-        float sumW = 0.0f;
-
-        for (int t = t0; t <= t1; ++t)
-        {
-            float tt = float(t) - sy;
-            for (int s = s0; s <= s1; ++s)
-            {
-                float ss = float(s) - sx;
-                float r2 = A * ss * ss + B * ss * tt + C * tt * tt;
-
-                if (r2 < 1.0f)
-                {
-                    float r2c = std::clamp(r2, 0.0f, 0.999999f);
-                    int   idx = int(r2c * float(EWA_LUT_SIZE - 1));
-                    idx       = std::min(std::max(idx, 0), int(EWA_LUT_SIZE - 1));
-
-                    float w = EwaWeightLUT[idx];
-                    RGB texel = sampleMortonTexel(s, t, levelRes, tex->wrapModeX, tex->wrapModeY, tex->texFormat, tex->isNormal, mortonLevelBuffer);
-                    sum += texel * w;
-                    sumW += w;
-                }
-            }
-        }
-
-        if (!(sumW > 0.0f))
-        {
-            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
-                                     int(std::floor(sy + 0.5f)),
-                                     levelRes,
-                                     tex->wrapModeX,
-                                     tex->wrapModeY,
-                                     tex->texFormat,
-                                     tex->isNormal,
-                                     mortonLevelBuffer);
-        }
-
-        return sum / sumW;
+        return EWAFormula(params, st_in, dst0_in, dst1_in);
     }
 
     RGB ImageTexturev2::evalRGB(TextureEvalContext const& ctx) const
@@ -789,14 +781,6 @@ namespace dmt {
 
         // choose 2 level of details and perform 2 EWA filtering lookup
         auto lodRes = computeTextureLOD_from_dudv(ctx.dUV.dudx, ctx.dUV.dudy, ctx.dUV.dvdx, ctx.dUV.dvdy, width, height);
-
-#if 0
-        Context actx;
-        // clang-format off
-        actx.log(" [TEXTURE SAMPLING]: st {} {} | p {} {} {} |", std::make_tuple(st.x, st.y, ctx.p.x, ctx.p.y, ctx.p.z));
-        actx.log("         \xCF\x83_min {} | \xCF\x83_max {} (If too higher than texel resolution, then differential computation is wrong!)", std::make_tuple(lodRes.sigma_min, lodRes.sigma_max));
-        // clang-format on
-#endif
 
         // for EWA
         float lambda = lodRes.lod_minor; // tends to preserve more detail; EWA addresses aliasing anisotropically

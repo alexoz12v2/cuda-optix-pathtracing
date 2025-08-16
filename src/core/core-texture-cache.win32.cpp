@@ -376,7 +376,12 @@ namespace dmt {
         return m_keyfdmap.contains(baseKey);
     }
 
-    int32_t MipCacheFile::copyMipOfKey(uint64_t fileKey, int32_t level, void* outBuffer, uint32_t* inOutBytes, size_t* inOutOffset) const
+    int32_t MipCacheFile::copyMipOfKey(uint64_t   fileKey,
+                                       int32_t    level,
+                                       void*      outBuffer,
+                                       uint32_t*  inOutBytes,
+                                       size_t*    inOutOffset,
+                                       TexFormat* outFormat) const
     {
         if (!m_keyfdmap.contains(fileKey))
             return false;
@@ -389,6 +394,7 @@ namespace dmt {
 
         if (!outBuffer)
         {
+            assert(outFormat);
             std::pmr::monotonic_buffer_resource scratch{s_tempBuffer, staticBytes, std::pmr::null_memory_resource()};
             // read header
             mipc::Header   header{};
@@ -418,6 +424,7 @@ namespace dmt {
 
             *inOutBytes  = sizeAligned;   // caller allocates this much
             *inOutOffset = offsetAligned; // aligned read start
+            *outFormat   = header.texFormat;
 
             return mipOffsetUnaligned - offsetAligned;
         }
@@ -458,7 +465,7 @@ namespace dmt {
         m_cache.reserve(256);
     }
 
-    void const* TextureCache::getOrInsert(uint64_t baseKey, int32_t mipLevel, uint32_t& outBytes)
+    void const* TextureCache::getOrInsert(uint64_t baseKey, int32_t mipLevel, uint32_t& outBytes, TexFormat& outTexFormat)
     {
         assert(m_cache.size() == m_lruKeyList.size());
         // 1. shared lock key path
@@ -466,7 +473,8 @@ namespace dmt {
         gx::shareable_lock lk(m_shmtx, gx::lock_mode::shared);
         if (auto it = m_cache.find(key); it != m_cache.cend())
         {
-            outBytes = it->second.numBytes;
+            outBytes     = it->second.numBytes;
+            outTexFormat = it->second.texFormat;
             // swap lruKey to last
             auto listit = std::find(m_lruKeyList.begin(), m_lruKeyList.end(), key);
             if (listit == m_lruKeyList.end())
@@ -486,10 +494,11 @@ namespace dmt {
 
         // 2. handle cache miss
         lk.upgrade_to_exclusive();
-        uint32_t mipSize            = 0;
-        size_t   mipOffset          = 0;
-        int32_t  mipUnalignedOffset = 0;
-        if (mipUnalignedOffset = MipcFiles.copyMipOfKey(baseKey, mipLevel, nullptr, &mipSize, &mipOffset);
+        uint32_t  mipSize            = 0;
+        size_t    mipOffset          = 0;
+        int32_t   mipUnalignedOffset = 0;
+        TexFormat texFormat;
+        if (mipUnalignedOffset = MipcFiles.copyMipOfKey(baseKey, mipLevel, nullptr, &mipSize, &mipOffset, &texFormat);
             !mipUnalignedOffset)
         {
             assert(false && "you shouldn't request something which doesn't exist");
@@ -528,9 +537,9 @@ namespace dmt {
             return nullptr; // memory failure
 
         // create entry in LRU map and push_back onto list the key
-        auto const& [it, wasInserted] = m_cache.try_emplace(key, baseKey, buffer, mipUnalignedOffset, mipLevel, mipSize);
+        auto const& [it, wasInserted] = m_cache.try_emplace(key, baseKey, buffer, mipUnalignedOffset, mipLevel, mipSize, texFormat);
 
-        if (!wasInserted || !MipcFiles.copyMipOfKey(baseKey, mipLevel, it->second.data, &mipSize, &mipOffset))
+        if (!wasInserted || !MipcFiles.copyMipOfKey(baseKey, mipLevel, it->second.data, &mipSize, &mipOffset, nullptr))
         {
             assert(false && "how did we get here?");
             m_texMemory.deallocate(buffer, mipSize);
@@ -543,7 +552,8 @@ namespace dmt {
         // update m_available
         m_available -= mipSize;
 
-        outBytes = mipSize;
+        outBytes     = mipSize;
+        outTexFormat = it->second.texFormat;
         return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
     }
 } // namespace dmt

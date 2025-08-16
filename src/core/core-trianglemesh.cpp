@@ -123,17 +123,23 @@ namespace dmt {
 
         // Faces: each face has 2 triangles
         // LEFT (-X)
-        mesh.addIndexedTriangle({1, 1, 9}, {5, 1, 10}, {4, 1, 11}).addIndexedTriangle({1, 1, 9}, {4, 1, 11}, {0, 1, 12});
+        mesh.addIndexedTriangle({1, 1, 9, -1}, {5, 1, 10, -1}, {4, 1, 11, -1})
+            .addIndexedTriangle({1, 1, 9, -1}, {4, 1, 11, -1}, {0, 1, 12, -1});
         // FRONT (+Y)
-        mesh.addIndexedTriangle({2, 3, 6}, {1, 3, 9}, {0, 3, 12}).addIndexedTriangle({2, 3, 6}, {0, 3, 12}, {3, 3, 3});
+        mesh.addIndexedTriangle({2, 3, 6, -1}, {1, 3, 9, -1}, {0, 3, 12, -1})
+            .addIndexedTriangle({2, 3, 6, -1}, {0, 3, 12, -1}, {3, 3, 3, -1});
         // RIGHT (+X)
-        mesh.addIndexedTriangle({6, 0, 5}, {2, 0, 6}, {3, 0, 3}).addIndexedTriangle({6, 0, 5}, {3, 0, 3}, {7, 0, 4});
+        mesh.addIndexedTriangle({6, 0, 5, -1}, {2, 0, 6, -1}, {3, 0, 3, -1})
+            .addIndexedTriangle({6, 0, 5, -1}, {3, 0, 3, -1}, {7, 0, 4, -1});
         // TOP (+Z)
-        mesh.addIndexedTriangle({3, 4, 3}, {0, 4, 12}, {4, 4, 13}).addIndexedTriangle({3, 4, 3}, {4, 4, 13}, {7, 4, 2});
+        mesh.addIndexedTriangle({3, 4, 3, -1}, {0, 4, 12, -1}, {4, 4, 13, -1})
+            .addIndexedTriangle({3, 4, 3, -1}, {4, 4, 13, -1}, {7, 4, 2, -1});
         // BACK (-Y)
-        mesh.addIndexedTriangle({7, 2, 2}, {4, 2, 13}, {5, 2, 0}).addIndexedTriangle({7, 2, 2}, {5, 2, 0}, {6, 2, 1});
+        mesh.addIndexedTriangle({7, 2, 2, -1}, {4, 2, 13, -1}, {5, 2, 0, -1})
+            .addIndexedTriangle({7, 2, 2, -1}, {5, 2, 0, -1}, {6, 2, 1, -1});
         // BOTTOM (-Z)
-        mesh.addIndexedTriangle({6, 5, 7}, {5, 5, 8}, {1, 5, 9}).addIndexedTriangle({6, 5, 7}, {1, 5, 9}, {2, 5, 6});
+        mesh.addIndexedTriangle({6, 5, 7, -1}, {5, 5, 8, -1}, {1, 5, 9, -1})
+            .addIndexedTriangle({6, 5, 7, -1}, {1, 5, 9, -1}, {2, 5, 6, -1});
     }
 
     Scene::Scene(std::pmr::memory_resource* memory) : geometry{memory}, instances{memory}, m_memory{memory} {}

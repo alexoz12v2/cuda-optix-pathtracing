@@ -4,6 +4,7 @@
 #include "core/core-bvh-builder.h"
 #include "core/core-cudautils-cpubuild.h"
 #include "core/core-texture-cache.h"
+#include "core/core-render.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -111,14 +112,6 @@ namespace dmt {
 } // namespace dmt
 
 namespace dmt {
-    void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
-    {
-        // https://developercommunity.visualstudio.com/t/monotonic_buffer_resourcerelease-does/10624172
-        auto* upstream = resource.upstream_resource();
-        std::destroy_at(&resource);
-        std::construct_at(&resource, ptr, bytes, upstream);
-    }
-
     static BVHBuildNode* buildBVHBuildLayout(Scene& scene, std::pmr::synchronized_pool_resource& pool)
     {
         UniqueRef<unsigned char[]> bufTmp = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), 4096);
@@ -235,10 +228,11 @@ namespace dmt {
         std::cout << "created mipc file data, see it on Temp and continue..." << std::endl;
         std::cin.get();
 
-        uint32_t bytes      = 0;
-        size_t   alignedOff = 0;
+        uint32_t  bytes      = 0;
+        size_t    alignedOff = 0;
+        TexFormat format;
 
-        int32_t startOffset = texCache.MipcFiles.copyMipOfKey(fileKey, 1, nullptr, &bytes, &alignedOff);
+        int32_t startOffset = texCache.MipcFiles.copyMipOfKey(fileKey, 1, nullptr, &bytes, &alignedOff, &format);
         if (!startOffset)
         {
             freeImageTexture(tex, texTmpMem);
@@ -257,7 +251,7 @@ namespace dmt {
             return;
         }
         auto lod1morton = makeUniqueRef<unsigned char[]>(texTmpMem, bytes);
-        if (!texCache.MipcFiles.copyMipOfKey(fileKey, 1, lod1morton.get(), &bytes, &alignedOff))
+        if (!texCache.MipcFiles.copyMipOfKey(fileKey, 1, lod1morton.get(), &bytes, &alignedOff, &format))
         {
             freeImageTexture(tex, texTmpMem);
             std::cerr << "Couldn't read mipc lod 1 metadata" << std::endl;
@@ -390,9 +384,10 @@ namespace dmt {
         }
 
         // --- Cache hit/miss test ---
-        uint32_t bytes  = 0;
-        auto*    dataA1 = texCache.getOrInsert(keyA, 0, bytes); // miss -> load
-        auto*    dataA2 = texCache.getOrInsert(keyA, 0, bytes); // hit -> same ptr
+        uint32_t  bytes = 0;
+        TexFormat format;
+        auto*     dataA1 = texCache.getOrInsert(keyA, 0, bytes, format); // miss -> load
+        auto*     dataA2 = texCache.getOrInsert(keyA, 0, bytes, format); // hit -> same ptr
         if (dataA1 != dataA2)
         {
             std::cerr << "FAIL: Cache hit returned different pointer for keyA\n";
@@ -400,8 +395,8 @@ namespace dmt {
         }
 
         // --- Force eviction ---
-        texCache.getOrInsert(keyB, 0, bytes);                // likely evicts A in small cache
-        auto* dataA3 = texCache.getOrInsert(keyA, 0, bytes); // should reload
+        texCache.getOrInsert(keyB, 0, bytes, format);                // likely evicts A in small cache
+        auto* dataA3 = texCache.getOrInsert(keyA, 0, bytes, format); // should reload
         if (dataA3 == dataA1)
         {
             std::cerr << "FAIL: Expected eviction of keyA but pointer is same\n";
@@ -490,6 +485,14 @@ int32_t guardedMain()
 
         dmt::testTextureCache();
         dmt::testTextureCacheLRU();
+
+        std::cout << "[Main Thread] Starting Render Thread" << std::endl;
+        std::cin.get();
+        {
+            dmt::Renderer renderer;
+            renderer.startRenderThread();
+        }
+        std::cout << "[Main Thread] Render Thread joined" << std::endl;
     }
     return 0;
 }

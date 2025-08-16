@@ -23,6 +23,19 @@ namespace dmt {
         uint32_t samplesPerPixel; /// used to compute a clamped scale factor for differentials max(rsqrt(samplesPerPixel), 1/8)
     };
 
+    struct LODResult
+    {
+        float sigma_max; // major axis length (texels)
+        float sigma_min; // minor axis length (texels)
+        float lod_major; // = max(0, log2(sigma_max))
+        float lod_minor; // = max(0, log2(sigma_min))  <-- PBRT/EWA uses this typically
+    };
+
+    // ctx.dUV contains dudx, dudy, dvdx, dvdy
+    // texWidth/texHeight are base-level resolution (not mip-resolved)
+    DMT_CORE_API LODResult
+        computeTextureLOD_from_dudv(float dudx, float dudy, float dvdx, float dvdy, int texWidth, int texHeight);
+
     /// orient camera such that z axis is aligned with the ray direction (camera position -> intersection point)
     /// camera defines min differentials in x and y, for both the origin of the ray and direction of the ray (4 vectors in total).
     /// they can be used to estimate 2 new rays and intersection points
@@ -147,6 +160,18 @@ namespace dmt {
 
         Count
     };
+
+    struct EWAParams
+    {
+        unsigned char const* mortonLevelBuffer; // pointer to start of mip level
+        Point2i              levelRes;          // resolution of this mip
+        TexWrapMode          wrapX;
+        TexWrapMode          wrapY;
+        TexFormat            texFormat;
+        bool                 isNormal;
+    };
+
+    DMT_CORE_API RGB EWAFormula(EWAParams const& p, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in);
 
     struct DMT_CORE_API ImageTexturev2
     {

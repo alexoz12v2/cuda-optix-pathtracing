@@ -34,6 +34,26 @@ namespace dmt {
     };
 
     DMT_CORE_API BsdfClosure makeClosure(RGB weight);
+
+    struct BSDFSample
+    {
+        /// sampled incident direction
+        Vector3f wi;
+
+        /// sampled (micro) normal direction (populated for pure GGX only)
+        Vector3f wm;
+
+        /// computed BSDF value for sampled direction and normal
+        RGB f;
+
+        /// PDF of sampled value
+        float pdf;
+
+        /// relative real part of IOR of intersection. equal to 1 if reflection or conductor
+        /// > 1 if dielectric and outside -> inside, < 1 if dielectric and inside -> outside
+        float eta;
+    };
+
 } // namespace dmt
 
 // TODO test these function
@@ -120,25 +140,6 @@ namespace dmt::ggx {
                 RGB transmittanceTint;
             } d;
         } fresnel;
-    };
-
-    struct BSDFSample
-    {
-        /// sampled incident direction
-        Vector3f wi;
-
-        /// sampled (micro) normal direction
-        Vector3f wm;
-
-        /// computed BSDF value for sampled direction and normal
-        RGB f;
-
-        /// PDF of sampled value
-        float pdf;
-
-        /// relative real part of IOR of intersection. equal to 1 if reflection or conductor
-        /// > 1 if dielectric and outside -> inside, < 1 if dielectric and inside -> outside
-        float eta;
     };
 
     /// set closure, alphax and alphay (roughness), energy scale and index of refraction

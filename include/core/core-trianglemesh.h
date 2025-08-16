@@ -3,15 +3,18 @@
 #include "core/core-macros.h"
 #include "core/core-cudautils-cpubuild.h"
 #include "core/core-math.h"
+#include "core/core-material.h"
+#include "core/core-light.h"
 
 #include "platform/platform-memory.h"
 
 namespace dmt {
     struct DMT_CORE_API VertexIndex
     {
-        size_t positionIdx;
-        size_t normalIdx;
-        size_t uvIdx;
+        size_t  positionIdx;
+        size_t  normalIdx;
+        size_t  uvIdx;
+        int32_t matIdx;
     };
     static_assert(std::is_trivial_v<VertexIndex> && std::is_standard_layout_v<VertexIndex>);
 
@@ -101,6 +104,8 @@ namespace dmt {
 
         std::pmr::vector<UniqueRef<TriangleMesh>> geometry;
         std::pmr::vector<UniqueRef<Instance>>     instances;
+        std::pmr::vector<SurfaceMaterial>         materials;
+        std::pmr::vector<Light>                   lights;
 
     private:
         std::pmr::memory_resource* m_memory;

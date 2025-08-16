@@ -36,6 +36,8 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-texture.h
         ${CMAKE_SOURCE_DIR}/include/core/core-mesh-parser.h
         ${CMAKE_SOURCE_DIR}/include/core/core-texture-cache.h
+	${CMAKE_SOURCE_DIR}/include/core/core-material.h
+	${CMAKE_SOURCE_DIR}/include/core/core-render.h
   PRIVATE
     #core-parser.cpp
     core-bvh-builder.cpp
@@ -48,6 +50,8 @@ target_sources(dmt-core
     core-light-tree-builder.cpp
     core-texture.cpp
     core-mesh-parser.cpp
+    core-material.cpp
+    core-render.cpp
     ${core_os_private_sources}
     ${core_unused_sources}
 )
@@ -59,6 +63,8 @@ target_link_libraries(dmt-core
     gx::gx
   PRIVATE
     FBXSDK::fbxsdk
+    stb::stb
+    OpenEXR::OpenEXR
 )
 
 set_target_properties(dmt-core PROPERTIES FOLDER "Modules/Core")

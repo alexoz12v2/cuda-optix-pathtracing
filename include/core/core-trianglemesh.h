@@ -28,7 +28,7 @@ namespace dmt {
 
     struct DMT_CORE_API IndexedTri
     {
-        IndexedTri(VertexIndex v0, VertexIndex v1, VertexIndex v2) : v{v0, v1, v2} {}
+        IndexedTri(VertexIndex v0, VertexIndex v1, VertexIndex v2, int32_t matIdx) : v{v0, v1, v2}, matIdx{matIdx} {}
 
         VertexIndex v[3];
         int32_t     matIdx;

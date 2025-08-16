@@ -25,6 +25,53 @@ namespace dmt {
     // of each node in the scene at a specific time.
     // Accessible by FbxScene::GetEvaluator()
     //
+    // Fbx Nodes
+    //
+    // Nodes are primarily used to specify the position, rotation and scale of scene
+    // elements within a scene.
+    //
+    // To get the root node of the hirarchy:
+    // FbxScene::GetRootNode()
+    //
+    // To traversed the hierarchy use:
+    // FbxNode::GetChild()
+    // FbxNode::GetParent()
+    // FbxNode::GetChildCount()
+    //
+    // Nodes are organized in a hierarchy such that the position, rotation and
+    // scale of a node is described in relation to its parent's coordinate system.
+    //
+    // The order in which the rotation and scaling transforms are applied to a parent and its
+    // children is specified by the node's inherit type
+    // The possible values are:
+    //     - eInheritRrSs : Scaling of parent is applied in the child world after the local child rotation.
+    //     - eInheritRSrs : Scaling of parent is applied in the parent world.
+    //     - eInheritRrs  : Scaling of parent does not affect the scaling of children.
+    //
+    // Get transformation inherit type:
+    // void GetTransformationInheritType(FbxTransform::EInheritType& pInheritType) const;
+    //
+    //
+    // FbxNodeAttribute: objects thate are present in a scene. Like: FbxMesh, FbxLight or FbxCamera
+    //
+    // More than one node attribute can be bound to a single node.
+    // Similarly, one node attribute can be bound to multiple nodes (instancing).
+    //
+    // Transformation data
+    //
+    // This data is represented as a set of FbxPropertyT objects, accessible via
+    // FbxNode::LclTranslation, FbxNode::LclRotation, FbxNode::LclScaling.
+    //
+    // Ex:
+    // FbxDouble3 translation = lNode->LclTranslation.Get();
+    // FbxDouble3 rotation = lNode->LclRotation.Get();
+    // FbxDouble3 scaling = lNode->LclScaling.Get();
+    //
+    // The transformations can be affect to FbxLimits and FbxConstraint, I think for animations.
+    //
+    // A node's global and local transformation matrices can be respectively obtained
+    // by calling FbxNode::EvaluateGlobalTransform() and FbxNode::EvaluateLocalTransform():
+    //
     // Meshes
     // FbxMesh -> abstracts the mesh information, like the vertices. A single instance
     // of FbxMesh can be bound to multiple instances of FbxNode. Scene geometry
@@ -40,6 +87,84 @@ namespace dmt {
     // Get the ControlPoints that are defined in a FbxMesh object:
     // FbxVector4* lControlPoints = lMesh->GetControlPoints(); lControlPoints is a vector.
     // Note that a scene axis conversion does not affect the vertex values of a mesh.
+    //
+    // Polygon Management
+    //
+    // Begins the process of adding a polygon to the mesh:
+    //
+    // void BeginPolygon(int pMaterial=-1, int pTexture=-1, int pGroup=-1, bool pLegacy=true);
+    //
+    // End writing a polygon, it should be called after adding one polygon:
+    // void EndPolygon();
+    //
+    // Add a polygon vertex to the current polygon.
+    // void AddPolygon(int pIndex, int pTextureUVIndex = -1);
+    // param pIndex Index in the table of the control points.
+    // param pTextureUVIndex Index of texture UV coordinates to assign to this polygon if texture UV mapping type is \e eByPolygonVertex. Otherwise it must be \c -1.
+    // remark After adding all the polygons of the mesh, call function "BuildMeshEdgeArray" to generate edge data for the mesh. */
+    //
+    //
+    // To get the number of polygons in the mesh.
+    // inline int GetPolygonCount() const { return mPolygons.GetCount(); }
+    //
+    // Get the number of polygon vertices in a polygon.
+    // inline int GetPolygonSize(int pPolygonIndex) const
+    //
+    // Get the current group ID of the specified polygon.
+    // int GetPolygonGroup(int pPolygonIndex) const;
+    //
+    // Get a polygon vertex (i.e: an index to a control point).
+    // inline int GetPolygonVertex(int pPolygonIndex, int pPositionInPolygon) const
+    //
+    // Get the normal associated with the specified polygon vertex.
+    // bool GetPolygonVertexNormal(int pPolyIndex, int pVertexIndex, FbxVector4& pNormal) const;
+    //
+    // Get the normals associated with the mesh for every polygon vertex.
+    // GetPolygonVertexNormals(FbxArray<FbxVector4>& pNormals) const;
+    //
+    // Get the UV associated with the specified polygon vertex.
+    // bool GetPolygonVertexUV(int pPolyIndex, int pVertexIndex, const char* pUVSetName, FbxVector2& pUV, bool& pUnmapped) const;
+    //
+    // Get the UVs associated with the mesh for every polygon vertex.
+    // bool GetPolygonVertexUVs(const char* pUVSetName, FbxArray<FbxVector2>& pUVs, FbxArray<int>* pUnmappedUVId = NULL) const;
+    //
+    // Get the array of polygon vertices (i.e: indices to the control points).
+    // int* GetPolygonVertices() const;
+    //
+    //
+    // Gets the number of polygon vertices in the mesh.
+    // inline int GetPolygonVertexCount() const { return mPolygonVertices.Size();
+    //
+    // Gets the start index into the array returned by GetPolygonVertices() for the given polygon.
+    // int GetPolygonVertexIndex(int pPolygonIndex) const;
+    //
+    // To access polygon information
+    // int lStartIndex = mesh.GetPolygonVertexIndex(3);
+    // if( lStartIndex == -1 ) return;
+    // int* lVertices = mesh.GetPolygonVertices()[lStartIndex];
+    // int lCount = mesh.GetPolygonSize(3);
+    // for( int i = 0; i < lCount; ++i )
+    // {
+    //     int vertexID = lVertices[i];
+    //	}
+    //
+    //
+    // Mesh->UV info
+    //
+    // Get the number of texture UV coordinates.
+    // int GetTextureUVCount(FbxLayerElement::EType pTypeIdentifier=FbxLayerElement::eTextureDiffuse);
+    // param pTypeIdentifier The texture channel the UV refers to.
+    //
+    // Get the number of layer containing at least one channel UVMap.
+    // int GetUVLayerCount() const;
+    // return 0 if no UV maps have been defined.
+    //
+    //
+    // Fills an array describing, for the given layer, which texture channel have UVs associated to it.
+    // FbxArray<FbxLayerElement::EType> GetAllChannelUV(int pLayer);
+    //
+    // Get a texture UV index associated with a polygon vertex (i.e: an index to a control point).
+    // int GetTextureUVIndex(int pPolygonIndex, int pPositionInPolygon, FbxLayerElement::EType pTypeIdentifier=FbxLayerElement::eTextureDiffuse);
     //
     // Meshes-Normals
     //
@@ -109,6 +234,37 @@ namespace dmt {
     //
     // Materials
     //
+    // FbxSurfaceMaterial
+    //
+    // Contains material settings
+    //
+    // FbxSurfaceLambert
+    //
+    // Ambient color property.
+    // Ambient
+    //
+    // Emissive color property.
+    // Emissive
+    //
+    // Diffuse color property.
+    // Diffuse
+    //
+    // NormalMap property. This property can be used to specify the distortion of the surface
+    // normals and create the illusion of a bumpy surface.
+    // NormalMap
+    //
+    // Transparent color property.
+    // TransparentColor
+    //
+    // Reflection color property. This property is used to
+    // implement reflection mapping.
+    // Reflection
+    //
+    //
+    // Reflection factor property. This property is used to
+    // attenuate the reflection color.
+    // ReflectionFactor
+    //
     // To create the material:
     //
     // FbxString lMaterialName = "toto";
@@ -117,6 +273,10 @@ namespace dmt {
     // To get the material ex:
     //
     // lMaterial = lNode->GetSrcObject<FbxSurfacePhong>(0);
+    //
+    //  To assign a material to a polygon pass the material index to the BeginPolygon function:
+    //  lMesh->BeginPolygon(0); // Material index
+    //
     //
     // Textures
     //
@@ -174,6 +334,12 @@ namespace dmt {
     //
     //
     //
+    // Referencing media
+    //
+    // When a binary FBX file containing embedded media is imported the media will be extracted from
+    // the file and copied into a subdirectory. By default, this subdirectory will be created at
+    // the location of the FBX file with the same name as the file, with the extension .fbm.
+    //
     // FbxFileTexture
     //
     // Represents any texture loaded from a file. To apply a texture to
@@ -201,6 +367,13 @@ namespace dmt {
     //
     //  eModelMaterial,		//! Texture uses model material.
     //  eDefaultMaterial	//! Texture does not use model material.
+    //
+    // FbxLayerElementUV
+    //
+    // To create the texture layers in the mesh:
+    //
+    // FbxMesh::CreateElementUV()
+    //
     //
     // There are created a number of texture layers in the mesh equal to the number
     // of used material channel like diffuse, ambient and emissive.
@@ -239,6 +412,11 @@ namespace dmt {
     // eTextureShading,
     // eFullShading
     //
+    //
+    //
+    //
+
+    //
     // To see:
     //
     // FbxLayerElementBinormal
@@ -274,67 +452,166 @@ namespace dmt {
         }
     }
 
+    void FbxDeleterResources::operator()(void* raw) const
+    {
+
+        auto* resources = reinterpret_cast<FbxResources*>(raw);
+        
+        if (resources->settings)
+        {
+            reinterpret_cast<FbxIOSettings*>(resources->settings)->Destroy();
+        }
+        if (resources->manager)
+        {
+            reinterpret_cast<FbxManager*>(resources->settings)->Destroy();
+        }        
+
+    };
+
     static FbxManager*    getManager(dFbxManager& inst) { return reinterpret_cast<FbxManager*>(inst.get()); }
     static FbxIOSettings* getIoSettings(dFbxIOSettings& inst) { return reinterpret_cast<FbxIOSettings*>(inst.get()); }
     static FbxScene*      getScene(dFbxScene& inst) { return reinterpret_cast<FbxScene*>(inst.get()); }
 
     dFbxManager createFBXInstance() { return dFbxManager{FbxManager::Create(), FbxDeleter{}}; }
 
-    MeshFbxPasser::MeshFbxPasser(dFbxManager& inst, char* fileName)
+    MeshFbxPasser::MeshFbxPasser()
     {
-        os::Path const fbxDirectory = os::Path::executableDir() / fileName;
-        if (!fbxDirectory.isValid() || !fbxDirectory.isFile())
-            return;
-
-        m_fileName = fbxDirectory.toUnderlying();
-        m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(inst), IOSROOT), FbxSettingsDeleter{}};
-
+        InitFbxManager();
+        //m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(m_mng), IOSROOT), FbxSettingsDeleter{}};
+        m_res.settings = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
+        FbxIOSettings* set = reinterpret_cast<FbxIOSettings*> (m_res.settings); 
         //set flags for import settings
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_MATERIAL, false);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_TEXTURE, true);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_LINK, false);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_SHAPE, false);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_GOBO, false);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_ANIMATION, false);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_GLOBAL_SETTINGS, true);
-        getIoSettings(m_settings)->SetBoolProp(IMP_FBX_NORMAL, true);
+        set->SetBoolProp(IMP_FBX_MATERIAL, true);
+        set->SetBoolProp(IMP_FBX_TEXTURE, true);
+        set->SetBoolProp(IMP_FBX_LINK, false);
+        set->SetBoolProp(IMP_FBX_SHAPE, false);
+        set->SetBoolProp(IMP_FBX_GOBO, false);
+        set->SetBoolProp(IMP_FBX_ANIMATION, false);
+        set->SetBoolProp(IMP_FBX_GLOBAL_SETTINGS, true);
+        set->SetBoolProp(IMP_FBX_NORMAL, true);
+
+
     }
 
-    bool MeshFbxPasser::ImportFBX(dFbxManager& inst, char* fileName)
+    bool MeshFbxPasser::ImportFBX(char const* fileName)
     {
+        FbxManager* mng = reinterpret_cast<FbxManager*>(m_res.manager);
+
+
+        //check FBX's filename
+        os::Path const fbxDirectory = os::Path::executableDir() / fileName;
+        if (!fbxDirectory.isValid() || !fbxDirectory.isFile())
+            return false;
+
+        m_fileName              = fbxDirectory.toUnderlying();
         std::string fileNameStr = std::string(fileName);
 
         if (fileNameStr.size() < 4)
             return false;
 
-        std::string sceneName = fileNameStr.substr(0, fileNameStr.size() - 4) + "_scene";
-
-        FbxImporter* fbxImporter = FbxImporter::Create(getManager(inst), sceneName.c_str());
-
-        //intialize the importer
-        bool importStatus = fbxImporter->Initialize(fileName, -1, getManager(inst)->GetIOSettings());
+        //Define the scene name
+        std::string  sceneName   = fileNameStr.substr(0, fileNameStr.size() - 4) + "_scene";
+        //Initialize the scene
+        FbxScene* pScene = FbxScene::Create(mng, sceneName.c_str());
+        //Initialize the Importer
+        FbxImporter* fbxImporter  = FbxImporter::Create(mng, sceneName.c_str());
+        bool importStatus = fbxImporter->Initialize(fileName, -1, mng->GetIOSettings());
 
         if (!importStatus)
             return false;
-
-
-        //Load the scene
-        m_scene = dFbxScene{FbxScene::Create(getManager(inst), sceneName.c_str())};
+        //Import the scene
+        importStatus = fbxImporter->Import(pScene);
+        
+        if (!importStatus)
+            return false;
 
         fbxImporter->Destroy();
 
-        //FbxNode*              lNode;
-        //FbxMesh mesh;
-        //FbxObject             obj;
-        //FbxLayer layer;
-        //FbxLayerElementNormal layerElementNormal;
-        //FbxFileTexture*       texture;
-        //FbxGeometry*          geometry;
-        //FbxGeometryElementNormal* lGeometryElementNormal;
-        //FbxGeometryBase*     geometry;
+        //attraverse the hirarchy 
+        FbxNode* lNode = pScene->GetRootNode();
+
+        if (lNode)
+        {
+            for (uint32_t i = 0; i < lNode->GetChildCount(); i++)
+            {
+                FbxNode* lChild = lNode->GetChild(i);
+
+                if (lChild->GetNodeAttribute() == nullptr)
+                {
+                    return false;
+                }
+                else
+                {
+                    FbxNodeAttribute::EType lAttributeType = (lChild->GetNodeAttribute()->GetAttributeType());
+
+                    if (lAttributeType != FbxNodeAttribute::eMesh)
+                        continue;
+
+                    //Get Mesh Information
+                    FbxMesh* lMesh = (FbxMesh*)lChild->GetNodeAttribute();
+                    m_meshName     = lMesh->GetName();
+                    uint32_t nPolygon       = lMesh->GetPolygonCount();
+                    FbxVector4* lControlPointsArray = lMesh->GetControlPoints();
+
+                    //Polygon
+
+                    //handle the mesh with Polygon groups
+                    for (int l = 0; l < lMesh->GetElementPolygonGroupCount(); l++)
+                    {
+                        FbxGeometryElementPolygonGroup* lPolyGroup = lMesh->GetElementPolygonGroup(l);
+                        switch (lPolyGroup->GetMappingMode())
+                        {
+                            case FbxGeometryElement::eByPolygon:
+                                if (lPolyGroup->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+                                {
+                                    int polyGroupId = lPolyGroup->GetIndexArray().GetAt(i);
+                                    //todo read vertex points
+                                }
+                            default: break;
+                        }
+                    }
+
+                    //Handle single polygon
+                    int vertexId = 0;
+                    for (uint32_t i = 0; i < nPolygon; i++)
+                    {
+                        //polygon size
+                        uint32_t polygonSize = lMesh->GetPolygonSize(i);
+
+                        for (uint32_t j = 0; j < polygonSize; j++)
+                        {
+
+                        }
+
+                       
+                    }
+
+
+                }
+            
+            }
+        }
+        
+        
+        pScene->Destroy();
+
 
         return true;
     }
 
+    char const* MeshFbxPasser::GetMeshName() 
+    {
+        return m_meshName.c_str();
+    }
+
     MeshFbxPasser::~MeshFbxPasser() {}
+
+    void MeshFbxPasser::InitFbxManager()
+    {
+        if (m_res.manager == nullptr)
+        {
+            m_res.manager = FbxManager::Create();
+        }
+
+    }
 } // namespace dmt

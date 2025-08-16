@@ -378,37 +378,119 @@ namespace dmt {
         return written;
     }
 
+
+    static int getExeSubsystem()
+    {
+        HMODULE hModule = GetModuleHandleW(NULL); // base of main EXE
+        if (!hModule)
+            return -1;
+
+        BYTE* base = (BYTE*)hModule;
+
+        IMAGE_DOS_HEADER* dosHeader = (IMAGE_DOS_HEADER*)base;
+        if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+            return -1;
+
+        IMAGE_NT_HEADERS* ntHeader = (IMAGE_NT_HEADERS*)(base + dosHeader->e_lfanew);
+        if (ntHeader->Signature != IMAGE_NT_SIGNATURE)
+            return -1;
+
+        return ntHeader->OptionalHeader.Subsystem;
+    }
+
+    inline constexpr WORD white  = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+    inline constexpr WORD red    = FOREGROUND_RED | FOREGROUND_INTENSITY;
+    inline constexpr WORD yellow = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+    inline constexpr WORD olive  = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+
+    static void setColor(WORD c)
+    {
+        static constexpr WORD consoleColorMask = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+        CONSOLE_SCREEN_BUFFER_INFO consoleInfo{};
+        GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo);
+        WORD attribute = (consoleInfo.wAttributes & ~consoleColorMask) | c;
+        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), attribute);
+    }
+
     bool createConsoleHandler(LogHandler& _out, LogHandlerAllocate _alloc, LogHandlerDeallocate _dealloc)
     {
+
         _out.hostAllocate   = _alloc;
         _out.hostDeallocate = _dealloc;
-        _out.data           = _out.hostAllocate(sizeof(LoggerData), alignof(LoggerData));
-        if (!_out.data)
+
+        int const subsystem = getExeSubsystem();
+
+        if (subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
+        {
+            SetConsoleCP(CP_UTF8);
+            SetConsoleOutputCP(CP_UTF8);
+
+            _out.data = _out.hostAllocate(sizeof(SpinLock) + 8192, alignof(SpinLock));
+            if (!_out.data)
+                return false;
+            std::construct_at(reinterpret_cast<SpinLock*>(_out.data));
+            _out.hostFlush    = [](void* _data) {};
+            _out.hostFilter   = [](void* _data, LogRecord const& record) -> bool { return true; };
+            _out.hostCallback = [](void* _data, LogRecord const& record) {
+                auto*                               data = std::bit_cast<SpinLock*>(_data);
+                std::lock_guard                     lk{*data};
+                auto*                               buffer = reinterpret_cast<unsigned char*>(data + 1);
+                std::pmr::monotonic_buffer_resource mem{buffer, 8192, std::pmr::null_memory_resource()};
+                if (record.level == ELogLevel::eLog)
+                    setColor(white);
+                else if (record.level == ELogLevel::eWarn)
+                    setColor(yellow);
+                else if (record.level == ELogLevel::eTrace)
+                    setColor(olive);
+                else
+                    setColor(red);
+
+                std::pmr::wstring wData = os::win32::utf16FromUtf8({record.data, record.len}, &mem);
+                WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), wData.data(), static_cast<DWORD>(wData.size()), nullptr, nullptr);
+
+                setColor(white);
+            };
+            _out.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {
+                auto*           data = std::bit_cast<SpinLock*>(_data);
+                std::lock_guard lk{*data};
+                std::destroy_at(data);
+                _dealloc(data, sizeof(SpinLock) + 8192, alignof(SpinLock));
+            };
+        }
+        else if (subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+        {
+            _out.data = _out.hostAllocate(sizeof(LoggerData), alignof(LoggerData));
+            if (!_out.data)
+                return false;
+            std::construct_at(std::bit_cast<LoggerData*>(_out.data));
+
+            _out.hostFlush = [](void* _data) {
+                auto* data = std::bit_cast<LoggerData*>(_data);
+                if (data->hStdOut != INVALID_HANDLE_VALUE)
+                {
+                    std::unique_lock wlk{*data->pMutex};
+                    data->waitReadyForNext(wlk);
+                }
+            };
+            _out.hostFilter   = [](void* _data, LogRecord const& record) -> bool { return true; };
+            _out.hostCallback = [](void* _data, LogRecord const& record) {
+                auto* data = std::bit_cast<LoggerData*>(_data);
+                if (data->hStdOut != INVALID_HANDLE_VALUE)
+                {
+                    data->writeAsync(record);
+                }
+            };
+
+            _out.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {
+                auto* data = std::bit_cast<LoggerData*>(_data);
+                std::destroy_at(data);
+                _dealloc(data, sizeof(LoggerData), alignof(LoggerData));
+            };
+        }
+        else
+        {
             return false;
-        std::construct_at(std::bit_cast<LoggerData*>(_out.data));
-
-        _out.hostFlush = [](void* _data) {
-            auto* data = std::bit_cast<LoggerData*>(_data);
-            if (data->hStdOut != INVALID_HANDLE_VALUE)
-            {
-                std::unique_lock wlk{*data->pMutex};
-                data->waitReadyForNext(wlk);
-            }
-        };
-        _out.hostFilter   = [](void* _data, LogRecord const& record) -> bool { return true; };
-        _out.hostCallback = [](void* _data, LogRecord const& record) {
-            auto* data = std::bit_cast<LoggerData*>(_data);
-            if (data->hStdOut != INVALID_HANDLE_VALUE)
-            {
-                data->writeAsync(record);
-            }
-        };
-
-        _out.hostCleanup = [](LogHandlerDeallocate _dealloc, void* _data) {
-            auto* data = std::bit_cast<LoggerData*>(_data);
-            std::destroy_at(data);
-            _dealloc(data, sizeof(LoggerData), alignof(LoggerData));
-        };
+        }
 
         return true;
     }

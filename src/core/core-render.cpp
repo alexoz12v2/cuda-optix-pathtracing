@@ -46,6 +46,23 @@ namespace dmt::job {
             for (int32_t x = data.StartPixel.x; x < xEnd; ++x)
             {
                 std::cout << "[Thread " << tid << "] Pixel " << x << " " << y << std::endl;
+                for (int32_t sampleIndex = 0; sampleIndex < data.SamplesPerPixel; ++sampleIndex)
+                {
+                    std::pmr::monotonic_buffer_resource scratch{4096}; // TODO better
+                    sampler.startPixelSample({x, y}, sampleIndex);
+                    camera::CameraSample const cs = camera::getCameraSample(sampler, {x, y}, *data.filter);
+
+                    Ray ray{camera::generateRay(cs, *data.cameraFromRaster, *data.renderFromCamera)};
+
+                    RGB  L = RGB::fromScalar(0.f), beta = RGB::fromScalar(1.f);
+                    bool hadTransmission = false, specularBounce = false, anyNonSpecularBounces = false;
+
+                    while (true)
+                    {
+                    }
+
+                    data.film->addSample({x, y}, L, cs.filterWeight);
+                }
             }
         }
     }

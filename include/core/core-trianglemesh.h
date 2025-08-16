@@ -11,10 +11,9 @@
 namespace dmt {
     struct DMT_CORE_API VertexIndex
     {
-        size_t  positionIdx;
-        size_t  normalIdx;
-        size_t  uvIdx;
-        int32_t matIdx;
+        size_t positionIdx;
+        size_t normalIdx;
+        size_t uvIdx;
     };
     static_assert(std::is_trivial_v<VertexIndex> && std::is_standard_layout_v<VertexIndex>);
 
@@ -32,6 +31,7 @@ namespace dmt {
         IndexedTri(VertexIndex v0, VertexIndex v1, VertexIndex v2) : v{v0, v1, v2} {}
 
         VertexIndex v[3];
+        int32_t     matIdx;
 
         VertexIndex&       operator[](int i) { return v[i]; }
         VertexIndex const& operator[](int i) const { return v[i]; }
@@ -50,7 +50,7 @@ namespace dmt {
         DMT_CORE_API TriangleMesh& addPosition(Point3f p);
         DMT_CORE_API TriangleMesh& addNormal(Normal3f n);
         DMT_CORE_API TriangleMesh& addUV(Point2f uv);
-        DMT_CORE_API TriangleMesh& addIndexedTriangle(VertexIndex i0, VertexIndex i1, VertexIndex i2);
+        DMT_CORE_API TriangleMesh& addIndexedTriangle(VertexIndex i0, VertexIndex i1, VertexIndex i2, int32_t matIdx);
 
         DMT_CORE_API Point3f    getPosition(size_t idx) const;
         DMT_CORE_API Normal3f   getNormal(size_t idx) const;

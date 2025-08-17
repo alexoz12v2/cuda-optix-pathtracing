@@ -13,14 +13,6 @@ namespace dmt {
         }
         return levels;
     }
-    static RGB rgbFromByte3(uint32_t encoded)
-    {
-        RGB res{};
-        res.r = static_cast<float>((encoded & 0x0000'ffff'0000'0000) >> 32) / 255.f;
-        res.g = static_cast<float>((encoded & 0x0000'0000'ffff'0000) >> 16) / 255.f;
-        res.b = static_cast<float>(encoded & 0x0000'0000'0000'ffff) / 255.f;
-        return res;
-    }
 
     static RGB sampleMippedTexture(TextureEvalContext const& ctx,
                                    TextureCache&             texCache,
@@ -87,13 +79,20 @@ namespace dmt {
                               float                     uc)
     {
         // sample normal
-        Normal3f ns = normFromOcta(material.normalvalue);
-        if (material.texMatMap & SurfaceMaterial::NormalMask)
+        Normal3f ns;
+
+        if (material.useShadingNormals)
         {
-            int w = static_cast<int>(material.normalWidth), h = static_cast<int>(material.normalHeight);
-            ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
-            assert(fl::abs(dotSelf(ns) - 1.f) < 1e-5f);
+            ns = normFromOcta(material.normalvalue);
+            if (material.texMatMap & SurfaceMaterial::NormalMask)
+            {
+                int w = static_cast<int>(material.normalWidth), h = static_cast<int>(material.normalHeight);
+                ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
+                assert(fl::abs(dotSelf(ns) - 1.f) < 1e-5f);
+            }
         }
+        else
+            ns = ng;
 
         // sample metallic texture with fallback. If 0 then pure dielectric, if 1 then pure conductor, otherwise compute both and lerp
         float metallic = material.metallicvalue;
@@ -161,5 +160,136 @@ namespace dmt {
         result.wi  = sConductor.wi;
         result.wm  = sConductor.wm;
         return result;
+    }
+
+    BSDFEval materialEval(SurfaceMaterial const&    material,
+                          TextureCache&             cache,
+                          TextureEvalContext const& texCtx,
+                          Vector3f                  wo,
+                          Vector3f                  wi,
+                          Vector3f                  ng)
+    {
+        // --- Step 1: Evaluate shading normal ---
+        Normal3f ns;
+
+        if (material.useShadingNormals)
+        {
+            ns = normFromOcta(material.normalvalue);
+            if (material.texMatMap & SurfaceMaterial::NormalMask)
+            {
+                int w = static_cast<int>(material.normalWidth), h = static_cast<int>(material.normalHeight);
+                ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
+                ns = safeNormalizeFallback(ns, ng);
+            }
+        }
+        else
+            ns = ng;
+
+        // --- Step 2: Material parameters ---
+        float metallic = material.metallicvalue;
+        if (material.texMatMap & SurfaceMaterial::MetallicMask)
+        {
+            int w = static_cast<int>(material.metallicWidth), h = static_cast<int>(material.metallicHeight);
+            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, w, h, false).r;
+        }
+
+        float roughness = material.roughnessvalue;
+        if (material.texMatMap & SurfaceMaterial::RoughnessMask)
+        {
+            int w = static_cast<int>(material.roughnessWidth), h = static_cast<int>(material.roughnessHeight);
+            roughness = sampleMippedTexture(texCtx, cache, material.roughnesskey, w, h, false).r;
+        }
+
+        RGB diffuse = rgbFromByte3(material.diffusevalue);
+        if (material.texMatMap & SurfaceMaterial::DiffuseMask)
+        {
+            int w = static_cast<int>(material.diffuseWidth), h = static_cast<int>(material.diffuseHeight);
+            diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false);
+        }
+
+        // --- Step 3: Early exit for pure diffuse ---
+        if (metallic <= 0.f && material.isDiffuseOpaque)
+        {
+            oren_nayar::BRDF
+                  brdf = oren_nayar::makeParams(roughness, diffuse, ns, wi, material.multiscatterMultiplier, {1, 1, 1});
+            float pdf  = std::max(0.f, dot(ns, wi)) * fl::rcpPi(); // cosine-weighted hemisphere pdf
+            RGB   f    = oren_nayar::intensity(brdf, wo, wi);
+
+            BSDFEval result{};
+            result.f   = f;
+            result.pdf = pdf;
+            result.eta = 1.f;
+            result.wi  = wi;
+            result.wm  = ns;
+            return result;
+        }
+
+        // --- Step 4: Setup GGX ---
+        float alphay = roughness;
+        float alphax = material.anisotropy * roughness;
+
+        ggx::BSDF dielectric = ggx::makeDielectric(wo,
+                                                   ns,
+                                                   ng,
+                                                   material.ior,
+                                                   alphax,
+                                                   alphay,
+                                                   material.reflectanceTint,
+                                                   material.transmittanceTint,
+                                                   diffuse);
+
+        ggx::BSDF conductor = ggx::makeConductor(wo, ns, ng, alphax, alphay, {1, 0, 0}, material.eta, material.etak, diffuse);
+
+        // --- Step 5: Evaluate ---
+        float pdfDielectric = 0.f, pdfConductor = 0.f;
+        RGB   fDielectric = ggx::eval(dielectric, wo, wi, ng, &pdfDielectric);
+        RGB   fConductor  = ggx::eval(conductor, wo, wi, ng, &pdfConductor);
+
+        BSDFEval result{};
+        if (metallic <= 0.f)
+        {
+            result.f   = fDielectric;
+            result.pdf = pdfDielectric;
+            result.eta = dielectric.eta;
+        }
+        else if (metallic >= 1.f)
+        {
+            result.f   = fConductor;
+            result.pdf = pdfConductor;
+            result.eta = 1.f;
+        }
+        else
+        {
+            // blend (not physically rigorous, matches your sampler)
+            result.f   = lerp(fDielectric, fConductor, metallic);
+            result.pdf = lerp(pdfDielectric, pdfConductor, metallic);
+            result.eta = 1.f;
+        }
+
+        result.wi = wi;
+        result.wm = ns;
+        return result;
+    }
+
+    Normal3f materialShadingNormal(SurfaceMaterial const& material, TextureCache& cache, TextureEvalContext const& texCtx, Vector3f ng)
+    {
+        if (!material.useShadingNormals)
+            return ng;
+        // Default: object-space/oct-encoded normal
+        Normal3f ns = normFromOcta(material.normalvalue);
+
+        // If there’s a normal map, sample it
+        if (material.texMatMap & SurfaceMaterial::NormalMask)
+        {
+            int w = static_cast<int>(material.normalWidth);
+            int h = static_cast<int>(material.normalHeight);
+
+            ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
+
+            // Ensure normalized, fallback to ng if something degenerate
+            ns = safeNormalizeFallback(ns, ng);
+        }
+
+        return ns;
     }
 } // namespace dmt

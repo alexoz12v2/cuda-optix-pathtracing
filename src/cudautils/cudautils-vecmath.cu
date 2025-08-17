@@ -622,7 +622,7 @@ namespace dmt {
     __host__ __device__ Quaternion fromRadians(float theta, Normal3f axis)
     {
         Quaternion  quat{};
-        float const sinHalfAngle = sinf(theta);
+        float const sinHalfAngle = sinf(theta * 0.5f);
 
         quat.w = cosf(theta * 0.5f);
         quat.x = axis.x * sinHalfAngle;

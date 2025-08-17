@@ -82,6 +82,17 @@ namespace dmt {
     DMT_CORE_API Matrix4f  matrixFromAffine(float const affineTransform[12]);
     DMT_CORE_API Transform transformFromAffine(float const affineTransform[12]);
 
+    DMT_FORCEINLINE DMT_CORE_API void coordinateSystemFallback(Vector3f const& n, Vector3f* t, Vector3f* b)
+    {
+        if (fabsf(n.x) > fabsf(n.z))
+            *t = Vector3f(-n.y, n.x, 0.f);
+        else
+            *t = Vector3f(0.f, -n.z, n.y);
+
+        *t = normalize(*t);
+        *b = cross(n, *t);
+    }
+
     DMT_CORE_API float lookupTableRead(float const* table, float x, int32_t size);
     DMT_CORE_API float lookupTableRead2D(float const* table, float x, float y, int32_t sizex, int32_t sizey);
 

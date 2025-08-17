@@ -1,5 +1,7 @@
 #include "core-primitive.h"
 
+#include "core-math.h"
+
 #if !defined(DMT_ARCH_X86_64)
     #error "Not correct CPU Arch"
 #endif
@@ -677,17 +679,6 @@ namespace dmt {
         Point2f const interpolatedUV = w0 * uv0 + w1 * uv1 + w2 * uv2;
 
         return interpolatedUV;
-    }
-
-    static void coordinateSystemFallback(Vector3f const& n, Vector3f* t, Vector3f* b)
-    {
-        if (fabsf(n.x) > fabsf(n.z))
-            *t = Vector3f(-n.y, n.x, 0.f);
-        else
-            *t = Vector3f(0.f, -n.z, n.y);
-
-        *t = normalize(*t);
-        *b = cross(n, *t);
     }
 
     void TriangleIndexedBase::compute_dpdu_dpdv(size_t triIdx, Vector3f* dpdu, Vector3f* dpdv) const

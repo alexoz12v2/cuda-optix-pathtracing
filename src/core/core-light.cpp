@@ -25,16 +25,39 @@ namespace dmt {
     Light makeSpotLight(Transform const& t, RGB emission, float cosTheta0, float cosThetae, float radius, float factor)
     {
         Light light{};
-        light.type            = LightType::eSpot;
-        light.lightFromRender = t;
-        light.strength        = emission;
+        light.type     = LightType::eSpot;
+        light.strength = emission;
 
+        // --- Extract apex position from translation ---
         light.co.x = t.m.m[12];
         light.co.y = t.m.m[13];
         light.co.z = t.m.m[14];
 
-        Normal3f const dir                  = Normal3f::yAxis();
-        light.data.spot.direction           = t(dir);
+        // --- Light cone direction in world space ---
+        Vector3f coneDirWorld = normalize(t(Vector3f{0, 1, 0})); // "y" is local forward
+        Vector3f zLight       = -coneDirWorld;                   // z points opposite the cone
+
+        // --- Construct orthonormal frame for light ---
+        Vector3f xLight, yLight;
+        if (fabsf(zLight.x) > 0.1f)
+            xLight = normalize(cross(Vector3f(0, 1, 0), zLight));
+        else
+            xLight = normalize(cross(Vector3f(1, 0, 0), zLight));
+        yLight = cross(zLight, xLight);
+
+        // --- Build 4x4 matrix mapping world -> light space ---
+        // Columns = x, y, z axes; origin = apex
+        // Note: This is the inverse of the usual "frame to world" transform
+        // clang-format off
+        light.lightFromRender = Transform{
+            {xLight.x, yLight.x, zLight.x, light.co.x,
+             xLight.y, yLight.y, zLight.y, light.co.y,
+             xLight.z, yLight.z, zLight.z, light.co.z,
+             0.f, 0.f, 0.f, 1.f}};
+        // clang-format on
+
+        // --- Spot parameters ---
+        light.data.spot.direction           = coneDirWorld; // world-space direction
         light.data.spot.radius              = radius;
         light.data.spot.evalFac             = factor;
         light.data.spot.cosHalfSpotAngle    = fl::clamp(cosTheta0, -1.f, 1.f);
@@ -95,6 +118,7 @@ namespace dmt {
         Vector3f    lightN    = p - light.co;
         float const distSqr   = dotSelf(lightN);
         float const dist      = fl::sqrt(distSqr);
+        assert(!fl::isInfOrNaN(dist));
         lightN /= dist;
 
         sample->evalFac = light.data.point.evalFac;
@@ -141,8 +165,9 @@ namespace dmt {
 
     bool pointLightIntersect(Light const& light, Ray const& ray, float* t)
     {
-        assert(light.type == LightType::ePoint);
-        if (float const radius = light.data.point.radius; radius > 0.f)
+        assert(light.type == LightType::ePoint || light.type == LightType::eSpot);
+        float const radius = light.type == LightType::ePoint ? light.data.point.radius : light.data.spot.radius;
+        if (radius > 0.f)
         {
             Point3f p{};
             return raySphereIntersect(ray.o, ray.d, 0, 1e5f, light.co, radius, &p, t);
@@ -157,16 +182,28 @@ namespace dmt {
     /// transform vector into light#s local coordinate system and invert its z (to go towards cone apex)
     static Vector3f spotLightToLocal(Transform const& lightFromRender, Vector3f _dir)
     {
-        Normal3f dir = normalFrom(_dir);
-        dir          = lightFromRender(dir);
-        dir.z        = -dir.z;
+        Vector3f dir = _dir;
+        dir          = normalize(lightFromRender(dir));
         return dir;
     }
 
     static float spotLightAttenuation(SpotLight const& light, Vector3f rayD)
     {
         static constexpr float smoothFactor = 1.f; // TODO: Maybe add it to spot light if needed
-        return smoothstep((rayD.z - light.cosHalfSpotAngle) * smoothFactor);
+        // z points toward apex in light space
+        float cosTheta = rayD.z; // 1 along cone axis
+#if 0
+        float inner    = light.cosHalfSpotAngle;                             // start of full intensity
+        float outer    = light.cosHalfSpotAngle + light.cosHalfLargerSpread; // end of penumbra
+
+        // remap cosTheta from [inner, outer] -> [1, 0]
+        float t = fl::clamp01((outer - cosTheta) / (outer - inner));
+
+        // apply smoothstep for smooth falloff
+        return smoothstep(0.f, 1.f, powf(t, smoothFactor));
+#else
+        return smoothstep(light.cosHalfLargerSpread, light.cosHalfSpotAngle, cosTheta);
+#endif
     }
 
     static float halfCotHalfSpotAngle(float cosHalfSpotAngle)
@@ -187,6 +224,35 @@ namespace dmt {
         Point2f const uv{dir.y * factor + 0.5f, -(dir.x + dir.y) * factor};
         return uv;
     }
+
+    // Samples a direction uniformly on a spherical cap
+    // axis: the central direction of the cap (normalized)
+    // cosThetaMax: cosine of the maximum polar angle of the cap
+    // u: 2D uniform random sample in [0,1)^2
+    static Vector3f sampleUniformSphereCap(Vector3f const& axis, float cosThetaMax, Point2f const& u)
+    {
+        float cosTheta = (1.f - u.x) + u.x * cosThetaMax; // linear interpolation: cosTheta in [cosThetaMax,1]
+        float sinTheta = sqrtf(fmaxf(0.f, 1.f - cosTheta * cosTheta));
+        float phi      = 2.f * fl::pi() * u.y;
+
+        // Local spherical coordinates
+        float x = sinTheta * cosf(phi);
+        float y = sinTheta * sinf(phi);
+        float z = cosTheta;
+
+        // Build an orthonormal basis around axis
+        Vector3f w = normalize(axis);
+        Vector3f uVec, vVec;
+        if (fabsf(w.x) > 0.1f)
+            uVec = normalize(cross(Vector3f(0, 1, 0), w));
+        else
+            uVec = normalize(cross(Vector3f(1, 0, 0), w));
+        vVec = cross(w, uVec);
+
+        // Transform local coords to world
+        return normalize(x * uVec + y * vVec + z * w);
+    }
+
 
     bool spotLightSampleFromContext(Light const& light, Point2f u, Point3f p, Vector3f n, bool ht, LightSample* sample)
     {
@@ -209,19 +275,27 @@ namespace dmt {
             {
                 // if direction towards apex, sample visible part of the sphere
                 sample->d = sampleUniformCone(-lightN, one_minus_cos_half_angle, u, &cosTheta, &sample->pdf);
-                sample->t = fl::infinity();
             }
             else
             {
                 // sample spread cone (note: Here we compute also sample->t, hence after the attenuation step we won't compute it again)
-                // clang-format off
-                sample->d = sampleUniformCone(-light.data.spot.direction, one_minus_cos_half_spot_spread, u, &cosTheta, &sample->pdf);
-                if (!raySphereIntersect(p, sample->d, 0.f, fl::infinity(), light.co, light.data.spot.radius, &sample->p, &sample->t))
-                {
-                    // direction doesn't intersect light
-                    return false;
-                }
-                // clang-format on
+                sample->d = sampleUniformCone(-light.data.spot.direction,
+                                              one_minus_cos_half_spot_spread,
+                                              u,
+                                              &cosTheta,
+                                              &sample->pdf);
+            }
+            if (!raySphereIntersect(p,
+                                    sample->d,
+                                    0.f,
+                                    fl::infinity(),
+                                    light.co,
+                                    light.data.spot.radius,
+                                    &sample->p,
+                                    &sample->t))
+            {
+                // direction doesn't intersect light
+                return false;
             }
         }
         else
@@ -292,12 +366,40 @@ namespace dmt {
             return false;
     }
 
+    bool lightIntersect(Light const& light, Ray const& ray, float* t)
+    {
+
+        if (light.type == LightType::ePoint)
+            return pointLightIntersect(light, ray, t);
+        else if (light.type == LightType::eSpot)
+            return spotLightIntersect(light, ray, t);
+        else
+            return false;
+    }
+
     RGB lightEval(Light const& light, LightSample const* sample)
     {
         RGB eval = RGB::fromScalar(1.f);
 
-        eval *= sample->evalFac;
+        //eval *= sample->evalFac;
         eval *= light.strength;
+
+        // Distance-based attenuation (optional)
+        // Avoid division by zero
+        float attenuation = 1.f;
+        if (sample->t > 1e-6f)
+        {
+            // Example: inverse-square law
+            attenuation = 1.f / (sample->t * sample->t);
+
+            // Alternatively, smooth falloff: linear
+            // attenuation = std::max(0.f, 1.f - sample->t / maxDistance);
+
+            // Or exponential falloff
+            // attenuation = expf(-decayRate * sample->t);
+        }
+
+        eval *= attenuation;
 
         return eval;
     }
@@ -371,13 +473,11 @@ namespace dmt {
         float const phi   = std::atan2(wLight.y, wLight.x);
 
         // map to [0,1]^2
-        Point2f const uv
-        {
-            0.5f * (1.f + phi / fl::pi()), // phi in [-pi, pi]
+        Point2f const uv{0.5f * (1.f + phi / fl::pi()), // phi in [-pi, pi]
 #if defined(DMT_EQUIRECTANGULAR_FLIP_Y)
-                1.f - theta / fl::pi()
+                         1.f - theta / fl::pi()
 #else
-                theta / fl::pi()
+                         theta / fl::pi()
 #endif
         };
 

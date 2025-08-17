@@ -18,6 +18,7 @@ namespace dmt {
         Vector3f            cameraDirection = {0, 1, 0};
         Point2i             filmResolution  = {128, 128};
         int32_t             samplesPerPixel = 1;
+        int32_t             maxDepth        = 5;
         UniqueRef<EnvLight> envLight        = nullptr;
     };
 

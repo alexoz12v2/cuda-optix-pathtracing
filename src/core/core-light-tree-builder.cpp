@@ -13,12 +13,12 @@ namespace dmt {
         // if one cone is inside another, then return the outer one
         float const theta_0 = fl::safeacos(cosTheta_0), theta_1 = fl::safeacos(cosTheta_1);
         float const theta_diff = angleBetween(w0, w1);
-        if (fminf(theta_diff + theta_1, fl::pi()) <= theta_0) // 1 inside 0
+        if ((fl::isInfOrNaN(theta_diff) && !all(w1)) || (fminf(theta_diff + theta_1, fl::pi()) <= theta_0)) // 1 invalid or inside 0
         {
             *w = w0, *cosTheta = cosTheta_0;
             return;
         }
-        if (fminf(theta_diff + theta_0, fl::pi()) <= theta_1) // 0 inside 1
+        if ((fl::isInfOrNaN(theta_diff) && !all(w0)) || (fminf(theta_diff + theta_0, fl::pi()) <= theta_1)) // 0 invalid inside 1
         {
             *w = w1, *cosTheta = cosTheta_1;
             return;
@@ -137,10 +137,11 @@ namespace dmt {
     LightBounds makeLBFromLight(Light const& light)
     {
         LightBounds lb{};
+        float const strength = 0.2126f * light.strength.r + 0.7152f * light.strength.g + 0.0722f * light.strength.b;
         if (light.type == LightType::ePoint)
         {
             Vector3f const halfExtent = Vector3f::s(light.data.point.radius);
-            float const    phi        = 4 * fl::pi() * light.strength.max() * light.data.point.evalFac;
+            float const    phi        = 4 * fl::pi() * strength * light.data.point.evalFac;
 
             lb.bounds     = makeBounds(light.co - halfExtent, light.co + halfExtent);
             lb.phi        = phi;
@@ -154,8 +155,8 @@ namespace dmt {
             assert(fl::abs(normL2(light.data.spot.direction) - 1.f) < 1e-5f &&
                    fl::abs(light.data.spot.cosHalfLargerSpread) < 1.f && fl::abs(light.data.spot.cosHalfSpotAngle) < 1.f);
             Vector3f const halfExtent = Vector3f::s(light.data.spot.radius);
-            float const    phi        = 4 * fl::pi() * light.data.spot.evalFac * light.strength.max();
-            float const    cosTheta_e = cosf(
+            float const phi = 2 * fl::pi() * (1 - light.data.spot.cosHalfLargerSpread) * light.data.spot.evalFac * strength;
+            float const cosTheta_e = cosf(
                 fl::safeacos(light.data.spot.cosHalfLargerSpread) - fl::safeacos(light.data.spot.cosHalfSpotAngle));
 
             lb.bounds     = makeBounds(light.co - halfExtent, light.co + halfExtent);
@@ -229,7 +230,7 @@ namespace dmt {
     /// orientation cost function factor
     DMT_FORCEINLINE static float lightTreeBounds_Momega(float cosTheta_e, float cosTheta_o)
     {
-        assert(cosTheta_o >= cosTheta_e);
+        // assert(cosTheta_o >= cosTheta_e); WHY?
         float const theta_e = fl::safeacos(cosTheta_e);
         float const theta_o = fl::safeacos(cosTheta_o);
         float const theta_w = fminf(theta_o + theta_e, fl::pi());
@@ -269,14 +270,15 @@ namespace dmt {
         return lb;
     }
 
-    static LightTreeBuildNode makeLeaf(Light const* ptr, uint32_t idx)
+    static LightTreeBuildNode makeLeaf(Light const* ptr, uint32_t idx, LightBounds const& lb)
     {
         assert(ptr);
         LightTreeBuildNode node{};
         node.leaf             = 1;
         node.data.emitter.idx = idx;
         node.data.emitter.ptr = ptr;
-        node.lb               = makeLBFromLight(*ptr);
+        // node.lb               = makeLBFromLight(ptr[idx]); populated by parent node
+        node.lb = lb;
 
         return node;
     }
@@ -299,10 +301,9 @@ namespace dmt {
     {
         assert(lights.size() > 0);
         LightTreeBuildNode& current = nodes->back();
-        if (lights.size() == 1)
+        if (end - start == 1)
         {
-            assert(start == end + 1);
-            current = makeLeaf(lights.data(), start);
+            current = makeLeaf(lights.data(), start, current.lb);
             bitTrails->emplace_back(start, trail);
 
             return 1;
@@ -326,9 +327,19 @@ namespace dmt {
                 for (Light const& light : lights)
                 {
                     if (light.co[axis] < splitPos) // left
-                        lbLeftTmp = lbUnion(lbLeftTmp, makeLBFromLight(light));
+                    {
+                        if (!all(lbLeftTmp.w))
+                            lbLeftTmp = makeLBFromLight(light);
+                        else
+                            lbLeftTmp = lbUnion(lbLeftTmp, makeLBFromLight(light));
+                    }
                     else
-                        lbRightTmp = lbUnion(lbRightTmp, makeLBFromLight(light));
+                    {
+                        if (!all(lbRightTmp.w))
+                            lbRightTmp = makeLBFromLight(light);
+                        else
+                            lbRightTmp = lbUnion(lbRightTmp, makeLBFromLight(light));
+                    }
                 }
 
                 if (float cost = summedAreaOrientationHeuristic(lbLeftTmp, lbRightTmp, Kr, Ma, Momega); cost < minCost)
@@ -353,19 +364,23 @@ namespace dmt {
             }
 
             // recursion
-            nodes->emplace_back(makeInterior());
-            LightTreeBuildNode& left      = nodes->back();
-            uint32_t const      leftTrail = trail;
-            assert(leftTrail > trail);
-            current.data.children[0] = &left;
-            current.numEmitters += lightTreeBuildRecursive(lights, start, mid, leftTrail, ++tzcount, nodes, bitTrails, temp);
+            {
+                nodes->emplace_back(makeInterior());
+                LightTreeBuildNode& left = nodes->back();
+                left.lb                  = lbLeft;
+                uint32_t const leftTrail = trail;
+                assert(leftTrail >= trail);
+                current.data.children[0] = &left;
+                current.numEmitters += lightTreeBuildRecursive(lights, start, mid, leftTrail, ++tzcount, nodes, bitTrails, temp);
+            }
 
             if (mid != end)
             {
                 nodes->emplace_back(makeInterior());
-                LightTreeBuildNode& right      = nodes->back();
-                uint32_t const      rightTrail = trail | (1u << tzcount);
-                current.data.children[1]       = &left;
+                LightTreeBuildNode& right = nodes->back();
+                right.lb                  = lbRight;
+                uint32_t const rightTrail = trail | (1u << tzcount);
+                current.data.children[1]  = &right;
                 current.numEmitters += lightTreeBuildRecursive(lights, mid, end, rightTrail, ++tzcount, nodes, bitTrails, temp);
             }
             else
@@ -403,7 +418,7 @@ namespace dmt {
             fillPhisRecursive(*node.data.children[0], phis);
 
         if (node.data.children[1]->leaf)
-            phis->push_back(node.data.children[0]->lb.phi);
+            phis->push_back(node.data.children[1]->lb.phi);
         else
             fillPhisRecursive(*node.data.children[1], phis);
     }
@@ -451,8 +466,9 @@ namespace dmt {
         return numEmitters;
     }
 
-    LightSplit lightTreeAdaptiveSplit(LightTreeBuildNode const& ltRoot, Point3f p, float precision, std::pmr::memory_resource* memory)
+    LightSplit lightTreeAdaptiveSplit(LightTreeBuildNode const& ltRoot, Point3f p, float precision, std::pmr::memory_resource* temp)
     {
+        assert(ltRoot.varPhi > 0); // TODO remove
         LightSplit split{};
         if (ltRoot.leaf)
         {
@@ -462,10 +478,10 @@ namespace dmt {
         else
         {
             // breadth-first visit
-            std::pmr::vector<LightTreeBuildNode const*> parentStack{memory}, siblingStack{memory};
+            std::pmr::vector<LightTreeBuildNode const*> parentStack{temp}, siblingStack{temp};
             parentStack.reserve(64), siblingStack.reserve(64);
             siblingStack.push_back(&ltRoot);
-            while ((!siblingStack.empty() && !parentStack.empty()) || split.count < LightTreeMaxSplitSize)
+            while ((!siblingStack.empty() || !parentStack.empty()) && split.count < LightTreeMaxSplitSize)
             {
                 if (!siblingStack.empty())
                 {
@@ -497,6 +513,7 @@ namespace dmt {
             }
         }
 
+        assert(split.count > 0);
         return split;
     }
 
@@ -506,12 +523,13 @@ namespace dmt {
         SelectedLights selectedLights{};
         uint32_t       moreLights = lightSplit.count;
         uint32_t       splitIndex = 0;
-        while (selectedLights.count < LightTreeMaxSplitSize && moreLights) // I think that moreLights is sufficient
+        while (selectedLights.count < lightSplit.count && moreLights && splitIndex < lightSplit.count)
         {
             LightTreeBuildNode const* node        = lightSplit.nodes[splitIndex];
             float                     pmf         = startPMF;
-            bool                      pathSampled = true;
+            bool                      pathSampled = false; // <-- should start false, so inner loop runs
             ++splitIndex;
+
             while (!pathSampled)
             {
                 if (!node->leaf)
@@ -519,7 +537,9 @@ namespace dmt {
                     float const importances[2]{lbImportance(node->data.children[0]->lb, p, n),
                                                lbImportance(node->data.children[1]->lb, p, n)};
                     if (importances[0] == 0.f && importances[1] == 0.f)
+                    {
                         pathSampled = true;
+                    }
                     else
                     {
                         float   nodePMF     = 0;

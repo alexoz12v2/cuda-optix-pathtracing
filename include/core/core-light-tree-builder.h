@@ -82,10 +82,10 @@ namespace dmt {
 
     /// Takes precision (0 - 1), shading point (p) and LightTree Root to apply Adaptive Splitting Heuristic to decide how many lights we want
     /// to sample from the Light Tree
-    DMT_CORE_API LightSplit lightTreeAdaptiveSplit(LightTreeBuildNode const& ltRoot,
-                                                   Point3f                   p,
-                                                   float                     precision = 0.5f,
-                                                   std::pmr::memory_resource* memory = std::pmr::get_default_resource());
+    DMT_CORE_API LightSplit lightTreeAdaptiveSplit(LightTreeBuildNode const&  ltRoot,
+                                                   Point3f                    p,
+                                                   float                      precision = 0.5f,
+                                                   std::pmr::memory_resource* temp = std::pmr::get_default_resource());
 
     struct SelectedLights
     {

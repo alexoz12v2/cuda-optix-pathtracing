@@ -21,6 +21,32 @@ namespace dmt {
         return *this;
     }
 
+    bool TriangleMesh::checkPosition(Point3f p, uint32_t& idx)
+    {
+        for (uint32_t i = 0; i < m_positions.size(); i++)
+        {
+            if (m_positions[i].x == p.x && m_positions[i].y == p.y && m_positions[i].z == p.z)
+            {
+                idx = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool TriangleMesh::checkNormal(Point3f p, uint32_t& idx)
+    {
+        for (uint32_t i = 0; i < m_normals.size(); i++)
+        {
+            if (m_normals[i].x == p.x && m_normals[i].y == p.y && m_normals[i].z == p.z)
+            {
+                idx = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
     TriangleMesh& TriangleMesh::addNormal(Normal3f n)
     {
         m_normals.emplace_back(n);
@@ -39,11 +65,11 @@ namespace dmt {
         return *this;
     }
 
-    Point3f TriangleMesh::getPosition(size_t idx) const { return m_positions[idx]; }
-
+    Point3f  TriangleMesh::getPosition(size_t idx) const { return m_positions[idx]; }
+    uint32_t TriangleMesh::getPositionSize() { return m_positions.size(); }
     Normal3f TriangleMesh::getNormal(size_t idx) const { return m_normals[idx]; }
-
-    Point2f TriangleMesh::getUV(size_t idx) const { return m_uvs[idx]; }
+    uint32_t TriangleMesh::getNormalSize() { return m_normals.size(); }
+    Point2f  TriangleMesh::getUV(size_t idx) const { return m_uvs[idx]; }
 
     IndexedTri TriangleMesh::getIndexedTri(size_t idx) const { return m_tris[idx]; }
 

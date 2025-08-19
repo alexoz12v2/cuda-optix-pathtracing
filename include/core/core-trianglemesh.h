@@ -53,7 +53,9 @@ namespace dmt {
         DMT_CORE_API TriangleMesh& addIndexedTriangle(VertexIndex i0, VertexIndex i1, VertexIndex i2, int32_t matIdx);
 
         DMT_CORE_API Point3f    getPosition(size_t idx) const;
+        DMT_CORE_API uint32_t   getPositionSize();
         DMT_CORE_API Normal3f   getNormal(size_t idx) const;
+        uint32_t                getNormalSize();
         DMT_CORE_API Point2f    getUV(size_t idx) const;
         DMT_CORE_API IndexedTri getIndexedTri(size_t idx) const;
 
@@ -64,6 +66,9 @@ namespace dmt {
 
         DMT_CORE_API Bounds3f transformedBounds(float const affine[12]) const;
         DMT_CORE_API Bounds3f transformedBounds(Transform const& t) const;
+
+        DMT_CORE_API bool checkPosition(Point3f p, uint32_t& idx);
+        DMT_CORE_API bool checkNormal(Point3f p, uint32_t& idx);
 
     private:
         std::pmr::vector<Point3f>    m_positions;

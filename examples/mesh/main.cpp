@@ -9,16 +9,24 @@ namespace dmt {
 
     static void fbxImportTester()
     {
+
         dmt::Context ctx;
         assert(ctx.isValid() && "Invalid Context");
-
+        //memory
+        std::unique_ptr<unsigned char[]> bufferPtr    = std::make_unique<unsigned char[]>(2048);
+        auto                             bufferMemory = std::pmr::monotonic_buffer_resource(bufferPtr.get(), 2048);
         ctx.log("FBXImport test", {});
 
         dmt::MeshFbxPasser fbxPasser{};
 
-        std::pmr::string fbxName = "stanford-bunny.fbx";
+        std::pmr::string fbxBunny     = "stanford-bunny.fbx";
+        std::pmr::string fbxBoxFlat   = "BoxFlat.fbx";
+        std::pmr::string fbxBoxSmooth = "BoxSmooth.fbx";
+        std::pmr::string fbxBoxDown   = "DownSysBox.fbx";
+        std::pmr::string fbxBoxRight  = "RightSysBox.fbx";
 
-        bool r = fbxPasser.ImportFBX(fbxName.c_str());
+        TriangleMesh mesh;
+        bool         r = fbxPasser.ImportFBX(fbxBoxDown.c_str(), &mesh, std::pmr::get_default_resource());
 
 
         if (r)

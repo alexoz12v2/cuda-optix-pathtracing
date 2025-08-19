@@ -412,20 +412,24 @@ namespace dmt {
     // eTextureShading,
     // eFullShading
     //
+    // World space
+    // right x pos
+    // Up z pos
+    // forward y
+    //
+    //camera space -> sys DirectX
     //
     //
-    //
-
     //
     // To see:
     //
     // FbxLayerElementBinormal
     //
     //
-    //
+    //TriangleMesh
 
-
-    void FbxDeleter::operator()(void* raw) const
+    static void TextureNames(FbxMesh* lMesh);
+    void        FbxDeleter::operator()(void* raw) const
     {
         auto* manager = reinterpret_cast<FbxManager*>(raw);
         if (manager)
@@ -480,7 +484,7 @@ namespace dmt {
         m_res.settings     = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
         FbxIOSettings* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
         //set flags for import settings
-        set->SetBoolProp(IMP_FBX_MATERIAL, true);
+        set->SetBoolProp(IMP_FBX_MATERIAL, false);
         set->SetBoolProp(IMP_FBX_TEXTURE, true);
         set->SetBoolProp(IMP_FBX_LINK, false);
         set->SetBoolProp(IMP_FBX_SHAPE, false);
@@ -490,7 +494,9 @@ namespace dmt {
         set->SetBoolProp(IMP_FBX_NORMAL, true);
     }
 
-    bool MeshFbxPasser::ImportFBX(char const* fileName)
+    bool MeshFbxPasser::ImportFBX(char const*                fileName,
+                                  TriangleMesh*              outMesh,
+                                  std::pmr::memory_resource* memory = std::pmr::get_default_resource())
     {
         FbxManager* mng = reinterpret_cast<FbxManager*>(m_res.manager);
 
@@ -524,6 +530,35 @@ namespace dmt {
 
         fbxImporter->Destroy();
 
+        //Get Info about the scene
+        FbxAxisSystem as = pScene->GetGlobalSettings().GetAxisSystem();
+        FbxSystemUnit su = pScene->GetGlobalSettings().GetSystemUnit();
+        //unit sys conversion
+        if (pScene->GetGlobalSettings().GetSystemUnit() == FbxSystemUnit::cm)
+        {
+            const FbxSystemUnit::ConversionOptions lConversionOptions = {
+                true, /* mConvertRrsNodes */
+                true, /* mConvertLimits */
+                true, /* mConvertClusters */
+                true, /* mConvertLightIntensity */
+                true, /* mConvertPhotometricLProperties */
+                true  /* mConvertCameraClipPlanes */
+            };
+
+            // Convert the scene to meters using the defined options.
+            FbxSystemUnit::m.ConvertScene(pScene, lConversionOptions);
+        }
+
+        if (pScene->GetGlobalSettings().GetAxisSystem() != FbxAxisSystem::MayaZUp)
+        {
+            // Convert the scene to meters using the defined options.
+            FbxAxisSystem::MayaZUp.ConvertScene(pScene);
+        }
+
+        assert(pScene->GetGlobalSettings().GetSystemUnit() == FbxSystemUnit::m);
+        assert(pScene->GetGlobalSettings().GetAxisSystem() == FbxAxisSystem::MayaZUp);
+
+
         //attraverse the hirarchy
         FbxNode* lNode = pScene->GetRootNode();
 
@@ -541,6 +576,7 @@ namespace dmt {
                 {
                     FbxNodeAttribute::EType lAttributeType = (lChild->GetNodeAttribute()->GetAttributeType());
 
+
                     if (lAttributeType != FbxNodeAttribute::eMesh)
                         continue;
 
@@ -549,8 +585,15 @@ namespace dmt {
                     m_meshName                      = lMesh->GetName();
                     uint32_t    nPolygon            = lMesh->GetPolygonCount();
                     FbxVector4* lControlPointsArray = lMesh->GetControlPoints();
-
+                    uint32_t    nElementNormal      = lMesh->GetElementNormalCount();
+                    uint32_t    nElementBiNormal    = lMesh->GetElementBinormalCount();
+                    FbxAMatrix  globalTransform     = lChild->EvaluateGlobalTransform();
                     //Polygon
+
+                    if (nPolygon <= 0)
+                        return false;
+
+                    //TriangleMesh tMesh{nPolygon, memory};
 
                     //handle the mesh with Polygon groups
                     for (int l = 0; l < lMesh->GetElementPolygonGroupCount(); l++)
@@ -567,18 +610,98 @@ namespace dmt {
                             default: break;
                         }
                     }
+                    //FbxAxisSystem d;
 
                     //Handle single polygon
                     int vertexId = 0;
-                    for (uint32_t i = 0; i < nPolygon; i++)
+                    for (uint32_t k = 0; k < nPolygon; k++)
                     {
                         //polygon size
-                        uint32_t polygonSize = lMesh->GetPolygonSize(i);
+                        uint32_t polygonSize = lMesh->GetPolygonSize(k);
+                        if (polygonSize > 4 && polygonSize > 2)
+                            return false;
 
-                        for (uint32_t j = 0; j < polygonSize; j++)
+                        VertexIndex vIdx[4];
+
+                        for (uint32_t j = 0; j < polygonSize; j++, vertexId++)
                         {
+                            //normals handle
+                            for (uint32_t k = 0; k < nElementNormal; k++)
+                            {
+                                FbxGeometryElementNormal* lENormal = lMesh->GetElementNormal(k);
+                                Normal3f                  normal{};
+                                if (lENormal->GetMappingMode() == FbxGeometryElement::eByControlPoint)
+                                {
+                                    switch (lENormal->GetReferenceMode())
+                                    {
+                                        case FbxGeometryElement::eDirect:
+                                        {
+                                            normal.x = static_cast<float>(lENormal->GetDirectArray().GetAt(vertexId)[0]);
+                                            normal.y = static_cast<float>(lENormal->GetDirectArray().GetAt(vertexId)[1]);
+                                            normal.z = static_cast<float>(lENormal->GetDirectArray().GetAt(vertexId)[2]);
+                                        }
+                                        break;
+                                        case FbxGeometryElement::eIndexToDirect:
+                                        {
+                                            int id   = lENormal->GetIndexArray().GetAt(vertexId);
+                                            normal.x = static_cast<float>(lENormal->GetDirectArray().GetAt(id)[0]);
+                                            normal.y = static_cast<float>(lENormal->GetDirectArray().GetAt(id)[1]);
+                                            normal.z = static_cast<float>(lENormal->GetDirectArray().GetAt(id)[2]);
+                                        }
+                                        break;
+                                        default: break;
+                                    }
+
+                                    uint32_t nidx = 0;
+                                    if (outMesh->checkNormal(normal, nidx))
+                                    {
+                                        vIdx[j].normalIdx = nidx;
+                                    }
+                                    else
+                                    {
+                                        outMesh->addNormal(normal);
+                                        vIdx[j].normalIdx = outMesh->getNormalSize() - 1;
+                                    }
+                                }
+                            }
+
+                            int controlPointIndex = lMesh->GetPolygonVertex(k, j);
+
+
+                            if (controlPointIndex < 0)
+                            {
+                                return false;
+                            }
+                            //vertex
+                            uint32_t   idx         = 0;
+                            FbxVector4 cp          = lControlPointsArray[controlPointIndex];
+                            FbxVector4 transformed = globalTransform.MultT(cp);
+                            Point3f    controlPoint{
+                                   {static_cast<float>(cp[0]), static_cast<float>(cp[1]), static_cast<float>(cp[2])}};
+
+                            if (outMesh->checkPosition(controlPoint, idx))
+                            {
+                                vIdx[j].positionIdx = idx;
+                            }
+                            else
+                            {
+                                outMesh->addPosition(controlPoint);
+                                vIdx[j].positionIdx = outMesh->getPositionSize() - 1;
+                            }
+                            //add polygon
+                            if (j > 1)
+                            {
+                                outMesh->addIndexedTriangle(vIdx[j - 2], vIdx[j], vIdx[j - 1], -1);
+                            }
                         }
                     }
+
+                    if (true)
+                    {
+                    }
+
+                    //handle textures
+                    TextureNames(lMesh);
                 }
             }
         }
@@ -601,4 +724,22 @@ namespace dmt {
             m_res.manager = FbxManager::Create();
         }
     }
+
+    void TextureNames(FbxMesh* lMesh)
+    {
+        bool lIsAllSame = true;
+        for (uint32_t n = 0; n < lMesh->GetElementMaterialCount(); n++)
+        {
+
+            FbxGeometryElementMaterial* lMaterialElement = lMesh->GetElementMaterial(n);
+
+            if (lMaterialElement->GetMappingMode() == FbxGeometryElement::eByPolygon)
+            {
+                lIsAllSame = false;
+                break;
+            }
+        }
+    }
+
+
 } // namespace dmt

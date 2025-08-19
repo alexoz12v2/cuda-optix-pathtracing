@@ -64,11 +64,12 @@ namespace dmt {
         MeshFbxPasser();
         ~MeshFbxPasser();
 
-        bool        ImportFBX(char const* fileName);
+        bool        ImportFBX(char const* fileName, TriangleMesh* outMesh, std::pmr::memory_resource* memory);
         char const* GetMeshName();
 
     private:
-        void             InitFbxManager();
+        void InitFbxManager();
+
         std::pmr::string m_fileName;
         std::pmr::string m_meshName;
         dFbxIOSettings   m_settings;

@@ -72,8 +72,7 @@ namespace dmt {
 
         std::pmr::string m_fileName;
         std::pmr::string m_meshName;
-        dFbxIOSettings   m_settings;
-        dFbxManager      m_mng;
+        std::pmr::unordered_map<const char*, const char*> m_ChannelsTexPath;
         FbxResources     m_res;
     };
 } // namespace dmt

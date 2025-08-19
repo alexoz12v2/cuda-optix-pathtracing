@@ -24,7 +24,6 @@ namespace dmt {
         void operator()(void* raw) const;
     };
 
-    
 
     using dFbxManager    = std::unique_ptr<void, FbxDeleter>;
     using dFbxIOSettings = std::unique_ptr<void, FbxSettingsDeleter>;
@@ -32,7 +31,7 @@ namespace dmt {
 
     struct FbxResources
     {
-        void* manager = nullptr;
+        void* manager  = nullptr;
         void* settings = nullptr;
     };
 
@@ -65,7 +64,7 @@ namespace dmt {
         MeshFbxPasser();
         ~MeshFbxPasser();
 
-        bool ImportFBX(char const* fileName);
+        bool        ImportFBX(char const* fileName);
         char const* GetMeshName();
 
     private:
@@ -73,7 +72,7 @@ namespace dmt {
         std::pmr::string m_fileName;
         std::pmr::string m_meshName;
         dFbxIOSettings   m_settings;
-        dFbxManager      m_mng; 
-        FbxResources m_res;
+        dFbxManager      m_mng;
+        FbxResources     m_res;
     };
 } // namespace dmt

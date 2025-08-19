@@ -13,7 +13,66 @@
 #include <stb_image_write.h>
 #include <stb_image.h>
 
+// OpenEXR
+#include <ImfRgbaFile.h>
+#include <ImfArray.h>
+
 namespace dmt {
+    // TODO move elsewhere
+    static bool openEXR(os::Path const&            imagePath,
+                        RGB**                      buffer,
+                        int32_t*                   xRes,
+                        int32_t*                   yRes,
+                        std::pmr::memory_resource* temp = std::pmr::get_default_resource())
+    {
+        if (!imagePath.isValid() || !imagePath.isFile())
+            return false;
+
+        try
+        {
+            auto const         str = imagePath.toUnderlying(temp);
+            Imf::RgbaInputFile file(str.c_str());
+            Imath::Box2i       dw = file.dataWindow();
+
+            int32_t width  = dw.max.x - dw.min.x + 1;
+            int32_t height = dw.max.y - dw.min.y + 1;
+
+            if (!buffer)
+            {
+                assert(xRes && yRes);
+                *xRes = width;
+                *yRes = height;
+                return true;
+            }
+            else
+            {
+                assert(xRes && yRes && *xRes > 0 && *yRes > 0);
+                assert(*xRes == width && *yRes == height); // sanity check
+
+                auto pixels = makeUniqueRef<Imf::Array2D<Imf::Rgba>>(temp, height, width); // note: height x width
+                file.setFrameBuffer(&(*pixels)[0][0] - dw.min.x - dw.min.y * width, 1, width); // Adjust for dataWindow origin
+                file.readPixels(dw.min.y, dw.max.y);
+
+                for (int32_t y = 0; y < height; ++y)
+                {
+                    for (int32_t x = 0; x < width; ++x)
+                    {
+                        (*buffer)[x + y * width].r = static_cast<float>((*pixels)[y][x].r);
+                        (*buffer)[x + y * width].g = static_cast<float>((*pixels)[y][x].g);
+                        (*buffer)[x + y * width].b = static_cast<float>((*pixels)[y][x].b);
+                    }
+                }
+
+                return true;
+            }
+
+        } catch (...)
+        {
+            return false;
+        }
+    }
+
+
     // TODO somehow integrate this with texture
     struct PNGInfoWithGamma
     {
@@ -434,16 +493,66 @@ namespace dmt {
         Renderer renderer;
 
         renderer.scene.lights.push_back(
-            makeSpotLight(Transform{}, {1380, 1140, 1190}, cosf(25.f * fl::pi() / 180.f), cosf(10.f * fl::pi() / 180.f)));
+            makeSpotLight(Transform{}, {1.380f, 1.140f, 1.190f}, cosf(20.f * fl::pi() / 180.f), cosf(30.f * fl::pi() / 180.f)));
         renderer.scene.lights.push_back(
-            makeSpotLight(Transform::translate({1380, 1140, 1190}) * Transform::rotate(75.f, Vector3f::zAxis()),
-                          {1, 0.5, 1},
-                          0.707,
-                          0.93));
+            makeSpotLight(Transform::translate({1, 1, 1}) * Transform::rotate(75.f, Vector3f::zAxis()), {1, 0.5, 1}, 0.707, 0.93));
         testScene(renderer.scene);
+
+        SurfaceMaterial& mat = renderer.scene.materials[0];
+        mat.texMatMap |= SurfaceMaterial::DiffuseMask;
+
+        std::pmr::string const pathWorkbenchDiff = (os::Path::executableDir() / "tex" / "workbench.png").toUnderlying();
+        uint64_t               key_pathWorkbenchDiff = baseKeyFromPath(pathWorkbenchDiff);
+        int                    width, height, channels;
+        uint8_t*               buff = stbi_load(pathWorkbenchDiff.c_str(), &width, &height, &channels, 3);
+        if (!buff)
+        {
+            std::cerr << "No texture\n";
+            return;
+        }
+        ImageTexturev2 tex = makeRGBMipmappedTexture(buff,
+                                                     width,
+                                                     height,
+                                                     TexWrapMode::eClamp,
+                                                     TexWrapMode::eClamp,
+                                                     TexFormat::ByteRGB,
+                                                     std::pmr::get_default_resource());
+        stbi_image_free(buff);
+        if (!tex.data)
+        {
+            std::cerr << "No texture\n";
+            return;
+        }
+        renderer.texCache.MipcFiles.createCacheFile(key_pathWorkbenchDiff, tex);
+
+        mat.diffuseWidth  = width;
+        mat.diffuseHeight = height;
+        mat.diffusekey    = key_pathWorkbenchDiff;
 
         renderer.params.cameraDirection = normalFrom({0.f, 1.f, -0.5f});
         renderer.params.samplesPerPixel = 32;
+
+        os::Path back = os::Path::executableDir() / "kloppenheim_02_2k.exr";
+
+        if (!openEXR(back, nullptr, &width, &height))
+        {
+            std::cerr << "cannot open EXR\n";
+            return;
+        }
+        RGB* envBuf = reinterpret_cast<RGB*>(malloc(static_cast<size_t>(width) * height * sizeof(RGB))); // LEAK!
+        if (!envBuf)
+        {
+            std::cerr << "Cannot allocate\n";
+            return;
+        }
+        if (!openEXR(back, &envBuf, &width, &height))
+        {
+            std::cerr << "cannot open EXR\n";
+            return;
+        }
+
+        renderer.params.envLight = //
+            makeUniqueRef<EnvLight>(std::pmr::get_default_resource(), envBuf, width, height, Quaternion::quatIdentity(), 1.f);
 
         renderer.startRenderThread();
     }

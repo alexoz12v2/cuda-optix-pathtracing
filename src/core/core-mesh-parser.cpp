@@ -456,7 +456,7 @@ namespace dmt {
     {
 
         auto* resources = reinterpret_cast<FbxResources*>(raw);
-        
+
         if (resources->settings)
         {
             reinterpret_cast<FbxIOSettings*>(resources->settings)->Destroy();
@@ -464,8 +464,7 @@ namespace dmt {
         if (resources->manager)
         {
             reinterpret_cast<FbxManager*>(resources->settings)->Destroy();
-        }        
-
+        }
     };
 
     static FbxManager*    getManager(dFbxManager& inst) { return reinterpret_cast<FbxManager*>(inst.get()); }
@@ -478,8 +477,8 @@ namespace dmt {
     {
         InitFbxManager();
         //m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(m_mng), IOSROOT), FbxSettingsDeleter{}};
-        m_res.settings = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
-        FbxIOSettings* set = reinterpret_cast<FbxIOSettings*> (m_res.settings); 
+        m_res.settings     = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
+        FbxIOSettings* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
         //set flags for import settings
         set->SetBoolProp(IMP_FBX_MATERIAL, true);
         set->SetBoolProp(IMP_FBX_TEXTURE, true);
@@ -489,8 +488,6 @@ namespace dmt {
         set->SetBoolProp(IMP_FBX_ANIMATION, false);
         set->SetBoolProp(IMP_FBX_GLOBAL_SETTINGS, true);
         set->SetBoolProp(IMP_FBX_NORMAL, true);
-
-
     }
 
     bool MeshFbxPasser::ImportFBX(char const* fileName)
@@ -510,24 +507,24 @@ namespace dmt {
             return false;
 
         //Define the scene name
-        std::string  sceneName   = fileNameStr.substr(0, fileNameStr.size() - 4) + "_scene";
+        std::string sceneName = fileNameStr.substr(0, fileNameStr.size() - 4) + "_scene";
         //Initialize the scene
         FbxScene* pScene = FbxScene::Create(mng, sceneName.c_str());
         //Initialize the Importer
         FbxImporter* fbxImporter  = FbxImporter::Create(mng, sceneName.c_str());
-        bool importStatus = fbxImporter->Initialize(fileName, -1, mng->GetIOSettings());
+        bool         importStatus = fbxImporter->Initialize(fileName, -1, mng->GetIOSettings());
 
         if (!importStatus)
             return false;
         //Import the scene
         importStatus = fbxImporter->Import(pScene);
-        
+
         if (!importStatus)
             return false;
 
         fbxImporter->Destroy();
 
-        //attraverse the hirarchy 
+        //attraverse the hirarchy
         FbxNode* lNode = pScene->GetRootNode();
 
         if (lNode)
@@ -548,9 +545,9 @@ namespace dmt {
                         continue;
 
                     //Get Mesh Information
-                    FbxMesh* lMesh = (FbxMesh*)lChild->GetNodeAttribute();
-                    m_meshName     = lMesh->GetName();
-                    uint32_t nPolygon       = lMesh->GetPolygonCount();
+                    FbxMesh* lMesh                  = (FbxMesh*)lChild->GetNodeAttribute();
+                    m_meshName                      = lMesh->GetName();
+                    uint32_t    nPolygon            = lMesh->GetPolygonCount();
                     FbxVector4* lControlPointsArray = lMesh->GetControlPoints();
 
                     //Polygon
@@ -580,29 +577,20 @@ namespace dmt {
 
                         for (uint32_t j = 0; j < polygonSize; j++)
                         {
-
                         }
-
-                       
                     }
-
-
                 }
-            
             }
         }
-        
-        
+
+
         pScene->Destroy();
 
 
         return true;
     }
 
-    char const* MeshFbxPasser::GetMeshName() 
-    {
-        return m_meshName.c_str();
-    }
+    char const* MeshFbxPasser::GetMeshName() { return m_meshName.c_str(); }
 
     MeshFbxPasser::~MeshFbxPasser() {}
 
@@ -612,6 +600,5 @@ namespace dmt {
         {
             m_res.manager = FbxManager::Create();
         }
-
     }
 } // namespace dmt

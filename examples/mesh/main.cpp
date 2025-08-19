@@ -20,7 +20,6 @@ namespace dmt {
 
         bool r = fbxPasser.ImportFBX(fbxName.c_str());
 
-        
 
         if (r)
         {

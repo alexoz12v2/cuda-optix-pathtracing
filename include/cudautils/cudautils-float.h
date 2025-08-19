@@ -366,30 +366,9 @@ namespace dmt {
         return 3.f * x2 - 2.f * x2 * x;
     }
 
-    // Overloaded smoothstep function with a and b limits
-    // This function maps 'x' from the range [a, b] to [0, 1]
-    // and then applies the smoothstep curve.
     DMT_CPU_GPU DMT_CORE_API inline float smoothstep(float a, float b, float x)
     {
-        // Handle the edge case where the range is invalid or zero-width
-        // to prevent division by zero and unexpected results.
-        if (b <= a)
-        {
-            // If x is within the non-existent range, the function should
-            // return a clamped value. A common convention is to return 0.f.
-            return 0.f;
-        }
-
-        // Normalize x to the [0, 1] range.
-        // The original smoothstep function will then handle the clamping
-        // and the cubic curve.
-        //
-        // For example:
-        // - If x = a, t = 0.
-        // - If x = b, t = 1.
-        // - If x < a, t < 0 (smoothstep clamps to 0).
-        // - If x > b, t > 1 (smoothstep clamps to 1).
-        float const t = (x - a) / (b - a);
+        float const t = fl::clamp01((x - a) / (b - a));
 
         return smoothstep(t);
     }

@@ -1688,9 +1688,8 @@ namespace dmt::bvh {
         std::pmr::vector<Primitive const*> ret{memory};
 
         auto const f = []<typename F>
-            requires std::is_invocable_v<F, Primitive const*>(auto && _f, BVHBuildNode * _node, F && doFunc)
-            ->void
-        {
+            requires std::is_invocable_v<F, Primitive const*>
+        (auto&& _f, BVHBuildNode* _node, F&& doFunc) -> void {
             if (_node->childCount == 0)
             {
                 for (uint32_t i = 0; i < _node->primitiveCount; ++i)

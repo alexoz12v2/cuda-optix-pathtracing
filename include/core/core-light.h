@@ -110,6 +110,7 @@ namespace dmt {
         float     pdfSelection; /// PDF for selecting light (set BEFORE light sampling, in light selection)
         float     evalFac;      /// Intensity multiplier
         LightType type;         /// type of light;
+        bool      delta;
     };
 
     // note on PDF: first light sample fills its initial value, than the light tree pdf multiplies it, then multiply it by

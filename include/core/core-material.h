@@ -40,10 +40,10 @@ namespace dmt {
         /// xxxx'yyyy'zzzz'wwww
         /// if x = 1 -> diffuse uses texture, y = 1 -> normal uses texture, z = 1 -> metallic uses texture, w = 1 -> roughness uses texture
         int32_t                  texMatMap;
-        static constexpr int32_t MetallicMask  = 0x0000'0000'ffff'0000;
-        static constexpr int32_t DiffuseMask   = 0xffff'0000'0000'0000;
-        static constexpr int32_t NormalMask    = 0x0000'ffff'0000'0000;
-        static constexpr int32_t RoughnessMask = 0x0000'0000'0000'ffff;
+        static constexpr int32_t MetallicMask  = 0x00'00'ff'00;
+        static constexpr int32_t DiffuseMask   = 0xff'00'00'00;
+        static constexpr int32_t NormalMask    = 0x00'ff'00'00;
+        static constexpr int32_t RoughnessMask = 0x00'00'00'ff;
 
         /// fallback of metallicKey when it is equal to zero
         float metallicvalue;

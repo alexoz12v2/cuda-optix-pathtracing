@@ -54,6 +54,27 @@ namespace dmt {
         float eta;
     };
 
+    struct BSDFEval
+    {
+        /// BSDF value f(wi, wo)
+        RGB f;
+
+        /// PDF of sampling `wi` given `wo` under this BSDF
+        float pdf;
+
+        /// Relative index of refraction:
+        /// - = 1 for reflection or conductor
+        /// - > 1 if dielectric outside -> inside
+        /// - < 1 if dielectric inside -> outside
+        float eta;
+
+        /// The incident direction (same as in eval call, echoed for convenience)
+        Vector3f wi;
+
+        /// The (microfacet) normal if applicable, or shading normal otherwise
+        Vector3f wm;
+    };
+
 } // namespace dmt
 
 // TODO test these function

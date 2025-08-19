@@ -112,16 +112,23 @@ namespace dmt {
 } // namespace dmt
 
 namespace dmt {
-    static BVHBuildNode* buildBVHBuildLayout(Scene& scene, std::pmr::synchronized_pool_resource& pool)
+    static void testScene(Scene& scene)
     {
-        UniqueRef<unsigned char[]> bufTmp = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), 4096);
-        std::pmr::monotonic_buffer_resource scratch{bufTmp.get(), 4096, std::pmr::null_memory_resource()};
-
         { // prepare geometry
             scene.geometry.reserve(16);
             scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(std::pmr::get_default_resource()));
+            SurfaceMaterial mat{};
+            mat.anisotropy             = 1.f;
+            mat.metallicvalue          = 0.f;
+            mat.isDiffuseOpaque        = 1;
+            mat.multiscatterMultiplier = 2.f;
+            mat.ior                    = 1.4;
+            mat.useShadingNormals      = false;
+            mat.roughnessvalue         = 0.5f;
+            mat.diffusevalue           = byte3FromRGB(RGB{0.3, 0.5, 0.2});
+            scene.materials.push_back(mat);
             auto& cube = *scene.geometry.back();
-            TriangleMesh::unitCube(cube);
+            TriangleMesh::unitCube(cube, 0);
         }
         { // instance geometry
             {
@@ -161,24 +168,32 @@ namespace dmt {
                 cubeInstance.bounds = scene.geometry[cubeInstance.meshIdx]->transformedBounds(t);
                 cubeInstance.color  = {0.7f, 0.3f, 0.6f};
             }
-            // compute per instance BVH and total BVH
-            std::pmr::vector<BVHBuildNode*>        perInstanceBvhNodes{&pool};
-            std::pmr::vector<UniqueRef<Primitive>> primitives{&pool};
-            perInstanceBvhNodes.reserve(64);
-            primitives.reserve(256);
-
-            for (size_t instanceIdx = 0; instanceIdx < scene.instances.size(); ++instanceIdx)
-            {
-                perInstanceBvhNodes.push_back(bvh::buildForInstance(scene, instanceIdx, primitives, &scratch, &pool));
-                resetMonotonicBufferPointer(scratch, bufTmp.get(), 4096);
-            }
-
-            auto* bvhRoot = reinterpret_cast<BVHBuildNode*>(pool.allocate(sizeof(BVHBuildNode)));
-            std::memset(bvhRoot, 0, sizeof(BVHBuildNode));
-            bvh::buildCombined(bvhRoot, perInstanceBvhNodes, &scratch, &pool);
-
-            return bvhRoot;
         }
+    }
+
+    static BVHBuildNode* buildBVHBuildLayout(Scene& scene, std::pmr::synchronized_pool_resource& pool)
+    {
+        UniqueRef<unsigned char[]> bufTmp = makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), 4096);
+        std::pmr::monotonic_buffer_resource scratch{bufTmp.get(), 4096, std::pmr::null_memory_resource()};
+        testScene(scene);
+
+        // compute per instance BVH and total BVH
+        std::pmr::vector<BVHBuildNode*>        perInstanceBvhNodes{&pool};
+        std::pmr::vector<UniqueRef<Primitive>> primitives{&pool};
+        perInstanceBvhNodes.reserve(64);
+        primitives.reserve(256);
+
+        for (size_t instanceIdx = 0; instanceIdx < scene.instances.size(); ++instanceIdx)
+        {
+            perInstanceBvhNodes.push_back(bvh::buildForInstance(scene, instanceIdx, primitives, &scratch, &pool));
+            resetMonotonicBufferPointer(scratch, bufTmp.get(), 4096);
+        }
+
+        auto* bvhRoot = reinterpret_cast<BVHBuildNode*>(pool.allocate(sizeof(BVHBuildNode)));
+        std::memset(bvhRoot, 0, sizeof(BVHBuildNode));
+        bvh::buildCombined(bvhRoot, perInstanceBvhNodes, &scratch, &pool);
+
+        return bvhRoot;
     }
 
     static void testTextureCache()
@@ -414,10 +429,29 @@ namespace dmt {
         freeImageTexture(tex, texTmpMem);
     }
 
+    static void testRenderer()
+    {
+        Renderer renderer;
+
+        renderer.scene.lights.push_back(
+            makeSpotLight(Transform{}, {1380, 1140, 1190}, cosf(25.f * fl::pi() / 180.f), cosf(10.f * fl::pi() / 180.f)));
+        renderer.scene.lights.push_back(
+            makeSpotLight(Transform::translate({1380, 1140, 1190}) * Transform::rotate(75.f, Vector3f::zAxis()),
+                          {1, 0.5, 1},
+                          0.707,
+                          0.93));
+        testScene(renderer.scene);
+
+        renderer.params.cameraDirection = normalFrom({0.f, 1.f, -0.5f});
+        renderer.params.samplesPerPixel = 32;
+
+        renderer.startRenderThread();
+    }
+
 } // namespace dmt
 
-#define DMT_DBG_PX_X 50
-#define DMT_DBG_PX_Y 58
+#define DMT_DBG_PX_X 62
+#define DMT_DBG_PX_Y 56
 
 int32_t guardedMain()
 {
@@ -432,6 +466,7 @@ int32_t guardedMain()
         dmt::Context ctx;
         ctx.log("Hello Cruel World", {});
 
+#if 0
         auto monotonicBuf = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), 4096);
 
         std::pmr::synchronized_pool_resource pool{};
@@ -442,7 +477,7 @@ int32_t guardedMain()
         uint32_t             nodeCount = 0;
         dmt::BVHWiVeCluster* bvh       = dmt::bvh::buildBVHWive(bvhRoot, &nodeCount, &scratch, &pool);
 
-        static constexpr uint32_t       Width = 128, Height = 128, Channels = 1;
+        static constexpr uint32_t       Width = 128, Height = 128, Channels = 3;
         dmt::os::Path                   imagePath = dmt::os::Path::executableDir() / "wive.png";
         dmt::UniqueRef<unsigned char[]> buffer = dmt::makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(),
                                                                                      static_cast<size_t>(Width) *
@@ -459,6 +494,7 @@ int32_t guardedMain()
         dmt::Transform const renderFromCamera = dmt::transforms::worldFromCamera(cameraDirection, cameraPosition);
 
         std::memset(buffer.get(), 0, static_cast<size_t>(Width) * Height * Channels);
+        std::map<std::pair<uint32_t, size_t>, dmt::Normal3f> faceNormalMapping;
         for (int32_t y = 0; y < Height; ++y)
         {
             for (int32_t x = 0; x < Width; ++x)
@@ -477,21 +513,49 @@ int32_t guardedMain()
                 size_t   triIdx      = 0;
                 auto     trisect     = dmt::triangle::Triisect::nothing();
                 if (dmt::bvh::traverseRay(ray, bvh, nodeCount, &instanceIdx, &triIdx, &trisect))
-                    buffer[x + static_cast<int64_t>(y) * Width] = 255;
+                {
+                    Instance const&     instance = *scene.instances[instanceIdx];
+                    TriangleMesh const& mesh     = *scene.geometry[instance.meshIdx];
+                    auto const          tri      = mesh.getIndexedTri(triIdx);
+                    Transform const     xform    = transformFromAffine(instance.affineTransform);
+                    Vector3f const      n0       = mesh.getNormal(tri.v[0].normalIdx);
+                    Vector3f const      n1       = mesh.getNormal(tri.v[1].normalIdx);
+                    Vector3f const      n2       = mesh.getNormal(tri.v[2].normalIdx);
+                    Normal3f const      ng       = mulTranspose(xform.mInv, (n0 + n1 + n2));
+                    if (!faceNormalMapping.contains(std::make_pair(instanceIdx, triIdx)))
+                    {
+                        faceNormalMapping.try_emplace(std::make_pair(instanceIdx, triIdx), ng);
+                        std::cout << "Normal Instance " << instanceIdx << " Face " << triIdx << ": " << ng.x << " "
+                                  << ng.y << " " << ng.z << std::endl;
+                    }
+
+                    if (instanceIdx == 0 && triIdx == 6)
+                        int i = 0;
+
+                    Vector3f nPlus = (Vector3f(ng) + Vector3f::s(1)) * 0.5f;
+                    uint32_t col = byte3FromRGB(RGB::fromVec(nPlus));
+
+                    buffer[(x + static_cast<int64_t>(y) * Width) * Channels + 0] = static_cast<uint8_t>(
+                        (col & 0x00'ff'00'00) >> 16);
+                    buffer[(x + static_cast<int64_t>(y) * Width) * Channels + 1] = static_cast<uint8_t>(
+                        (col & 0x00'00'ff'00) >> 8);
+                    buffer[(x + static_cast<int64_t>(y) * Width) * Channels + 2] = static_cast<uint8_t>(
+                        (col & 0x00'00'00'ff));
+                }
             }
         }
 
-        stbi_write_png(imagePath.toUnderlying().c_str(), Width, Height, 1, buffer.get(), Width);
+        std::cout << "[Main Thread] writing normal image to wive.png" << std::endl;
+        stbi_write_png(imagePath.toUnderlying().c_str(), Width, Height, Channels, buffer.get(), Width * Channels);
+#endif
 
+#if 0
         dmt::testTextureCache();
         dmt::testTextureCacheLRU();
+#endif
 
         std::cout << "[Main Thread] Starting Render Thread" << std::endl;
-        std::cin.get();
-        {
-            dmt::Renderer renderer;
-            renderer.startRenderThread();
-        }
+        dmt::testRenderer();
         std::cout << "[Main Thread] Render Thread joined" << std::endl;
     }
     return 0;

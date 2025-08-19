@@ -382,7 +382,7 @@ namespace dmt {
     // TODO: If you use it for large arrays, optimize it with AVX (have no idea for GPU though)
     int32_t sampleDiscrete(float const* weights, uint32_t weightCount, float u, float* pmf, float* uRemapped)
     {
-        if (weightCount || !weights)
+        if (weightCount == 0 || !weights)
         {
             if (pmf)
                 *pmf = 0;

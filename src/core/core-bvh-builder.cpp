@@ -123,11 +123,9 @@ namespace dmt::bvh {
                         {
 
                             float const splitPosition = current.bounds.pMin[axis] + (i + 1) * splitLength;
-                            float const splitCost     = evaluateSAH(
-                                std::span{primsBeg, primsEnd},
-                                [](Primitive const* p) { return p->bounds(); },
-                                axis,
-                                splitPosition);
+                            float const splitCost = evaluateSAH(std::span{primsBeg, primsEnd}, [](Primitive const* p) {
+                                return p->bounds();
+                            }, axis, splitPosition);
                             if (splitCost < minimumSplitCost)
                             {
                                 minimumSplitCost     = splitCost;
@@ -206,7 +204,7 @@ namespace dmt::bvh {
                     last->end         = primsMid;
                     last->node.bounds = bbUnionPrimitives(std::span{primsBeg, primsMid});
                 } // end else (maybeNode)
-            }     // end while (on workItem list)
+            } // end while (on workItem list)
 
             for (auto const& workItem : childCandidates)
             {
@@ -269,11 +267,9 @@ namespace dmt::bvh {
                 {
                     float const splitPosition = bounds.pMin[axis] + (i + 1) * splitLength;
 
-                    float splitCost = evaluateSAH(
-                        currNodes,
-                        [](BVHBuildNode const* p) { return p->bounds; },
-                        axis,
-                        splitPosition);
+                    float splitCost = evaluateSAH(currNodes, [](BVHBuildNode const* p) {
+                        return p->bounds;
+                    }, axis, splitPosition);
 
                     if (splitCost < minimumSplitCost)
                     {
@@ -946,9 +942,11 @@ namespace dmt::bvh {
                 // If you have vectorized triangle intersection helpers, use them.
                 // Here I assume triangle::intersect4/intersect exist and return Triisect
                 // with .hit boolean and .t and indices.
+                uint32_t i = 0, j = 0, k = 0;
                 while (remaining >= 4)
                 {
                     auto sect = triangle::intersect4(ray, isect.t, leaf->v0s + currIdx, leaf->v1s + currIdx, leaf->v2s + currIdx, 0xF);
+                    sect.index += (i << 2);
                     remaining -= 4;
                     currIdx += 4;
                     if (sect && sect.t < isect.t)
@@ -959,10 +957,12 @@ namespace dmt::bvh {
                         *instanceIdx = leaf->instanceIdx;
                         *triIdx      = leaf->triIdx[sect.index];
                     }
+                    ++i;
                 }
                 while (remaining >= 2)
                 {
                     auto sect = triangle::intersect4(ray, isect.t, leaf->v0s + currIdx, leaf->v1s + currIdx, leaf->v2s + currIdx, 0x3);
+                    sect.index += (i << 2) + (j << 1);
                     remaining -= 2;
                     currIdx += 2;
                     if (sect && sect.t < isect.t)
@@ -972,10 +972,12 @@ namespace dmt::bvh {
                         *instanceIdx = leaf->instanceIdx;
                         *triIdx      = leaf->triIdx[sect.index];
                     }
+                    ++j;
                 }
                 while (remaining > 0)
                 {
                     auto sect = triangle::intersect(ray, isect.t, leaf->v0s[currIdx], leaf->v1s[currIdx], leaf->v2s[currIdx], 0);
+                    sect.index += (i << 2) + (j << 1) + k;
                     --remaining;
                     ++currIdx;
                     if (sect && sect.t < isect.t)
@@ -985,6 +987,7 @@ namespace dmt::bvh {
                         *instanceIdx = leaf->instanceIdx;
                         *triIdx      = leaf->triIdx[sect.index];
                     }
+                    ++k;
                 }
 
                 // If we found a hit in this leaf, update tFarVec used for AABB tests
@@ -1019,12 +1022,9 @@ namespace dmt::bvh {
 
         auto* root = reinterpret_cast<BVHBuildNode*>(memory->allocate(sizeof(BVHBuildNode)));
         std::memset(root, 0, sizeof(BVHBuildNode));
-        root->bounds = std::transform_reduce(
-            shufflingPrims.begin(),
-            shufflingPrims.end(),
-            bbEmpty(),
-            [](Bounds3f a, Bounds3f b) { return bbUnion(a, b); },
-            [](Primitive const* p) { return p->bounds(); });
+        root->bounds = std::transform_reduce(shufflingPrims.begin(), shufflingPrims.end(), bbEmpty(), [](Bounds3f a, Bounds3f b) {
+            return bbUnion(a, b);
+        }, [](Primitive const* p) { return p->bounds(); });
         buildRecursive(shufflingPrims.data(), shufflingPrims.data() + shufflingPrims.size(), root, memory, temp);
         return root;
     }

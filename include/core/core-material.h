@@ -61,7 +61,8 @@ namespace dmt {
         float multiscatterMultiplier;
 
         /// distriminator to know whether to use Oren Nayar of GGX for dielectric part of the material
-        int32_t isDiffuseOpaque;
+        int32_t isDiffuseOpaque   : 31;
+        int32_t useShadingNormals : 1;
 
         /// relative (to air) ior for dielectric (GGX)
         float ior;
@@ -91,4 +92,34 @@ namespace dmt {
         Vector3f                  ng,
         Point2f                   u,
         float                     uc);
+
+    DMT_CORE_API BSDFEval materialEval(SurfaceMaterial const&    material,
+                                       TextureCache&             cache,
+                                       TextureEvalContext const& texCtx,
+                                       Vector3f                  wo,
+                                       Vector3f                  wi,
+                                       Vector3f                  ng);
+
+    DMT_CORE_API Normal3f materialShadingNormal(SurfaceMaterial const&    material,
+                                                TextureCache&             cache,
+                                                TextureEvalContext const& texCtx,
+                                                Vector3f                  ng);
+
+    inline RGB rgbFromByte3(uint32_t encoded)
+    {
+        RGB res{};
+        res.r = static_cast<float>((encoded >> 16) & 0xFF) / 255.f;
+        res.g = static_cast<float>((encoded >> 8) & 0xFF) / 255.f;
+        res.b = static_cast<float>(encoded & 0xFF) / 255.f;
+        return res;
+    }
+
+    inline uint32_t byte3FromRGB(RGB const& c)
+    {
+        uint32_t r = static_cast<uint32_t>(fl::clamp(c.r, 0.f, 1.f) * 255.f + 0.5f);
+        uint32_t g = static_cast<uint32_t>(fl::clamp(c.g, 0.f, 1.f) * 255.f + 0.5f);
+        uint32_t b = static_cast<uint32_t>(fl::clamp(c.b, 0.f, 1.f) * 255.f + 0.5f);
+
+        return (r << 16) | (g << 8) | b;
+    }
 } // namespace dmt

@@ -95,7 +95,7 @@ namespace dmt {
 
     // static
 
-    void TriangleMesh::unitCube(TriangleMesh& mesh)
+    void TriangleMesh::unitCube(TriangleMesh& mesh, int32_t matIdx)
     {
         static constexpr float half = 0.5f;
 
@@ -149,23 +149,23 @@ namespace dmt {
 
         // Faces: each face has 2 triangles
         // LEFT (-X)
-        mesh.addIndexedTriangle({1, 1, 9}, {5, 1, 10}, {4, 1, 11}, -1)
-            .addIndexedTriangle({1, 1, 9}, {4, 1, 11}, {0, 1, 12}, -1);
+        mesh.addIndexedTriangle({1, 1, 9}, {5, 1, 10}, {4, 1, 11}, matIdx)
+            .addIndexedTriangle({1, 1, 9}, {4, 1, 11}, {0, 1, 12}, matIdx);
         // FRONT (+Y)
-        mesh.addIndexedTriangle({2, 3, 6}, {1, 3, 9}, {0, 3, 12}, -1) //
-            .addIndexedTriangle({2, 3, 6}, {0, 3, 12}, {3, 3, 3}, -1);
+        mesh.addIndexedTriangle({2, 3, 6}, {1, 3, 9}, {0, 3, 12}, matIdx) //
+            .addIndexedTriangle({2, 3, 6}, {0, 3, 12}, {3, 3, 3}, matIdx);
         // RIGHT (+X)
-        mesh.addIndexedTriangle({6, 0, 5}, {2, 0, 6}, {3, 0, 3}, -1) //
-            .addIndexedTriangle({6, 0, 5}, {3, 0, 3}, {7, 0, 4}, -1);
+        mesh.addIndexedTriangle({6, 0, 5}, {2, 0, 6}, {3, 0, 3}, matIdx) //
+            .addIndexedTriangle({6, 0, 5}, {3, 0, 3}, {7, 0, 4}, matIdx);
         // TOP (+Z)
-        mesh.addIndexedTriangle({3, 4, 3}, {0, 4, 12}, {4, 4, 13}, -1) //
-            .addIndexedTriangle({3, 4, 3}, {4, 4, 13}, {7, 4, 2}, -1);
+        mesh.addIndexedTriangle({3, 4, 3}, {0, 4, 12}, {4, 4, 13}, matIdx) //
+            .addIndexedTriangle({3, 4, 3}, {4, 4, 13}, {7, 4, 2}, matIdx);
         // BACK (-Y)
-        mesh.addIndexedTriangle({7, 2, 2}, {4, 2, 13}, {5, 2, 0}, -1) //
-            .addIndexedTriangle({7, 2, 2}, {5, 2, 0}, {6, 2, 1}, -1);
+        mesh.addIndexedTriangle({7, 2, 2}, {4, 2, 13}, {5, 2, 0}, matIdx) //
+            .addIndexedTriangle({7, 2, 2}, {5, 2, 0}, {6, 2, 1}, matIdx);
         // BOTTOM (-Z)
-        mesh.addIndexedTriangle({6, 5, 7}, {5, 5, 8}, {1, 5, 9}, -1) //
-            .addIndexedTriangle({6, 5, 7}, {1, 5, 9}, {2, 5, 6}, -1);
+        mesh.addIndexedTriangle({6, 5, 7}, {5, 5, 8}, {1, 5, 9}, matIdx) //
+            .addIndexedTriangle({6, 5, 7}, {1, 5, 9}, {2, 5, 6}, matIdx);
     }
 
     Scene::Scene(std::pmr::memory_resource* memory) : geometry{memory}, instances{memory}, m_memory{memory} {}

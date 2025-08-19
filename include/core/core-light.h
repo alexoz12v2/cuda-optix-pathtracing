@@ -50,8 +50,8 @@ namespace dmt {
     {
         Point3f co;
         Transform lightFromRender; // has position in last column (we assume that this is affine), but we keep it anyways
-        RGB                strength;
-        LightType          type;
+        RGB       strength;
+        LightType type;
         union DMT_CORE_API LightData
         {
             PointLight point;
@@ -154,6 +154,8 @@ namespace dmt {
     /// use `sample` as an in out parameter to evaluate spectrum for light. what needs to be initialized
     /// - n, evalFac
     DMT_CORE_API RGB lightEval(Light const& light, LightSample const* sample);
+
+    DMT_CORE_API bool lightIntersect(Light const& light, Ray const& ray, float* t);
 
     // ---- Env Light ----
     /// sample context is useless, kept just to have the sameish api as the other light types

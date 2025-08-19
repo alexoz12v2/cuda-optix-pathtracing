@@ -11,6 +11,73 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+// TODO remove
+#define DMT_SINGLE_THREAD
+#define DMT_DBG_PIXEL
+#define DMT_DBG_PIXEL_X     62
+#define DMT_DBG_PIXEL_Y     49
+#define DMT_DBG_SAMPLEINDEX 9
+
+namespace dmt {
+    // conservative gamma helper if you don't have PBRT's
+    static inline float myGamma(int n)
+    {
+        float const eps = std::numeric_limits<float>::epsilon(); // ~1.19e-7
+        return (n * eps) / (1.f - n * eps);
+    }
+
+    // make absolute-value vector
+    static inline Vector3f absVec(Vector3f v) { return Vector3f{fabsf(v.x), fabsf(v.y), fabsf(v.z)}; }
+
+    // estimate hit error from position differentials (conservative)
+    static inline Vector3f estimateHitError(Vector3f dpdx, Vector3f dpdy, Point3f p)
+    {
+        // differential-based error (like PBRT)
+        Vector3f err = (absVec(dpdx) + absVec(dpdy)) * myGamma(5);
+
+        // add a tiny absolute epsilon proportional to the magnitude of p
+        // this avoids underflow when dpdx/dpdy are tiny or missing
+        float    maxAbsP = fmaxf(fmaxf(fabsf(p.x), fabsf(p.y)), fabsf(p.z));
+        float    absEps  = fmaxf(1e-6f, 8.0f * std::numeric_limits<float>::epsilon() * maxAbsP);
+        Vector3f absErr  = Vector3f::s(absEps);
+
+        return err + absErr;
+    }
+
+    static inline Point3f offsetRayOrigin(Point3f p, Vector3f pError, Normal3f ng, Vector3f w)
+    {
+        Vector3f n = ng.asVec();
+        // conservative offset distance along normal
+        float d = dot(absVec(n), pError);
+
+        // add a tiny absolute safety margin to ensure robust separation
+        // the constant below can be tuned; 1e-4 is conservative for typical meters-scale scenes
+        constexpr float extraMargin = 1e-4f;
+        d += extraMargin;
+
+        // choose direction away from the surface relative to ray direction w
+        Vector3f offset = (dot(w, n) > 0.f) ? n * d : -n * d;
+
+        Point3f po = p + offset;
+
+        // Move each component to next float away from the surface to break ties
+        auto bump = [](float x, float o) {
+            if (o > 0.f)
+                return fl::nextFloatUp(x);
+            if (o < 0.f)
+                return fl::nextFloatDown(x);
+            return x;
+        };
+
+        po.x = bump(po.x, offset.x);
+        po.y = bump(po.y, offset.y);
+        po.z = bump(po.z, offset.z);
+
+        return po;
+    }
+
+} // namespace dmt
+
 namespace dmt::job {
     struct EvalTileData
     {
@@ -30,6 +97,7 @@ namespace dmt::job {
         Scene const*                    scene;
         std::span<LightTreeBuildNode>   lightTreeNodes;
         std::span<LightTrailPair>       lightTreeBittrails;
+        int32_t                         maxDepth;
     };
 
     static void evalTile(uintptr_t _data, uint32_t tid)
@@ -45,9 +113,18 @@ namespace dmt::job {
         {
             for (int32_t x = data.StartPixel.x; x < xEnd; ++x)
             {
+#if defined(DMT_DBG_PIXEL)
+                if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y)
+                    int i = 0;
+#endif
                 std::cout << "[Thread " << tid << "] Pixel " << x << " " << y << std::endl;
                 for (int32_t sampleIndex = 0; sampleIndex < data.SamplesPerPixel; ++sampleIndex)
                 {
+#if defined(DMT_DBG_PIXEL)
+                    if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y && sampleIndex == DMT_DBG_SAMPLEINDEX)
+                        int i = 0;
+#endif
+
                     std::pmr::monotonic_buffer_resource scratch{4096}; // TODO better
                     sampler.startPixelSample({x, y}, sampleIndex);
                     camera::CameraSample const cs = camera::getCameraSample(sampler, {x, y}, *data.filter);
@@ -56,9 +133,226 @@ namespace dmt::job {
 
                     RGB  L = RGB::fromScalar(0.f), beta = RGB::fromScalar(1.f);
                     bool hadTransmission = false, specularBounce = false, anyNonSpecularBounces = false;
+                    // LightSampleContext prevIntrCtx; needed only for emissive surfaces
+                    float    bsdfPdf = 1.f, etascale = 1.f;
+                    uint32_t depth = 0;
 
                     while (true)
                     {
+                        // 1. Trace Rays towards scene to find an intersection (Main Path)
+                        uint32_t           instanceIdx = 0;
+                        size_t             triIdx      = 0;
+                        triangle::Triisect trisect     = triangle::Triisect::nothing();
+                        if (!bvh::traverseRay(ray, data.bvhRoot, data.bvhNodeNum, &instanceIdx, &triIdx, &trisect))
+                        {
+                            if (data.envLight)
+                            {
+                                float     pdfLight = 0;
+                                RGB const Le       = envLightEval(*data.envLight, ray.d, &pdfLight);
+                                // 2. if no intersection, light at infinity, break
+                                if (depth == 0 || specularBounce) // specular bounce = PDF BSDF is Dirac Delta
+                                    L += beta * Le;
+                                else // MIS
+                                    L += beta * (bsdfPdf / (bsdfPdf + pdfLight)) * Le;
+                            }
+                            break;
+                        }
+                        else
+                        {
+                            // 3. check if maximum number of bounces has been reached and break
+                            if (depth >= data.maxDepth)
+                                break;
+                            depth++;
+
+                            // 4. if intersection and emissive, account for emission (TODO later maybe)
+                            // Bonus. compute intersection information
+                            Instance const&        instance = *data.scene->instances[instanceIdx];
+                            TriangleMesh const&    mesh     = *data.scene->geometry[instance.meshIdx];
+                            IndexedTri const&      triangle = mesh.getIndexedTri(triIdx);
+                            Transform const        xform    = transformFromAffine(instance.affineTransform);
+                            SurfaceMaterial const& mat      = data.scene->materials[triangle.matIdx];
+                            Point2f const          uv0      = mesh.getUV(triangle.v[0].uvIdx);
+                            Point2f const          uv1      = mesh.getUV(triangle.v[1].uvIdx);
+                            Point2f const          uv2      = mesh.getUV(triangle.v[2].uvIdx);
+
+                            // Perform the barycentric interpolation.
+                            float const w0 = 1.0f - trisect.u - trisect.v;
+                            float const w1 = trisect.u;
+                            float const w2 = trisect.v;
+
+                            Point2f const  uv   = w0 * uv0 + w1 * uv1 + w2 * uv2;
+                            Vector2f const duv1 = uv1 - uv0;
+                            Vector2f const duv2 = uv2 - uv0;
+
+                            Point3f const p0 = xform(mesh.getPosition(triangle.v[0].positionIdx));
+                            Point3f const p1 = xform(mesh.getPosition(triangle.v[1].positionIdx));
+                            Point3f const p2 = xform(mesh.getPosition(triangle.v[2].positionIdx));
+
+                            Vector3f const dp1 = p1 - p0;
+                            Vector3f const dp2 = p2 - p0;
+
+                            float const det = duv1.x * duv2.y - duv1.y * duv2.x;
+                            Vector3f    dpdu, dpdv;
+                            if (fl::abs(det) < 1e-8f)
+                            {
+                                // UVs are degenerate — fallback to geometric basis
+                                Vector3f ng = normalize(cross(p2 - p0, p1 - p0));
+                                coordinateSystemFallback(ng, &dpdu, &dpdv); // builds arbitrary tangent frame
+                                return;
+                            }
+
+                            float const invDet = 1.0f / det;
+                            dpdu               = (duv2.y * dp1 - duv1.y * dp2) * invDet;
+                            dpdv               = (-duv2.x * dp1 + duv1.x * dp2) * invDet;
+
+                            float const   t = trisect.t;
+                            Point3f const p = ray.o + ray.d * t;
+
+                            Vector3f const n0    = mesh.getNormal(triangle.v[0].normalIdx);
+                            Vector3f const n1    = mesh.getNormal(triangle.v[1].normalIdx);
+                            Vector3f const n2    = mesh.getNormal(triangle.v[2].normalIdx);
+                            Normal3f const ngObj = normalFrom(n0 + n1 + n2);
+                            Normal3f const ng    = xform(ngObj);
+
+                            Vector3f dpdx, dpdy;
+                            data.diffCtx.p = p;
+                            data.diffCtx.n = ng;
+                            approximate_dp_dxy(data.diffCtx, &dpdx, &dpdy);
+
+                            Vector3f const pErr = estimateHitError(dpdx, dpdy, p);
+
+                            UVDifferentialsContext uvCtx{};
+                            uvCtx.dpdu = dpdu;
+                            uvCtx.dpdv = dpdv;
+                            uvCtx.dpdx = dpdx;
+                            uvCtx.dpdy = dpdy;
+
+                            TextureEvalContext texCtx{};
+                            texCtx.p    = p;
+                            texCtx.dpdx = dpdx;
+                            texCtx.dpdy = dpdy;
+                            texCtx.n    = ng;
+                            texCtx.uv   = uv;
+                            texCtx.dUV  = duv_From_dp_dxy(uvCtx);
+
+                            Normal3f const ns = xform(materialShadingNormal(mat, *data.texCache, texCtx, ngObj));
+
+                            // 5. (Maybe) BSDF regularization
+                            // 6. Sample direct illumination and cast shadow ray
+                            // choose between envLight and light tree
+                            // TODO: If material is specular skip direct lighting estimation
+                            LightSampleContext lightCtx{};
+                            lightCtx.ray             = ray;
+                            lightCtx.n               = ns;
+                            lightCtx.hadTransmission = hadTransmission;
+                            lightCtx.p               = p;
+
+                            LightSample  ls[4]{};
+                            float        pmfs[4]{};
+                            Light const* plights[4]{};
+                            uint32_t     lsCount = 0; // number of shadow rays
+
+                            float                  uLightChoice  = sampler.get1D();
+                            Point2f                uLight        = sampler.get2D();
+                            static constexpr float lightStartPMF = 0.5f;
+                            if (uLightChoice < 0.5f && data.envLight)
+                            {
+                                lsCount = envLightSampleFromContext(*data.envLight, lightCtx, uLight, &ls[0]);
+                                pmfs[0] = lightStartPMF;
+                            }
+                            else
+                            {
+                                if (uLightChoice >= 0.5f)
+                                    uLightChoice = fl::clamp01((uLightChoice - 0.5f) * 2.f);
+                                LightSplit const split = lightTreeAdaptiveSplit(data.lightTreeNodes[0], p);
+                                SelectedLights const lights = selectLightsFromSplit(split, p, ng, uLightChoice, lightStartPMF); // TODO use ns
+
+                                for (uint32_t i = 0; i < lights.count; ++i)
+                                {
+                                    Light const& light = data.scene->lights[lights.indices[i]];
+                                    if (lightSampleFromContext(light, lightCtx, uLight, &ls[lsCount]))
+                                    {
+                                        plights[lsCount] = &light;
+                                        pmfs[lsCount]    = lights.pmfs[i];
+                                        lsCount++;
+                                    }
+                                }
+                            }
+
+                            for (uint32_t shadowRayIdx = 0; shadowRayIdx < lsCount; ++shadowRayIdx)
+                            {
+                                float tLight = 0;
+                                // nudge towards light to avoid self intersections
+                                Point3f            shadowOrigin = offsetRayOrigin(p, pErr, ng, ls[shadowRayIdx].d);
+                                Ray const          shadowRay{shadowOrigin, ls[shadowRayIdx].d};
+                                uint32_t           idx;
+                                size_t             tri;
+                                triangle::Triisect sect;
+
+                                // evaluate material BSDF and ensure its value is nonzero for the sampled direction
+                                if (ls[shadowRayIdx].pdf == 0)
+                                    continue;
+
+                                BSDFEval eval = materialEval(mat, *data.texCache, texCtx, -ray.d, shadowRay.d, ng);
+                                if (eval.pdf == 0.f || eval.f.max() < 1e-5f)
+                                    continue;
+
+                                // ensure shadow ray doesn't encounter any obstacle in its path towards the source
+                                // TODO account for mesh light?
+                                if (bvh::traverseRay(shadowRay, data.bvhRoot, data.bvhNodeNum, &idx, &tri, &sect))
+                                {
+                                    //assert(!(instanceIdx == idx) || hadTransmission); // debugging purposes
+                                    continue;
+                                }
+                                assert(dot(shadowRay.d, ng) > 0); // todo remove
+
+                                // account for direct lighting contribution
+                                RGB Le{};
+                                if (lsCount == 1 && !plights[shadowRayIdx]) // if envLight
+                                    Le = envLightEval(*data.envLight, &ls[shadowRayIdx]);
+                                else if (plights[shadowRayIdx] && lightIntersect(*plights[shadowRayIdx], shadowRay, &tLight))
+                                    Le = lightEval(*plights[shadowRayIdx], &ls[shadowRayIdx]);
+
+                                if (Le.max() > 0.f)
+                                {
+                                    float const pdfLight = pmfs[shadowRayIdx] * ls[shadowRayIdx].pdf;
+
+                                    // TODO account for 0 radiance paths in statistics
+                                    L += beta * (Le * eval.f / (pdfLight + eval.pdf)); // pdfLight / pdfLight simplified from MIS
+                                }
+                            }
+
+                            // 7. Sample new path direction
+                            BSDFSample const
+                                bs = materialSample(mat, *data.texCache, texCtx, -ray.d, ng, sampler.get2D(), sampler.get1D());
+                            if (bs.pdf == 0.f) // if doesn't bounce, path dies
+                                break;
+
+                            // 8. update path state variables and perform russian roulette to terminate the path early
+                            beta *= bs.f * absDot(bs.wi, ns) / bs.pdf;
+                            assert(!fl::isInfOrNaN(beta.r) && !fl::isInfOrNaN(beta.g) && !fl::isInfOrNaN(beta.b));
+                            bsdfPdf        = bs.pdf;
+                            specularBounce = false;        // TODO compute if bounce was specular
+                            anyNonSpecularBounces |= true; // TODO compute if bounce was specular
+                            if (bool transmission = bs.eta != 1.f; transmission)
+                            {
+                                hadTransmission = true;
+                                etascale *= bs.eta * bs.eta; // TODO see if do the reciprocal when going inside-out
+                            }
+                            // prevIntrCtx = ...
+                            Point3f nextOrigin = offsetRayOrigin(p, pErr, ng, bs.wi);
+                            ray                = Ray{nextOrigin, bs.wi};
+
+                            // roussian roulette
+                            RGB const rrBeta = beta * etascale;
+                            if (rrBeta.max() < 1 && depth > 1)
+                            {
+                                float q = fl::clamp01(rrBeta.max());
+                                if (sampler.get1D() < q)
+                                    break;     // kill ray
+                                beta /= 1 - q; // if survived, make it more significant
+                            }
+                        }
                     }
 
                     data.film->addSample({x, y}, L, cs.filterWeight);
@@ -176,10 +470,16 @@ namespace dmt::render_thread {
             std::construct_at<sampling::HaltonOwen>(&tlsSamplers[tidx], SamplesPerPixel, Point2i{Width, Height}, seed);
         }
 
-        Point2i startPix{0, 0};
-        Point2i tileSize{TileWidth, TileHeight};
         for (uint32_t job = 0; job < NumJobs; ++job)
         {
+            uint32_t tileX = job % NumTileX;
+            uint32_t tileY = job / NumTileX;
+
+            Point2i startPix{static_cast<int>(tileX * TileWidth), static_cast<int>(tileY * TileHeight)};
+
+            Point2i tileSize{static_cast<int>(std::min<int>(TileWidth, Width - startPix.x)),
+                             static_cast<int>(std::min<int>(TileHeight, Height - startPix.y))};
+
             jobData[job].StartPixel         = startPix;
             jobData[job].tileResolution     = tileSize;
             jobData[job].SamplesPerPixel    = SamplesPerPixel;
@@ -196,19 +496,7 @@ namespace dmt::render_thread {
             jobData[job].scene              = rtData->scene;
             jobData[job].lightTreeNodes     = lightTreeNodes;
             jobData[job].lightTreeBittrails = lightTreeBittrails;
-
-            if (job != 0 && job % NumTileX == 0)
-            {
-                startPix.x = 0;
-                startPix.y += TileHeight;
-                tileSize.x = Width;
-                tileSize.y = fminf(TileHeight, Height - startPix.y);
-            }
-            else
-            {
-                startPix.x += TileWidth;
-                tileSize.x = fminf(TileWidth, Width - startPix.x);
-            }
+            jobData[job].maxDepth           = rtData->params->maxDepth;
 
             threadpool.addJob({job::evalTile, std::bit_cast<uintptr_t>(&jobData[job])}, EJobLayer::ePriority0);
         }
@@ -216,6 +504,9 @@ namespace dmt::render_thread {
         threadpool.waitForAll();
 
         std::cout << "[RT] Finished everything" << std::endl;
+
+        // TODO better
+        film.writeImage(os::Path::executableDir() / "render.png");
     }
 } // namespace dmt::render_thread
 
@@ -226,7 +517,11 @@ namespace dmt {
     m_bigTmpMem{m_bigBuffer.get(), m_bigBufferSize},
     m_poolMem{},
     m_renderThread{render_thread::mainLoop, &m_poolMem},
+#if defined(DMT_SINGLE_THREAD)
+    m_workers{1, &m_poolMem},
+#else
     m_workers{std::thread::hardware_concurrency(), &m_poolMem},
+#endif
     m_renderThreadData{makeUniqueRef<unsigned char[]>(&m_poolMem, sizeof(render_thread::Data), alignof(render_thread::Data))}
     {
         std::construct_at(reinterpret_cast<render_thread::Data*>(m_renderThreadData.get()));

@@ -24,9 +24,10 @@ namespace dmt {
         std::pmr::string fbxBoxSmooth = "BoxSmooth.fbx";
         std::pmr::string fbxBoxDown   = "DownSysBox.fbx";
         std::pmr::string fbxBoxRight  = "RightSysBox.fbx";
+        std::pmr::string fbxBoxFlatTetured  = "BoxFlatTextured.fbx";
 
         TriangleMesh mesh;
-        bool         r = fbxPasser.ImportFBX(fbxBoxDown.c_str(), &mesh, std::pmr::get_default_resource());
+        bool         r = fbxPasser.ImportFBX(fbxBunny.c_str(), &mesh, std::pmr::get_default_resource());
 
 
         if (r)

@@ -62,7 +62,7 @@ namespace dmt::fl {
 #endif
         return ret;
     }
-    __host__ __device__ bool  nearZero(float x) { return glm::epsilonEqual(x, 0.f, eqTol()); }
+    __host__ __device__ bool  nearZero(float x, float tol) { return glm::epsilonEqual(x, 0.f, tol); }
     __host__ __device__ bool  near(float x, float y) { return glm::epsilonEqual(x, y, eqTol()); }
     __host__ __device__ float pythag(float a, float b)
     {

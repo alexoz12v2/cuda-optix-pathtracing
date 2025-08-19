@@ -18,63 +18,67 @@
 namespace dmt {
     static void jobWorkerThread(void* that)
     {
-        auto*          storage    = reinterpret_cast<ThreadPoolV2::ThreadStorage*>(that);
-        auto*          threadPool = storage->threadPool;
-        uint32_t const index      = storage->index;
-        Job            copy;
-        EJobLayer      currentLayer   = EJobLayer::eEmpty;
-        bool           otherRemaining = false;
+        auto*     storage    = reinterpret_cast<ThreadPoolV2::ThreadStorage*>(that);
+        auto*     threadPool = storage->threadPool;
+        uint32_t  index      = storage->index;
+        Job       copy;
+        EJobLayer currentLayer = EJobLayer::eEmpty;
 
-        // forever
         while (true)
         {
-            // Context ctx;
-            // wait for a job to become available
+            bool hasJob         = false;
+            bool otherRemaining = false;
+
             {
                 std::unique_lock<decltype(threadPool->m_mtx)> lk{threadPool->m_mtx};
-                if (threadPool->m_shutdownRequested)
-                {
-                    break;
-                }
 
-                EJobLayer activeLayer = currentLayer;
-                threadPool->m_cv.wait(lk, [&threadPool, &activeLayer]() {
-                    return (threadPool->m_ready && !threadPool->otherLayerActive(activeLayer)) ||
-                           threadPool->m_shutdownRequested;
+                // Wait until a job is available or shutdown is requested
+                threadPool->m_cv.wait(lk, [&]() {
+                    return threadPool->m_shutdownRequested ||
+                           (threadPool->m_ready && !threadPool->otherLayerActive(currentLayer));
                 });
-                if (threadPool->m_shutdownRequested)
-                {
-                    break;
-                }
 
-                // copy the next job
+                if (threadPool->m_shutdownRequested)
+                    break;
+
+                // Grab the next job
                 copy = threadPool->nextJob(otherRemaining, currentLayer);
 
-                threadPool->m_activeLayer = currentLayer;
-            }
+                if (copy.func)
+                {
+                    // Mark that a job is running
+                    threadPool->m_jobsInFlight.test_and_set();
+                    hasJob = true;
+                }
+            } // unlock while executing the job
 
-            // uncomment to debug
-            // static std::mutex mtx;
-            if (copy.func)
+            threadPool->m_cv.notify_all();
+
+            if (hasJob)
             {
-                //if (ctx.isValid() && ctx.isTraceEnabled())
-                //    ctx.trace("number of jobs remaining {}, func: {}",
-                //              std::make_tuple(threadPool->numJobs(currentLayer), copy.func));
-                //std::lock_guard lk{mtx};
-                threadPool->m_jobsInFlight.test_and_set();
-                //if (ctx.isValid() && ctx.isTraceEnabled())
-                //    ctx.trace("index: {}", std::make_tuple(index));
+                // Execute job outside of lock
                 copy.func(copy.data, index);
                 copy.func = nullptr;
-                --threadPool->m_numJobs;
-                if (otherRemaining)
+
                 {
-                    threadPool->m_cv.notify_all(); // 👈 Wake up another worker if more work is pending
+                    std::lock_guard<decltype(threadPool->m_mtx)> lk{threadPool->m_mtx};
+                    --threadPool->m_numJobs;
+
+                    // Clear the layer if no other jobs remain
+                    if (!threadPool->otherLayerActive(currentLayer))
+                    {
+                        threadPool->m_activeLayer = EJobLayer::eEmpty;
+                    }
+
+                    // Clear jobsInFlight only if no jobs left globally
+                    if (threadPool->m_numJobs == 0)
+                    {
+                        threadPool->m_jobsInFlight.clear();
+                    }
                 }
-                else
-                {
-                    threadPool->m_jobsInFlight.clear();
-                }
+
+                // Notify all threads to re-check the predicate
+                threadPool->m_cv.notify_all();
             }
         }
     }
@@ -237,9 +241,12 @@ namespace dmt {
     {
         while (true)
         {
-            std::lock_guard<SpinLock> lk{m_mtx};
-            if (m_numJobs == 0)
-                return;
+            {
+                std::lock_guard<SpinLock> lk{m_mtx};
+                if (m_numJobs == 0)
+                    return;
+            } // lock is released here
+
             std::this_thread::sleep_for(std::chrono::milliseconds(sleepMillis));
         }
     }

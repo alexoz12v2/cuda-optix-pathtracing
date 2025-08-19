@@ -41,6 +41,7 @@ namespace dmt {
     {
     public: // primitive creation
         DMT_CORE_API static void unitCube(TriangleMesh& mesh, int32_t matIdx = -1);
+        DMT_CORE_API static void unitPlane(TriangleMesh& mesh, int32_t matIdx = -1);
 
     public:
         DMT_CORE_API TriangleMesh(size_t cap = 256, std::pmr::memory_resource* memory = std::pmr::get_default_resource());

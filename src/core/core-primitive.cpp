@@ -6,6 +6,10 @@
     #error "Not correct CPU Arch"
 #endif
 
+//#define DMT_MOLLER_TRUMBORE
+#define DMT_BACKFACE_CULLING
+//#define DMT_LAST_RESORT
+
 namespace dmt {
     namespace triangle {
         /// TODO REMOVE AND PUT NORMAL BUFFER EXTRACTION
@@ -143,10 +147,8 @@ namespace dmt {
             return Bounds3f{Point3f{{x_min, y_min, z_min}}, Point3f{{x_max, y_max, z_max}}};
         }
 
-#define DMT_MOLLER_TRUMBORE
-
         Triisect DMT_FASTCALL
-            intersect4(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask)
+            intersect4(Ray const& ray, float tMax, float tMin, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask)
         {
 #if defined DMT_MOLLER_TRUMBORE
             // constants
@@ -156,6 +158,7 @@ namespace dmt {
             __m128i const iOne    = _mm_set1_epi32(1);
             __m128 const  signBit = _mm_set1_ps(-0.f);
             __m128 const  tMaxv   = _mm_set1_ps(tMax);
+            __m128 const  tMinv   = _mm_set1_ps(tMin);
             __m128 const  argMask = _mm_castsi128_ps(
                 _mm_set_epi32((mask & 0x08) ? -1 : 0, (mask & 0x04) ? -1 : 0, (mask & 0x02) ? -1 : 0, (mask & 0x01) ? -1 : 0));
 
@@ -230,7 +233,8 @@ namespace dmt {
             __m128 const v = _mm_mul_ps(vDetNum, invDet);
 
             // v >= -tol && (u + v) <= 1 + tol
-            __m128 const vMask = _mm_and_ps(_mm_cmp_ps(v, mtol, _CMP_GE_OQ), _mm_cmp_ps(_mm_add_ps(u, v), one, _CMP_LE_OQ));
+            __m128 const uPlusv = _mm_add_ps(u, v);
+            __m128 const vMask  = _mm_and_ps(_mm_cmp_ps(v, mtol, _CMP_GE_OQ), _mm_cmp_ps(uPlusv, one, _CMP_LE_OQ));
 
             // tDetNum = det[oMv0, e1, e2] = dot(e2, cross(oMv0, e1)) = dot(e2, oMv0_Xe1)
             __m128 const tDetNum = _mm_add_ps(_mm_add_ps(_mm_mul_ps(e2x, oMv0_Xe1x), _mm_mul_ps(e2y, oMv0_Xe1y)),
@@ -238,7 +242,8 @@ namespace dmt {
             __m128 const t       = _mm_mul_ps(tDetNum, invDet);
 
             // t >= -tol && t <= tMax
-            __m128 const tMask = _mm_and_ps(_mm_cmp_ps(t, mtol, _CMP_GE_OQ), _mm_cmp_ps(t, tMaxv, _CMP_LE_OQ));
+            __m128 const tMask = _mm_and_ps(_mm_and_ps(_mm_cmp_ps(t, mtol, _CMP_GE_OQ), _mm_cmp_ps(t, tMaxv, _CMP_LE_OQ)),
+                                            _mm_cmp_ps(t, tMinv, _CMP_GT_OQ));
 
             // extract best result
             __m128 const finalMask = _mm_and_ps(argMask, _mm_and_ps(_mm_and_ps(detMask, uMask), _mm_and_ps(vMask, tMask)));
@@ -279,12 +284,13 @@ namespace dmt {
                         .index = static_cast<uint32_t>(bestIndex)};
             }
 #else
-    #error "not implemented"
+            //#error "not implemented"
             return Triisect::nothing();
 #endif
         }
 
-        Triisect DMT_FASTCALL intersect8(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s)
+        Triisect DMT_FASTCALL
+            intersect8(Ray const& ray, float tMax, float tMin, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s)
         {
 #if defined DMT_MOLLER_TRUMBORE
             // constants
@@ -294,6 +300,7 @@ namespace dmt {
             __m256i const iOne    = _mm256_set1_epi32(1);
             __m256 const  signBit = _mm256_set1_ps(-0.f);
             __m256 const  tMaxv   = _mm256_set1_ps(tMax);
+            __m256 const  tMinv   = _mm256_set1_ps(tMin);
 
             // ray
             __m256 const dx = _mm256_set1_ps(ray.d.x);
@@ -375,7 +382,9 @@ namespace dmt {
             __m256 const t = _mm256_mul_ps(tDetNum, invDet);
 
             // t >= -tol && t <= tMax
-            __m256 const tMask = _mm256_and_ps(_mm256_cmp_ps(t, mtol, _CMP_GE_OQ), _mm256_cmp_ps(t, tMaxv, _CMP_LE_OQ));
+            __m256 const tMask = _mm256_and_ps(_mm256_and_ps(_mm256_cmp_ps(t, mtol, _CMP_GE_OQ),
+                                                             _mm256_cmp_ps(t, tMaxv, _CMP_LE_OQ)),
+                                               _mm256_cmp_ps(t, tMinv, _CMP_GT_OQ));
 
             // extract best result
             __m256 const mask = _mm256_and_ps(_mm256_and_ps(detMask, uMask), _mm256_and_ps(vMask, tMask));
@@ -416,18 +425,20 @@ namespace dmt {
                         .index = static_cast<uint32_t>(bestIndex)};
             }
 #else
-    #error "not implemented"
+            //#error "not implemented"
             return Triisect::nothing();
 #endif
         }
 
-        Triisect DMT_FASTCALL intersect(Ray const& ray, float tMax, Point3f v0, Point3f v1, Point3f v2, uint32_t index)
+#if 0
+        Triisect DMT_FASTCALL intersect(Ray const& ray, float tMax, float tMin, Point3f v0, Point3f v1, Point3f v2, uint32_t index)
         {
-#if defined DMT_MOLLER_TRUMBORE
+    #if defined DMT_MOLLER_TRUMBORE
             // moller trumbore algorithm https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
             Vector3f const         e1  = v1 - v0;
             Vector3f const         e2  = v2 - v0;
-            static constexpr float tol = Triisect::tol;
+            static constexpr float tol = -Triisect::tol;
+
             // det[a, b, c] = a . (b x c) -> all cyclic permutations + cross is anticommutative
             Vector3f const h = cross(ray.d, e2);
             float const    a = dot(e1, h);
@@ -447,11 +458,11 @@ namespace dmt {
                 return Triisect::nothing();
 
             float const t = f * dot(e2, q);
-            if (t < -tol || t > tMax)
+            if (t <= tMin || t > tMax)
                 return Triisect::nothing();
 
             return {.u = fl::clamp01(u), .v = fl::clamp01(v), .w = fl::clamp01(1.f - u - v), .t = t, .index = index};
-#else
+    #else
             // Woop's watertight algorithm https://jcgt.org/published/0002/01/05/paper.pdf
             // calculate dimension where the ray direction is maximal
             int32_t kz = maxComponentIndex(ray.d);
@@ -503,13 +514,13 @@ namespace dmt {
             }
 
             // Perform edge tests. Moving this test before and at the end of the previous conditional gives higher performance
-    #ifdef DMT_BACKFACE_CULLING
+        #ifdef DMT_BACKFACE_CULLING
             if (U < 0.0f || V < 0.0f || W < 0.0f)
                 return Triisect::nothing();
-    #else
+        #else
             if ((U < 0.0f || V < 0.0f || W < 0.0f) && (U > 0.0f || V > 0.0f || W > 0.0f))
                 return Triisect::nothing();
-    #endif
+        #endif
 
             // calculate determinant
             float const det = U + V + W;
@@ -521,14 +532,15 @@ namespace dmt {
             float const Bz = Sz * B[kz];
             float const Cz = Sz * C[kz];
             float const T  = U * Az + V * Bz + W * Cz;
-    #ifdef DMT_BACKFACE_CULLING
-            if (T < 0.0f || T > tMax * det)
+        #ifdef DMT_BACKFACE_CULLING
+            if (T < tMin * det || T > tMax * det)
                 return Triisect::nothing();
-    #else
+        #else
             int det_sign = fl::signBit(det);
-            if (fl::xorf(T, det_sign) < 0.0f || fl::xorf(T, det_sign) > tMax * fl::xorf(det, det_sign))
+            if (fl::xorf(T, det_sign) < tMin * fl::xorf(det, det_sign) ||
+                fl::xorf(T, det_sign) > tMax * fl::xorf(det, det_sign))
                 return Triisect::nothing();
-    #endif
+        #endif
             // normalize U, V, W, and T
             float const rcpDet = 1.0f / det;
             float const u      = U * rcpDet;
@@ -537,7 +549,126 @@ namespace dmt {
             float const t      = T * rcpDet;
 
             return {.u = u, .v = v, .w = w, .t = t};
+    #endif
+        }
 #endif
+
+        Triisect DMT_FASTCALL intersect(Ray const& ray, float tMax, float tMin, Point3f v0, Point3f v1, Point3f v2, uint32_t index)
+        {
+            // 1) choose k by absolute max component (robust for grazing)
+            auto maxComponentIndexAbs = [](Vector3f const& v) -> int {
+                float ax = fabsf(v.x), ay = fabsf(v.y), az = fabsf(v.z);
+                if (az > ax && az > ay)
+                    return 2;
+                if (ay > ax)
+                    return 1;
+                return 0;
+            };
+            int kz = maxComponentIndexAbs(ray.d);
+            int kx = (kz + 1) % 3;
+            int ky = (kx + 1) % 3;
+            // keep the original Woop sign swap (preserve winding)
+            if (ray.d[kz] < 0.0f)
+                std::swap(kx, ky);
+
+            // shear constants (kz guaranteed to be nonzero-ish because chosen by abs max)
+            float const Sx = ray.d[kx] / ray.d[kz];
+            float const Sy = ray.d[ky] / ray.d[kz];
+            float const Sz = 1.0f / ray.d[kz];
+
+            // vertices relative to ray origin
+            Vector3f const A = v0 - ray.o;
+            Vector3f const B = v1 - ray.o;
+            Vector3f const C = v2 - ray.o;
+
+            // shear & scale
+            float const Ax = A[kx] - Sx * A[kz];
+            float const Ay = A[ky] - Sy * A[kz];
+            float const Bx = B[kx] - Sx * B[kz];
+            float const By = B[ky] - Sy * B[kz];
+            float const Cx = C[kx] - Sx * C[kz];
+            float const Cy = C[ky] - Sy * C[kz];
+
+            // scaled barycentrics
+            float U = Cx * By - Cy * Bx;
+            float V = Ax * Cy - Ay * Cx;
+            float W = Bx * Ay - By * Ax;
+
+            // double fallback (no clamp)
+            if (fl::nearZero(U, 0x1.0p-9f) || fl::nearZero(V, 0x1.0p-9f) || fl::nearZero(W, 0x1.0p-9f))
+            {
+                double CxBy = (double)Cx * (double)By;
+                double CyBx = (double)Cy * (double)Bx;
+                U           = (float)(CxBy - CyBx);
+                double AxCy = (double)Ax * (double)Cy;
+                double AyCx = (double)Ay * (double)Cx;
+                V           = (float)(AxCy - AyCx);
+                double BxAy = (double)Bx * (double)Ay;
+                double ByAx = (double)By * (double)Ax;
+                W           = (float)(BxAy - ByAx);
+            }
+
+            // scaled epsilon = relative to triangle size (avoid absolute tiny thresholds)
+            float triMax = fmaxf(fmaxf(fabsf(Ax), fabsf(Ay)),
+                                 fmaxf(fabsf(Bx), fmaxf(fabsf(By), fmaxf(fabsf(Cx), fabsf(Cy)))));
+            float eps    = 1e-7f * fmaxf(1.0f, triMax); // tune factor if needed
+
+#ifdef DMT_BACKFACE_CULLING
+            // tie-break rule: make one barycentric exclusive (W <= eps) and others inclusive
+            if (U < -eps || V < -eps || W <= eps) // allow tiny positive W but reject <= eps
+                return Triisect::nothing();
+#else
+            // two-sided: reject if signs mixed beyond eps
+            bool anyNeg = (U < -eps) || (V < -eps) || (W < -eps);
+            bool anyPos = (U > eps) || (V > eps) || (W > eps);
+            if (anyNeg && anyPos)
+                return Triisect::nothing();
+#endif
+
+            float const det = U + V + W;
+#ifdef DMT_BACKFACE_CULLING
+            // require det sufficiently positive
+            if (det <= eps)
+                return Triisect::nothing();
+#else
+            if (fabsf(det) <= eps)
+                return Triisect::nothing();
+#endif
+
+            // scaled z coords and T
+            float const Az = Sz * A[kz];
+            float const Bz = Sz * B[kz];
+            float const Cz = Sz * C[kz];
+            float const T  = U * Az + V * Bz + W * Cz;
+
+            // t interval test (use scaled det)
+            if (T < tMin * det || T > tMax * det)
+                return Triisect::nothing();
+
+            float const rcpDet = 1.0f / det;
+            float const u      = U * rcpDet;
+            float const v      = V * rcpDet;
+            float const w      = W * rcpDet;
+            float const t      = T * rcpDet;
+
+            // LAST RESORT: ensure geometric normal faces the ray (avoid backface sneaking through)
+            // If you *prefer* no hit on grazing cases, replace next block with `if (det <= eps) return nothing;`.
+            {
+                Vector3f ng     = normalize(cross(v1 - v0, v2 - v0));
+                float    facing = dot(ng, -ray.d); // positive if ng faces the ray
+                if (facing <= 0.0f)
+                {
+#ifdef DMT_BACKFACE_CULLING
+                    // backface got through; treat as miss
+                    return Triisect::nothing();
+#else
+                    // flip normal for two-sided shading if desired (we still report hit)
+                    // ng = -ng;
+#endif
+                }
+            }
+
+            return {.u = u, .v = v, .w = w, .t = t};
         }
 
         Intersection DMT_FASTCALL fromTrisect(Triisect trisect, Ray const& ray, RGB color, Point2f uv)
@@ -574,7 +705,7 @@ namespace dmt {
     // -- intersect --
     Intersection Triangle::intersect(Ray const& ray, float tMax) const
     {
-        triangle::Triisect const trisect = triangle::intersect(ray, tMax, tri.v0, tri.v1, tri.v2, 0);
+        triangle::Triisect const trisect = triangle::intersect(ray, tMax, 1e-4f, tri.v0, tri.v1, tri.v2, 0);
         return triangle::fromTrisect(trisect, ray, tri.color);
     }
 
@@ -590,7 +721,7 @@ namespace dmt {
             v1s[i] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
             v2s[i] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
         }
-        triangle::Triisect const trisect = triangle::intersect4(ray, fl::infinity(), v0s, v1s, v2s, 0x3);
+        triangle::Triisect const trisect = triangle::intersect4(ray, fl::infinity(), 1e-4f, v0s, v1s, v2s, 0x3);
         assert(trisect.index < 2 && "out of bounds triangle2 intersection index");
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
     }
@@ -606,7 +737,7 @@ namespace dmt {
             v1s[j] = {xs[3 * j + 1], ys[3 * j + 1], zs[3 * j + 1]};
             v2s[j] = {xs[3 * j + 2], ys[3 * j + 2], zs[3 * j + 2]};
         }
-        triangle::Triisect const trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
+        triangle::Triisect const trisect = triangle::intersect4(ray, tMax, 1e-4f, v0s, v1s, v2s, 0xf);
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
     }
 
@@ -622,7 +753,7 @@ namespace dmt {
             v2s[i] = {xs[3 * i + 2], ys[3 * i + 2], zs[3 * i + 2]};
         }
 
-        triangle::Triisect const trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
+        triangle::Triisect const trisect = triangle::intersect8(ray, tMax, 1e-4f, v0s, v1s, v2s);
         return triangle::fromTrisect(trisect, ray, colors[trisect.index]);
     }
 
@@ -732,7 +863,7 @@ namespace dmt {
     {
         auto const [p0, p1, p2] = worldSpacePts(triIdx);
 
-        triangle::Triisect const trisect = triangle::intersect(ray, tMax, p0, p1, p2, 0);
+        triangle::Triisect const trisect = triangle::intersect(ray, tMax, 1e-4f, p0, p1, p2, 0);
 
         auto ret = triangle::fromTrisect(trisect,
                                          ray,
@@ -810,7 +941,7 @@ namespace dmt {
         Point3f v1s[2]{};
         Point3f v2s[2]{};
         fillIndexedVerts<2>(this, triIdxs, v0s, v1s, v2s);
-        triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0x3);
+        triangle::Triisect trisect = triangle::intersect4(ray, tMax, 1e-4f, v0s, v1s, v2s, 0x3);
 
         auto ret = triangle::fromTrisect(trisect,
                                          ray,
@@ -830,7 +961,7 @@ namespace dmt {
         Point3f v1s[4]{};
         Point3f v2s[4]{};
         fillIndexedVerts<4>(this, triIdxs, v0s, v1s, v2s);
-        triangle::Triisect trisect = triangle::intersect4(ray, tMax, v0s, v1s, v2s, 0xf);
+        triangle::Triisect trisect = triangle::intersect4(ray, tMax, 1e-4f, v0s, v1s, v2s, 0xf);
 
         auto ret = triangle::fromTrisect(trisect,
                                          ray,
@@ -850,7 +981,7 @@ namespace dmt {
         Point3f v1s[8]{};
         Point3f v2s[8]{};
         fillIndexedVerts<8>(this, triIdxs, v0s, v1s, v2s);
-        triangle::Triisect trisect = triangle::intersect8(ray, tMax, v0s, v1s, v2s);
+        triangle::Triisect trisect = triangle::intersect8(ray, tMax, 1e-4f, v0s, v1s, v2s);
 
         auto ret = triangle::fromTrisect(trisect,
                                          ray,

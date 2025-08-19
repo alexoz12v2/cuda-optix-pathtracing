@@ -347,7 +347,7 @@ namespace dmt::fl {
     DMT_CORE_API DMT_CPU_GPU float rsqrt(float x);
     DMT_CORE_API DMT_CPU_GPU float abs(float x);
     DMT_CORE_API DMT_CPU_GPU float rcp(float x);
-    DMT_CORE_API DMT_CPU_GPU bool  nearZero(float x);
+    DMT_CORE_API DMT_CPU_GPU bool  nearZero(float x, float tol = eqTol());
     DMT_CORE_API DMT_CPU_GPU bool  near(float x, float y);
     // Helper to compute (a^2 + b^2)^1/2 without overflow or underflow
     DMT_CORE_API DMT_CPU_GPU float pythag(float a, float b);

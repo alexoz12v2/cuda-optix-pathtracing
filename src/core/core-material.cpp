@@ -130,6 +130,7 @@ namespace dmt {
             result.eta = 1.f;
             result.wi  = wr;
             result.wm  = ns;
+            assert(dot(result.wi, ns) > 0);
             return result;
         }
 
@@ -210,6 +211,7 @@ namespace dmt {
         // --- Step 3: Early exit for pure diffuse ---
         if (metallic <= 0.f && material.isDiffuseOpaque)
         {
+            assert(dot(ns, wo) > 0);
             oren_nayar::BRDF
                   brdf = oren_nayar::makeParams(roughness, diffuse, ns, wi, material.multiscatterMultiplier, {1, 1, 1});
             float pdf  = std::max(0.f, dot(ns, wi)) * fl::rcpPi(); // cosine-weighted hemisphere pdf

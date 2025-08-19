@@ -14,34 +14,39 @@
 // TODO remove
 #define DMT_SINGLE_THREAD
 #define DMT_DBG_PIXEL
-#define DMT_DBG_PIXEL_X     57
-#define DMT_DBG_PIXEL_Y     60
-#define DMT_DBG_SAMPLEINDEX 0x15
+#define DMT_DBG_PIXEL_X     0x2f
+#define DMT_DBG_PIXEL_Y     0x35
+#define DMT_DBG_SAMPLEINDEX 0x4
+#define DMT_DBG_DEPTH       0x0
+#define DMT_PBRT_HITERROR
 
 namespace dmt {
-    // conservative gamma helper if you don't have PBRT's
-    static inline float myGamma(int n)
-    {
-        float const eps = std::numeric_limits<float>::epsilon(); // ~1.19e-7
-        return (n * eps) / (1.f - n * eps);
-    }
-
     // make absolute-value vector
     static inline Vector3f absVec(Vector3f v) { return Vector3f{fabsf(v.x), fabsf(v.y), fabsf(v.z)}; }
 
     // estimate hit error from position differentials (conservative)
+#if !defined(DMT_PBRT_HITERROR)
     static inline Vector3f estimateHitError(Vector3f dpdx, Vector3f dpdy, Point3f p)
+#else
+    static inline Vector3f estimateHitError(float b0, float b1, float b2, Point3f p0, Point3f p1, Point3f p2)
+#endif
     {
+#if !defined(DMT_PBRT_HITERROR)
         // differential-based error (like PBRT)
-        Vector3f err = (absVec(dpdx) + absVec(dpdy)) * myGamma(5);
+        Vector3f err = (absVec(dpdx) + absVec(dpdy)) * fl::gamma(5);
 
         // add a tiny absolute epsilon proportional to the magnitude of p
         // this avoids underflow when dpdx/dpdy are tiny or missing
-        float    maxAbsP = fmaxf(fmaxf(fabsf(p.x), fabsf(p.y)), fabsf(p.z));
+        float    maxAbsP = fmaxf(fmaxf(fabsf(p.x), fabsf(p.y)), fabsf(p.z)) + 1e-4f;
         float    absEps  = fmaxf(1e-6f, 8.0f * std::numeric_limits<float>::epsilon() * maxAbsP);
         Vector3f absErr  = Vector3f::s(absEps);
 
         return err + absErr;
+#else
+        Point3f  pAbsSum = Point3f{abs(b0 * p0)} + abs(b1 * p1) + abs(b2 * p2);
+        Vector3f pError  = fl::gamma(7) * Vector3f(pAbsSum);
+        return pError;
+#endif
     }
 
     static inline Point3f offsetRayOrigin(Point3f p, Vector3f pError, Normal3f ng, Vector3f w)
@@ -52,11 +57,11 @@ namespace dmt {
 
         // add a tiny absolute safety margin to ensure robust separation
         // the constant below can be tuned; 1e-4 is conservative for typical meters-scale scenes
-        constexpr float extraMargin = 1e-4f;
-        d += extraMargin;
+        // constexpr float extraMargin = 2e-3f;
+        // d += extraMargin;
 
         // choose direction away from the surface relative to ray direction w
-        Vector3f offset = (dot(w, n) > 0.f) ? n * d : -n * d;
+        Vector3f offset = n * d;
 
         Point3f po = p + offset;
 
@@ -117,7 +122,11 @@ namespace dmt::job {
                 if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y)
                     int i = 0;
 #endif
-                std::cout << "[Thread " << tid << "] Pixel " << x << " " << y << std::endl;
+                // TODO remove
+                {
+                    Context ctx;
+                    ctx.log("[Thread {}] Pixel {} {}", std::make_tuple(tid, x, y));
+                }
                 for (int32_t sampleIndex = 0; sampleIndex < data.SamplesPerPixel; ++sampleIndex)
                 {
 #if defined(DMT_DBG_PIXEL)
@@ -139,6 +148,20 @@ namespace dmt::job {
 
                     while (true)
                     {
+                        // TODO remove
+                        if (data.StartPixel.x != 0 && data.StartPixel.y != 0)
+                        {
+                            Context ctx;
+                            ctx.log("[Thread {}]  Ray O {} {} {} Ray D {} {} {}",
+                                    std::make_tuple(tid, ray.o.x, ray.o.y, ray.o.z, ray.d.x, ray.d.y, ray.d.z));
+                        }
+
+#if defined(DMT_DBG_PIXEL)
+                        if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y && sampleIndex == DMT_DBG_SAMPLEINDEX &&
+                            depth == DMT_DBG_DEPTH)
+                            int i = 0;
+#endif
+
                         // 1. Trace Rays towards scene to find an intersection (Main Path)
                         uint32_t           instanceIdx = 0;
                         size_t             triIdx      = 0;
@@ -214,12 +237,22 @@ namespace dmt::job {
                             Normal3f const ngObj = normalFrom(n0 + n1 + n2);
                             Normal3f const ng    = xform(ngObj);
 
+                            // TODO remove
+                            if (bool cameraRay = depth == 1; cameraRay)
+                            {
+                                assert(dot(ng, -ray.d) > 0 && "Camera ray cannot intersect backface");
+                            }
+
                             Vector3f dpdx, dpdy;
                             data.diffCtx.p = p;
                             data.diffCtx.n = ng;
                             approximate_dp_dxy(data.diffCtx, &dpdx, &dpdy);
 
+#if defined(DMT_PBRT_HITERROR)
+                            Vector3f const pErr = estimateHitError(trisect.u, trisect.w, trisect.w, p0, p1, p2);
+#else
                             Vector3f const pErr = estimateHitError(dpdx, dpdy, p);
+#endif
 
                             UVDifferentialsContext uvCtx{};
                             uvCtx.dpdu = dpdu;

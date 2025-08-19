@@ -158,14 +158,31 @@ namespace dmt {
         mesh.addIndexedTriangle({6, 0, 5}, {2, 0, 6}, {3, 0, 3}, matIdx) //
             .addIndexedTriangle({6, 0, 5}, {3, 0, 3}, {7, 0, 4}, matIdx);
         // TOP (+Z)
-        mesh.addIndexedTriangle({3, 4, 3}, {0, 4, 12}, {4, 4, 13}, matIdx) //
-            .addIndexedTriangle({3, 4, 3}, {4, 4, 13}, {7, 4, 2}, matIdx);
+        mesh.addIndexedTriangle({0, 4, 12}, {3, 4, 3}, {4, 4, 13}, matIdx) //
+            .addIndexedTriangle({4, 4, 13}, {3, 4, 3}, {7, 4, 2}, matIdx);
         // BACK (-Y)
         mesh.addIndexedTriangle({7, 2, 2}, {4, 2, 13}, {5, 2, 0}, matIdx) //
             .addIndexedTriangle({7, 2, 2}, {5, 2, 0}, {6, 2, 1}, matIdx);
         // BOTTOM (-Z)
-        mesh.addIndexedTriangle({6, 5, 7}, {5, 5, 8}, {1, 5, 9}, matIdx) //
-            .addIndexedTriangle({6, 5, 7}, {1, 5, 9}, {2, 5, 6}, matIdx);
+        mesh.addIndexedTriangle({1, 5, 9}, {5, 5, 8}, {6, 5, 7}, matIdx) //
+            .addIndexedTriangle({2, 5, 6}, {1, 5, 9}, {6, 5, 7}, matIdx);
+    }
+
+    void TriangleMesh::unitPlane(TriangleMesh& mesh, int32_t matIdx)
+    {
+        static constexpr float center     = 0.f;
+        static constexpr float halfExtent = 0.5f;
+
+        mesh.addPosition({center - halfExtent, center - halfExtent, 0})
+            .addPosition({center + halfExtent, center - halfExtent, 0})
+            .addPosition({center - halfExtent, center + halfExtent, 0})
+            .addPosition({center + halfExtent, center + halfExtent, 0});
+
+        mesh.addNormal({0, 0, 1});
+        mesh.addUV({0, 0}).addUV({1, 0}).addUV({0, 1}).addUV({1, 1});
+
+        mesh.addIndexedTriangle({0, 0, 0}, {3, 0, 3}, {2, 0, 2}, matIdx) //
+            .addIndexedTriangle({0, 0, 0}, {1, 0, 1}, {3, 0, 3}, matIdx);
     }
 
     Scene::Scene(std::pmr::memory_resource* memory) : geometry{memory}, instances{memory}, m_memory{memory} {}

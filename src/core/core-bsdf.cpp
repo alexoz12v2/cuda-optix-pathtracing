@@ -39,7 +39,7 @@ namespace dmt {
         Vector3f const R = 2 * dot(N, I) * N - I;
 
         float Iz = dot(I, Ng);
-        assert(Iz >= 0);
+        assert(Iz >= 0); // TODO remove, caller should flip Normals
 
         // Reflection rays may always be at least as shallow as the incoming ray.
         float const threshold = fminf(0.9f * Iz, 0.01f);

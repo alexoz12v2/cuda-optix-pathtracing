@@ -498,6 +498,29 @@ namespace dmt {
             makeSpotLight(Transform::translate({1, 1, 1}) * Transform::rotate(75.f, Vector3f::zAxis()), {1, 0.5, 1}, 0.707, 0.93));
         testScene(renderer.scene);
 
+        { // plane
+            SurfaceMaterial mat{};
+            mat.anisotropy    = 1.f;
+            mat.ior           = 1.4;
+            mat.eta           = {0.155f, 0.424f, 1.345};
+            mat.etak          = {3.911f, 2.345f, 1.770f};
+            mat.metallicvalue = 1.f;
+            renderer.scene.materials.push_back(mat);
+
+            renderer.scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(std::pmr::get_default_resource()));
+            TriangleMesh& mesh = *renderer.scene.geometry.back();
+            TriangleMesh::unitPlane(mesh, 1);
+
+            renderer.scene.instances.emplace_back(makeUniqueRef<Instance>(std::pmr::get_default_resource()));
+            auto& cubeInstance   = *renderer.scene.instances.back();
+            cubeInstance.meshIdx = 1;
+
+            Transform const t = Transform::translate({0, 0, -1}) * Transform::scale(3.f);
+            extractAffineTransform(t.m, cubeInstance.affineTransform);
+            cubeInstance.bounds = renderer.scene.geometry[cubeInstance.meshIdx]->transformedBounds(t);
+            cubeInstance.color  = {0.3f, 0.7f, 0.6f};
+        }
+
         SurfaceMaterial& mat = renderer.scene.materials[0];
         mat.texMatMap |= SurfaceMaterial::DiffuseMask;
 
@@ -531,6 +554,7 @@ namespace dmt {
 
         renderer.params.cameraDirection = normalFrom({0.f, 1.f, -0.5f});
         renderer.params.samplesPerPixel = 32;
+        renderer.params.maxDepth        = 10;
 
         os::Path back = os::Path::executableDir() / "kloppenheim_02_2k.exr";
 

@@ -818,7 +818,8 @@ namespace dmt::bvh {
         uint8_t const signIndex = (raySignZ << 2) | (raySignY << 1) | raySignX;
 
         float const initial_tNear = 1e-5f;
-        float       scalar_tFar   = 1e5f; // scalar cutoff updated from leaf hits
+        float const tMin_Leaves   = 0x1.0p-9; // 2^-9, which is 0.000195..., nearest power of two bigger than 1mm
+        float       scalar_tFar   = 1e5f;     // scalar cutoff updated from leaf hits
         __m256      tNear         = _mm256_set1_ps(initial_tNear);
         __m256      tFarVec       = _mm256_set1_ps(scalar_tFar); // will be updated when isect changes
 
@@ -943,9 +944,16 @@ namespace dmt::bvh {
                 // Here I assume triangle::intersect4/intersect exist and return Triisect
                 // with .hit boolean and .t and indices.
                 uint32_t i = 0, j = 0, k = 0;
+#if 0
                 while (remaining >= 4)
                 {
-                    auto sect = triangle::intersect4(ray, isect.t, leaf->v0s + currIdx, leaf->v1s + currIdx, leaf->v2s + currIdx, 0xF);
+                    auto sect = triangle::intersect4(ray,
+                                                     isect.t,
+                                                     tMin_Leaves,
+                                                     leaf->v0s + currIdx,
+                                                     leaf->v1s + currIdx,
+                                                     leaf->v2s + currIdx,
+                                                     0xF);
                     sect.index += (i << 2);
                     remaining -= 4;
                     currIdx += 4;
@@ -961,7 +969,13 @@ namespace dmt::bvh {
                 }
                 while (remaining >= 2)
                 {
-                    auto sect = triangle::intersect4(ray, isect.t, leaf->v0s + currIdx, leaf->v1s + currIdx, leaf->v2s + currIdx, 0x3);
+                    auto sect = triangle::intersect4(ray,
+                                                     isect.t,
+                                                     tMin_Leaves,
+                                                     leaf->v0s + currIdx,
+                                                     leaf->v1s + currIdx,
+                                                     leaf->v2s + currIdx,
+                                                     0x3);
                     sect.index += (i << 2) + (j << 1);
                     remaining -= 2;
                     currIdx += 2;
@@ -974,9 +988,16 @@ namespace dmt::bvh {
                     }
                     ++j;
                 }
+#endif
                 while (remaining > 0)
                 {
-                    auto sect = triangle::intersect(ray, isect.t, leaf->v0s[currIdx], leaf->v1s[currIdx], leaf->v2s[currIdx], 0);
+                    auto sect = triangle::intersect(ray,
+                                                    isect.t,
+                                                    tMin_Leaves,
+                                                    leaf->v0s[currIdx],
+                                                    leaf->v1s[currIdx],
+                                                    leaf->v2s[currIdx],
+                                                    0);
                     sect.index += (i << 2) + (j << 1) + k;
                     --remaining;
                     ++currIdx;
@@ -1005,6 +1026,11 @@ namespace dmt::bvh {
         // After traversal, if we found a hit, write out hit info and return true
         if (isect && isect.t < 1e5f)
         {
+#if defined(DMT_DEBUG)
+            //assert(isect.t > tMin_Leaves);
+            if (isect.t < 0.f || isect.t < tMin_Leaves)
+                __debugbreak();
+#endif
             *outTri = isect;
             return true;
         }

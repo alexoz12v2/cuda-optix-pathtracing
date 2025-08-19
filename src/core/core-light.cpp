@@ -201,7 +201,7 @@ namespace dmt {
 
     static float spotLightAttenuation(SpotLight const& light, Vector3f rayD)
     {
-        assert(rayD.z > 0);
+        // assert(rayD.z > 0); // TODO if negative should return 0 hopefully?
         float cosTheta = rayD.z; // assuming normalized direction in light space
         return smoothstep(light.cosHalfLargerSpread, light.cosHalfSpotAngle, cosTheta);
     }

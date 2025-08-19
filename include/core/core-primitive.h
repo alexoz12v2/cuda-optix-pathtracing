@@ -142,7 +142,7 @@ namespace dmt {
 namespace dmt::triangle {
     struct DMT_CORE_API Triisect
     {
-        static constexpr float tol = 1e-7f; // or 6
+        static constexpr float tol = 0; //5e-5f;
 
         float    u;
         float    v;
@@ -161,12 +161,13 @@ namespace dmt::triangle {
 
     Intersection DMT_FASTCALL DMT_CORE_API fromTrisect(Triisect trisect, Ray const& ray, RGB color, Point2f uv = {0, 0});
 
-    Triisect DMT_FASTCALL DMT_CORE_API intersect(Ray const& ray, float tMax, Point3f v0, Point3f v1, Point3f v2, uint32_t index);
+    Triisect DMT_FASTCALL DMT_CORE_API
+        intersect(Ray const& ray, float tMax, float tMin, Point3f v0, Point3f v1, Point3f v2, uint32_t index);
 
     // 0x3 -> intersect2, 0xf -> intersect4
     Triisect DMT_FASTCALL DMT_CORE_API
-        intersect4(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask);
+        intersect4(Ray const& ray, float tMax, float tMin, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s, int32_t mask);
 
     Triisect DMT_FASTCALL DMT_CORE_API
-        intersect8(Ray const& ray, float tMax, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s);
+        intersect8(Ray const& ray, float tMax, float tMin, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s);
 } // namespace dmt::triangle

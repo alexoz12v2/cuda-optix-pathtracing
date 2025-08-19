@@ -39,6 +39,8 @@ namespace dmt {
         return hashCRC64(path.toUnderlying(&scratch));
     }
 
+    DMT_FORCEINLINE uint64_t baseKeyFromPath(std::string_view path) { return hashCRC64(path); }
+
     /// - its static method creates, from the `ImageTexturev2` object, a temporary file which will be deleted
     ///   upon process termination. Such a file stores a header of metadata about the uncompressed image, such as
     ///    - pixel format (and size)

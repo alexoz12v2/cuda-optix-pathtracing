@@ -7,7 +7,7 @@
 
 #define N       16
 #define MASK    ((unsigned)(1 << (N - 1)) + (1 << (N - 1)) - 1)
-#define LOW(x)  ((unsigned)(x)&MASK)
+#define LOW(x)  ((unsigned)(x) & MASK)
 #define HIGH(x) LOW((x) >> N)
 #define MUL(x, y, z)                    \
     {                                   \

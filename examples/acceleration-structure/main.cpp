@@ -279,14 +279,10 @@ namespace dmt::test {
         Context ctx;
         assert(ctx.isValid() && "Need valid context");
 
-        Bounds3f const sceneBounds = std::transform_reduce(
-            scene.begin(),
-            scene.end(),
-            bbEmpty(),
-            [](dmt::Bounds3f a, dmt::Bounds3f b) { return bbUnion(a, b); },
-            [](TriangleData const& t) {
-            return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)};
-            });
+        Bounds3f const
+            sceneBounds = std::transform_reduce(scene.begin(), scene.end(), bbEmpty(), [](dmt::Bounds3f a, dmt::Bounds3f b) {
+            return bbUnion(a, b);
+        }, [](TriangleData const& t) { return Bounds3f{min(min(t.v0, t.v1), t.v2), max(max(t.v0, t.v1), t.v2)}; });
 
         Bounds3f const primsBounds = std::transform_reduce( //
             spanPrims.begin(),

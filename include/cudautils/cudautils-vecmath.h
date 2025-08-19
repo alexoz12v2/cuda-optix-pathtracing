@@ -909,6 +909,15 @@ namespace dmt {
                 0.f, 0.f, 0.f, 1.f  // column three
             }};
         }
+        static DMT_CPU_GPU inline constexpr Matrix4f rowWise(float const arr[16]) {
+            return {{
+                arr[0], arr[4], arr[8],  arr[12],
+                arr[1], arr[5], arr[9],  arr[13],
+                arr[2], arr[6], arr[10], arr[14],
+                arr[3], arr[7], arr[11], arr[15],
+            }};
+        }
+
         // clang-format on
         DMT_CPU_GPU inline float&          operator[](Index2 i) { return m[i.col * 4 + i.row]; }
         DMT_CPU_GPU inline float const&    operator[](Index2 i) const { return m[i.col * 4 + i.row]; }

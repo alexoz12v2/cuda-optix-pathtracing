@@ -14,9 +14,9 @@
 // TODO remove
 #define DMT_SINGLE_THREAD
 #define DMT_DBG_PIXEL
-#define DMT_DBG_PIXEL_X     62
-#define DMT_DBG_PIXEL_Y     49
-#define DMT_DBG_SAMPLEINDEX 9
+#define DMT_DBG_PIXEL_X     57
+#define DMT_DBG_PIXEL_Y     60
+#define DMT_DBG_SAMPLEINDEX 0x15
 
 namespace dmt {
     // conservative gamma helper if you don't have PBRT's
@@ -315,10 +315,14 @@ namespace dmt::job {
 
                                 if (Le.max() > 0.f)
                                 {
-                                    float const pdfLight = pmfs[shadowRayIdx] * ls[shadowRayIdx].pdf;
+                                    float pdfLight = ls[shadowRayIdx].pdf;
+                                    pdfLight *= pmfs[shadowRayIdx];
 
                                     // TODO account for 0 radiance paths in statistics
-                                    L += beta * (Le * eval.f / (pdfLight + eval.pdf)); // pdfLight / pdfLight simplified from MIS
+                                    if (ls[shadowRayIdx].delta)
+                                        L += beta * Le * eval.f / pdfLight;
+                                    else
+                                        L += beta * (Le * eval.f / (pdfLight + eval.pdf)); // pdfLight / pdfLight simplified from MIS
                                 }
                             }
 

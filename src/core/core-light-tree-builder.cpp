@@ -276,7 +276,7 @@ namespace dmt {
         LightTreeBuildNode node{};
         node.leaf             = 1;
         node.data.emitter.idx = idx;
-        node.data.emitter.ptr = ptr;
+        node.data.emitter.ptr = ptr + idx;
         // node.lb               = makeLBFromLight(ptr[idx]); populated by parent node
         node.lb = lb;
 

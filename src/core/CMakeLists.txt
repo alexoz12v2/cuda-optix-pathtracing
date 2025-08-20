@@ -24,7 +24,7 @@ target_sources(dmt-core
       FILES
         ${CMAKE_SOURCE_DIR}/include/core/core-macros.h
         ${CMAKE_SOURCE_DIR}/include/core/core-dstd.h
-        #${CMAKE_SOURCE_DIR}/include/core/core-parser.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-parser.h
         ${CMAKE_SOURCE_DIR}/include/core/core-bvh-builder.h
         ${CMAKE_SOURCE_DIR}/include/core/core-primitive.h
         ${CMAKE_SOURCE_DIR}/include/core/core-math.h
@@ -39,7 +39,7 @@ target_sources(dmt-core
 	${CMAKE_SOURCE_DIR}/include/core/core-material.h
 	${CMAKE_SOURCE_DIR}/include/core/core-render.h
   PRIVATE
-    #core-parser.cpp
+    core-parser.cpp
     core-bvh-builder.cpp
     core-primitive.cpp
     core-trianglemesh.cpp
@@ -65,6 +65,7 @@ target_link_libraries(dmt-core
     FBXSDK::fbxsdk
     stb::stb
     OpenEXR::OpenEXR
+    nlohmann_json::nlohmann_json
 )
 
 set_target_properties(dmt-core PROPERTIES FOLDER "Modules/Core")

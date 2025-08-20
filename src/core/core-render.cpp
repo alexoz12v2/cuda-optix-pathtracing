@@ -12,11 +12,11 @@
 #include <stb_image_write.h>
 
 // TODO remove
-#define DMT_SINGLE_THREAD
+//#define DMT_SINGLE_THREAD
 #define DMT_DBG_PIXEL
-#define DMT_DBG_PIXEL_X     0x2f
-#define DMT_DBG_PIXEL_Y     0x35
-#define DMT_DBG_SAMPLEINDEX 0x4
+#define DMT_DBG_PIXEL_X     69
+#define DMT_DBG_PIXEL_Y     71
+#define DMT_DBG_SAMPLEINDEX 0x1
 #define DMT_DBG_DEPTH       0x0
 #define DMT_PBRT_HITERROR
 
@@ -237,11 +237,13 @@ namespace dmt::job {
                             Normal3f const ngObj = normalFrom(n0 + n1 + n2);
                             Normal3f const ng    = xform(ngObj);
 
-                            // TODO remove
+// TODO remove
+#if 0
                             if (bool cameraRay = depth == 1; cameraRay)
                             {
                                 assert(dot(ng, -ray.d) > 0 && "Camera ray cannot intersect backface");
                             }
+#endif
 
                             Vector3f dpdx, dpdy;
                             data.diffCtx.p = p;
@@ -288,7 +290,7 @@ namespace dmt::job {
                             float                  uLightChoice  = sampler.get1D();
                             Point2f                uLight        = sampler.get2D();
                             static constexpr float lightStartPMF = 0.5f;
-                            if (uLightChoice < 0.5f && data.envLight)
+                            if (uLightChoice < 0.5f && data.envLight) // TODO: light choice/tree vs env not fixed 0.5
                             {
                                 lsCount = envLightSampleFromContext(*data.envLight, lightCtx, uLight, &ls[0]);
                                 pmfs[0] = lightStartPMF;
@@ -337,7 +339,7 @@ namespace dmt::job {
                                     //assert(!(instanceIdx == idx) || hadTransmission); // debugging purposes
                                     continue;
                                 }
-                                assert(dot(shadowRay.d, ng) > 0); // todo remove
+                                //assert(dot(shadowRay.d, ng) > 0); // todo remove
 
                                 // account for direct lighting contribution
                                 RGB Le{};
@@ -506,6 +508,8 @@ namespace dmt::render_thread {
             int seed = 18123 * sinf(32424 * tidx);
             std::construct_at<sampling::HaltonOwen>(&tlsSamplers[tidx], SamplesPerPixel, Point2i{Width, Height}, seed);
         }
+
+        threadpool.addJob({[](uintptr_t f, uint32_t tid) {}, 0}, EJobLayer::ePriority0);
 
         for (uint32_t job = 0; job < NumJobs; ++job)
         {

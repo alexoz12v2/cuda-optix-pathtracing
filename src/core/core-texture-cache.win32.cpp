@@ -467,10 +467,10 @@ namespace dmt {
 
     void const* TextureCache::getOrInsert(uint64_t baseKey, int32_t mipLevel, uint32_t& outBytes, TexFormat& outTexFormat)
     {
-        assert(m_cache.size() == m_lruKeyList.size());
         // 1. shared lock key path
         uint64_t           key = baseKey ^ static_cast<uint64_t>(mipLevel) << 33;
         gx::shareable_lock lk(m_shmtx, gx::lock_mode::shared);
+        assert(m_cache.size() == m_lruKeyList.size());
         if (auto it = m_cache.find(key); it != m_cache.cend())
         {
             outBytes     = it->second.numBytes;
@@ -494,6 +494,27 @@ namespace dmt {
 
         // 2. handle cache miss
         lk.upgrade_to_exclusive();
+#if 1
+        if (auto it = m_cache.find(key); it != m_cache.cend())
+        {
+            outBytes     = it->second.numBytes;
+            outTexFormat = it->second.texFormat;
+            // swap lruKey to last
+            auto listit = std::find(m_lruKeyList.begin(), m_lruKeyList.end(), key);
+            if (listit == m_lruKeyList.end())
+            {
+                assert(false && "How did List and HashMap get out of sync");
+                return nullptr;
+            }
+            if (std::next(listit) != m_lruKeyList.end()) // if not last swap to last
+            {
+                m_lruKeyList.splice(m_lruKeyList.end(), m_lruKeyList, listit);
+                lk.downgrade_to_shared();
+            }
+
+            return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
+        }
+#endif
         uint32_t  mipSize            = 0;
         size_t    mipOffset          = 0;
         int32_t   mipUnalignedOffset = 0;

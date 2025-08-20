@@ -70,9 +70,9 @@ namespace dmt {
     private:
         void InitFbxManager();
 
-        std::pmr::string m_fileName;
-        std::pmr::string m_meshName;
-        std::pmr::unordered_map<const char*, const char*> m_ChannelsTexPath;
-        FbxResources     m_res;
+        std::pmr::string                                  m_fileName;
+        std::pmr::string                                  m_meshName;
+        std::pmr::unordered_map<char const*, char const*> m_ChannelsTexPath;
+        FbxResources                                      m_res;
     };
 } // namespace dmt

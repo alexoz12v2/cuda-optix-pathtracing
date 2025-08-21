@@ -19,12 +19,12 @@ namespace dmt {
 
         dmt::MeshFbxPasser fbxPasser{};
 
-        std::pmr::string fbxBunny     = "stanford-bunny.fbx";
-        std::pmr::string fbxBoxFlat   = "BoxFlat.fbx";
-        std::pmr::string fbxBoxSmooth = "BoxSmooth.fbx";
-        std::pmr::string fbxBoxDown   = "DownSysBox.fbx";
-        std::pmr::string fbxBoxRight  = "RightSysBox.fbx";
-        std::pmr::string fbxBoxFlatTetured  = "BoxFlatTextured.fbx";
+        std::pmr::string fbxBunny          = "stanford-bunny.fbx";
+        std::pmr::string fbxBoxFlat        = "BoxFlat.fbx";
+        std::pmr::string fbxBoxSmooth      = "BoxSmooth.fbx";
+        std::pmr::string fbxBoxDown        = "DownSysBox.fbx";
+        std::pmr::string fbxBoxRight       = "RightSysBox.fbx";
+        std::pmr::string fbxBoxFlatTetured = "BoxFlatTextured.fbx";
 
         TriangleMesh mesh;
         bool         r = fbxPasser.ImportFBX(fbxBunny.c_str(), &mesh, std::pmr::get_default_resource());

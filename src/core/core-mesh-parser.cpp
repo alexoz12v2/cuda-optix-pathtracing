@@ -428,10 +428,13 @@ namespace dmt {
     //
     //TriangleMesh
 
-    static void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const *, char const *>& chTex);
-    static void GetTextureName(FbxProperty property, std::pmr::unordered_map<char const *, char const *>& chTex, uint32_t texIdx, uint32_t matIdx);
+    static void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const*, char const*>& chTex);
+    static void GetTextureName(FbxProperty                                        property,
+                               std::pmr::unordered_map<char const*, char const*>& chTex,
+                               uint32_t                                           texIdx,
+                               uint32_t                                           matIdx);
 
-    void        FbxDeleter::operator()(void* raw) const
+    void FbxDeleter::operator()(void* raw) const
     {
         auto* manager = reinterpret_cast<FbxManager*>(raw);
         if (manager)
@@ -534,7 +537,7 @@ namespace dmt {
 
         fbxImporter->Destroy();
 
-        //Channels<->TexturePath 
+        //Channels<->TexturePath
         m_ChannelsTexPath = std::pmr::unordered_map<char const*, char const*>{memory};
         m_ChannelsTexPath.reserve(4);
         //Get Info about the scene
@@ -728,11 +731,11 @@ namespace dmt {
         }
     }
 
-    void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const *, char const *>& chTex)
+    void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const*, char const*>& chTex)
     {
-         
-        if(pGeometry->GetNode()==NULL)
-        return;
+
+        if (pGeometry->GetNode() == NULL)
+            return;
 
         uint32_t nMat = pGeometry->GetNode()->GetSrcObjectCount<FbxSurfaceMaterial>();
         for (uint32_t matIdx = 0; matIdx < nMat; matIdx++)
@@ -740,24 +743,25 @@ namespace dmt {
             FbxSurfaceMaterial* lMaterial = pGeometry->GetNode()->GetSrcObject<FbxSurfaceMaterial>(matIdx);
 
             //go through all the possible textures
-            if(lMaterial)
+            if (lMaterial)
             {
 
                 uint32_t texIdx;
                 FBXSDK_FOR_EACH_TEXTURE(texIdx)
                 {
-                    
-                    FbxProperty property = lMaterial->FindProperty(FbxLayerElement::sTextureChannelNames[texIdx]);                   
-                    GetTextureName(property, chTex, texIdx, matIdx); 
+
+                    FbxProperty property = lMaterial->FindProperty(FbxLayerElement::sTextureChannelNames[texIdx]);
+                    GetTextureName(property, chTex, texIdx, matIdx);
                 }
-
             }
-
         }
     }
 
-    void GetTextureName(FbxProperty property, std::pmr::unordered_map<char const *, char const *>& chTex, uint32_t texIdx, uint32_t matIdx) 
-    { 
+    void GetTextureName(FbxProperty                                        property,
+                        std::pmr::unordered_map<char const*, char const*>& chTex,
+                        uint32_t                                           texIdx,
+                        uint32_t                                           matIdx)
+    {
         if (property.IsValid())
         {
             uint32_t texCount = property.GetSrcObjectCount<FbxTexture>();
@@ -774,8 +778,8 @@ namespace dmt {
                         FbxTexture* lTexture = lLayeredTexture->GetSrcObject<FbxTexture>(k);
                         if (lTexture)
                         {
-                            
-                            FbxFileTexture* lFileTexture = FbxCast<FbxFileTexture>(lTexture);
+
+                            FbxFileTexture* lFileTexture                         = FbxCast<FbxFileTexture>(lTexture);
                             chTex[FbxLayerElement::sTextureChannelNames[texIdx]] = lFileTexture->GetFileName();
                         }
                     }
@@ -786,7 +790,7 @@ namespace dmt {
                     FbxTexture* lTexture = property.GetSrcObject<FbxTexture>(j);
                     if (lTexture)
                     {
-                        FbxFileTexture* lFileTexture = FbxCast<FbxFileTexture>(lTexture);
+                        FbxFileTexture* lFileTexture                         = FbxCast<FbxFileTexture>(lTexture);
                         chTex[FbxLayerElement::sTextureChannelNames[texIdx]] = lFileTexture->GetFileName();
                     }
                 }

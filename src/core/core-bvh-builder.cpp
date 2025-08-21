@@ -822,10 +822,11 @@ namespace dmt::bvh {
         uint8_t const signIndex = (raySignZ << 2) | (raySignY << 1) | raySignX;
 
         float const initial_tNear = 1e-5f;
-        float const tMin_Leaves   = 0x1.0p-9; // 2^-9, which is 0.000195..., nearest power of two bigger than 1mm
-        float       scalar_tFar   = 1e5f;     // scalar cutoff updated from leaf hits
-        __m256      tNear         = _mm256_set1_ps(initial_tNear);
-        __m256      tFarVec       = _mm256_set1_ps(scalar_tFar); // will be updated when isect changes
+        // 0x1.0p-9; // 2^-9, which is 0.000195..., nearest power of two bigger than 1mm
+        float const tMin_Leaves = fl::gamma(7) * fmaxf(fmaxf(fabsf(ray.o.x), fabsf(ray.o.y)), fabsf(ray.o.z));
+        float       scalar_tFar = 1e5f; // scalar cutoff updated from leaf hits
+        __m256      tNear       = _mm256_set1_ps(initial_tNear);
+        __m256      tFarVec     = _mm256_set1_ps(scalar_tFar); // will be updated when isect changes
 
         int const     scale  = sizeof(uint64_t);
         __m256i const vindex = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);

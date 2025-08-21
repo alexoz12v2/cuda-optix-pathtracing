@@ -149,23 +149,23 @@ namespace dmt {
 
         // Faces: each face has 2 triangles
         // LEFT (-X)
-        mesh.addIndexedTriangle({1, 1, 9}, {5, 1, 10}, {4, 1, 11}, matIdx)
-            .addIndexedTriangle({1, 1, 9}, {4, 1, 11}, {0, 1, 12}, matIdx);
+        mesh.addIndexedTriangle({1, 1, 6}, {4, 1, 4}, {5, 1, 5}, matIdx)
+            .addIndexedTriangle({1, 1, 6}, {0, 1, 3}, {4, 1, 4}, matIdx);
         // FRONT (+Y)
-        mesh.addIndexedTriangle({2, 3, 6}, {1, 3, 9}, {0, 3, 12}, matIdx) //
-            .addIndexedTriangle({2, 3, 6}, {0, 3, 12}, {3, 3, 3}, matIdx);
+        mesh.addIndexedTriangle({2, 3, 9}, {0, 3, 3}, {1, 3, 6}, matIdx) //
+            .addIndexedTriangle({2, 3, 9}, {3, 3, 12}, {0, 3, 3}, matIdx);
         // RIGHT (+X)
-        mesh.addIndexedTriangle({6, 0, 5}, {2, 0, 6}, {3, 0, 3}, matIdx) //
-            .addIndexedTriangle({6, 0, 5}, {3, 0, 3}, {7, 0, 4}, matIdx);
+        mesh.addIndexedTriangle({6, 0, 9}, {3, 0, 12}, {2, 0, 10}, matIdx) //
+            .addIndexedTriangle({6, 0, 9}, {7, 0, 11}, {3, 0, 12}, matIdx);
         // TOP (+Z)
-        mesh.addIndexedTriangle({0, 4, 12}, {3, 4, 3}, {4, 4, 13}, matIdx) //
-            .addIndexedTriangle({4, 4, 13}, {3, 4, 3}, {7, 4, 2}, matIdx);
+        mesh.addIndexedTriangle({0, 4, 3}, {3, 4, 12}, {4, 4, 2}, matIdx) //
+            .addIndexedTriangle({4, 4, 2}, {3, 4, 12}, {7, 4, 13}, matIdx);
         // BACK (-Y)
-        mesh.addIndexedTriangle({7, 2, 2}, {4, 2, 13}, {5, 2, 0}, matIdx) //
-            .addIndexedTriangle({7, 2, 2}, {5, 2, 0}, {6, 2, 1}, matIdx);
+        mesh.addIndexedTriangle({7, 2, 13}, {5, 2, 1}, {4, 2, 2}, matIdx) //
+            .addIndexedTriangle({7, 2, 13}, {6, 2, 0}, {5, 2, 1}, matIdx);
         // BOTTOM (-Z)
-        mesh.addIndexedTriangle({1, 5, 9}, {5, 5, 8}, {6, 5, 7}, matIdx) //
-            .addIndexedTriangle({2, 5, 6}, {1, 5, 9}, {6, 5, 7}, matIdx);
+        mesh.addIndexedTriangle({1, 5, 6}, {5, 5, 7}, {6, 5, 8}, matIdx) //
+            .addIndexedTriangle({2, 5, 9}, {1, 5, 6}, {6, 5, 8}, matIdx);
     }
 
     void TriangleMesh::unitPlane(TriangleMesh& mesh, int32_t matIdx)

@@ -118,9 +118,14 @@ namespace dmt {
             diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false);
         }
 
+        if (dot(ng, w) < 0) // TODO maybe flip sign bit
+            ng = ng * Vector3f::s(-1);
+
         // --- Step 2: Early exit for pure diffuse ---
         if (metallic <= 0.f && material.isDiffuseOpaque)
         {
+            if (dot(ng, ns) < 0)
+                ns = ns * Vector3f::s(-1);
             oren_nayar::BRDF brdf = oren_nayar::makeParams(roughness, diffuse, ns, w, material.multiscatterMultiplier, {1, 1, 1});
             float      pdf = 0.f;
             Vector3f   wr  = oren_nayar::sample(ns, ng, u, &pdf);
@@ -208,10 +213,14 @@ namespace dmt {
             diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false);
         }
 
+        if (dot(ng, wo) < 0) // TODO maybe flip sign bit
+            ng = ng * Vector3f::s(-1);
+
         // --- Step 3: Early exit for pure diffuse ---
         if (metallic <= 0.f && material.isDiffuseOpaque)
         {
-            assert(dot(ns, wo) > 0);
+            if (dot(ng, ns) < 0)
+                ns = ns * Vector3f::s(-1);
             oren_nayar::BRDF
                   brdf = oren_nayar::makeParams(roughness, diffuse, ns, wi, material.multiscatterMultiplier, {1, 1, 1});
             float pdf  = std::max(0.f, dot(ns, wi)) * fl::rcpPi(); // cosine-weighted hemisphere pdf

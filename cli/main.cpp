@@ -500,11 +500,12 @@ namespace dmt {
 
         { // plane
             SurfaceMaterial mat{};
-            mat.anisotropy    = 1.f;
-            mat.ior           = 1.4;
-            mat.eta           = {0.155f, 0.424f, 1.345};
-            mat.etak          = {3.911f, 2.345f, 1.770f};
-            mat.metallicvalue = 1.f;
+            mat.anisotropy     = 1.f;
+            mat.roughnessvalue = 0.89f;
+            mat.ior            = 1.4;
+            mat.eta            = {0.155f, 0.424f, 1.345};
+            mat.etak           = {3.911f, 2.345f, 1.770f};
+            mat.metallicvalue  = 1.f;
             renderer.scene.materials.push_back(mat);
 
             renderer.scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(std::pmr::get_default_resource()));

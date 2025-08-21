@@ -546,7 +546,7 @@ namespace dmt {
         //unit sys conversion
         if (pScene->GetGlobalSettings().GetSystemUnit() == FbxSystemUnit::cm)
         {
-            const FbxSystemUnit::ConversionOptions lConversionOptions = {
+            FbxSystemUnit::ConversionOptions const lConversionOptions = {
                 true, /* mConvertRrsNodes */
                 true, /* mConvertLimits */
                 true, /* mConvertClusters */

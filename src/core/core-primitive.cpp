@@ -7,7 +7,7 @@
 #endif
 
 //#define DMT_MOLLER_TRUMBORE
-#define DMT_BACKFACE_CULLING
+//#define DMT_BACKFACE_CULLING
 //#define DMT_LAST_RESORT
 
 namespace dmt {

@@ -73,6 +73,8 @@ namespace dmt {
 
     IndexedTri TriangleMesh::getIndexedTri(size_t idx) const { return m_tris[idx]; }
 
+    IndexedTri& TriangleMesh::getIndexedTriRef(size_t idx) { return m_tris[idx]; }
+
     Bounds3f TriangleMesh::transformedBounds(float const affine[12]) const
     {
         return transformedBounds(transformFromAffine(affine));

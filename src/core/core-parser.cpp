@@ -34,6 +34,7 @@ namespace dmt {
         std::unordered_map<std::string, Light>    lights;
         std::unordered_map<std::string, TexInfo>  texturesPath;
         std::unordered_map<std::string, uint32_t> materials;
+        std::unordered_map<std::string, uint32_t> objects;
     };
 } // namespace dmt
 
@@ -78,6 +79,30 @@ namespace dmt::parse_helpers {
         eCount
     };
 
+    static constexpr bool hasOnlyAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
+    {
+        if (!object.is_object())
+            return false;
+        for (auto const& [key, val] : object.items())
+        {
+            if (!allowedKeys.contains(key))
+                return false;
+        }
+        return true;
+    }
+
+    static constexpr bool hasAllAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
+    {
+        if (!hasOnlyAllowedkeys(object, allowedKeys))
+            return false;
+        for (auto const& key : allowedKeys)
+        {
+            if (!object.contains(key))
+                return false;
+        }
+        return true;
+    }
+
     static TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out)
     {
         using enum TempTexObjResult;
@@ -120,6 +145,8 @@ namespace dmt::parse_helpers {
                 {
                     format    = TexFormat::HalfRGB;
                     half* buf = (half*)malloc(sizeof(half) * xRes * yRes * 3);
+                    if (!buf)
+                        throw std::runtime_error("what");
                     for (int y = 0; y < yRes; ++y)
                     {
                         for (int x = 0; x < xRes; ++x)
@@ -136,6 +163,8 @@ namespace dmt::parse_helpers {
                 {
                     format    = TexFormat::HalfGray;
                     half* buf = (half*)malloc(sizeof(half) * xRes * yRes);
+                    if (!buf)
+                        throw std::runtime_error("what");
                     for (int y = 0; y < yRes; ++y)
                     {
                         for (int x = 0; x < xRes; ++x)
@@ -327,10 +356,28 @@ namespace dmt::parse_helpers {
             ctx.error("The 'materials' array should contain only objects", {});
             return false;
         }
+        static std::unordered_set<std::string> const
+            allowedKeys{"name",
+                        "diffuse",
+                        "metallic",
+                        "normal",
+                        "roughness",
+                        "ior",
+                        "eta",
+                        "etak",
+                        "ggx-anisotropy",
+                        "ggx-dielectric",
+                        "oren-nayar-dielectric"};
+        if (!hasOnlyAllowedkeys(material, allowedKeys))
+        {
+            ctx.error("material has extraneous key", {});
+            return false;
+        }
 
+        std::string name;
         try
         {
-            if (!material.contains("name"))
+            if (material.contains("name"))
             {
                 ctx.error(
                     "The material should have a unique 'name'"
@@ -344,6 +391,7 @@ namespace dmt::parse_helpers {
                 ctx.error("Duplicate material names", {});
                 return false;
             }
+            name = material["name"];
             // - mandatory fields parsing
             if (!material.contains("diffuse"))
             {
@@ -382,11 +430,23 @@ namespace dmt::parse_helpers {
             }
             else if (material["diffuse"].is_string())
             {
-                if (!state.texturesPath.contains(static_cast<std::string>(material["diffuse"])))
+                std::string diffuseName = material["diffuse"];
+                if (!state.texturesPath.contains(diffuseName))
                 {
                     ctx.error("'diffuse' texture name should be an existing named texture", {});
                     return false;
                 }
+
+                TexInfo const& texInfo = state.texturesPath.at(diffuseName);
+                if (texInfo.texType != "diffuse")
+                {
+                    ctx.error("'diffuse' material texture should point to a 'diffuse' texture", {});
+                    return false;
+                }
+                mat.diffusekey    = baseKeyFromPath(texInfo.texPath);
+                mat.diffuseWidth  = texInfo.xRes;
+                mat.diffuseHeight = texInfo.yRes;
+                mat.texMatMap |= SurfaceMaterial::DiffuseMask;
             }
             else
             {
@@ -395,6 +455,7 @@ namespace dmt::parse_helpers {
             }
 
             // -- normal
+            mat.useShadingNormals = true;
             if (material["normal"].is_array())
             {
                 Vector3f tmp{};
@@ -402,14 +463,27 @@ namespace dmt::parse_helpers {
                 {
                     ctx.error("'normal' constant expected to be RGB value", {});
                 }
+                mat.normalvalue = octaFromNorm(normalize(tmp));
             }
             else if (material["normal"].is_string())
             {
-                if (!state.texturesPath.contains(static_cast<std::string>(material["normal"])))
+                std::string normalName = material["normal"];
+                if (!state.texturesPath.contains(normalName))
                 {
                     ctx.error("'normal' texture name should be an existing named texture", {});
                     return false;
                 }
+
+                TexInfo const& texInfo = state.texturesPath.at(normalName);
+                if (texInfo.texType != "normal")
+                {
+                    ctx.error("'normal' material texture should point to a 'normal' texture", {});
+                    return false;
+                }
+                mat.normalkey    = baseKeyFromPath(texInfo.texPath);
+                mat.normalWidth  = texInfo.xRes;
+                mat.normalHeight = texInfo.yRes;
+                mat.texMatMap |= SurfaceMaterial::NormalMask;
             }
             else
             {
@@ -420,14 +494,26 @@ namespace dmt::parse_helpers {
             // -- roughness
             if (material["roughness"].is_number())
             {
+                mat.roughnessvalue = fl::clamp01(material["roughness"]);
             }
             else if (material["roughness"].is_string())
             {
-                if (!state.texturesPath.contains(static_cast<std::string>(material["roughness"])))
+                std::string roughnessName = material["roughness"];
+                if (!state.texturesPath.contains(roughnessName))
                 {
                     ctx.error("'roughness' texture name should be an existing named texture", {});
                     return false;
                 }
+                TexInfo const& texInfo = state.texturesPath.at(roughnessName);
+                if (texInfo.texType != "roughness")
+                {
+                    ctx.error("'roughness' material texture should point to a 'roughness' texture", {});
+                    return false;
+                }
+                mat.roughnesskey    = baseKeyFromPath(texInfo.texPath);
+                mat.roughnessWidth  = texInfo.xRes;
+                mat.roughnessHeight = texInfo.yRes;
+                mat.texMatMap |= SurfaceMaterial::RoughnessMask;
             }
             else
             {
@@ -438,14 +524,26 @@ namespace dmt::parse_helpers {
             // -- metallic
             if (material["metallic"].is_number())
             {
+                mat.metallicvalue = fl::clamp01(material["metallic"]);
             }
             else if (material["metallic"].is_string())
             {
-                if (!state.texturesPath.contains(static_cast<std::string>(material["metallic"])))
+                std::string metallicName = material["metallic"];
+                if (!state.texturesPath.contains(metallicName))
                 {
                     ctx.error("'metallic' texture name should be an existing named texture", {});
                     return false;
                 }
+                TexInfo const& texInfo = state.texturesPath.at(metallicName);
+                if (texInfo.texType != "metallic")
+                {
+                    ctx.error("'metallic' material texture should point to a 'metallic' texture", {});
+                    return false;
+                }
+                mat.metallickey    = baseKeyFromPath(texInfo.texPath);
+                mat.metallicWidth  = texInfo.xRes;
+                mat.metallicHeight = texInfo.yRes;
+                mat.texMatMap |= SurfaceMaterial::MetallicMask;
             }
             else
             {
@@ -453,13 +551,155 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
+            // - optional fields for diffuse
+            // -- ior
+            // dielectric ior list: <https://balyberdin.com/tools/ior-list/>
+            mat.ior = 1.4f; // default
+            if (material.contains("ior"))
+            {
+                if (!material["ior"].is_number())
+                {
+                    ctx.error("'ior' from material, if present, should be a number between 1 and 10", {});
+                    return false;
+                }
+                mat.ior = fmaxf(material["ior"], 1.f);
+            }
+
+            // -- eta
+            static constexpr uint8_t etaPresent  = 0x1;
+            static constexpr uint8_t etakPresent = 0x2;
+            static constexpr uint8_t etaFull     = etaPresent | etakPresent;
+            uint8_t                  etaPresence = 0;
+            // conductor ior list: <https://chris.hindefjord.se/resources/rgb-ior-metals/>
+            mat.eta  = {0.18299, 0.42108, 1.37340};
+            mat.etak = {3.42420, 2.34590, 1.77040};
+            if (material.contains("eta"))
+            {
+                etaPresence |= etaPresent;
+                Vector3f tmp{};
+                if (extractVec3f(material["eta"], &tmp) != ExtractVec3fResult::eOk)
+                {
+                    ctx.error("material error extracting RGB 'eta' field", {});
+                    return false;
+                }
+                mat.eta = RGB::fromVec(max(tmp, {0, 0, 0}));
+            }
+
+            // -- etak
+            if (material.contains("etak"))
+            {
+                etaPresence |= etakPresent;
+                Vector3f tmp{};
+                if (extractVec3f(material["etak"], &tmp) != ExtractVec3fResult::eOk)
+                {
+                    ctx.error("material error extracting RGB 'etak' field", {});
+                    return false;
+                }
+                mat.etak = RGB::fromVec(max(tmp, {0, 0, 0}));
+            }
+
+            if (etaPresence != 0 && etaPresence != etaFull)
+            {
+                ctx.error("material: either specify both 'eta' and 'etak' or none of them (Gold)", {});
+                return false;
+            }
+
+            // -- ggx-anisotropy
+            if (material.contains("ggx-anisotropy"))
+            {
+                if (!material["ggx-anisotropy"].is_number_float())
+                {
+                    ctx.error("material field 'ggx-anisotropy' should be a number from 0.0 to 1.0", {});
+                    return false;
+                }
+
+                float const anisInterp = fl::clamp01(material["ggx-anisotropy"]);
+                mat.anisotropy         = fl::lerp(anisInterp, 1.f, 8.f);
+            }
+
+            // -- ggx-dielectric
+            bool dielectricFound = false;
+            if (material.contains("ggx-dielectric"))
+            {
+                dielectricFound = true;
+
+                json const& ggxDielectric = material["ggx-dielectric"];
+                if (!ggxDielectric.is_object() && !ggxDielectric.is_null())
+                {
+                    ctx.error("material: 'ggx-dielectric' should be an object (or null to use defaults)", {});
+                    return false;
+                }
+                mat.reflectanceTint   = {1, 1, 1};
+                mat.transmittanceTint = {1, 1, 1};
+                if (ggxDielectric.is_object())
+                {
+                    static std::unordered_set<std::string> const allowedKeys{"reflectance-tint", "transmittance-tint"};
+                    if (!hasOnlyAllowedkeys(ggxDielectric, allowedKeys))
+                    {
+                        ctx.error("material: Unrecognized key inside 'ggx-dielectric'", {});
+                        return false;
+                    }
+                    if (ggxDielectric.contains("reflectance-tint"))
+                    {
+                        Vector3f tmp{};
+                        if (extractVec3f(ggxDielectric["reflectance-tint"], &tmp) != ExtractVec3fResult::eOk)
+                        {
+                            ctx.error("material: error extracting 'reflectance-tint'", {});
+                            return false;
+                        }
+                        mat.reflectanceTint = RGB::fromVec(max(min(tmp, {1, 1, 1}), {0, 0, 0}));
+                    }
+                    if (ggxDielectric.contains("transmittance-tint"))
+                    {
+                        Vector3f tmp{};
+                        if (extractVec3f(ggxDielectric["transmittance-tint"], &tmp) != ExtractVec3fResult::eOk)
+                        {
+                            ctx.error("material: error extracting 'transmittance-tint'", {});
+                            return false;
+                        }
+                        mat.transmittanceTint = RGB::fromVec(min(max(tmp, {0, 0, 0}), {1, 1, 1}));
+                    }
+                }
+            }
+
+            // -- oren-nayar-dielectric
+            if (material.contains("oren-nayar-dielectric"))
+            {
+                if (dielectricFound)
+                {
+                    ctx.error("material: Either specify 'ggx-dielectric' or 'oren-nayar-dielectric', not both", {});
+                    return false;
+                }
+                dielectricFound                 = true;
+                json const& orenNayarDielectric = material["oren-nayar-dielectric"];
+                if (!orenNayarDielectric.is_object() && !orenNayarDielectric.is_null())
+                {
+                    ctx.error("material: 'oren-nayar-dielectric' should be an object (or null to use defaults)", {});
+                    return false;
+                }
+                mat.multiscatterMultiplier = 1.f;
+                if (orenNayarDielectric.contains("multiscatter-multiplier"))
+                {
+                    if (json const& j = orenNayarDielectric["multiscatter-multiplier"];
+                        !j.is_number() || static_cast<float>(j) <= 0.f)
+                    {
+                        ctx.error("material: 'multiscatter-multiplier' should be a positive number", {});
+                        return false;
+                    }
+                    mat.multiscatterMultiplier = orenNayarDielectric["multiscatter-multiplier"];
+                }
+            }
         } catch (...)
         {
             ctx.error("Unknown Error during material parsing", {});
             return false;
         }
 
-        return true;
+        rend->scene.materials.push_back(mat);
+        auto const& [it, wasInserted] = state.materials.try_emplace(name,
+                                                                    static_cast<uint32_t>(rend->scene.materials.size() - 1));
+
+        return wasInserted;
     }
 
     static bool parseCamera(Parser& parser, json const& camera, Parameters* param)
@@ -767,7 +1007,7 @@ namespace dmt::parse_helpers {
         return true;
     }
 
-    static bool envlight(Parser& parser, ParserState& state, json const& envLight)
+    static bool envlight(Parser& parser, ParserState& state, json const& envLight, Renderer* renderer)
     {
         Context ctx;
         if (!envLight.is_string())
@@ -785,6 +1025,137 @@ namespace dmt::parse_helpers {
                 " Should be a PNG/EXR file relative to JSON file directory",
                 {});
         }
+        assert(false); // TODO construct envlight in params
+    }
+
+    static bool object(Parser& parser, ParserState& state, json const& object, Renderer* rend, MeshFbxParser& meshParser)
+    {
+        Context ctx;
+
+        if (!object.is_object())
+        {
+            ctx.error("element of 'objects' should be a JSON object", {});
+            return false;
+        }
+
+        std::string name;
+        // grows depending on type. once type fully specified, check
+        std::unordered_set<std::string> allowedKeys{"name", "type", "material"};
+        allowedKeys.reserve(128);
+        try
+        {
+            if (!object.contains("name") || !object["name"].is_string())
+            {
+                ctx.error("object specification mandates a unique 'name' as string", {});
+                return false;
+            }
+            name = object["name"];
+            if (state.objects.contains(name))
+            {
+                ctx.error("object 'name's should be unique", {});
+                return false;
+            }
+
+            // get material id
+            if (!object.contains("material") || !object["material"].is_string())
+            {
+                ctx.error("object should specify a string 'material' name", {});
+                return false;
+            }
+
+            std::string const materialStr = object["material"];
+            if (!state.materials.contains(materialStr))
+            {
+                ctx.error("couldn't find material of name `{}`", std::make_tuple(materialStr));
+                return false;
+            }
+            uint32_t const materialIdx = state.materials.at(materialStr);
+
+            // switch on type
+            if (!object.contains("type") || !object["type"].is_string())
+            {
+                ctx.error("object should contain a string 'type'", {});
+                return false;
+            }
+            std::string const type = object["type"];
+
+            rend->scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(rend->scene.memory()));
+            TriangleMesh& mesh = *rend->scene.geometry.back();
+            if (type == "fbx" || type == "FBX")
+            {
+                allowedKeys.insert("path");
+                if (!hasOnlyAllowedkeys(object, allowedKeys))
+                {
+                    ctx.error("Unrecognized keys in object", {});
+                    return false;
+                }
+                // check path is valid and file, then go to fbx parsing function
+                if (!object.contains("path") || !object["path"].is_string())
+                {
+                    ctx.error("FBX object should contain a string 'path' field", {});
+                    return false;
+                }
+                os::Path const fbxPath = parser.fileDirectory() / static_cast<std::string>(object["path"]).c_str();
+                if (!fbxPath.isValid() || !fbxPath.isFile())
+                {
+                    ctx.error("FBX object 'path' field should point to a existing FBX file. Got `{}`",
+                              std::make_tuple(fbxPath.toUnderlying()));
+                    return false;
+                }
+
+                if (!meshParser.ImportFBX(fbxPath.toUnderlying().c_str(), &mesh))
+                {
+                    __debugbreak(); // TODO remove
+                    ctx.error("FBX: Error during parsing of FBX file", {});
+                    return false;
+                }
+
+                for (size_t tri = 0; tri < mesh.triCount(); ++tri)
+                {
+                    mesh.getIndexedTriRef(tri).matIdx = materialIdx;
+                }
+            }
+            else if (type == "primitive")
+            {
+                allowedKeys.insert("shape");
+                if (!hasOnlyAllowedkeys(object, allowedKeys))
+                {
+                    ctx.error("Unrecognized keys in object", {});
+                    return false;
+                }
+
+                if (!object.contains("shape") || !object["shape"].is_string())
+                {
+                    ctx.error("'shape' for primitive absent or ill-defined", {});
+                    return false;
+                }
+
+                std::string const shape = object["shape"];
+                if (shape == "cube")
+                    TriangleMesh::unitCube(mesh, materialIdx);
+                else if (shape == "plane")
+                    TriangleMesh::unitPlane(mesh, materialIdx);
+                else
+                {
+                    ctx.error("Unrecognized 'shape' `{}`", std::make_tuple(shape));
+                    return false;
+                }
+            }
+            else
+            {
+                ctx.error("Unrecognized type `{}` in object parsing", std::make_tuple(type));
+                return false;
+            }
+        } catch (...)
+        {
+            ctx.error("Unknown error while parsing object", {});
+            return false;
+        }
+
+        auto const& [it, wasInserted] = //
+            state.objects.try_emplace(name, static_cast<uint32_t>(rend->scene.geometry.size() - 1));
+
+        return wasInserted;
     }
 } // namespace dmt::parse_helpers
 
@@ -807,10 +1178,79 @@ namespace dmt {
         if (!f)
             return false;
 
+        static std::unordered_set<std::string> const
+            allowedKeys{"camera",
+                        "film",
+                        "textures",
+                        "materials",
+                        "objects",
+                        "lights",
+                        "envlight",
+                        "transforms",
+                        "world"};
+
         try
         {
             json data = json::parse(f);
+            if (!parse_helpers::hasAllAllowedkeys(data, allowedKeys))
+                throw std::runtime_error("JSON value is lacking some keys");
 
+            ParserState state;
+
+            // parse camera object
+            if (!parse_helpers::parseCamera(*this, data["camera"], &m_renderer->params))
+                throw nullptr;
+
+            // parse film object
+            if (!parse_helpers::parseFilm(*this, data["film"], &m_renderer->params))
+                throw nullptr;
+
+            // parse texture array
+            if (!data["textures"].is_array())
+                throw std::runtime_error("'textures' should be a JSON array");
+
+            for (json const& texture : data["textures"])
+            {
+                if (!parse_helpers::parseTexture(*this, state, texture, m_renderer))
+                    throw nullptr;
+            }
+
+            // parse materials array
+            if (!data["materials"].is_array())
+                throw std::runtime_error("'materials' should be a JSON array");
+
+            for (json const& material : data["materials"])
+            {
+                if (!parse_helpers::parseMaterial(*this, state, material, m_renderer))
+                    throw nullptr;
+            }
+
+            // parse objects array
+            if (!data["objects"].is_array())
+                throw std::runtime_error("'objects' should be a JSON array");
+
+            for (json const& object : data["objects"])
+            {
+                if (!parse_helpers::object(*this, state, object, m_renderer, m_fbxParser))
+                    throw nullptr;
+            }
+
+            // parse envlight
+            if (!parse_helpers::envlight(*this, state, data["envlight"], m_renderer))
+                throw nullptr;
+
+            // parse transforms array
+            if (!data["transforms"].is_array())
+                throw std::runtime_error("'transforms' should be a JSON array");
+
+            for (json const& transform : data["transforms"])
+            {
+                if (!parse_helpers::transform(*this, state, transform))
+                    throw nullptr;
+            }
+
+            // parse world
+            assert(false); // TODO
         } catch (...)
         {
             try

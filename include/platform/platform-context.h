@@ -43,7 +43,7 @@ namespace dmt {
         static constexpr uint32_t maxHandlers          = 4;
         static constexpr uint32_t logBufferNumBytes    = 2048;
         static constexpr uint32_t argLogBufferNumBytes = 1024;
-        struct DMT_PLATFORM_API   Common
+        struct DMT_PLATFORM_API Common
         {
             // 8 byte aligned
             LogHandler handlers[maxHandlers]{};
@@ -76,7 +76,7 @@ namespace dmt {
             eGenericError
         };
         inline constexpr uint32_t maxNumCtxs = 4;
-        class DMT_PLATFORM_API    Contexts
+        class DMT_PLATFORM_API Contexts
         {
         public:
             Contexts()                               = default;

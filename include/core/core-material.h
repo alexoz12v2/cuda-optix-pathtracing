@@ -37,7 +37,7 @@ namespace dmt {
         uint32_t roughnessWidth;
         uint32_t roughnessHeight;
 
-        /// xxxx'yyyy'zzzz'wwww
+        /// xx'yy'zz'ww
         /// if x = 1 -> diffuse uses texture, y = 1 -> normal uses texture, z = 1 -> metallic uses texture, w = 1 -> roughness uses texture
         int32_t                  texMatMap;
         static constexpr int32_t MetallicMask  = 0x00'00'ff'00;

@@ -17,8 +17,7 @@ namespace dmt {
     {
     public:
         DMT_CORE_API Parser(os::Path const&            path,
-                            Parameters*                pParameters,
-                            Scene*                     pScene,
+                            Renderer*                  renderer,
                             std::pmr::memory_resource* mem = std::pmr::get_default_resource());
         Parser(Parser const&)                = delete;
         Parser(Parser&&) noexcept            = delete;
@@ -27,18 +26,16 @@ namespace dmt {
 
     public:
         DMT_FORCEINLINE bool isValid() const { return m_path.isValid() && m_path.isFile(); }
+        DMT_FORCEINLINE os::Path fileDirectory() const { return m_path.parent(); }
 
         DMT_CORE_API bool parse();
 
     private:
         /// component to handle FBX importing (1st triangular mesh only, ignoring textures and materials)
-        MeshFbxPasser m_fbxParser;
+        MeshFbxParser m_fbxParser;
 
         /// Scene to be populated. Assumes no other accesses are being made to it
-        Scene*      m_pScene;
-
-        /// Scene parameters to be populated. Assumes no other accesses are being made to it
-        Parameters* m_parameters;
+        Renderer* m_renderer;
 
         /// Path to json file
         os::Path m_path;

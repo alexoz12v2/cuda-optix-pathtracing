@@ -347,7 +347,7 @@ namespace dmt::camera {
         /// the time value determines what camera position to use when generating the ray
         float time;
 
-        /// scale factor that is applied when the ray’s radiance is added to the image stored by the film;
+        /// scale factor that is applied when the rayï¿½s radiance is added to the image stored by the film;
         /// it accounts for the reconstruction filter used to filter image samples at each pixel
         float filterWeight;
     };

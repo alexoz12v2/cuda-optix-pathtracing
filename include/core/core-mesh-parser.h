@@ -57,14 +57,14 @@ namespace dmt {
     };
 #endif
 
-    class DMT_CORE_API MeshFbxPasser
+    class DMT_CORE_API MeshFbxParser
     {
 
     public:
-        MeshFbxPasser();
-        ~MeshFbxPasser();
+        MeshFbxParser();
+        ~MeshFbxParser();
 
-        bool        ImportFBX(char const* fileName, TriangleMesh* outMesh, std::pmr::memory_resource* memory);
+        bool        ImportFBX(char const* fileName, TriangleMesh* outMesh);
         char const* GetMeshName();
 
     private:

@@ -482,11 +482,12 @@ namespace dmt {
 
     dFbxManager createFBXInstance() { return dFbxManager{FbxManager::Create(), FbxDeleter{}}; }
 
-    MeshFbxPasser::MeshFbxPasser()
+    MeshFbxParser::MeshFbxParser()
     {
         InitFbxManager();
         //m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(m_mng), IOSROOT), FbxSettingsDeleter{}};
         m_res.settings     = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
+        
         FbxIOSettings* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
         //set flags for import settings
         set->SetBoolProp(IMP_FBX_MATERIAL, false);
@@ -499,14 +500,10 @@ namespace dmt {
         set->SetBoolProp(IMP_FBX_NORMAL, true);
     }
 
-    bool MeshFbxPasser::ImportFBX(char const*                fileName,
-                                  TriangleMesh*              outMesh,
-                                  std::pmr::memory_resource* memory = std::pmr::get_default_resource())
+    bool MeshFbxParser::ImportFBX(char const*                fileName,
+                                  TriangleMesh*              outMesh)
     {
-
-
         FbxManager* mng = reinterpret_cast<FbxManager*>(m_res.manager);
-
 
         //check FBX's filename
         os::Path const fbxDirectory = os::Path::executableDir() / fileName;
@@ -538,8 +535,7 @@ namespace dmt {
         fbxImporter->Destroy();
 
         //Channels<->TexturePath
-        m_ChannelsTexPath = std::pmr::unordered_map<char const*, char const*>{memory};
-        m_ChannelsTexPath.reserve(4);
+        m_ChannelsTexPath.clear();
         //Get Info about the scene
         FbxAxisSystem as = pScene->GetGlobalSettings().GetAxisSystem();
         FbxSystemUnit su = pScene->GetGlobalSettings().GetSystemUnit();
@@ -719,11 +715,11 @@ namespace dmt {
         return true;
     }
 
-    char const* MeshFbxPasser::GetMeshName() { return m_meshName.c_str(); }
+    char const* MeshFbxParser::GetMeshName() { return m_meshName.c_str(); }
 
-    MeshFbxPasser::~MeshFbxPasser() {}
+    MeshFbxParser::~MeshFbxParser() {}
 
-    void MeshFbxPasser::InitFbxManager()
+    void MeshFbxParser::InitFbxManager()
     {
         if (m_res.manager == nullptr)
         {

@@ -73,6 +73,10 @@ macro(dmt_setup_dependencies)
       GIT_TAG 3.3.4
       GIT_SHALLOW ON
     )
+    if (DMT_OS_LINUX)
+      set(GLFW_BUILD_WAYLAND ${GLFW_BUILD_WAYLAND})
+      message(STATUS "before make available: GLFW_BUILD_WAYLAND ${GLFW_BUILD_WAYLAND}")
+    endif()
     FetchContent_MakeAvailable(glfw)
   endif()
 

@@ -486,8 +486,8 @@ namespace dmt {
     {
         InitFbxManager();
         //m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(m_mng), IOSROOT), FbxSettingsDeleter{}};
-        m_res.settings     = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
-        
+        m_res.settings = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
+
         FbxIOSettings* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
         //set flags for import settings
         set->SetBoolProp(IMP_FBX_MATERIAL, false);
@@ -500,8 +500,7 @@ namespace dmt {
         set->SetBoolProp(IMP_FBX_NORMAL, true);
     }
 
-    bool MeshFbxParser::ImportFBX(char const*                fileName,
-                                  TriangleMesh*              outMesh)
+    bool MeshFbxParser::ImportFBX(char const* fileName, TriangleMesh* outMesh)
     {
         FbxManager* mng = reinterpret_cast<FbxManager*>(m_res.manager);
 

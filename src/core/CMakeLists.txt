@@ -52,6 +52,7 @@ target_sources(dmt-core
     core-mesh-parser.cpp
     core-material.cpp
     core-render.cpp
+    core-texture-cache.cpp
     ${core_os_private_sources}
     ${core_unused_sources}
 )

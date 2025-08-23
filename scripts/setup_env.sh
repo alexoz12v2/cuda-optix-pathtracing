@@ -161,3 +161,17 @@ fi
 
 echo "CUDA, OptiX, and FBX SDK environment setup complete."
 
+# -----------------------------
+# Update shell prompt (PS1)
+# -----------------------------
+if [ -z "$_DMT_ENV_PS1_BACKUP" ]; then
+    # Backup original prompt once
+    export _DMT_ENV_PS1_BACKUP="$PS1"
+fi
+
+ENV_PREFIX="[dmt-env] "
+case "$PS1" in
+    *"$ENV_PREFIX"*) ;; # already has prefix
+    *) export PS1="${ENV_PREFIX}${PS1}" ;;
+esac
+

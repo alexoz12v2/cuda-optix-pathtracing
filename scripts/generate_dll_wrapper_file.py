@@ -224,7 +224,7 @@ def prepare_library_population(
 
         exports = new_exports
 
-    library_name = Path(library_dict["Windows"]).name
+    library_name = Path(library_dict[platform.system()]).name
     library_class_name = library_name.replace("-", "_").capitalize()[
         : library_name.rfind(".")
     ]
@@ -248,12 +248,12 @@ def append_class_header_preamble(includes, header_string, exports, library_class
 
     if export_macro and len(export_macro) > 0:
         header_string[0] += f"""
-class {export_macro} {library_class_name}LibraryFunctions {{
+class {export_macro} {library_class_name} {{
   public:
 """
     else:
         header_string[0] += f"""
-class {library_class_name}LibraryFunctions {{
+class {library_class_name} {{
   public:
 """
 
@@ -267,23 +267,24 @@ def generate_loader(
     header_name: str | None,
     use_executable_dir: bool,
     export_macro: str,
-    macro_filter
+    macro_filter,
+    name
 ) -> Tuple[str, str]:
     """Generates C++ code for dynamically loading functions from a shared library."""
     header_string = [f"#pragma once\n{get_header()}"]
     implementation_string = [""]
-    exports, library_class_name = prepare_library_population(
+    exports, library_class_name_NOT = prepare_library_population(
         library_path, version_pattern, latest_only, macro_filter
     )
     data: List[MethodData] = list()
 
-    append_class_header_preamble(includes, header_string, exports, library_class_name, export_macro)
+    append_class_header_preamble(includes, header_string, exports, name, export_macro)
     write_type_declarations_and_populate_method_data(
         json_file, exports, data, header_string
     )
     append_class_header_termination(header_string, data)
     header_string[0] += (
-        f"bool load{library_class_name}Functions({library_class_name}LibraryFunctions* funcList);\n"
+        f"bool load{name}Functions({name}* funcList);\n"
     )
 
     implementation_string[0] += f'#include "{header_name}"\n{get_header()}\n'
@@ -334,17 +335,17 @@ static void* LoadLibraryFunc(const char* func_name) {{
 
     if export_macro and len(export_macro) > 0:
         implementation_string[0] += f"""
-bool {export_macro} load{library_class_name}Functions({library_class_name}LibraryFunctions* funcList)
+bool {export_macro} load{name}Functions({name}* funcList)
 {{
 """
     else:
         implementation_string[0] += f"""
-bool load{library_class_name}Functions({library_class_name}LibraryFunctions* funcList)
+bool load{name}Functions({name}* funcList)
 {{
 """
     for methodData in data:
         implementation_string[0] += (
-            f'    funcList->{methodData.name} = reinterpret_cast<{library_class_name}LibraryFunctions::{methodData.type}>(LoadLibraryFunc("{methodData.latest_version}"));\n'
+            f'    funcList->{methodData.name} = reinterpret_cast<{name}::{methodData.type}>(LoadLibraryFunc("{methodData.latest_version}"));\n'
         )
         implementation_string[0] += (
             f"    if (!funcList->{methodData.name}) {{ return false; }}\n"
@@ -364,13 +365,14 @@ def platform_generate_loader(
     header_name: str | None,
     use_executable_dir: bool,
     export_macro: str,
-    macro_filter
+    macro_filter,
+    name
 ) -> Tuple[str, str]:
     header_string = [
         f'#pragma once\n{get_header()}\n#include "platform/platform-utils.h"\n'
     ]
     implementation_string = [f'#include "{header_name}"\n{get_header()}\n']
-    exports, library_class_name = prepare_library_population(
+    exports, library_class_name_NOT = prepare_library_population(
         library_dict, version_pattern, latest_only, macro_filter
     )
     data: List[MethodData] = list()
@@ -386,7 +388,7 @@ def platform_generate_loader(
             + " / ".join(f'"{s}"' for i, s in enumerate(search_path_parts) if i > 0),
         )
 
-    append_class_header_preamble(includes, header_string, exports, library_class_name, export_macro)
+    append_class_header_preamble(includes, header_string, exports, name, export_macro)
     write_type_declarations_and_populate_method_data(
         json_file, exports, data, header_string
     )
@@ -394,15 +396,15 @@ def platform_generate_loader(
     append_class_header_termination(header_string, data)
     if export_macro and len(export_macro) > 0:
         header_string[0] += (
-            f"\nbool {export_macro} load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
+            f"\nbool {export_macro} load{name}Functions(dmt::os::LibraryLoader const& loader, {name}* funcList);\n"
         )
     else:
         header_string[0] += (
-            f"\nbool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList);\n"
+            f"\nbool load{name}Functions(dmt::os::LibraryLoader const& loader, {name}* funcList);\n"
         )
 
     implementation_string[0] += (
-        f"bool load{library_class_name}Functions(dmt::os::LibraryLoader const& loader, {library_class_name}LibraryFunctions* funcList) {{\n"
+        f"bool load{name}Functions(dmt::os::LibraryLoader const& loader, {name}* funcList) {{\n"
     )
     implementation_string[0] += "    using namespace std::string_view_literals;\n\n"
 
@@ -438,7 +440,7 @@ def platform_generate_loader(
     implementation_string[0] += "    if (!funcList->m_library) { return false; }\n"
     for methodData in data:
         implementation_string[0] += (
-            f'    funcList->{methodData.name} = reinterpret_cast<{library_class_name}LibraryFunctions::{methodData.type}>(dmt::os::lib::getFunc(funcList->m_library, "{methodData.latest_version}"));\n'
+            f'    funcList->{methodData.name} = reinterpret_cast<{name}::{methodData.type}>(dmt::os::lib::getFunc(funcList->m_library, "{methodData.latest_version}"));\n'
         )
         implementation_string[0] += (
             f"    if (!funcList->{methodData.name}) {{ return false; }}\n"
@@ -462,6 +464,11 @@ def main():
         "library",
         type=str,
         help="Path to the DLL/.so file to generate the wrapper for.",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        help="name of the generated class.",
     )
     parser.add_argument(
         "-i",
@@ -533,9 +540,10 @@ def main():
     library_json = {
         key: Path(remove_matching_quotes(value)) for key, value in library_json.items()
     }
-    for path in library_json.values():
-        if not path.exists():
-            raise ValueError(f"Path {str(path)} doesn't exist")
+
+    path = library_json[platform.system()]
+    if not path.exists():
+        raise ValueError(f"Path {str(path)} doesn't exist")
 
     header_file = Path(remove_matching_quotes(args.header_file))
     cpp_file = Path(remove_matching_quotes(args.cpp_file))
@@ -578,7 +586,8 @@ def main():
         header_name,
         args.use_executable_path,
         args.export_macro,
-        args.macro_filter
+        args.macro_filter,
+        args.name
     )
 
     cpp_file.parent.mkdir(parents=True, exist_ok=True)

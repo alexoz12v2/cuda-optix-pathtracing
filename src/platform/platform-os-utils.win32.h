@@ -1,6 +1,6 @@
 #pragma once
 
-#include "platform/platform-os-utils-macros.h"
+#include "platform/platform-macros.h"
 
 #include <memory>
 #include <utility> // std::min
@@ -24,31 +24,28 @@
 // implementation units are not linked together. It needs to stay here. It should not be included in the
 // binary interface, hence it is fine
 namespace dmt::os::win32 {
-    DMT_PLATFORM_OS_UTILS_API uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize);
+    uint32_t getLastErrorAsString(char* buffer, uint32_t maxSize);
 
     constexpr bool luidCompare(LUID const& luid0, LUID const& luid1)
     {
         return luid0.HighPart == luid1.HighPart && luid1.LowPart == luid0.LowPart;
     }
 
-    DMT_PLATFORM_OS_UTILS_API std::pmr::wstring utf16FromUtf8(
-        std::string_view           mbStr,
-        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    DMT_PLATFORM_OS_UTILS_API std::pmr::string utf8FromUtf16(
-        std::wstring_view          wideStr,
-        std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    std::pmr::wstring utf16FromUtf8(std::string_view           mbStr,
+                                    std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    std::pmr::string  utf8FromUtf16(std::wstring_view          wideStr,
+                                    std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
-    DMT_PLATFORM_OS_UTILS_API uint32_t utf16le_From_utf8(
-        char const* DMT_RESTRICT _u8str,
-        uint32_t                 _u8NumBytes,
-        wchar_t* DMT_RESTRICT    _mediaBuf,
-        uint32_t                 _mediaMaxBytes,
-        wchar_t* DMT_RESTRICT    _outBuf,
-        uint32_t                 _maxBytes,
-        uint32_t*                _outBytesWritten);
+    uint32_t utf16le_From_utf8(char const* DMT_RESTRICT _u8str,
+                               uint32_t                 _u8NumBytes,
+                               wchar_t* DMT_RESTRICT    _mediaBuf,
+                               uint32_t                 _mediaMaxBytes,
+                               wchar_t* DMT_RESTRICT    _outBuf,
+                               uint32_t                 _maxBytes,
+                               uint32_t*                _outBytesWritten);
 
     /** requires a nul terminated string, returns a nul terminated string */
-    DMT_PLATFORM_OS_UTILS_API std::unique_ptr<wchar_t[]> quickUtf16leFrom(char const* prefix, char const* str);
+    std::unique_ptr<wchar_t[]> quickUtf16leFrom(char const* prefix, char const* str);
 
     template <typename F>
         requires std::is_invocable_r_v<bool, F, std::wstring_view>
@@ -78,5 +75,5 @@ namespace dmt::os::win32 {
         return ret;
     }
 
-    [[noreturn]] DMT_PLATFORM_OS_UTILS_API void errorExit(wchar_t const* msg);
+    [[noreturn]] void errorExit(wchar_t const* msg);
 } // namespace dmt::os::win32

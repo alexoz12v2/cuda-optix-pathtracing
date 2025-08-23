@@ -34,6 +34,21 @@ namespace dmt::mipc {
 } // namespace dmt::mipc
 
 namespace dmt {
+    DMT_FORCEINLINE uint32_t mipBytes(int32_t width, int32_t height, int32_t level, TexFormat texFormat)
+    {
+        uint32_t const pixelBytes = bytesPerPixel(texFormat);
+        while (level > 0)
+        {
+            width  = std::max<int32_t>(1, width >> 1);
+            height = std::max<int32_t>(1, height >> 1);
+            --level;
+        }
+
+        size_t bytes = static_cast<size_t>(pixelBytes) * width * height;
+        assert(static_cast<uint32_t>(bytes) == bytes && "A mip level is occupying more than 4 GB");
+        return static_cast<uint32_t>(bytes);
+    }
+
     DMT_FORCEINLINE uint64_t baseKeyFromPath(os::Path const& path)
     {
         static char                         buffer[1024];

@@ -1,9 +1,15 @@
 #include "core-parser.h"
 
+#include "core-light.h"
+#include "core-math.h"
+#include "core-trianglemesh.h"
+#include "cudautils-transform.h"
+#include "platform-memory.h"
 #include "platform/platform-context.h"
 
 // json parsing
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 // image parsing
 #define STB_IMAGE_IMPLEMENTATION
@@ -35,6 +41,7 @@ namespace dmt {
         std::unordered_map<std::string, TexInfo>  texturesPath;
         std::unordered_map<std::string, uint32_t> materials;
         std::unordered_map<std::string, uint32_t> objects;
+        std::vector<Transform>                    stackTrasforms;
     };
 } // namespace dmt
 
@@ -79,7 +86,7 @@ namespace dmt::parse_helpers {
         eCount
     };
 
-    static constexpr bool hasOnlyAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
+    static bool hasOnlyAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
     {
         if (!object.is_object())
             return false;
@@ -91,7 +98,7 @@ namespace dmt::parse_helpers {
         return true;
     }
 
-    static constexpr bool hasAllAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
+    static bool hasAllAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
     {
         if (!hasOnlyAllowedkeys(object, allowedKeys))
             return false;
@@ -571,8 +578,8 @@ namespace dmt::parse_helpers {
             static constexpr uint8_t etaFull     = etaPresent | etakPresent;
             uint8_t                  etaPresence = 0;
             // conductor ior list: <https://chris.hindefjord.se/resources/rgb-ior-metals/>
-            mat.eta  = {0.18299, 0.42108, 1.37340};
-            mat.etak = {3.42420, 2.34590, 1.77040};
+            mat.eta  = {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
+            mat.etak = {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
             if (material.contains("eta"))
             {
                 etaPresence |= etaPresent;
@@ -750,7 +757,7 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
-            json               jDir = camera["direction"];
+            json const&        jDir = camera["direction"];
             Vector3f           dir{};
             ExtractVec3fResult res = extractVec3f(jDir, &dir);
 
@@ -767,8 +774,8 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
-            param->focalLength     = camera["focalLength"] / 1000.f;
-            param->sensorSize      = camera["sensorSize"] / 1000.f;
+            param->focalLength     = static_cast<float>(camera["focalLength"]) / 1000.f;
+            param->sensorSize      = static_cast<float>(camera["sensorSize"]) / 1000.f;
             param->cameraDirection = dir;
 
 
@@ -1017,7 +1024,9 @@ namespace dmt::parse_helpers {
         }
 
         os::Path envPath = parser.fileDirectory() / static_cast<std::string>(envLight).c_str();
+#if defined(DMT_OS_WINDOWS)
         __debugbreak(); // TODO remove
+#endif
         if (!envPath.isValid() || !envPath.isFile())
         {
             ctx.error(
@@ -1105,7 +1114,6 @@ namespace dmt::parse_helpers {
 
                 if (!meshParser.ImportFBX(fbxPath.toUnderlying().c_str(), &mesh))
                 {
-                    __debugbreak(); // TODO remove
                     ctx.error("FBX: Error during parsing of FBX file", {});
                     return false;
                 }
@@ -1156,6 +1164,99 @@ namespace dmt::parse_helpers {
             state.objects.try_emplace(name, static_cast<uint32_t>(rend->scene.geometry.size() - 1));
 
         return wasInserted;
+    }
+
+    static bool parseWorldTranform(Parser& parse, ParserState& state, json const& worldObj, Renderer* rend)
+    {
+
+        //existing key,
+        for (auto const& [key, value] : worldObj.items())
+        {
+
+            if (state.transforms.contains(key))
+            {
+                state.stackTrasforms.push_back(state.transforms[key]);
+                if (!parse_helpers::parseWorldTranform(parse, state, value, rend))
+                    return false;
+                state.stackTrasforms.pop_back();
+            }
+
+            Transform currTransform = state.stackTrasforms.back();
+            for (auto transform = state.stackTrasforms.rbegin() + 1; transform != state.stackTrasforms.rend(); transform++)
+            {
+                currTransform = (*transform) * currTransform;
+            }
+
+            //evaluate instances
+            if (key == "instances")
+            {
+                if (!value.is_array())
+                {
+                    //insert error message
+                    return false;
+                }
+
+                for (auto const& obj : value)
+                {
+                    if (!obj.is_string())
+                        return false;
+                    if (!state.objects.contains(static_cast<std::string>(obj)))
+                        return false;
+
+                    rend->scene.instances.emplace_back(makeUniqueRef<Instance>(rend->scene.memory()));
+                    auto& instance   = *rend->scene.instances.back();
+                    instance.meshIdx = state.objects[static_cast<std::string>(obj)];
+                    extractAffineTransform(currTransform.m, instance.affineTransform);
+                    instance.bounds = rend->scene.geometry[instance.meshIdx]->transformedBounds(currTransform);
+                }
+            }
+
+            //evaluate the ligths
+            else if (key == "lights")
+            {
+
+                if (!value.is_array())
+                {
+                    //insert error message
+                    return false;
+                }
+
+                for (auto const& light : value)
+                {
+                    if (!light.is_string())
+                        return false;
+                    if (!state.lights.contains(light))
+                    {
+                        //insert error message
+                        return false;
+                    }
+
+                    Light tmpLight = state.lights[light];
+                    if (tmpLight.type == dmt::LightType::ePoint)
+                    {
+
+                        rend->scene.lights.push_back(dmt::makePointLight(currTransform,
+                                                                         tmpLight.strength,
+                                                                         tmpLight.data.point.radius,
+                                                                         tmpLight.data.point.evalFac));
+                    }
+                    else if (tmpLight.type == dmt::LightType::eSpot)
+                    {
+                        rend->scene.lights.push_back(
+                            dmt::makeSpotLight(currTransform,
+                                               tmpLight.strength,
+                                               tmpLight.data.spot.cosHalfSpotAngle,
+                                               tmpLight.data.spot.cosHalfLargerSpread,
+                                               tmpLight.data.spot.radius,
+                                               tmpLight.data.spot.evalFac));
+                    }
+                    else
+                        return false;
+                }
+            }
+        }
+
+        return true;
     }
 } // namespace dmt::parse_helpers
 
@@ -1234,7 +1335,16 @@ namespace dmt {
                 if (!parse_helpers::object(*this, state, object, m_renderer, m_fbxParser))
                     throw nullptr;
             }
+            //parse ligths
+            // parse objects array
+            if (!data["lights"].is_array())
+                throw std::runtime_error("'lights' should be a JSON array");
 
+            for (json const& light : data["lights"])
+            {
+                if (!parse_helpers::light(*this, state, light))
+                    throw nullptr;
+            }
             // parse envlight
             if (!parse_helpers::envlight(*this, state, data["envlight"], m_renderer))
                 throw nullptr;
@@ -1248,6 +1358,24 @@ namespace dmt {
                 if (!parse_helpers::transform(*this, state, transform))
                     throw nullptr;
             }
+
+            if (!data["world"].is_object())
+                throw std::runtime_error("'world' should be an object");
+            //existing key,
+            for (auto const& [key, value] : data["world"].items())
+            {
+
+                if (state.transforms.contains(key))
+                {
+                    state.stackTrasforms.push_back(state.transforms[key]);
+                    if (!parse_helpers::parseWorldTranform(*this, state, value, m_renderer))
+                    {
+                        throw std::runtime_error("Error to parse world");
+                    }
+                }
+                state.stackTrasforms.pop_back();
+            }
+
 
             // parse world
             assert(false); // TODO

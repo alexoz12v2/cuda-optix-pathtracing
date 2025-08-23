@@ -1,7 +1,5 @@
 #pragma once
 
-#include <platform/platform-macros.h>
-
 #include <bit>
 #include <charconv> // For std::from_chars
 #include <concepts>
@@ -19,6 +17,8 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
+
+#include "platform/platform-macros.h"
 
 namespace dmt::os {
     DMT_PLATFORM_API uint32_t processId();
@@ -171,7 +171,7 @@ namespace dmt {
         char const* ptr    = s.data();
         for (char const* const end = ptr + s.size(); ptr < end; ++result)
         {
-            int const next = std::mblen(ptr, end - ptr);
+            int const next = std::mblen(ptr, static_cast<uint64_t>(end - ptr));
             if (next == -1)
                 // throw std::runtime_error("strlen_mb(): conversion error");
                 return -1;
@@ -416,15 +416,20 @@ namespace dmt {
     template <std::integral T>
     inline constexpr T popCount(T v)
     {
+#if 0
         v   = v - ((v >> 1) & (T) ~(T)0 / 3);                             // temp
         v   = (v & (T) ~(T)0 / 15 * 3) + ((v >> 2) & (T) ~(T)0 / 15 * 3); // temp
         v   = (v + (v >> 4)) & (T) ~(T)0 / 255 * 15;                      // temp
         T c = (T)(v * ((T) ~(T)0 / 255)) >> (sizeof(T) - 1) * CHAR_BIT;   // count
         return c;
+#else
+        return std::popcount(v);
+#endif
     }
 
     inline constexpr uint32_t countTrailingZeros(uint32_t v)
     {
+#if 0
         uint32_t c = 32; // c will be the number of zero bits on the right
         v &= -signed(v);
         if (v)
@@ -440,9 +445,12 @@ namespace dmt {
         if (v & 0x55555555)
             c -= 1;
         return c;
+#else
+        return static_cast<uint32_t>(std::countr_zero(v));
+#endif
     }
 
-    inline constexpr size_t findFirstWhitespace(std::string_view str)
+    constexpr size_t findFirstWhitespace(std::string_view str)
     {
         for (size_t i = 0; i < str.size(); ++i)
         {
@@ -454,7 +462,7 @@ namespace dmt {
         return std::string_view::npos;
     }
 
-    inline constexpr std::string_view trimStartWhitespace(std::string_view str)
+    constexpr std::string_view trimStartWhitespace(std::string_view str)
     {
         size_t start = 0;
         while (start < str.size() && std::isspace(static_cast<unsigned char>(str[start])))
@@ -464,12 +472,12 @@ namespace dmt {
         return str.substr(start);
     }
 
-    inline constexpr bool startsWithEndsWith(std::string_view str, char start, char end)
+    constexpr bool startsWithEndsWith(std::string_view str, char start, char end)
     {
         return str.starts_with(start) && str.ends_with(end);
     }
 
-    inline constexpr std::string_view dequoteString(std::string_view str)
+    constexpr std::string_view dequoteString(std::string_view str)
     {
         if (str.size() >= 2 && (str.front() == '"' || str.front() == '\'') && str.back() == str.front())
         {
@@ -478,8 +486,9 @@ namespace dmt {
         return str; // Return as-is if not quoted
     }
 
-    inline constexpr uint32_t countTrailingZeros(uint64_t v)
+    constexpr uint32_t countTrailingZeros(uint64_t v)
     {
+#if 0
         uint32_t c = 64; // c will be the number of zero bits on the right
         v &= -signed(v); // Isolate the lowest set bit
         if (v)
@@ -498,6 +507,9 @@ namespace dmt {
             c -= 1;
 
         return c;
+#else
+        return static_cast<uint32_t>(std::countr_zero(v));
+#endif
     }
 
     // Primary template (matches nothing by default)
@@ -521,7 +533,7 @@ namespace dmt {
     concept TemplateInstantiationOf = is_template_instantiation_v<Template, T>;
 
     // TODO move to cpp all not inline
-    inline constexpr char pathSeparator()
+    constexpr char pathSeparator()
     {
 #if defined(DMT_OS_WINDOWS)
         return '\\';
@@ -1122,11 +1134,15 @@ namespace dmt {
 
     static DMT_FORCEINLINE uint64_t CountLeadingZeros64(uint64_t Value)
     {
+#if 0
         // return 64 if value if was 0
         unsigned long BitIndex;
         if (!_BitScanReverse64(&BitIndex, Value))
             BitIndex = -1;
         return 63 - BitIndex;
+#else
+        return static_cast<uint64_t>(std::countl_zero(Value));
+#endif
     }
 
     static DMT_FORCEINLINE uint64_t CeilLogTwo64(uint64_t Arg)

@@ -1,25 +1,24 @@
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
+set(GLAD_HEADER_LIST include/glad/gl.h;include/KHR/khrplatform.h)
+set(GLAD_SRC_LIST src/gl.c)
+if (DMT_OS_WINDOWS)
+  list(APPEND GLAD_HEADER_LIST include/glad/wgl.h)
+  list(APPEND GLAD_SRC_LIST src/wgl.c)
+endif()
+
 add_library(glad STATIC)
 target_sources(glad
   PRIVATE
-    src/gl.c
-    src/wgl.c
+    ${GLAD_SRC_LIST}
   PUBLIC 
     FILE_SET glad_headers TYPE HEADERS BASE_DIRS include/
-      FILES include/glad/gl.h
-            include/glad/wgl.h
-            include/KHR/khrplatform.h
+      FILES 
+        ${GLAD_HEADER_LIST}
 )
 
-target_include_directories(glad
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-  INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
+install(TARGETS glad FILE_SET glad_headers)
 
 get_target_property(glad_SOURCES glad INTERFACE_SOURCES)
 source_group("GLAD" FILES ${glad_SOURCES})

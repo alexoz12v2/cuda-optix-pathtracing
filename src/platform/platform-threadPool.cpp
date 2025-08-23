@@ -16,12 +16,12 @@
 #include <cassert>
 
 namespace dmt {
-    static void jobWorkerThread(void* that)
+    void jobWorkerThread(void* that)
     {
         auto*     storage    = reinterpret_cast<ThreadPoolV2::ThreadStorage*>(that);
         auto*     threadPool = storage->threadPool;
         uint32_t  index      = storage->index;
-        Job       copy;
+        Job       copy{};
         EJobLayer currentLayer = EJobLayer::eEmpty;
 
         while (true)

@@ -1,72 +1,84 @@
 {
   "camera": {
-    "focalLength": 20 // millimetres
-    "sensorSize": 36 // millimetres
-    "direction": [3.12, 3.234, 1.34] // array of 3 floats normalize
+    "focalLength": 20, // millimetres
+    "sensorSize": 36, // millimetres
+    "direction": [ 3.12, 3.234, 1.34 ] // array of 3 floats normalize
   },
   "film": {
     "resolutionX": 1238, // integer
-    "resolutionY": 2313, // integer
+    "resolutionY": 2313 // integer
   },
-  "textures": {
-    "tex": "path\img"
-  },
-  "materials": {
-    "mat-name": {
-      "diffuse": "tex",// mandatory
-      "metallic": 0.0,// mandatory
-      "normal": [0.3, 0.3, 0.2],// mandatory
+  "textures": [
+    {
+      "name": "tex1",
+      "type": "metallic",
+      "path": "path/to/tex.exr"
+    },
+    {}
+  ],
+  "materials": [
+    {
+      "name": "diff",
+      "diffuse": "tex", // mandatory
+      "metallic": 0.0, // mandatory
+      "normal": [ 0.3, 0.3, 0.2 ], // mandatory
       "roughness": 0.3, // mandatory
       "ior": 1.4, // optional: default: glass
-      "eta": [3, 2, 1], // optional, default: gold
-      "etak": [3, 1, 2], // optional, default: gold
-      "ggx-anisotropy": 2, // default 1
+      "eta": [ 3, 2, 1 ], // optional, default: gold
+      "etak": [ 3, 1, 2 ], // optional, default: gold
+      "ggx-anisotropy": 0, // default 1
       "ggx-dielectic": {
-        "reflectance-tint": [1,1,1],
-        "transmittance-tint": [1,1,1]
+        "reflectance-tint": [ 1, 1, 1 ],
+        "transmittance-tint": [ 1, 1, 1 ]
       }, // if present oren-nayar-dielectric absent
       "oren-nayar-dielectric": {
         "multiscatter-multiplier": 1.3
       }
     }
-  },
-  "objects": {
-    "nomeAcaso": {
-      "type": "FBX",
-      "path": "rel/to/this/file",
-      "material": "mat-name"
-    },
-    "altro": {
-      "type": "unit-cube"
-    }
-  },
-  "lights": {
-    "lightname": {
-      "type": "spot",
-      "light-angle": 45,
-      "penumbra-angle": 12
-    }
-  },
-  "envlight": "path\img\equi",
-  "transforms": {
-    "other": {
-      "built-in": "identity"
-    },
-    "position1": {
-      "from": "other",
-      "rotateX": "45" // degrees
-    }
-  },
-  "world": [
+  ],
+  "objects": [
     {
-      "transform": "position1",
-      "instances": ["nomeAcaso"],
-      "lights": [""],
-      "embedded": {
-        "transform": "position1",
-        "instances": ["nomeAcaso"],
-        "lights": [""]
+      "name": "nomeAcaso",
+      "type": "FBX",
+      "path": "rel/to/this/file.fbx",
+      "material": "mat-name"
+    }
+  ],
+  "lights": [
+    {
+      "name": "light-name",
+      "type": "spot",
+      "cone-angle": 60, // number from 0 to 120. anything outside is clamped
+      "falloff-percentage": 12, // number from 0 to 100, anything outside is clamped
+      "radiant-intensity": [ 1, 1, 1 ]
+    },
+    {
+      "name": "my-point",
+      "type": "point",
+      "radiant-intensity": [ 1, 1, 1 ]
+    }
+  ],
+  "envlight": "path/img/equi.png",
+  "transforms": [
+    {
+      "name": "position1",
+      "srt": {
+        "translation-vector": [ 10, 0, 2 ]
       }
     }
-  ]
+  ],
+  "world": {
+    "transform1": {
+      "transform3": {
+        "instances": ["obj1", "obj2"],
+        "lights": ["lidght1"]
+      },
+      "instances": ["obj1", "obj2"],
+      "lights": ["lidght1"]
+    },
+    "transform2": {
+      "instances": ["obj1", "obj2"],
+      "lights": ["lidght1"]
+    }
+  }
 }

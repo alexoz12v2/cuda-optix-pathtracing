@@ -16,10 +16,7 @@ namespace dmt::os {
     void Thread::start(void* arg)
     {
         m_internal->data = arg;
-        if (pthread_create(reinterpret_cast<pthread_t*>(m_thread),
-                           nullptr,
-                           threadFuncWrapper,
-                           reinterpret_cast<void*>(m_internal)))
+        if (pthread_create(reinterpret_cast<pthread_t*>(m_thread), nullptr, threadFuncWrapper, reinterpret_cast<void*>(m_internal)))
         {
             // error
         }

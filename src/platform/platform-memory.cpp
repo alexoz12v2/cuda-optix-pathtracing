@@ -183,7 +183,7 @@ namespace dmt {
         // if you didn't find any free block in the currently committed memory, check that the remainng size to be committed hosts enough additional blocks
         size_t const oldNumBlock      = numBlocks();
         size_t const additionalMemory = numBlocksRequired * m_blockSize;
-        size_t const additionalBitmap = ceilDiv(numBlocksRequired, 4ull);
+        size_t const additionalBitmap = ceilDiv<size_t>(numBlocksRequired, 4ull);
 
         if (additionalMemory > m_reservedSize - m_committedSize)
             return nullptr;

@@ -266,7 +266,7 @@ So, when all repositories are properly setup (LLVM: <https://apt.llvm.org/>, kit
 sudo apt-get install cmake clang clang-format clang-tidy lldb lld doxygen graphviz ninja-build
 ```
 
-### Install the clang++ 21 compiler
+### Install the clang++ 20 compiler
 
 This is the maximum version supported by nvcc 13
 
@@ -275,6 +275,21 @@ wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
 # verify with 
 clang++-20 --version
 # this is the compiler in CMakePresets.json for Debug-Linux
+```
+
+We need to make sure that it associates itself with the correct headers (C++20 headers), hence try the command
+
+```sh
+clang++-20 -v -E -stdlib=libc++ -x c++ /dev/null
+# look for found candidates ...
+```
+
+If it uses headers from a gcc version which doesn't support C++20, eg gcc 13, we need to use other C++ headers, like the libc++ ones
+from llvm, which can be installed on a debian like distribution with
+
+```sh
+sudo apt-get update # make sure to have the LLVM apt repository
+sudo apt install libc++-20-dev libc++abi-20-dev -y
 ```
 
 ### Install NVIDIA drivers and CUDA Toolkit

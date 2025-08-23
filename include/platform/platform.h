@@ -17,22 +17,7 @@
 #include <platform/platform-file.h>
 #include <platform/platform-memory-stackAllocator.h>
 
-// group 5: generated
-#include <platform/cuda-wrapper.h>
-
 namespace dmt {
-    /**
-     * Checks the `CUresult` of a CUDA Driver API operation, and, if different than `::CUDA_SUCCESS`,
-     * @note This is supposed to be used in CUDA calls whose failure is fatal
-     */
-    [[nodiscard]] DMT_PLATFORM_API bool cudaDriverCall(NvcudaLibraryFunctions const* cudaApi, CUresult result);
-
-    /**
-     * This function (and similiar for all loaded dlls) should be populated with more
-     * manual fixes with respect to the generated version as soon as Access Violations are discovered
-     */
-    DMT_PLATFORM_API void fixCUDADriverSymbols(NvcudaLibraryFunctions* cudaApi);
-
     /**
      * Adds a ContextImpl object inside
      */

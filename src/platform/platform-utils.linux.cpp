@@ -8,6 +8,8 @@
 #include <vector>
 #include <cstdint>
 
+#include <sys/types.h>
+#include <pwd.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -186,6 +188,116 @@ namespace dmt::os {
     m_isDir(true),
     m_valid(content != nullptr && capacity > 0 && size > 0 && exists(reinterpret_cast<char*>(content)))
     {
+    }
+
+    Path Path::home(std::pmr::memory_resource* resource)
+    {
+        if (!resource)
+            resource = std::pmr::get_default_resource();
+
+        char const* homeEnv  = getenv("HOME");
+        char const* homePath = nullptr;
+        if (homeEnv && *homeEnv)
+        {
+            homePath = homeEnv;
+        }
+        else
+        {
+            // Fallback to passwd
+            struct passwd* pw = getpwuid(getuid());
+            if (pw)
+                homePath = pw->pw_dir;
+        }
+
+        if (!homePath)
+            return invalid(resource);
+
+        size_t len    = strlen(homePath);
+        char*  buffer = reinterpret_cast<char*>(resource->allocate(len + 1));
+        memcpy(buffer, homePath, len);
+        buffer[len] = '\0';
+
+        return Path{resource, buffer, static_cast<uint32_t>(len + 1), static_cast<uint32_t>(len)};
+    }
+
+    Path Path::cwd(std::pmr::memory_resource* resource)
+    {
+        if (!resource)
+            resource = std::pmr::get_default_resource();
+
+        char tmp[PATH_MAX];
+        if (!getcwd(tmp, sizeof(tmp)))
+            return invalid(resource);
+
+        size_t len    = strlen(tmp);
+        char*  buffer = reinterpret_cast<char*>(resource->allocate(len + 1));
+        memcpy(buffer, tmp, len);
+        buffer[len] = '\0';
+
+        return Path{resource, buffer, static_cast<uint32_t>(len + 1), static_cast<uint32_t>(len)};
+    }
+
+    Path Path::invalid(std::pmr::memory_resource* resource) { return Path{resource, nullptr, 0, 0}; }
+
+    Path Path::root(char const* diskDesignator, std::pmr::memory_resource* resource)
+    {
+        if (!resource)
+            resource = std::pmr::get_default_resource();
+
+        // On Linux, "root" is always "/"
+        (void)diskDesignator; // ignored
+
+        char const* rootPath = "/";
+        size_t      len      = 1;
+        char*       buffer   = reinterpret_cast<char*>(resource->allocate(len + 1));
+        buffer[0]            = '/';
+        buffer[1]            = '\0';
+
+        return Path{resource, buffer, static_cast<uint32_t>(len + 1), static_cast<uint32_t>(len)};
+    }
+
+    Path Path::executableDir(std::pmr::memory_resource* resource)
+    {
+        if (!resource)
+            resource = std::pmr::get_default_resource();
+
+        char    tmp[PATH_MAX];
+        ssize_t len = readlink("/proc/self/exe", tmp, sizeof(tmp) - 1);
+        if (len <= 0)
+            return invalid(resource);
+
+        tmp[len] = '\0';
+
+        // Strip the executable name
+        for (ssize_t i = len - 1; i >= 0; --i)
+        {
+            if (tmp[i] == '/')
+            {
+                tmp[i] = '\0';
+                len    = i;
+                break;
+            }
+        }
+
+        char* buffer = reinterpret_cast<char*>(resource->allocate(len + 1));
+        memcpy(buffer, tmp, len);
+        buffer[len] = '\0';
+
+        return Path{resource, buffer, static_cast<uint32_t>(len + 1), static_cast<uint32_t>(len)};
+    }
+
+    std::pmr::string Path::toUnderlying(std::pmr::memory_resource* resource) const
+    {
+        if (!resource)
+            resource = m_resource;
+
+        std::pmr::string result{resource};
+        if (!m_data || m_dataSize == 0)
+            return result;
+
+        // On Linux, the internal data is UTF-8 char*
+        result.assign(reinterpret_cast<char const*>(m_data), m_dataSize);
+        return result;
     }
 
     // Copy constructor

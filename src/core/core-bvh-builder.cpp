@@ -1027,7 +1027,7 @@ namespace dmt::bvh {
         // After traversal, if we found a hit, write out hit info and return true
         if (isect && isect.t < 1e5f)
         {
-#if defined(DMT_DEBUG)
+#if defined(DMT_DEBUG) && defined(DMT_OS_WINDOWS)
             //assert(isect.t > tMin_Leaves);
             if (isect.t < 0.f || isect.t < tMin_Leaves)
                 __debugbreak();

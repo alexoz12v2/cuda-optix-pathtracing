@@ -73,7 +73,7 @@ project(
 )
 
 enable_language(C)
-enable_language(CUDA)
+# enable_language(CUDA)
 
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 

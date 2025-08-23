@@ -3,8 +3,18 @@
 #include <platform/platform.h> // using AppContextJanitor
 
 namespace dmt {
-    // Private stuff forward declarations -----------------------------------------------------------------------------
-    __host__ __device__ void adjustRangeToErrorBounds(Vector3f dir, Point3fi& o, float* optInOut_tMax);
+    // Private Static Stuff -------------------------------------------------------------------------------------------
+    static __host__ __device__ void adjustRangeToErrorBounds(Vector3f dir, Point3fi& o, float* optInOut_tMax)
+    {
+        // offset ray origin to the edge of the error bounds and adjust the `tMax`
+        if (float len2 = dotSelf(dir); len2 > 0.f)
+        {
+            float dt = dot(abs(dir), o.error()) / len2;
+            o        = o + Point3fi(dir * dt); // TODO: support for more operations with intervals
+            if (optInOut_tMax)
+                *optInOut_tMax -= dt;
+        }
+    }
 
     __host__ __device__ Transform::Transform() : m(Matrix4f::identity()), mInv(Matrix4f::identity()) {}
     __host__ __device__ Transform::Transform(Matrix4f const& matrix) : m(matrix), mInv(inverse(matrix)) {}
@@ -1135,19 +1145,6 @@ namespace dmt {
                 assert(zeros.length < outNumZeros);
                 zeros.data[outNumZeros++] = tNewton;
             }
-        }
-    }
-
-    // Private Static Stuff -------------------------------------------------------------------------------------------
-    static __host__ __device__ void adjustRangeToErrorBounds(Vector3f dir, Point3fi& o, float* optInOut_tMax)
-    {
-        // offset ray origin to the edge of the error bounds and adjust the `tMax`
-        if (float len2 = dotSelf(dir); len2 > 0.f)
-        {
-            float dt = dot(abs(dir), o.error()) / len2;
-            o        = o + Point3fi(dir * dt); // TODO: support for more operations with intervals
-            if (optInOut_tMax)
-                *optInOut_tMax -= dt;
         }
     }
 } // namespace dmt

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "platform/platform-os-utils-macros.h"
+#include "platform/platform-macros.h"
 
 #include <sys/mman.h> // mmap, munmap
 

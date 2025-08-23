@@ -146,7 +146,8 @@ macro(dmt_define_environment)
     endif()
   endif()
 
-  string(TOUPPER "{ARCH}" ARCH_UPPER)
+  string(TOUPPER "${ARCH}" ARCH_UPPER)
+  string(REPLACE "-" "_" ARCH_UPPER "${ARCH_UPPER}")
   set("DMT_ARCH_${ARCH_UPPER}" 1)
 
   if(NOT ${DMT_ARCH_X86_64})
@@ -271,6 +272,44 @@ function(dmt_find_python_executable)
     endif()
   endif()
   return(PROPAGATE PYTHON_EXEC)
+endfunction()
+
+
+function(dmt_set_linux_specific_compile_options target properties_visibility)
+  if(DMT_OS_LINUX)
+    if(DMT_COMPILER_CLANG)
+      #target_include_directories(${target} BEFORE ${properties_visibility}
+      #    /usr/lib/llvm-20/include/c++/v1
+      #    /usr/lib/llvm-20/lib/clang/20/include
+      #)
+
+      # DISABLES `clang-scan-deps` needed by ninja to keep track of compilation dependencies
+      # and make incremental builds faster. It doesn't follow our directories though
+      # set_target_properties(${target} PROPERTIES CXX_NO_DEPENDENCIES TRUE)
+
+      target_compile_options(${target} ${properties_visibility} 
+        #-stdlib=libc++ 
+        -nostdlib++ -nostdinc++ -isystem /usr/lib/llvm-20/include/c++/v1
+      )
+  
+      # target_compile_definitions(${target} ${properties_visibility} _LIBCPP_DISABLE_AVAILABILITY)
+      target_link_libraries(${target} ${properties_visibility} c++ c++abi)
+    endif()
+  endif()
+endfunction()
+
+
+function(dmt_set_cpu_architecture_features target properties_visibility)
+  if(DEFINED DMT_ARCH_X86_64)
+    if (DMT_COMPILER_CLANG OR DMT_COMPILER_GCC)
+      # $<$<COMPILE_LANGUAGE:CXX>: ?
+      target_compile_options(${target} ${properties_visibility} -mavx -msse3 -mfma -mavx2)
+    elseif(DMT_COMPILER_MSVC)
+      target_compile_options(${target} ${properties_visibility} /arch:AVX2 /arch:AVX /arch:SSE4.2)
+    endif()
+  else()
+      message(FATAL_ERROR "HELLO")
+  endif()
 endfunction()
 
 
@@ -551,6 +590,8 @@ function(dmt_add_module_library name module_name)
     set(properties_visibility_public "PUBLIC")
   endif()
 
+  dmt_set_linux_specific_compile_options(${name} ${properties_visibility})
+  dmt_set_cpu_architecture_features(${name} ${properties_visibility})
   dmt_set_target_compiler_versions(${name} ${properties_visibility})
   dmt_set_target_warnings(${name} ${properties_visibility})
   dmt_set_target_optimization(${name} ${properties_visibility})
@@ -584,11 +625,21 @@ function(dmt_add_module_library name module_name)
 
   # possible todo: Override PDB name/directory as 2 configurations generate debug symbols
 
+  # alessio: Shouldn't `install(TARGETS .. FILE_SET ..)` take tare of include libraries?
   # add project include as include directory
   if(NOT properties_visibility MATCHES "INTERFACE")
     target_include_directories(${name}
-      INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-      PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/src/${target_path} ${PROJECT_SOURCE_DIR}/include/${target_path} ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/extern
+      INTERFACE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+        $<INSTALL_INTERFACE:include>  # <--- install tree include
+      PRIVATE
+        #${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src/${target_path}
+        ${PROJECT_SOURCE_DIR}/include/${target_path}
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/extern
     )
   else()
     target_include_directories(${name}
@@ -644,6 +695,8 @@ endfunction()
 
 function(dmt_add_cli target)
   add_executable(${target})
+  dmt_set_linux_specific_compile_options(${target} PRIVATE)
+  dmt_set_cpu_architecture_features(${target} PRIVATE)
   set_target_properties(${target} PROPERTIES 
     RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
     DEBUG_POSTFIX -d
@@ -690,6 +743,8 @@ function(dmt_add_example target)
     # add the PE executable with .com extension, since command line prefers it when calling a program without suffix extension
     # this will use /SUBSYSTEM:CONSOLE
     add_executable(${target}-launcher)
+    dmt_set_linux_specific_compile_options(${target}-launcher PRIVATE)
+    dmt_set_cpu_architecture_features(${target}-launcher PRIVATE)
     target_sources(${target}-launcher PRIVATE ${PROJECT_SOURCE_DIR}/src/win32-launcher/launcher.cpp)
     # set the same properties for the launcher as well
     set_target_properties(${target}-launcher PROPERTIES 
@@ -716,6 +771,8 @@ function(dmt_add_example target)
   message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
   message(STATUS "${target} ARGS_PUBLIC_DEPS ${ARGS_PUBLIC_DEPS}")
   message(STATUS "${target} ARGS_PRIVATE_DEPS ${ARGS_PRIVATE_DEPS}")
+  dmt_set_cpu_architecture_features(${target} PRIVATE)
+  dmt_set_linux_specific_compile_options(${target} PRIVATE)
 
   # put the executable file in the right place
   # set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
@@ -757,6 +814,9 @@ function(dmt_add_test target)
   target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+
+  dmt_set_cpu_architecture_features(${target} PRIVATE)
+  dmt_set_linux_specific_compile_options(${target} PRIVATE)
 
   # showup folder on visual studio
   set_target_properties(${target} PROPERTIES FOLDER "Tests")

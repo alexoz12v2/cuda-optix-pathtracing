@@ -101,5 +101,7 @@
     #define __global__
     #define __constant__
     #define __managed__
-    #define __noinline__
+    #if 0 // breaks libc++
+        #define __noinline__
+    #endif
 #endif

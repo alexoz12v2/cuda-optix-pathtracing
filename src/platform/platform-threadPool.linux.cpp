@@ -2,39 +2,44 @@
 
 #include <pthread.h>
 
-Thread::Thread(ThreadFunc func) : function(func), thread(0) {}
-
-void* threadFuncWrapper(void* arg)
-{
-    auto func = reinterpret_cast<Thread::ThreadFunc>(arg);
-    if (func)
-        func();
-    return nullptr;
-}
-
-void Thread::start()
-{
-    if (pthread_create(reinterpret_cast<pthread_t*>(&thread), nullptr, threadFuncWrapper, reinterpret_cast<void*>(function)) !=
-        0)
+namespace dmt::os {
+    static void* threadFuncWrapper(void* arg)
     {
-        // error
-    }
-}
+        auto* internal = reinterpret_cast<Thread::Internal*>(arg);
+        if (!internal)
+            return nullptr;
 
-void Thread::join()
-{
-    if (thread)
-    {
-        pthread_join(static_cast<pthread_t>(thread), nullptr);
-        thread = 0;
+        internal->func(internal->data);
+        return nullptr;
     }
-}
 
-void Thread::terminate()
-{
-    if (thread)
+    void Thread::start(void* arg)
     {
-        pthread_cancel(static_cast<pthread_t>(thread));
-        thread = 0;
+        m_internal->data = arg;
+        if (pthread_create(reinterpret_cast<pthread_t*>(m_thread),
+                           nullptr,
+                           threadFuncWrapper,
+                           reinterpret_cast<void*>(m_internal)))
+        {
+            // error
+        }
     }
-}
+
+    void Thread::join()
+    {
+        if (m_thread)
+        {
+            pthread_join(static_cast<pthread_t>(m_thread), nullptr);
+            m_thread = 0;
+        }
+    }
+
+    void Thread::terminate()
+    {
+        if (m_thread)
+        {
+            pthread_cancel(static_cast<pthread_t>(m_thread));
+            m_thread = 0;
+        }
+    }
+} // namespace dmt::os

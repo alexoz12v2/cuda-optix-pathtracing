@@ -7,6 +7,8 @@
 
 #include <gx/shared_mutex.h>
 
+#include <list>
+
 // mipc file description
 // - header
 // - content

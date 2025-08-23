@@ -38,14 +38,10 @@ namespace dmt::os {
             if (name.length() <= 0 || value.length() > maxWinLength)
                 return result;
 
-#if defined(_WIN32)
             // TODO switch to smart pointers maybe?
             std::pmr::wstring const wName  = dmt::os::win32::utf16FromUtf8(name, resource);
             std::pmr::wstring const wValue = dmt::os::win32::utf16FromUtf8(value, resource);
             result                         = SetEnvironmentVariableW(wName.c_str(), wValue.c_str());
-#else
-    #error "not done yet"
-#endif
             return result;
         }
 

@@ -1,0 +1,7 @@
+If:
+  PathMatch: [.*\.h, .*\.cpp, .*\.cu]
+  PathExclude: [extern/.*, build/.*/_deps/.*]
+
+CompileFlags:
+  Compiler: clang++-20
+  CompilationDatabase: build/Debug-Linux/

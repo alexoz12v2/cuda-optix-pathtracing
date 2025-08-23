@@ -3,17 +3,6 @@
 #include <Windows.h>
 
 namespace dmt::os {
-    Thread::Thread(ThreadFunc func, std::pmr::memory_resource* resource) :
-    m_internal(reinterpret_cast<Thread::Internal*>(resource->allocate(sizeof(Thread::Internal)))),
-    m_resource(resource)
-    {
-        if (m_internal)
-        {
-            m_internal->func = func;
-            m_internal->data = nullptr;
-        }
-    }
-
     static DWORD WINAPI threadFuncWrapper(LPVOID arg)
     {
         auto& internal = *reinterpret_cast<Thread::Internal*>(arg);

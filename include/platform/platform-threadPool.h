@@ -36,14 +36,24 @@ namespace dmt::os {
             void*      data;
         };
 
-        Thread(ThreadFunc func, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        DMT_FORCEINLINE Thread(ThreadFunc func, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) :
+        m_internal(reinterpret_cast<Thread::Internal*>(resource->allocate(sizeof(Thread::Internal)))),
+        m_resource(resource)
+        {
+            if (m_internal)
+            {
+                m_internal->func = func;
+                m_internal->data = nullptr;
+            }
+        }
+
         Thread(Thread const&)                = delete;
         Thread(Thread&&) noexcept            = delete;
         Thread& operator=(Thread const&)     = delete;
         Thread& operator=(Thread&&) noexcept = delete;
 
         void     start(void* arg = nullptr);
-        void     join();
+        void     join(); /// deallocates memory, so must be called before destruction
         void     terminate();
         bool     running() const;
         uint32_t id() const;

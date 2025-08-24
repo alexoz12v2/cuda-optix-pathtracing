@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-math.h"
 
 namespace dmt {

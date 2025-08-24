@@ -1,6 +1,6 @@
 #include "cudautils-vecmath.h"
 
-#if defined(DMT_ARCH_X86_64)
+#if defined(DMT_ARCH_X86_64) && !defined(__CUDA_ARCH__)
     #include <immintrin.h>
 #endif
 
@@ -1121,9 +1121,9 @@ namespace dmt {
 
     __host__ __device__ QR qr(Matrix4f const& m, int32_t numIter)
     {
-        QR        ret;
-        glm::mat4 QT{1.f};
-        glm::mat4 R = toGLMmat(m);
+        QR                    ret;
+        alignas(16) glm::mat4 QT{1.f};
+        alignas(16) glm::mat4 R = toGLMmat(m);
         for (int32_t iter = 0; iter < numIter; ++iter)
         {
             for (int32_t idx = 0; idx < 3; ++idx)
@@ -1152,7 +1152,9 @@ namespace dmt {
                     break;
             }
         }
-        ret.qOrthogonal = fromGLMmat(glm::transpose(QT));
+        QT = glm::transpose(QT);
+
+        ret.qOrthogonal = fromGLMmat(QT);
         ret.rUpper      = fromGLMmat(R);
         return ret;
     }
@@ -1214,16 +1216,20 @@ namespace dmt {
 
     __host__ __device__ Matrix4f operator+(Matrix4f const& a, Matrix4f const& b)
     {
-        return fromGLMmat(toGLMmat(a) + toGLMmat(b));
+        alignas(16) glm::mat4 sum = toGLMmat(a) + toGLMmat(b);
+        return fromGLMmat(sum);
     }
     __host__ __device__ Matrix4f operator-(Matrix4f const& a, Matrix4f const& b)
     {
-        return fromGLMmat(toGLMmat(a) - toGLMmat(b));
+        alignas(16) glm::mat4 sub = toGLMmat(a) - toGLMmat(b);
+        return fromGLMmat(sub);
     }
     __host__ __device__ Matrix4f operator*(Matrix4f const& a, Matrix4f const& b)
     {
-        return fromGLMmat(toGLMmat(a) * toGLMmat(b));
+        alignas(16) glm::mat4 prod = toGLMmat(a) * toGLMmat(b);
+        return fromGLMmat(prod);
     }
+
     __host__ __device__ Matrix4f operator*(float v, Matrix4f const& m)
     {
         Matrix4f ret = m;
@@ -1231,6 +1237,7 @@ namespace dmt {
             ret.m[i] *= v;
         return ret;
     }
+
     __host__ __device__ Matrix4f operator*(Matrix4f const& m, float v)
     {
         Matrix4f ret = m;
@@ -1238,6 +1245,7 @@ namespace dmt {
             ret.m[i] *= v;
         return ret;
     }
+
     __host__ __device__ Matrix4f operator/(Matrix4f const& m, float v)
     {
         Matrix4f ret = m;
@@ -1273,7 +1281,11 @@ namespace dmt {
         return m;
     }
 
-    __host__ __device__ Matrix4f fromQuat(Quaternion q) { return fromGLMmat(glm::mat4_cast(toGLM(q))); }
+    __host__ __device__ Matrix4f fromQuat(Quaternion q)
+    {
+        alignas(16) glm::mat4 mat = glm::mat4_cast(toGLM(q));
+        return fromGLMmat(mat);
+    }
 
     __host__ __device__ bool near(Matrix4f const& a, Matrix4f const& b)
     {
@@ -1289,9 +1301,17 @@ namespace dmt {
 
     __host__ __device__ float determinant(Matrix4f const& m) { return glm::determinant(toGLMmat(m)); }
 
-    __host__ __device__ Matrix4f inverse(Matrix4f const& m) { return fromGLMmat(glm::inverse(toGLMmat(m))); }
+    __host__ __device__ Matrix4f inverse(Matrix4f const& m)
+    {
+        alignas(16) glm::mat4 minv = glm::inverse(toGLMmat(m));
+        return fromGLMmat(minv);
+    }
 
-    __host__ __device__ Matrix4f transpose(Matrix4f const& m) { return fromGLMmat(glm::transpose(toGLMmat(m))); }
+    __host__ __device__ Matrix4f transpose(Matrix4f const& m)
+    {
+        alignas(16) glm::mat4 t = glm::transpose(toGLMmat(m));
+        return fromGLMmat(t);
+    }
 
     __host__ __device__ Vector4f mul(Matrix4f const& m, Vector4f v) { return {fromGLM(toGLMmat(m) * toGLM(v))}; }
 

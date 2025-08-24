@@ -74,11 +74,11 @@ if (DMT_OS_WINDOWS)
     endif()
 
     if (FBXSDK_FOUND)
-        add_library(FBXSDK::fbxsdk STATIC IMPORTED)
+        add_library(FBXSDK::fbxsdk SHARED IMPORTED)
 
         set_target_properties(FBXSDK::fbxsdk PROPERTIES
-            IMPORTED_LOCATION_RELEASE "${FBXSDK_LIBRARY}"
-            IMPORTED_LOCATION_DEBUG   "${FBXSDK_LIBRARY_DEBUG}"
+            IMPORTED_LOCATION_RELEASE "${FBXSDK_RUNTIME}"
+            IMPORTED_LOCATION_DEBUG   "${FBXSDK_RUNTIME_DEBUG}"
             INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}"
         )
 
@@ -152,11 +152,11 @@ elseif (DMT_OS_LINUX)
     endif()
 
     if (FBXSDK_FOUND)
-        add_library(FBXSDK::fbxsdk STATIC IMPORTED)
+        add_library(FBXSDK::fbxsdk SHARED IMPORTED)
 
         set_target_properties(FBXSDK::fbxsdk PROPERTIES
-            IMPORTED_LOCATION_RELEASE "${FBXSDK_LIBRARY}"
-            IMPORTED_LOCATION_DEBUG   "${FBXSDK_LIBRARY_DEBUG}"
+            IMPORTED_LOCATION_RELEASE "${FBXSDK_RUNTIME}"
+            IMPORTED_LOCATION_DEBUG   "${FBXSDK_RUNTIME_DEBUG}"
             INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}"
         )
 

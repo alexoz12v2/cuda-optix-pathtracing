@@ -62,6 +62,7 @@ namespace dmt {
             texCache.getOrInsert(key, ilod, bytesLod0, texFormat));
         auto const* mortonLevelBufferLod1 = reinterpret_cast<unsigned char const*>(
             texCache.getOrInsert(key, ilod + 1, bytesLod1, texFormat));
+        assert(mortonLevelBufferLod0 && mortonLevelBufferLod1);
 
         // TODO handle wrap mode
         EWAParams paramsLod0{mortonLevelBufferLod0, levelResLod0, TexWrapMode::eMirror, TexWrapMode::eMirror, texFormat, normal};
@@ -289,7 +290,7 @@ namespace dmt {
         // Default: object-space/oct-encoded normal
         Normal3f ns = normFromOcta(material.normalvalue);
 
-        // If there’s a normal map, sample it
+        // If thereï¿½s a normal map, sample it
         if (material.texMatMap & SurfaceMaterial::NormalMask)
         {
             int w = static_cast<int>(material.normalWidth);

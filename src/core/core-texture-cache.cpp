@@ -1,11 +1,16 @@
 #include "core-texture-cache.h"
+#include <memory_resource>
 
 namespace dmt {
     TextureCache::TextureCache(size_t cacheSize, std::pmr::memory_resource* cacheMem, std::pmr::memory_resource* listMem) :
     MipcFiles{cacheMem},
     m_cache{cacheMem},
     m_lruKeyList{listMem},
+#if defined(DMT_USE_SYNC_ALLOCATOR)
     m_texMemory{EMemoryTag::eTextures, cacheSize},
+#else
+    m_texMemory{std::pmr::pool_options{.max_blocks_per_chunk = 32, .largest_required_pool_block = 256}},
+#endif
     m_available{cacheSize}
     {
         m_cache.reserve(256);
@@ -67,7 +72,7 @@ namespace dmt {
         int32_t   mipUnalignedOffset = 0;
         TexFormat texFormat{};
         if (mipUnalignedOffset = MipcFiles.copyMipOfKey(baseKey, mipLevel, nullptr, &mipSize, &mipOffset, &texFormat);
-            !mipUnalignedOffset)
+            mipUnalignedOffset < 0)
         {
             assert(false && "you shouldn't request something which doesn't exist");
             return nullptr; // no file
@@ -86,7 +91,7 @@ namespace dmt {
                 return nullptr;
             }
             uint32_t const numBytes = it->second.numBytes;
-            m_texMemory.deallocate(it->second.data, numBytes);
+            m_texMemory.deallocate(it->second.data, numBytes, MipcFiles.sectorSize());
 
             bool const deleted = m_cache.erase(keyToDel);
             assert(deleted);
@@ -100,17 +105,17 @@ namespace dmt {
             return nullptr;
         }
 
-        void* buffer = m_texMemory.allocate(mipSize);
+        void* buffer = m_texMemory.allocate(mipSize, MipcFiles.sectorSize());
         if (!buffer)
             return nullptr; // memory failure
 
         // create entry in LRU map and push_back onto list the key
         auto const& [it, wasInserted] = m_cache.try_emplace(key, baseKey, buffer, mipUnalignedOffset, mipLevel, mipSize, texFormat);
 
-        if (!wasInserted || !MipcFiles.copyMipOfKey(baseKey, mipLevel, it->second.data, &mipSize, &mipOffset, nullptr))
+        if (!wasInserted || MipcFiles.copyMipOfKey(baseKey, mipLevel, it->second.data, &mipSize, &mipOffset, nullptr) < 0)
         {
             assert(false && "how did we get here?");
-            m_texMemory.deallocate(buffer, mipSize);
+            m_texMemory.deallocate(buffer, mipSize, MipcFiles.sectorSize());
             return nullptr;
         }
 

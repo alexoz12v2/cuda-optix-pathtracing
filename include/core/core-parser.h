@@ -3,7 +3,7 @@
 #include "core/core-macros.h"
 #include "core/core-trianglemesh.h"
 #include "core/core-dstd.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-material.h"
 #include "core/core-mesh-parser.h"
 #include "core/core-render.h"

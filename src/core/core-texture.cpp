@@ -1,4 +1,5 @@
 #include "core-texture.h"
+#include "core-texture-cache.h"
 
 namespace dmt {
     struct Byte3
@@ -577,7 +578,7 @@ namespace dmt {
             return r;
         }
 
-        // eigenvalues = 0.5 * (trace ± sqrt(trace^2 - 4*det))
+        // eigenvalues = 0.5 * (trace ï¿½ sqrt(trace^2 - 4*det))
         float discr = trace * trace - 4.f * det;
         if (discr < 0.f)
             discr = 0.f; // numeric safety

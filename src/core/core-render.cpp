@@ -11,6 +11,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+#include "platform/platform-context.h"
+
 // TODO remove
 //#define DMT_SINGLE_THREAD
 #define DMT_DBG_PIXEL
@@ -218,7 +220,7 @@ namespace dmt::job {
                             Vector3f    dpdu, dpdv;
                             if (fl::abs(det) < 1e-8f)
                             {
-                                // UVs are degenerate — fallback to geometric basis
+                                // UVs are degenerate ï¿½ fallback to geometric basis
                                 Vector3f ng = normalize(cross(p2 - p0, p1 - p0));
                                 coordinateSystemFallback(ng, &dpdu, &dpdv); // builds arbitrary tangent frame
                                 return;
@@ -452,11 +454,15 @@ namespace dmt::render_thread {
         static constexpr uint32_t TileHeight         = 32;
         static constexpr uint32_t ScratchBufferBytes = 4096;
 
+        Context ctx;
+        ctx.log("[RT] Started Render Thread", {});
+
         Data*    rtData       = reinterpret_cast<Data*>(data);
         uint32_t bvhNodeCount = 0;
 
         // construct BVH
         rtData->bvh = bvhBuild(*rtData->scene, &bvhNodeCount);
+        ctx.log("[RT] Built BVH", {});
 
         // define film, sampler, camera
         int32_t const Width           = rtData->params->filmResolution.x;
@@ -471,6 +477,7 @@ namespace dmt::render_thread {
         film::RGBFilm       film{{{Width, Height}}, 1e5f, &pool};
         filtering::Mitchell filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f, &pool, &scratch};
         resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
+        ctx.log("[RT] Constructed Film Buffer and Mitchell Filter Distribution", {});
 
         // define camera (image plane physical dims, resolution given by image)
         Vector3f const cameraPosition{0.f, 0.f, 0.f};
@@ -483,6 +490,7 @@ namespace dmt::render_thread {
         Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
         ApproxDifferentialsContext
             diffCtx = camera::minDifferentialsFromCamera(cameraFromRaster, renderFromCamera, film, SamplesPerPixel);
+        ctx.log("[RT] Constructed Camera Parameters", {});
 
         // build light tree
         std::pmr::vector<LightTreeBuildNode> lightTreeNodes{&pool};
@@ -492,6 +500,7 @@ namespace dmt::render_thread {
             lightTreeBuild(rtData->scene->lights, &lightTreeNodes, &lightTreeBittrails, &scratch);
             resetMonotonicBufferPointer(scratch, scratchBuffer.get(), ScratchBufferBytes);
         }
+        ctx.log("[RT] Constructed Light Tree", {});
 
         // allocate all necessary jobs
         uint32_t const NumTileX = ceilDiv(static_cast<uint32_t>(Width), TileWidth);
@@ -499,10 +508,12 @@ namespace dmt::render_thread {
         uint32_t const NumJobs  = NumTileX * NumTileY;
 
         UniqueRef<job::EvalTileData[]> jobData = makeUniqueRef<job::EvalTileData[]>(&pool, NumJobs);
+        ctx.log("[RT] Allocated Job Data", {});
 
         ThreadPoolV2& threadpool = *rtData->workers;
 
         UniqueRef<sampling::HaltonOwen[]> tlsSamplers = makeUniqueRef<sampling::HaltonOwen[]>(&pool, threadpool.numThreads());
+        ctx.log("[RT] Allocated TLS for Halton Samplers with Owen Scrambling", {});
         for (uint32_t tidx = 0; tidx < threadpool.numThreads(); ++tidx)
         {
             int seed = 18123 * sinf(32424 * tidx);
@@ -544,7 +555,7 @@ namespace dmt::render_thread {
         threadpool.kickJobs();
         threadpool.waitForAll();
 
-        std::cout << "[RT] Finished everything" << std::endl;
+        ctx.log("[RT] Finished everything", {});
 
         // TODO better
         film.writeImage(os::Path::executableDir() / "render.png");
@@ -553,10 +564,10 @@ namespace dmt::render_thread {
 
 namespace dmt {
     Renderer::Renderer(size_t tmpSize) :
+    scene{&heapAligned},
     m_bigBuffer{makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), tmpSize)},
     m_bigBufferSize{tmpSize},
     m_bigTmpMem{m_bigBuffer.get(), m_bigBufferSize},
-    m_poolMem{},
     m_renderThread{render_thread::mainLoop, &m_poolMem},
 #if defined(DMT_SINGLE_THREAD)
     m_workers{1, &m_poolMem},

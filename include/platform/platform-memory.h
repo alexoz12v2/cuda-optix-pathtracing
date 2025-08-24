@@ -459,6 +459,26 @@ namespace dmt {
 
     typedef GenericPlatformMemoryConstants PlatformMemoryConstants;
 
+    class Aligned16MemoryResource : public std::pmr::memory_resource
+    {
+    public:
+        // Constructor: Takes a pointer to the upstream memory resource.
+        DMT_PLATFORM_API explicit Aligned16MemoryResource(
+            std::pmr::memory_resource* upstream = std::pmr::get_default_resource());
+
+    private:
+        // The core allocation function. This is where we enforce the alignment.
+        DMT_PLATFORM_API void* do_allocate(std::size_t bytes, std::size_t alignment) override;
+
+        // The core deallocation function. This is where we find and free
+        // the original block.
+        DMT_PLATFORM_API void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override;
+
+        // Compares this memory resource with another.
+        DMT_PLATFORM_API bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override;
+
+        std::pmr::memory_resource* m_upstream;
+    };
 } // namespace dmt
 
 /** @} */

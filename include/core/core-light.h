@@ -1,22 +1,19 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-math.h"
 
 // Note: InfiniteImageLight are treated separately from lights in scene
 
 namespace dmt {
-    // TODO move elsewhere
-    DMT_CORE_API float sin_sqr_to_one_minus_cos(float const s_sq);
-
     // -- Constants --
 
     inline constexpr float threshold = 1e-4f;
 
     // -- Types --
 
-    struct DMT_CORE_API PointLight
+    struct PointLight
     {
         float radius;  /// we treat the point light as a small sphere, hence it has a radius
         float evalFac; /// multiplicative factor for light strength
@@ -24,7 +21,7 @@ namespace dmt {
     static_assert(std::is_trivial_v<PointLight> && std::is_standard_layout_v<PointLight>);
 
     // attenuation follows the third grade smoothstep function
-    struct DMT_CORE_API SpotLight
+    struct SpotLight
     {
         Vector3f direction;           /// cone direction (unit vector) (if storage saving needed, use octahedral)
         float    radius;              /// apex is treated as a small sphere of this radius
@@ -34,7 +31,7 @@ namespace dmt {
     };
     static_assert(std::is_trivial_v<SpotLight> && std::is_standard_layout_v<SpotLight>);
 
-    enum class DMT_CORE_API LightType : int32_t
+    enum class LightType : int32_t
     {
         ePoint = 0,
         eEnv,
@@ -46,10 +43,10 @@ namespace dmt {
     };
 
     // probably moved in cudautils if used on GPU without any variations
-    struct DMT_CORE_API alignas(16) Light
+    struct alignas(16) Light
     {
-        Point3f co;
-        Transform lightFromRender; // has position in last column (we assume that this is affine), but we keep it anyways
+        alignas(16) Transform lightFromRender; // has position in last column (we assume that this is affine), but we keep it anyways
+        Point3f   co;
         RGB       strength;
         LightType type;
         union DMT_CORE_API LightData

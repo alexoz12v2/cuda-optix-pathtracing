@@ -11,6 +11,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include <cassert>
@@ -488,7 +489,7 @@ namespace dmt {
             }
             else
             {
-                // Not a format specifier OR ran out of args — treat as literal
+                // Not a format specifier OR ran out of args ï¿½ treat as literal
                 earlyExit             = tupleSize == 0 || usedArgs >= tupleSize;
                 CharRangeU8 portion   = *fmt;
                 char const* src       = portion.data;
@@ -552,141 +553,190 @@ namespace dmt {
                                                LogHandlerDeallocate _dealloc = ::dmt::os::deallocate);
 
     // ----------------------------------------------------------------------------------------------------------------
+    template <typename T>
+    T* implicit_aligned_alloc(std::size_t alignment, void*& p, std::size_t& sz)
+    {
+        void* aligned_ptr = p;
+        if (std::align(alignment, sizeof(T), aligned_ptr, sz))
+        {
+            T* result = std::launder(reinterpret_cast<T*>(aligned_ptr));
+            // move pointer past allocated object
+            p = static_cast<std::byte*>(aligned_ptr) + sizeof(T);
+            sz -= sizeof(T);
+            return result;
+        }
+        return nullptr; // not enough space
+    }
+
+    template <typename T>
+    struct UTF8Formatter;
 
     template <std::floating_point T>
     struct UTF8Formatter<T>
     {
-        inline constexpr void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
+        inline void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
         {
-            if (_bufferSize < _offset + 2 * sizeof(uint32_t))
-                return; // Not enough space for metadata
+            void*       p  = _buffer + _offset;
+            std::size_t sz = _bufferSize;
 
-            char* writePos = reinterpret_cast<char*>(_buffer + _offset + 2 * sizeof(uint32_t));
-            int bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%.6g", value); // Adjust precision if needed
-            if (bytesWritten > 0 && static_cast<uint32_t>(bytesWritten) <= (_bufferSize - _offset - 2 * sizeof(uint32_t)))
+            // Align buffer for two uint32_t metadata
+            void* aligned_metadata = std::align(alignof(uint32_t), 2 * sizeof(uint32_t), p, sz);
+            if (!aligned_metadata || sz < 2 * sizeof(uint32_t))
             {
-                uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
-                uint32_t len      = numBytes; // Each byte corresponds to one character in this case
-
-                *std::bit_cast<uint32_t*>(_buffer + _offset)                    = numBytes; // Store `numBytes`
-                *std::bit_cast<uint32_t*>(_buffer + _offset + sizeof(uint32_t)) = len;      // Store `len`
-
-                _offset += 2 * sizeof(uint32_t) + numBytes;
-                _bufferSize -= 2 * sizeof(uint32_t) + numBytes;
+                _bufferSize = 0;
+                return;
             }
-            else
+
+            uint32_t* numBytesPtr = std::launder(reinterpret_cast<uint32_t*>(aligned_metadata));
+            uint32_t* lenPtr      = numBytesPtr + 1;
+
+            // Align buffer for string write after metadata
+            char*       stringPos = reinterpret_cast<char*>(lenPtr + 1);
+            std::size_t stringSz  = sz - 2 * sizeof(uint32_t);
+
+            void*       aligned_string = stringPos;
+            std::size_t remaining      = stringSz;
+            aligned_string             = std::align(alignof(std::max_align_t), stringSz, aligned_string, remaining);
+            if (!aligned_string || remaining == 0)
             {
-                _bufferSize = 0; // Insufficient buffer space
+                _bufferSize = 0;
+                return;
             }
+
+            char* writePos = reinterpret_cast<char*>(aligned_string);
+
+            // Format float/double/long double into buffer
+            int bytesWritten = std::snprintf(writePos, remaining, "%.6g", value); // Adjust precision if needed
+
+            if (bytesWritten <= 0 || static_cast<std::size_t>(bytesWritten) > remaining)
+            {
+                _bufferSize = 0;
+                return;
+            }
+
+            uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
+            uint32_t len      = numBytes;
+
+            *numBytesPtr = numBytes;
+            *lenPtr      = len;
+
+            // Update offsets
+            _offset += (writePos - (_buffer + _offset)) + bytesWritten;
+            _bufferSize -= (writePos - (_buffer + _offset)) + bytesWritten;
         }
     };
 
-    template <std::integral T>
+
+    template <typename T>
+        requires(std::integral<T> || (std::is_pointer_v<T> && (!std::convertible_to<T, std::string_view>)))
     struct UTF8Formatter<T>
     {
-        inline constexpr void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
+        inline void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
         {
-            if (_bufferSize < _offset + 2 * sizeof(uint32_t))
-                return; // Not enough space for metadata
+            void*       p  = _buffer + _offset;
+            std::size_t sz = _bufferSize;
 
-            char* writePos     = reinterpret_cast<char*>(_buffer + _offset + 2 * sizeof(uint32_t));
-            int   bytesWritten = 0;
-            if constexpr (std::is_signed_v<T>)
+            // Align buffer for two uint32_t metadata
+            void* aligned_metadata = std::align(alignof(uint32_t), 2 * sizeof(uint32_t), p, sz);
+            if (!aligned_metadata || sz < 2 * sizeof(uint32_t))
             {
-                if constexpr (sizeof(T) <= 4)
-                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%d", value);
-                else
-                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%zd", value);
+                _bufferSize = 0;
+                return;
             }
+
+            uint32_t* numBytesPtr = std::launder(reinterpret_cast<uint32_t*>(aligned_metadata));
+            uint32_t* lenPtr      = numBytesPtr + 1;
+
+            // Align buffer for string write after metadata
+            char*       stringPos = reinterpret_cast<char*>(lenPtr + 1);
+            std::size_t stringSz  = sz - 2 * sizeof(uint32_t);
+
+            void*       aligned_string = stringPos;
+            std::size_t remaining      = stringSz;
+            aligned_string             = std::align(alignof(std::max_align_t), stringSz, aligned_string, remaining);
+            if (!aligned_string || remaining == 0)
+            {
+                _bufferSize = 0;
+                return;
+            }
+
+            char* writePos = reinterpret_cast<char*>(aligned_string);
+
+            // Format value into buffer
+            int bytesWritten = 0;
+            if constexpr (std::is_pointer_v<T>)
+                bytesWritten = std::snprintf(writePos, remaining, "%p", value);
+            else if constexpr (sizeof(T) == 8)
+                bytesWritten = std::snprintf(writePos, remaining, std::is_signed_v<T> ? "%zd" : "%zu", value);
             else
+                bytesWritten = std::snprintf(writePos, remaining, std::is_signed_v<T> ? "%d" : "%u", value);
+
+            if (bytesWritten <= 0 || static_cast<std::size_t>(bytesWritten) > remaining)
             {
-                if constexpr (sizeof(T) <= 4)
-                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%u", value);
-                else
-                    bytesWritten = std::snprintf(writePos, _bufferSize - _offset - 2 * sizeof(uint32_t), "%zu", value);
+                _bufferSize = 0;
+                return;
             }
 
-            if (bytesWritten > 0 && static_cast<uint32_t>(bytesWritten) <= (_bufferSize - _offset - 2 * sizeof(uint32_t)))
-            {
-                uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
-                uint32_t len      = numBytes; // Each byte corresponds to one character in this case
+            uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
+            uint32_t len      = numBytes;
 
-                *std::bit_cast<uint32_t*>(_buffer + _offset)                    = numBytes; // Store `numBytes`
-                *std::bit_cast<uint32_t*>(_buffer + _offset + sizeof(uint32_t)) = len;      // Store `len`
+            *numBytesPtr = numBytes;
+            *lenPtr      = len;
 
-                _offset += 2 * sizeof(uint32_t) + numBytes;
-                _bufferSize -= 2 * sizeof(uint32_t) + numBytes;
-            }
-            else
-            {
-                _bufferSize = 0; // Insufficient buffer space
-            }
+            // Update offsets
+            _offset += (writePos - (_buffer + _offset)) + bytesWritten;
+            _bufferSize -= (writePos - (_buffer + _offset)) + bytesWritten;
         }
     };
 
-    // TODO pstd::string_view
     template <std::convertible_to<std::string_view> T>
     struct UTF8Formatter<T>
     {
-        inline constexpr void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
+        inline void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
         {
-            std::string_view strView = value;
+            std::string_view sv = value; // convert to string_view
 
-            if (_bufferSize < _offset + 2 * sizeof(uint32_t))
+            void*       p  = _buffer + _offset;
+            std::size_t sz = _bufferSize;
+
+            // Align buffer for two uint32_t metadata
+            void* aligned_metadata = std::align(alignof(uint32_t), 2 * sizeof(uint32_t), p, sz);
+            if (!aligned_metadata || sz < 2 * sizeof(uint32_t))
             {
-                assert(false && "string exceeds maximum size");
-                return; // Not enough space for metadata
+                _bufferSize = 0;
+                return;
             }
 
-            uint32_t numBytes = static_cast<uint32_t>(strView.size());
-            uint32_t len = static_cast<uint32_t>(strView.size()); // Assuming valid UTF-8 input where each character is 1 byte
+            uint32_t* numBytesPtr = std::launder(reinterpret_cast<uint32_t*>(aligned_metadata));
+            uint32_t* lenPtr      = numBytesPtr + 1;
 
-            if (_bufferSize < _offset + 2 * sizeof(uint32_t) + numBytes)
+            // Align buffer for string content
+            char*       stringPos = reinterpret_cast<char*>(lenPtr + 1);
+            std::size_t stringSz  = sz - 2 * sizeof(uint32_t);
+
+            void*       aligned_string = stringPos;
+            std::size_t remaining      = stringSz;
+            aligned_string             = std::align(alignof(std::max_align_t), sv.size(), aligned_string, remaining);
+            if (!aligned_string || remaining < sv.size())
             {
-                assert(false && "String exceeds maximum size");
-                return; // Insufficient space for the string
+                _bufferSize = 0;
+                return;
             }
 
-            *std::bit_cast<uint32_t*>(_buffer + _offset)                    = numBytes; // Store `numBytes`
-            *std::bit_cast<uint32_t*>(_buffer + _offset + sizeof(uint32_t)) = len;      // Store `len`
+            char* writePos = reinterpret_cast<char*>(aligned_string);
 
-            memcpy(_buffer + _offset + 2 * sizeof(uint32_t), strView.data(), numBytes);
+            // Copy string content
+            std::memcpy(writePos, sv.data(), sv.size());
 
-            _offset += 2 * sizeof(uint32_t) + numBytes;
-            _bufferSize -= 2 * sizeof(uint32_t) + numBytes;
+            uint32_t numBytes = static_cast<uint32_t>(sv.size());
+            uint32_t len      = numBytes;
+
+            *numBytesPtr = numBytes;
+            *lenPtr      = len;
+
+            // Update offsets
+            _offset += (writePos - (_buffer + _offset)) + numBytes;
+            _bufferSize -= (writePos - (_buffer + _offset)) + numBytes;
         }
     };
-
-    template <typename T>
-    struct UTF8Formatter<T*>
-    {
-        inline constexpr void operator()(T* const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
-        {
-            if (_bufferSize < _offset + 2 * sizeof(uint32_t))
-                return; // Not enough space for metadata
-
-            char* writePos     = reinterpret_cast<char*>(_buffer + _offset + 2 * sizeof(uint32_t));
-            int   bytesWritten = std::snprintf(writePos,
-                                             _bufferSize - _offset - 2 * sizeof(uint32_t),
-                                             "%p",
-                                             static_cast<void const*>(value));
-
-            if (bytesWritten > 0 && static_cast<uint32_t>(bytesWritten) <= (_bufferSize - _offset - 2 * sizeof(uint32_t)))
-            {
-                uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
-                uint32_t len      = numBytes; // Each byte corresponds to one character
-
-                *std::bit_cast<uint32_t*>(_buffer + _offset)                    = numBytes; // Store `numBytes`
-                *std::bit_cast<uint32_t*>(_buffer + _offset + sizeof(uint32_t)) = len;      // Store `len`
-
-                _offset += 2 * sizeof(uint32_t) + numBytes;
-                _bufferSize -= 2 * sizeof(uint32_t) + numBytes;
-            }
-            else
-            {
-                _bufferSize = 0; // Insufficient buffer space
-            }
-        }
-    };
-
 } // namespace dmt

@@ -2,8 +2,6 @@
 
 #include "core/core-macros.h" // must be before cudautils
 
-#include "cudautils/cudautils-vecmath.h"
-
 #include "core/core-trianglemesh.h"
 #include "core/core-primitive.h"
 

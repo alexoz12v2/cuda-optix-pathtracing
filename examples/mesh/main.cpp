@@ -2,7 +2,7 @@
 #define DMT_WINDOWS_CLI
 #include "platform/platform.h"
 #include "core/core-bvh-builder.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-mesh-parser.h"
 
 namespace dmt {

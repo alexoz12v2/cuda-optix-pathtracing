@@ -3,11 +3,13 @@
 #include "core/core-macros.h"
 #include "core/core-texture.h"
 
+#include "dmtmacros.h"
 #include "platform/platform-memory.h"
 
 #include <gx/shared_mutex.h>
 
 #include <list>
+#include <memory_resource>
 
 // mipc file description
 // - header
@@ -34,7 +36,7 @@ namespace dmt::mipc {
 } // namespace dmt::mipc
 
 namespace dmt {
-    DMT_FORCEINLINE uint32_t mipBytes(int32_t width, int32_t height, int32_t level, TexFormat texFormat)
+    DMT_FORCEINLINE inline uint32_t mipBytes(int32_t width, int32_t height, int32_t level, TexFormat texFormat)
     {
         uint32_t const pixelBytes = bytesPerPixel(texFormat);
         while (level > 0)
@@ -49,14 +51,14 @@ namespace dmt {
         return static_cast<uint32_t>(bytes);
     }
 
-    DMT_FORCEINLINE uint64_t baseKeyFromPath(os::Path const& path)
+    DMT_FORCEINLINE inline uint64_t baseKeyFromPath(os::Path const& path)
     {
-        static char                         buffer[1024];
+        thread_local char                   buffer[1024];
         std::pmr::monotonic_buffer_resource scratch{buffer, 1024}; // default upstream on purpose, avoid crash
         return hashCRC64(path.toUnderlying(&scratch));
     }
 
-    DMT_FORCEINLINE uint64_t baseKeyFromPath(std::string_view path) { return hashCRC64(path); }
+    DMT_FORCEINLINE inline uint64_t baseKeyFromPath(std::string_view path) { return hashCRC64(path); }
 
     /// - its static method creates, from the `ImageTexturev2` object, a temporary file which will be deleted
     ///   upon process termination. Such a file stores a header of metadata about the uncompressed image, such as
@@ -94,6 +96,8 @@ namespace dmt {
                                           uint32_t*  inOutBytes,
                                           size_t*    inOutOffset,
                                           TexFormat* outFormat) const;
+
+        [[nodiscard]] DMT_FORCEINLINE inline size_t sectorSize() const { return m_sectorSize; }
 
     private:
         /// associate the file key to its file descriptor/HANDLE
@@ -143,9 +147,13 @@ namespace dmt {
         /// store a list of keys in LRU order, such that pop_front gives you the key to evict from the cache and therefore
         /// the address and size of the buffer to deallocate in texMemory
         std::pmr::list<uint64_t> m_lruKeyList;
+#if defined(DMT_USE_SYNC_ALLOCATOR)
         /// subclass of memory_resource and used to allocate/deallocate mips
         /// MAYBE TODO: swap this for an allocator which tries to allocate large pages.
         SyncPoolAllocator m_texMemory;
+#else
+        std::pmr::synchronized_pool_resource m_texMemory;
+#endif
         /// mutex used for cache reads in shared access, exclusive access when inserting/evicting from the cache
         mutable gx::shared_mutex m_shmtx;
         /// track approximate available size in texMemory

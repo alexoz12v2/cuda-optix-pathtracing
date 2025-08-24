@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 
 /**
  * Important Note: Each relative IOR specifies insideIOR / outsideIOR, where the "outside" is defined by the normal direction

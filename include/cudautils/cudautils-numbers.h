@@ -5,13 +5,13 @@
 
 // u = random uniformly distributed fp32 number between 0 and 1
 namespace dmt {
-    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE Point2f cartesianFromPolar(float rho, float phi)
+    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE inline Point2f cartesianFromPolar(float rho, float phi)
     {
         return {rho * cosf(phi), rho * sinf(phi)};
     }
 
     // using elevation angle as theta
-    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE Vector3f cartesianFromSpherical(float rho, float phi, float theta)
+    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE inline Vector3f cartesianFromSpherical(float rho, float phi, float theta)
     {
         float sin_phi   = sinf(phi);
         float cos_phi   = cosf(phi);
@@ -21,7 +21,7 @@ namespace dmt {
         return Vector3f(rho * sin_phi * cos_theta, rho * sin_phi * sin_theta, rho * cos_phi);
     }
 
-    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE float sin_sqr_to_one_minus_cos(float const s_sq)
+    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE inline float sin_sqr_to_one_minus_cos(float const s_sq)
     {
         // Using second-order Taylor expansion at small angles for better accuracy.
         return s_sq > 0.0004f ? 1.0f - fl::safeSqrt(1.0f - s_sq) : 0.5f * s_sq;
@@ -83,7 +83,3 @@ namespace dmt::sampling {
     DMT_CORE_API DMT_CPU_GPU float    sampleVisibleWavelengths(float u);
     DMT_CORE_API DMT_CPU_GPU Vector4f sampleVisibleWavelengths(Vector4f u);
 } // namespace dmt::sampling
-
-#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_NUMBERS_IMPL)
-    #include "cudautils-numbers.cu"
-#endif

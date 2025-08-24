@@ -2,7 +2,7 @@
 
 #define DMT_ENTRY_POINT
 #include "platform/platform.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-bvh-builder.h"
 #include "core/core-bsdf.h"
 #include "core/core-primitive.h"

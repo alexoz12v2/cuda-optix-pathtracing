@@ -43,6 +43,7 @@ set(PLATFORM_SOURCES_LINUX
   platform-file.linux.cpp
   platform-logging.linux.cpp
   platform-memory.linux.cpp
+  platform-threadPool.linux.cpp
   platform-utils.linux.cpp
   platform-os-utils.linux.cpp
 )

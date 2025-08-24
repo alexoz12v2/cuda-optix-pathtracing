@@ -14,11 +14,8 @@ int guardedMain();
 
 // to be defined before including this only once, on the entry point
 #if defined(DMT_ENTRY_POINT)
-    #if !defined(DMT_WINDOWS_INCLUDED)
-        #define DMT_WINDOWS_INCLUDED
-        #if defined(DMT_OS_WINDOWS)
-            #include <Windows.h>
-        #endif
+    #if defined(DMT_OS_WINDOWS)
+        #include <Windows.h>
         #if !defined(DMT_WINDOWS_CLI)
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
@@ -44,5 +41,4 @@ int main(int argc, char* argv[])
     return returnCode;
 }
     #endif
-
 #endif

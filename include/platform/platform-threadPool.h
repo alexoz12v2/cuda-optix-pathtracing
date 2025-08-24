@@ -26,7 +26,7 @@
 #include <cstdint>
 
 namespace dmt::os {
-    class DMT_PLATFORM_API Thread
+    class Thread
     {
     public:
         using ThreadFunc = void (*)(void*);
@@ -36,7 +36,8 @@ namespace dmt::os {
             void*      data;
         };
 
-        DMT_FORCEINLINE Thread(ThreadFunc func, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) :
+        DMT_FORCEINLINE inline Thread(ThreadFunc                 func,
+                                      std::pmr::memory_resource* resource = std::pmr::get_default_resource()) :
         m_internal(reinterpret_cast<Thread::Internal*>(resource->allocate(sizeof(Thread::Internal)))),
         m_resource(resource)
         {
@@ -52,11 +53,11 @@ namespace dmt::os {
         Thread& operator=(Thread const&)     = delete;
         Thread& operator=(Thread&&) noexcept = delete;
 
-        void     start(void* arg = nullptr);
-        void     join(); /// deallocates memory, so must be called before destruction
-        void     terminate();
-        bool     running() const;
-        uint32_t id() const;
+        DMT_PLATFORM_API void                   start(void* arg = nullptr);
+        DMT_PLATFORM_API void                   join(); /// deallocates memory, so must be called before destruction
+        DMT_PLATFORM_API void                   terminate();
+        [[nodiscard]] DMT_PLATFORM_API bool     running() const;
+        [[nodiscard]] DMT_PLATFORM_API uint32_t id() const;
 
     private:
 #ifdef _WIN32

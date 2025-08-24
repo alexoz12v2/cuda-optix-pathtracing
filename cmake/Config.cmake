@@ -277,6 +277,30 @@ endfunction()
 
 function(dmt_set_linux_specific_compile_options target properties_visibility)
   if(DMT_OS_LINUX)
+    # comment to debug linking issues (or, if you want to keep this and UBSAN if enabled, ensure to define LD_LIBRARY_PATH)
+    get_target_property(libtype ${target} TYPE)
+    if(libtype STREQUAL "SHARED_LIBRARY" OR libtype STREQUAL "MODULE_LIBRARY")
+        if (DMT_ENABLE_SANITIZERS)
+        set(UBSAN_LIB_DIR "/usr/lib/llvm-20/lib/clang/20/lib/linux")
+
+        target_compile_options(${target} PRIVATE 
+          -fsanitize=undefined 
+          -fno-omit-frame-pointer 
+          -fno-sanitize-recover=all
+        )
+
+        target_link_options(${target} PRIVATE
+          -fsanitize=undefined
+          -shared-libsan
+          -Wl,--no-undefined
+          -Wl,-rpath,${UBSAN_LIB_DIR}        # embed runtime path into .so
+          -Wl,-rpath-link,${UBSAN_LIB_DIR}   # help linker find UBSan .so at link time
+        )
+      else()
+        target_link_options(${target}   PRIVATE -Wl,--no-undefined)
+      endif()
+    endif()
+
     if(DMT_COMPILER_CLANG)
       #target_include_directories(${target} BEFORE ${properties_visibility}
       #    /usr/lib/llvm-20/include/c++/v1

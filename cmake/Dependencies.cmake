@@ -98,6 +98,9 @@ macro(dmt_setup_dependencies)
       GIT_SHALLOW ON
     )
     FetchContent_MakeAvailable(OpenEXR)
+    set_target_properties(OpenEXR PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN YES)
   endif()
 
   if(NOT TARGET nlohmann_json::nlohmann_json)

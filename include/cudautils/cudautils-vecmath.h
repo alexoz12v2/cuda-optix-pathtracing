@@ -888,10 +888,10 @@ namespace dmt {
     }
 
     // Column Major Order
-    struct DMT_CORE_API Matrix4f
+    struct DMT_CORE_API alignas(16) Matrix4f
     {
         // clang-format off
-        static DMT_CPU_GPU inline constexpr Matrix4f zero()
+        static DMT_CPU_GPU constexpr Matrix4f zero()
         {
             return {{
                 0.f, 0.f, 0.f, 0.f, // column zero
@@ -900,7 +900,7 @@ namespace dmt {
                 0.f, 0.f, 0.f, 0.f  // column three
             }};
         }
-        static DMT_CPU_GPU inline constexpr Matrix4f identity()
+        static DMT_CPU_GPU constexpr Matrix4f identity()
         {
             return {{
                 1.f, 0.f, 0.f, 0.f, // column zero
@@ -909,7 +909,7 @@ namespace dmt {
                 0.f, 0.f, 0.f, 1.f  // column three
             }};
         }
-        static DMT_CPU_GPU inline constexpr Matrix4f rowWise(float const arr[16]) {
+        static DMT_CPU_GPU constexpr Matrix4f rowWise(float const arr[16]) {
             return {{
                 arr[0], arr[4], arr[8],  arr[12],
                 arr[1], arr[5], arr[9],  arr[13],
@@ -1558,8 +1558,4 @@ namespace dmt {
 
 #if defined(DMT_OS_WINDOWS)
     #pragma pop_macro("near")
-#endif
-
-#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_VECMATH_IMPL)
-    #include "cudautils-vecmath.cu"
 #endif

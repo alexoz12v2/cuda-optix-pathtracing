@@ -1,5 +1,12 @@
 #include "core-light.h"
 
+#include <memory>
+
+#include "platform/platform-context.h"
+
+// TODO remove
+#include <iostream>
+
 namespace dmt {
 
     // -- Factory Methods --
@@ -52,14 +59,15 @@ namespace dmt {
         // Columns = x, y, z axes; origin = apex
         // Note: This is the inverse of the usual "frame to world" transform
         // clang-format off
-        float const arr[16] {
+        alignas(16) float const arr[16] {
             xLight.x, xLight.y, xLight.z, -dot(xLight, light.co),
             yLight.x, yLight.y, yLight.z, -dot(yLight, light.co),
             zLight.x, zLight.y, zLight.z, -dot(zLight, light.co),
             0.f,      0.f,      0.f,      1.f
         };
         // clang-format on
-        light.lightFromRender = Transform{Matrix4f::rowWise(arr)};
+        auto mat = Matrix4f::rowWise(arr);
+        std::construct_at(std::addressof(light.lightFromRender), mat);
 
         // --- Spot parameters ---
         light.data.spot.direction           = coneDirWorld; // world-space direction

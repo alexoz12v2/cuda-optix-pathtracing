@@ -6,9 +6,7 @@
 // ASSUMES EXPORT MACRO NAME
 #if !defined(__NVCC__) || !defined(__CUDA_ARCH__)
     #if !defined(DMT_CORE_API)
-        // TODO remove
-        //#error "dfjklsdajflkdsjlkfajldsa"
-        #define DMT_CORE_API
+        #include "core/core-macros.h"
     #endif
 #else
     #define DMT_CORE_API

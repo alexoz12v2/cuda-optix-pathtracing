@@ -21,22 +21,31 @@ namespace dmt {
 
     __host__ __device__ void Transform::translate_(Vector3f const& translation)
     {
-        m    = fromGLMmat(glm::translate(toGLMmat(m), toGLM(translation)));
-        mInv = fromGLMmat(glm::translate(toGLMmat(mInv), -toGLM(translation)));
+        alignas(16) glm::mat4 gm    = glm::translate(toGLMmat(m), toGLM(translation));
+        alignas(16) glm::mat4 gminv = glm::translate(toGLMmat(mInv), -toGLM(translation));
+
+        m    = fromGLMmat(gm);
+        mInv = fromGLMmat(gminv);
     }
 
     // Apply scaling
     __host__ __device__ void Transform::scale_(Vector3f const& scaling)
     {
-        m    = fromGLMmat(glm::scale(toGLMmat(m), toGLM(scaling)));
-        mInv = fromGLMmat(glm::scale(toGLMmat(mInv), toGLM(bcast<Vector3f>(1.0f) / scaling)));
+        alignas(16) glm::mat4 gm    = glm::scale(toGLMmat(m), toGLM(scaling));
+        alignas(16) glm::mat4 gminv = glm::scale(toGLMmat(mInv), toGLM(bcast<Vector3f>(1.0f) / scaling));
+
+        m    = fromGLMmat(gm);
+        mInv = fromGLMmat(gminv);
     }
 
     // Apply rotation (angle in degrees)
     __host__ __device__ void Transform::rotate_(float angle, Vector3f const& axis)
     {
-        m    = fromGLMmat(glm::rotate(toGLMmat(m), glm::radians(angle), toGLM(axis)));
-        mInv = fromGLMmat(glm::rotate(toGLMmat(mInv), -glm::radians(angle), toGLM(axis)));
+        alignas(16) glm::mat4 gm    = glm::rotate(toGLMmat(m), glm::radians(angle), toGLM(axis));
+        alignas(16) glm::mat4 gminv = glm::rotate(toGLMmat(mInv), -glm::radians(angle), toGLM(axis));
+
+        m    = fromGLMmat(gm);
+        mInv = fromGLMmat(gminv);
     }
 
     // Combine with another transform

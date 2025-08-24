@@ -4,8 +4,6 @@
 
 #include "cudautils/cudautils-vecmath.h"
 #include "cudautils/cudautils-color.h"
-#include "platform/platform-utils.h"
-#include "platform/platform-context.h"
 
 #include <cstdint>
 #include <cstring>
@@ -114,15 +112,13 @@ namespace dmt {
 
     inline std::string ToString(WrapMode mode)
     {
-        dmt::Context ctx;
-        ctx.log("Hello World!", {});
         switch (mode)
         {
             case WrapMode::Clamp: return "clamp";
             case WrapMode::Repeat: return "repeat";
             case WrapMode::Black: return "black";
             case WrapMode::OctahedralSphere: return "octahedralsphere";
-            default: ctx.error("Unhandled wrap mode", {}); return nullptr;
+            default: return nullptr;
         }
     }
 
@@ -178,8 +174,6 @@ namespace dmt {
                 case WrapMode::Black: return false;
                 default:
                 {
-                    dmt::Context ctx;
-                    ctx.error("Unhandled WrapMode mode", {});
                 }
             }
         }
@@ -327,8 +321,6 @@ namespace dmt {
                 }
                 default:
                 {
-                    dmt::Context ctx;
-                    ctx.error("Unhandled PixelFormat", {});
                     return 0;
                 }
             }
@@ -494,9 +486,6 @@ namespace dmt {
                 __threadfence();
                 asm("trap;");
 #else
-                Context ctx;
-                if (ctx.isValid())
-                    ctx.error("Unhandled PixelFormat in Image::SetChannel()", {});
                 std::abort();
 #endif
         }
@@ -535,8 +524,3 @@ namespace dmt {
     };
 
 } // namespace dmt
-
-
-#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_IMAGE_IMPL)
-    #include "cudautils-image.cu"
-#endif

@@ -123,7 +123,7 @@ namespace dmt {
         void Approxiamate_dp_dxy(Point3f p, Normal3f n, float time, int samplesPerPixel, Vector3f* dpdx, Vector3f* dpdy) const
         {
             Point3f   pCamera         = CameraFromRender(p, time);
-            Transform DownZFromCamera = RotateFromTo(normalize(Vector3f(pCamera)), Vector3f{{0, 0, 1}});
+            Transform DownZFromCamera = Transform::rotateFromTo(normalize(Vector3f(pCamera)), Vector3f{{0, 0, 1}});
             Point3f   pDownZ          = DownZFromCamera(pCamera);
             Normal3f  nDownZ          = DownZFromCamera(CameraFromRender(n, time));
             float     d               = nDownZ.z * pDownZ.z;

@@ -227,6 +227,7 @@ namespace dmt::color {
 namespace dmt::numbers {
     uint16_t permutationElement(int32_t i, uint32_t l, uint64_t p)
     {
+        uint32_t u = static_cast<uint32_t>(i);
         uint32_t w = l - 1;
         w |= w >> 1;
         w |= w >> 2;
@@ -235,26 +236,26 @@ namespace dmt::numbers {
         w |= w >> 16;
         do
         {
-            i ^= p;
-            i *= 0xe170893d;
-            i ^= p >> 16;
-            i ^= (i & w) >> 4;
-            i ^= p >> 8;
-            i *= 0x0929eb3f;
-            i ^= p >> 23;
-            i ^= (i & w) >> 1;
-            i *= 1 | p >> 27;
-            i *= 0x6935fa69;
-            i ^= (i & w) >> 11;
-            i *= 0x74dcb303;
-            i ^= (i & w) >> 2;
-            i *= 0x9e501cc3;
-            i ^= (i & w) >> 2;
-            i *= 0xc860a3df;
-            i &= w;
-            i ^= i >> 5;
-        } while (i >= l);
-        return (i + p) % l;
+            u ^= p;
+            u *= 0xe170893d;
+            u ^= p >> 16;
+            u ^= (u & w) >> 4;
+            u ^= p >> 8;
+            u *= 0x0929eb3f;
+            u ^= p >> 23;
+            u ^= (u & w) >> 1;
+            u *= 1 | p >> 27;
+            u *= 0x6935fa69;
+            u ^= (u & w) >> 11;
+            u *= 0x74dcb303;
+            u ^= (u & w) >> 2;
+            u *= 0x9e501cc3;
+            u ^= (u & w) >> 2;
+            u *= 0xc860a3df;
+            u &= w;
+            u ^= u >> 5;
+        } while (u >= l);
+        return static_cast<uint16_t>((u + p) % l);
     }
 } // namespace dmt::numbers
 
@@ -496,7 +497,7 @@ namespace dmt {
         {
             __m256 x = _mm256_mul_ps(_mm256_loadu_ps(fPtr), normalizeFac);
 
-            // In-lane prefix sum (lane 0: [0–3], lane 1: [4–7])
+            // In-lane prefix sum (lane 0: [0ï¿½3], lane 1: [4ï¿½7])
             __m256 t;
 
             t = _mm256_castsi256_ps(_mm256_slli_si256(_mm256_castps_si256(x), 4));
@@ -528,7 +529,7 @@ namespace dmt {
             // The last element in x is the total sum of this block
             // To get it, extract the high 128-bit lane, then extract element 3
 
-            __m128 high = _mm256_extractf128_ps(x, 1);                              // get elements 4–7
+            __m128 high = _mm256_extractf128_ps(x, 1);                              // get elements 4ï¿½7
             float  last = _mm_cvtss_f32(_mm_shuffle_ps(high, high, 0b11'11'11'11)); // get element 7
 
             carry = last;

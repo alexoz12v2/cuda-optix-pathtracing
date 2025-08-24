@@ -369,7 +369,7 @@ namespace dmt {
                                        TexFormat* outFormat) const
     {
         if (!m_keyfdmap.contains(fileKey))
-            return false;
+            return -1;
 
         HANDLE hFile     = std::bit_cast<HANDLE>(m_keyfdmap.at(fileKey));
         DWORD  bytesRead = 0;
@@ -389,7 +389,7 @@ namespace dmt {
 
             if (!SetFilePointerEx(hFile, {0ull}, nullptr, FILE_BEGIN) ||
                 !ReadFile(hFile, headerBuffer.get(), headerAlignedSize, &bytesRead, nullptr))
-                return false;
+                return -1;
             std::memcpy(&header, headerBuffer.get(), sizeof(mipc::Header));
 
             // compute unaligned offset and size
@@ -422,12 +422,12 @@ namespace dmt {
 
             if (!SetFilePointerEx(hFile, offsetAligned, nullptr, FILE_BEGIN) ||
                 !ReadFile(hFile, outBuffer, *inOutBytes, &bytesRead, nullptr))
-                return false;
+                return -1;
 
             // optionally, you could return the relative "start of actual data" inside buffer
             // but your caller already knows offset difference = actualOffset - alignedOffset
 
-            return true;
+            return 0;
         }
     }
 

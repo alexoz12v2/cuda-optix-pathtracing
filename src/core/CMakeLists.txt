@@ -16,11 +16,60 @@ elseif(DEFINED DMT_OS_LINUX)
 endif()
 set_source_files_properties(${core_unused_sources} PROPERTIES HEADER_FILE_ONLY TRUE)
 
+## CUDA utils (TODO better and copy to build)
+set(cudautils_implementation_files
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils.cu 
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-float.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-vecmath.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-light.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-transform.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-camera.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-media.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-lightsampler.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-texture.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-material.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-sampler.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-film.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-filter.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-bxdf.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-spectrum.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-color.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-numbers.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-image.cu
+)
+set_source_files_properties(${cudautils_implementation_files} PROPERTIES LANGUAGE CXX)
+
+set(cudautils_header_files
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-float.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-vecmath.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-enums.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-light.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-transform.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-camera.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-media.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-lightsampler.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-texture.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-material.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-sampler.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-film.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-filter.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-bxdf.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-spectrum.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-color.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-numbers.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-image.h
+)
+set_source_files_properties(${cudautils_header_files} PROPERTIES
+  LANGUAGE CXX
+  HEADER_FILE_ONLY TRUE
+)
+
 # target definition
 dmt_add_module_library(dmt-core core SHARED)
 target_sources(dmt-core
   PUBLIC
-    FILE_SET core_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/core
+    FILE_SET core_headers TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/
       FILES
         ${CMAKE_SOURCE_DIR}/include/core/core-macros.h
         ${CMAKE_SOURCE_DIR}/include/core/core-dstd.h
@@ -28,7 +77,6 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-bvh-builder.h
         ${CMAKE_SOURCE_DIR}/include/core/core-primitive.h
         ${CMAKE_SOURCE_DIR}/include/core/core-math.h
-        ${CMAKE_SOURCE_DIR}/include/core/core-cudautils-cpubuild.h
         ${CMAKE_SOURCE_DIR}/include/core/core-trianglemesh.h
         ${CMAKE_SOURCE_DIR}/include/core/core-bsdf.h
         ${CMAKE_SOURCE_DIR}/include/core/core-light.h
@@ -36,15 +84,16 @@ target_sources(dmt-core
         ${CMAKE_SOURCE_DIR}/include/core/core-texture.h
         ${CMAKE_SOURCE_DIR}/include/core/core-mesh-parser.h
         ${CMAKE_SOURCE_DIR}/include/core/core-texture-cache.h
-	${CMAKE_SOURCE_DIR}/include/core/core-material.h
-	${CMAKE_SOURCE_DIR}/include/core/core-render.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-material.h
+        ${CMAKE_SOURCE_DIR}/include/core/core-render.h
+    FILE_SET cudautils_headers_file_set TYPE HEADERS BASE_DIRS ${CMAKE_SOURCE_DIR}/include/
+      FILES ${cudautils_header_files}
   PRIVATE
     core-parser.cpp
     core-bvh-builder.cpp
     core-primitive.cpp
     core-trianglemesh.cpp
     core-math.cpp
-    core-cudautils-cpubuild.cpp
     core-bsdf.cpp
     core-light.cpp
     core-light-tree-builder.cpp
@@ -55,17 +104,27 @@ target_sources(dmt-core
     core-texture-cache.cpp
     ${core_os_private_sources}
     ${core_unused_sources}
+    ${cudautils_implementation_files}
+)
+
+target_include_directories(dmt-core 
+  PUBLIC
+    $<TARGET_PROPERTY:dmt-platform,INTERFACE_INCLUDE_DIRECTORIES>
+  PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include/cudautils
 )
 
 target_link_libraries(dmt-core 
   PUBLIC
-    dmt-platform
-    dmt-cudautils
     gx::gx
+    # CUDA UTILS LIBARIES (together with platform?)
+    glm::glm_static
+    Eigen3::Eigen
   PRIVATE
+    dmt-platform
+    OpenEXR::OpenEXR # ALWAYS before FBX SDK
     FBXSDK::fbxsdk
     stb::stb
-    OpenEXR::OpenEXR
     nlohmann_json::nlohmann_json
 )
 

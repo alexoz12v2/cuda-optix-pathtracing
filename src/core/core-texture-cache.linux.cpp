@@ -2,6 +2,7 @@
 
 #include "platform/platform-utils.h"
 
+#include <iostream>
 #include <memory_resource>
 #include <string>
 
@@ -9,6 +10,12 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+
+#include <signal.h>
+
+// note: enable this for debug purposes only. If enabled, the destructor is not run unless
+// you manually wire in additional mechanisms like signal actions or `pthread_cleanup_push`
+#define DMT_MIPC_UNLINK_AT_DESTRUCTION
 
 namespace /*static*/ {
     class SectorBufferedWriter
@@ -88,6 +95,91 @@ namespace /*static*/ {
         unsigned char* m_buffer     = nullptr;
     };
 
+    bool createDirectoryWithParents(std::string_view path)
+    {
+        // 1. Handle the tilde expansion for the home directory.
+        std::string fullPath;
+        if (path.starts_with("~"))
+        {
+            char const* homeDir = std::getenv("HOME");
+            if (!homeDir)
+            {
+                std::cerr << "Error: Could not determine home directory." << std::endl;
+                return false;
+            }
+            fullPath = homeDir;
+            fullPath += path.substr(1);
+        }
+        else
+        {
+            fullPath = path;
+        }
+
+        // 2. Iterate and create parent directories step-by-step.
+        size_t lastSlashPos = 0;
+        while (lastSlashPos < fullPath.size())
+        {
+            size_t nextSlashPos = fullPath.find('/', lastSlashPos);
+            if (nextSlashPos == std::string::npos)
+            {
+                nextSlashPos = fullPath.size();
+            }
+
+            // If it's an absolute path, skip the first empty component.
+            // E.g., for "/a/b", the first component is empty, but the root "/" exists.
+            if (lastSlashPos == 0 && fullPath.starts_with('/'))
+            {
+                lastSlashPos = nextSlashPos + 1;
+                continue;
+            }
+
+            std::string currentDir = fullPath.substr(0, nextSlashPos);
+
+            // Use stat to check the current path.
+            struct stat sb{};
+            if (stat(currentDir.c_str(), &sb) != 0)
+            {
+                // Path does not exist. Try to create it.
+                if (mkdir(currentDir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
+                {
+                    // If it's not EEXIST, it's a real error.
+                    if (errno != EEXIST)
+                    {
+                        std::cerr << "Error creating directory '" << currentDir << "': " << strerror(errno) << std::endl;
+                        return false;
+                    }
+                }
+            }
+            else if (!S_ISDIR(sb.st_mode))
+            {
+                // Path exists but is not a directory.
+                std::cerr << "Error: Path '" << currentDir << "' exists but is not a directory." << std::endl;
+                return false;
+            }
+
+            lastSlashPos = nextSlashPos + 1;
+        }
+
+        // If the full path itself doesn't exist at the end, create it.
+        // This handles cases like "a/b/c" where 'c' needs to be created after 'a/b' is made.
+        struct stat sb{};
+        if (stat(fullPath.c_str(), &sb) != 0)
+        {
+            if (mkdir(fullPath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0 && errno != EEXIST)
+            {
+                std::cerr << "Error creating directory '" << fullPath << "': " << strerror(errno) << std::endl;
+                return false;
+            }
+        }
+        else if (!S_ISDIR(sb.st_mode))
+        {
+            std::cerr << "Error: Path '" << fullPath << "' exists but is not a directory." << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+
 } // namespace
 
 namespace dmt {
@@ -100,38 +192,19 @@ namespace dmt {
         std::pmr::string tempMIPCDirectory = os::env::get("DMT_LINUX_MIPC_CACHE_LOCATION", &mem);
         if (tempMIPCDirectory.empty())
         {
-            tempMIPCDirectory = "~/.cache/dmt-mipc/";
+            tempMIPCDirectory = std::getenv("HOME");
+            tempMIPCDirectory.append("/.cache/dmt-mipc/");
         }
         if (!tempMIPCDirectory.ends_with('/'))
             tempMIPCDirectory.push_back('/');
 
         tempMIPCDirectory.append(std::to_string(getpid()));
-
-        // if directory doesn't exist, create it (with parents)
-        struct stat sb{};
-        int         fd = open(tempMIPCDirectory.c_str(), O_RDWR);
-        if (fd < 0)
-            return false;
-
-        if (fstat(fd, &sb))
-        {
-            // doesn't exist, make directory
-            if (mkdir(tempMIPCDirectory.c_str(), 0644))
-                return false;
-            close(fd);
-            fd = open(tempMIPCDirectory.c_str(), O_RDWR);
-        }
-        else if (!S_ISDIR(sb.st_mode))
-        {
-            // exists and is not directory, therefore error
-            close(fd);
-            return false;
-        }
-        close(fd);
+        createDirectoryWithParents(tempMIPCDirectory);
 
         // create new .mipc file by asssembling its name
         tempMIPCDirectory.push_back('/');
         tempMIPCDirectory.append(std::to_string(baseKey));
+        tempMIPCDirectory.append(".mipc");
 
         // create file and mark it such that it is closed when this class is destructed or when the process
         // is forcefully terminated
@@ -140,17 +213,20 @@ namespace dmt {
         // Requirements for O_DIRECT (unbuffered I/O):
         // - File offsets and buffer addresses must be aligned to the disk sector (usually 512 or 4096 bytes).
         // - File size and writes should be multiples of sector size.
-        fd = open(tempMIPCDirectory.c_str(), O_RDWR | O_CREAT, O_EXCL, S_IRUSR | S_IWUSR);
+        int const fd = open(tempMIPCDirectory.c_str(), O_RDWR | O_CREAT | O_DIRECT | O_EXCL, S_IRUSR | S_IWUSR);
         if (fd < 0)
             return false;
         // delete directory entry immediately. The fill will live until this file descriptor remains open
+#if !defined(DMT_MIPC_UNLINK_AT_DESTRUCTION)
         unlink(tempMIPCDirectory.c_str());
+#endif
 
         // 1. Determine sector size
         struct statvfs vfs{};
         if (fstatvfs(fd, &vfs) != 0)
             return false;
-        size_t sectorSize = vfs.f_frsize; // filesystem block size
+        size_t const sectorSize = vfs.f_frsize; // filesystem block size
+        m_sectorSize            = sectorSize;
 
         SectorBufferedWriter writer(fd, sectorSize, 4); // buffer = 4 sectors
 
@@ -250,8 +326,12 @@ namespace dmt {
         {
             // --- Read actual mip into provided buffer ---
             ssize_t bytesRead = pread(fd, outBuffer, *inOutBytes, *inOutOffset);
+            std::cout << "Bytes read from texture " << fileKey << " bytesRead: " << bytesRead << std::endl;
             if (bytesRead != static_cast<ssize_t>(*inOutBytes))
+            {
+                raise(SIGTRAP);
                 return -1;
+            }
 
             return 0;
         }
@@ -261,6 +341,26 @@ namespace dmt {
     {
         for (auto const& [key, value] : m_keyfdmap)
         {
+#if defined(DMT_MIPC_UNLINK_AT_DESTRUCTION)
+            // Construct the /proc/self/fd/<fd> path
+            std::ostringstream oss;
+            oss << "/proc/self/fd/" << value;
+            std::string fdPath = oss.str();
+
+            // Resolve the symlink to the actual file path
+            char    realPath[PATH_MAX + 1] = {0};
+            ssize_t len                    = readlink(fdPath.c_str(), realPath, sizeof(realPath) - 1);
+            if (len != -1)
+            {
+                realPath[len] = '\0'; // Null-terminate
+                unlink(realPath);     // Remove the file
+            }
+            else
+            {
+                // Optional: log or ignore the error
+                perror("readlink failed");
+            }
+#endif
             close(static_cast<int>(value));
         }
     }

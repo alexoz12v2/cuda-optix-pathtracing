@@ -111,9 +111,6 @@ namespace dmt {
                 __threadfence();
                 asm("trap;");
 #else
-                Context ctx;
-                if (ctx.isValid())
-                    ctx.error("Unhandled PixelFormat in TexelBytes()", {});
                 std::abort();
                 return 0;
 #endif

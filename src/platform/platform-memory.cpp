@@ -305,4 +305,100 @@ namespace dmt {
         // more constructor, move assignment, copy constructor, copy assignment are all deleted
         return false;
     }
+
+    // Aligned16MemoryResource
+
+    Aligned16MemoryResource::Aligned16MemoryResource(std::pmr::memory_resource* upstream) : m_upstream(upstream)
+    {
+        if (!m_upstream)
+        {
+            // It's a good practice to handle a null upstream resource.
+            // In this case, we'll fall back to the default resource.
+            m_upstream = std::pmr::get_default_resource();
+        }
+    }
+
+    void* Aligned16MemoryResource::do_allocate(std::size_t bytes, std::size_t alignment)
+    {
+        // The user can request an alignment less than 16, but we will
+        // enforce a minimum of 16 bytes for our purpose. We also need
+        // to pass this effective alignment to our upstream resource.
+        std::size_t const effective_alignment = std::max(alignment, static_cast<std::size_t>(16));
+
+        // We need to allocate extra memory from the upstream resource to:
+        // 1. Store a pointer to the original allocation from the upstream.
+        // 2. Account for potential padding needed to align the user's data.
+        std::size_t const raw_size = bytes + effective_alignment + sizeof(void*);
+
+        // Allocate the raw, unaligned memory block from the upstream resource.
+        void* raw_ptr = m_upstream->allocate(raw_size, effective_alignment);
+        if (!raw_ptr)
+        {
+            return nullptr;
+        }
+
+        // Now, perform the alignment. We want to find a 16-byte aligned
+        // address within the raw_ptr block that also has space to store
+        // the original pointer right before it.
+        void*       aligned_ptr     = static_cast<void*>(static_cast<char*>(raw_ptr) + sizeof(void*));
+        std::size_t space_available = raw_size - sizeof(void*);
+
+        // std::align is the standard way to get an aligned pointer from a buffer.
+        // It returns a pointer to the aligned block and updates `space_available`.
+        void* final_ptr = std::align(effective_alignment, bytes, aligned_ptr, space_available);
+
+        if (!final_ptr)
+        {
+            // This should not happen if our size calculation is correct,
+            // but it's good practice to handle it.
+            m_upstream->deallocate(raw_ptr, raw_size, effective_alignment);
+            return nullptr;
+        }
+
+        // Store the original, unaligned pointer (`raw_ptr`) just before the
+        // aligned pointer we are about to return. This is a common trick
+        // to allow `do_deallocate` to know what to free.
+        *static_cast<void**>(final_ptr) = raw_ptr;
+
+        // Return the aligned pointer to the user's memory.
+        return static_cast<char*>(final_ptr) + sizeof(void*);
+    }
+
+    // The core deallocation function. This is where we find and free
+    // the original block.
+    void Aligned16MemoryResource::do_deallocate(void* p, std::size_t bytes, std::size_t alignment)
+    {
+        if (!p)
+        {
+            return;
+        }
+
+        // We stored the original pointer in the memory block right before the
+        // address we returned to the user. We retrieve it here.
+        void* original_ptr = *std::bit_cast<void**>(std::bit_cast<char*>(p) - sizeof(void*));
+
+        // We need to pass the original size and alignment to the upstream's
+        // deallocation function.
+        std::size_t const effective_alignment = std::max(alignment, static_cast<std::size_t>(16));
+        std::size_t const raw_size            = bytes + effective_alignment + sizeof(void*);
+
+        // Deallocate the original memory block via the upstream resource.
+        m_upstream->deallocate(original_ptr, raw_size, effective_alignment);
+    }
+
+    bool Aligned16MemoryResource::do_is_equal(std::pmr::memory_resource const& other) const noexcept
+    {
+        // We are equal if the other object is the same type and has the same
+        // upstream resource.
+        if (this == &other)
+        {
+            return true;
+        }
+        auto other_casted = dynamic_cast<Aligned16MemoryResource const*>(&other);
+        if (other_casted)
+        {
+            return m_upstream->is_equal(*other_casted->m_upstream);
+        }
+        return false;
+    }
 } // namespace dmt

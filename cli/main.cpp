@@ -1,8 +1,9 @@
+#include <filesystem>
 #define DMT_ENTRY_POINT
 #define DMT_WINDOWS_CLI
 #include "platform/platform.h"
 #include "core/core-bvh-builder.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-texture-cache.h"
 #include "core/core-render.h"
 
@@ -438,10 +439,15 @@ namespace dmt {
         // Duplicate file to create a second texture key
         os::Path image2 = os::Path::executableDir() / "white2.png";
         {
+#if defined(DMT_OS_WINDOWS)
             auto const* copied   = reinterpret_cast<wchar_t const*>(image2.internalData());
             auto const* existing = reinterpret_cast<wchar_t const*>(image.internalData());
-            // TODO remove
             if (!CopyFileW(existing, copied, false))
+#else
+            auto const* copied   = reinterpret_cast<char const*>(image2.internalData());
+            auto const* existing = reinterpret_cast<char const*>(image.internalData());
+            if (!std::filesystem::copy_file(existing, copied))
+#endif
             {
                 std::cerr << "FAIL: couldn't copy file" << std::endl;
                 freeImageTexture(tex, texTmpMem);
@@ -492,12 +498,15 @@ namespace dmt {
     {
         Renderer renderer;
 
+        std::cout << "[Main Thread] Adding 2 lights on scene" << std::endl;
         renderer.scene.lights.push_back(
             makeSpotLight(Transform{}, {1.380f, 1.140f, 1.190f}, cosf(20.f * fl::pi() / 180.f), cosf(30.f * fl::pi() / 180.f)));
         renderer.scene.lights.push_back(
             makeSpotLight(Transform::translate({1, 1, 1}) * Transform::rotate(75.f, Vector3f::zAxis()), {1, 0.5, 1}, 0.707, 0.93));
+        std::cout << "[Main Thread] Creating Test Scene Basic" << std::endl;
         testScene(renderer.scene);
 
+        std::cout << "[Main Thread] Adding Plane" << std::endl;
         { // plane
             SurfaceMaterial mat{};
             mat.anisotropy     = 1.f;
@@ -547,6 +556,7 @@ namespace dmt {
             std::cerr << "No texture\n";
             return;
         }
+        std::cout << "[Main Thread] Adding Cube Material::Creating texture .mipc file for diffuse" << std::endl;
         renderer.texCache.MipcFiles.createCacheFile(key_pathWorkbenchDiff, tex);
 
         mat.diffuseWidth  = width;
@@ -559,6 +569,7 @@ namespace dmt {
 
         os::Path back = os::Path::executableDir() / "kloppenheim_02_2k.exr";
 
+        std::cout << "[Main Thread] Opening " << back.toUnderlying() << std::endl;
         if (!openEXR(back, nullptr, &width, &height))
         {
             std::cerr << "cannot open EXR\n";
@@ -576,9 +587,11 @@ namespace dmt {
             return;
         }
 
+        std::cout << "[Main Thread] Creating Environment Light" << std::endl;
         renderer.params.envLight = //
             makeUniqueRef<EnvLight>(std::pmr::get_default_resource(), envBuf, width, height, Quaternion::quatIdentity(), 1.f);
 
+        std::cout << "[Main Thread] Starting Render Thread For real" << std::endl;
         renderer.startRenderThread();
     }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/core-bvh-builder.h"
-#include "core/core-cudautils-cpubuild.h"
+#include "cudautils/cudautils.h"
 #include "core/core-math.h"
 #include "core/core-primitive.h"
 #include "core/core-dstd.h"

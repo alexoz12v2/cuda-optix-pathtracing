@@ -7,7 +7,7 @@
 
 namespace dmt {
     // Transform, AnimatedTransform, CameraTransform ------------------------------------------------------------------
-    class DMT_CORE_API Transform
+    class DMT_CORE_API alignas(16) Transform
     {
     public:
         Matrix4f m;    // Transformation matrix
@@ -84,33 +84,15 @@ namespace dmt {
     };
 
     // Transform Function Declarations
-    DMT_CORE_API DMT_CPU_GPU Transform    Translate(Vector3f delta);
-    DMT_CPU_GPU DMT_FORCEINLINE Transform RotateFromTo(Vector3f from, Vector3f to)
-    {
-        // Compute intermediate vector for vector reflection
-        Vector3f refl;
-        if (std::abs(from.x) < 0.72f && std::abs(to.x) < 0.72f)
-            refl = {{1, 0, 0}};
-        else if (std::abs(from.y) < 0.72f && std::abs(to.y) < 0.72f)
-            refl = {{0, 1, 0}};
-        else
-            refl = {{0, 0, 1}};
+    DMT_CORE_API DMT_CPU_GPU Transform Translate(Vector3f delta);
 
-        // Initialize matrix _r_ for rotation
-        Vector3f u = refl - from, v = refl - to;
-        Matrix4f r;
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j)
-                // Initialize matrix element _r[i][j]_
-                r[{i, j}] = ((i == j) ? 1 : 0) - 2 / Dot(u, u) * u[i] * u[j] - 2 / Dot(v, v) * v[i] * v[j] +
-                            4 * Dot(u, v) / (Dot(u, u) * Dot(v, v)) * v[i] * u[j];
-
-        return Transform(r);
-    }
     // Transform Inline Functions
     DMT_CPU_GPU inline Transform Inverse(Transform const& t) { return Transform(t.m); }
 
-    DMT_FORCEINLINE DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b) { return a.combine(b); }
+    DMT_FORCEINLINE inline DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b)
+    {
+        return a.combine(b);
+    }
 
     class DMT_CORE_API AnimatedTransform
     {
@@ -187,7 +169,3 @@ namespace dmt {
     };
 
 } // namespace dmt
-
-#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_TRANSFORM_IMPL)
-    #include "cudautils-transform.cu"
-#endif

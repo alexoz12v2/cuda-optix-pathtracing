@@ -37,6 +37,8 @@ namespace dmt {
         DMT_CORE_API void startRenderThread();
 
     public:
+        Aligned16MemoryResource heapAligned;
+
         // read only stuff for workers and render thread
         Scene        scene;
         Parameters   params;

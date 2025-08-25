@@ -50,6 +50,8 @@ namespace dmt::os {
                                               std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     } // namespace env
 
+    DMT_PLATFORM_API std::vector<std::string> cmdLine();
+
     struct DMT_PLATFORM_API FileStat
     {
         bool     valid       = false;
@@ -73,6 +75,7 @@ namespace dmt::os {
                          std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
         static Path executableDir(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        static Path fromString(std::string_view str, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
         FileStat stat() const;
 

@@ -20,30 +20,12 @@ namespace dmt {
     //-scene path
     //-time
 
-    static std::vector<Option> const optionTable =
-        {{.names       = {"--device", "-d"},
-          .description = "Device used for the rendering. It can be cpu or gpu",
-          .requiresVal = true,
-          .defaultVal  = "cpu",
-          .allowedVals = {"cpu", "gpu"}},
-         {.names       = {"--scene", "-s"},
-          .description = "JSON file used to describe the scene",
-          .requiresVal = true,
-          .defaultVal  = "",
-          .allowedVals = {}},
-         {.names       = {"--time", "-t"},
-          .description = " Measure and report the execution times of key rendering operations.",
-          .requiresVal = false,
-          .defaultVal  = "",
-          .allowedVals = {}}};
-
-
     class ArgParser
     {
     public:
         ArgParser() = default;
 
-        std::string getOption(std::string const& name, std::string const& defaultValue = "") const;
+        std::optional<std::string> getOption(std::string const& name, bool required = false, std::string const& defaultValue = "") const;
 
         bool hasFlag(std::string const& name) const;
 
@@ -51,7 +33,7 @@ namespace dmt {
 
         void printHelp(std::string_view progName) const;
 
-        bool parse(int argc, std::span<std::string_view> argv);
+        bool parse(std::span<std::string_view> argv);
         
 
     private:

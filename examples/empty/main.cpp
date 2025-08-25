@@ -1,13 +1,30 @@
-#include <bit>
-#include <algorithm>
-#include <iostream>
+#define DMT_ENTRY_POINT
 
-#if (DMT_OS_WINDOWS)
-int wmain()
+#include "platform/platform.h"
+
+namespace /* static */ {
+    void entryPoint()
+    {
+        dmt::Context ctx;
+
+        float            pi   = 3.14f;
+        int              i    = 0;
+        void*            addr = &i;
+        std::string_view str  = "sdfdsf";
+
+        ctx.log("{} Up and {} {} {} {{sss}}", std::make_tuple(pi, i, addr, str));
+    }
+} // namespace
+
+int guardedMain()
 {
-#else
-int main()
-{
-#endif
-    std::cout << "Hello Cruel World" << std::endl;
+    dmt::Ctx::init();
+    struct Janitor
+    {
+        ~Janitor() noexcept { dmt::Ctx::destroy(); }
+    } j;
+
+    entryPoint();
+
+    return 0;
 }

@@ -480,16 +480,20 @@ namespace dmt::render_thread {
         ctx.log("[RT] Constructed Film Buffer and Mitchell Filter Distribution", {});
 
         // define camera (image plane physical dims, resolution given by image)
-        Vector3f const cameraPosition{0.f, 0.f, 0.f};
+        Vector3f const cameraPosition  = rtData->params->cameraPosition;
         Normal3f const cameraDirection = normalFrom(rtData->params->cameraDirection);
         float const    focalLength     = rtData->params->focalLength;
         float const    sensorHeight    = rtData->params->sensorSize;
-        float const    aspectRatio     = static_cast<float>(Width) / Height;
 
-        Transform const cameraFromRaster = transforms::cameraFromRaster_Perspective(focalLength, sensorHeight, Width, Height);
-        Transform const renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
-        ApproxDifferentialsContext
-            diffCtx = camera::minDifferentialsFromCamera(cameraFromRaster, renderFromCamera, film, SamplesPerPixel);
+        Transform const            cameraFromRaster = transforms::cameraFromRaster_Perspective(focalLength,
+                                                                                    sensorHeight,
+                                                                                    static_cast<uint32_t>(Width),
+                                                                                    static_cast<uint32_t>(Height));
+        Transform const            renderFromCamera = transforms::worldFromCamera(cameraDirection, cameraPosition);
+        ApproxDifferentialsContext diffCtx          = camera::minDifferentialsFromCamera(cameraFromRaster,
+                                                                                renderFromCamera,
+                                                                                film,
+                                                                                static_cast<uint32_t>(SamplesPerPixel));
         ctx.log("[RT] Constructed Camera Parameters", {});
 
         // build light tree

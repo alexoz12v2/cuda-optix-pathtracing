@@ -16,6 +16,7 @@ namespace dmt {
         float               focalLength     = 20.f;
         float               sensorSize      = 36.f;
         Vector3f            cameraDirection = {0, 1, 0};
+        Vector3f            cameraPosition  = {0, 0, 0};
         Point2i             filmResolution  = {128, 128};
         int32_t             samplesPerPixel = 1;
         int32_t             maxDepth        = 5;

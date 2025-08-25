@@ -2,8 +2,10 @@
 
 #include "core-light.h"
 #include "core-math.h"
+#include "core-texture.h"
 #include "core-trianglemesh.h"
 #include "cudautils-transform.h"
+#include "cudautils-vecmath.h"
 #include "platform-memory.h"
 #include "platform/platform-context.h"
 
@@ -124,6 +126,7 @@ namespace dmt::parse_helpers {
         TexFormat   format;
         if (pathStr.ends_with("png"))
         {
+            // PNG file, no header parsing, 8 bppc only
             format = isRGB ? TexFormat::ByteRGB : TexFormat::ByteGray;
             data   = stbi_load(pathStr.c_str(), &xRes, &yRes, &channels, 0);
             if (!data)
@@ -133,6 +136,7 @@ namespace dmt::parse_helpers {
         }
         else if (pathStr.ends_with("exr"))
         {
+            // OpenEXR format, half16 per channel
             try
             {
                 Imf::RgbaInputFile file(pathStr.c_str());
@@ -188,6 +192,16 @@ namespace dmt::parse_helpers {
                 return eFailLoad;
             }
         }
+        else if (pathStr.ends_with("hdr"))
+        {
+            // Radiance RGBE pixel format through stb_image, which expands it into float32
+            format = isRGB ? TexFormat::FloatRGB : TexFormat::FloatGray;
+            data   = stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
+            if (!data)
+                return eFailLoad;
+            if (channels != (isRGB ? 3 : 1))
+                return eNumChannelsIncorrect;
+        }
         else
         {
             return eFormatNotSupported;
@@ -200,7 +214,7 @@ namespace dmt::parse_helpers {
     static void freeTempTexObj(os::Path const& path, ImageTexturev2& in)
     {
         std::pmr::string pathStr = path.toUnderlying();
-        if (pathStr.ends_with("png"))
+        if (pathStr.ends_with("png") || pathStr.ends_with("hdr"))
         {
             stbi_image_free(in.data);
         }
@@ -778,7 +792,17 @@ namespace dmt::parse_helpers {
             param->sensorSize      = static_cast<float>(camera["sensorSize"]) / 1000.f;
             param->cameraDirection = dir;
 
-
+            // optioanl position
+            if (camera.contains("position"))
+            {
+                Vector3f tmp{};
+                if (extractVec3f(camera["position"], &tmp) != ExtractVec3fResult::eOk)
+                {
+                    ctx.error("Error extracting camera position vector", {});
+                    return false;
+                }
+                param->cameraPosition = tmp;
+            }
         } catch (...)
         {
             //insert error message
@@ -787,6 +811,7 @@ namespace dmt::parse_helpers {
 
         return true;
     }
+
     static bool transform(Parser& parser, ParserState& state, json const& transform)
     {
         Context ctx;

@@ -25,8 +25,8 @@ namespace dmt {
         Parser& operator=(Parser&&) noexcept = delete;
 
     public:
-        DMT_FORCEINLINE bool isValid() const { return m_path.isValid() && m_path.isFile(); }
-        DMT_FORCEINLINE os::Path fileDirectory() const { return m_path.parent(); }
+        [[nodiscard]] DMT_FORCEINLINE bool isValid() const { return m_path.isValid() && m_path.isFile(); }
+        [[nodiscard]] DMT_FORCEINLINE os::Path fileDirectory() const { return m_path.parent(); }
 
         DMT_CORE_API bool parse();
 

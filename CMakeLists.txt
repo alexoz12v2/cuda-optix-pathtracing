@@ -69,7 +69,7 @@ project(
   DumbTracer
   VERSION 1.0.0
   DESCRIPTION "CUDA Path Tracing"
-  LANGUAGES CXX C CUDA
+  LANGUAGES CXX #C CUDA
 )
 
 enable_language(C)

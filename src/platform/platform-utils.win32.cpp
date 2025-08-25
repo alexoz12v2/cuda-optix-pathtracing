@@ -2,6 +2,8 @@
 
 #include "platform-os-utils.win32.h"
 #include "platform-memory.h"
+#include <memory_resource>
+#include <string>
 
 #pragma comment(lib, "mincore")
 #pragma comment(lib, "Shlwapi.lib")
@@ -79,6 +81,30 @@ namespace dmt::os {
             return result;
         }
     } // namespace env
+
+    std::vector<std::string> cmdLine()
+    {
+        wchar_t* argv = nullptr;
+        int      argc = 0;
+        argv          = CommandLineToArgW(GetCommandLineW(), &argc) if (argc) return {};
+
+        std::vector<std::string> args;
+        args.reserve(argc);
+
+        for (uint32_t i = 0; i < argc; ++i)
+        {
+            // UTF-16 -> UTF-8
+            int len = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);
+            if (len > 0)
+            {
+                std::string utf8(static_cast<size_t>(len - 1), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, utf8.data(), len, nullptr, nullptr);
+                args.push_back(std::move(utf8));
+            }
+        }
+        LocalFree(argv);
+        return args;
+    }
 
     // Path ----------------------------------------------------------------------------------------------------------
     Path::Path(std::pmr::memory_resource* resource, void* content, uint32_t capacity, uint32_t size) :
@@ -230,6 +256,41 @@ namespace dmt::os {
         }
 
         return Path{resource, exePath, capacity, static_cast<uint32_t>(len * sizeof(wchar_t))};
+    }
+
+    Path Path::fromString(std::string_view str, std::pmr::memory_resource* resource)
+    {
+        if (!resource)
+            resource = std::pmr::get_default_resource();
+
+        if (str.empty())
+            return invalid(resource);
+
+        // UTF8 -> UTF16
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
+        if (wideLen <= 0)
+            return invalid(resource);
+        // allocate buffer + long path prefix
+        static constexpr uint32_t longPrefixLen = 4; // in wchar_ts
+        size_t const              bufferBytes   = (wideLen + longPrefixLen + 1) * sizeof(wchar_t);
+        size_t const              capacity      = std::max<size_t>(MAX_PATH << 1, bufferBytes);
+        wchar_t*                  buffer        = reinterpret_cast<wchar_t*>(resource->allocate(capacity));
+        if (!buffer)
+            return invalid(resource);
+
+        // prepend long path prefix
+        std::memcpy(buffer, L"\\\\?\\", longPrefixLen * sizeof(wchar_t));
+        // UT8 -> UTF16
+        MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), buffer + longPrefixLen, wideLen);
+        buffer[longPrefixLen + wideLen] = L'\0';
+
+        if (PathFileExistsW(buffer))
+            return Path{resource,
+                        buffer,
+                        static_cast<uint32_t>(capacity),
+                        static_cast<uint32_t>((wcslen(buffer) + 1) * sizeof(wchar_t))};
+
+        return invalid(resource);
     }
 
     std::pmr::string Path::toUnderlying(std::pmr::memory_resource* resource) const

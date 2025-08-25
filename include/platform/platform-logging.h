@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory_resource>
 #include <platform/platform-macros.h>
 #include <platform/platform-utils.h>
 
@@ -359,15 +360,15 @@ namespace dmt {
      * @param rhs log level no 2
      * @return std::strong_ordering::{less,equivalent,greater} depending on the 2 values
      */
-    inline constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
+    constexpr std::strong_ordering operator<=>(ELogLevel lhs, ELogLevel rhs) noexcept
     {
         return toUnderlying(lhs) <=> toUnderlying(rhs);
     }
 
     // ----------------------------------------------------------------------------------------------------------------
-    struct DMT_PLATFORM_API LogLocation
+    struct LogLocation
     {
-        struct DMT_PLATFORM_API Device
+        struct Device
         {
             int32_t blockX;
             int32_t blockY;
@@ -378,12 +379,12 @@ namespace dmt {
             int32_t lane;
             int32_t warp;
         };
-        struct DMT_PLATFORM_API Host
+        struct Host
         {
             uint64_t pid;
             uint64_t tid;
         };
-        union DMT_PLATFORM_API U
+        union U
         {
             Device dev;
             Host   host;
@@ -408,7 +409,7 @@ namespace dmt {
     // https://stackoverflow.com/questions/44337309/whats-the-most-efficient-way-to-calculate-the-warp-id-lane-id-in-a-1-d-grid
     inline LogLocation getPhysicalLocation()
     {
-        LogLocation loc;
+        LogLocation loc{};
 #if defined(__CUDA_ARCH__)
         int32_t     device  = -1;
         cudaError_t err     = cudaGetDevice(&device);
@@ -430,103 +431,110 @@ namespace dmt {
     }
 
     template <typename T>
-    struct UTF8Formatter;
-
-    /** Shortcut to write `std::make_tuple` */
-
-    template <typename... Ts>
-        requires(std::is_invocable_v<UTF8Formatter<Ts>, Ts const&, char*, uint32_t&, uint32_t&> && ...)
-    inline constexpr LogRecord createRecord(
-        FormatString<>              fmt,
-        ELogLevel                   _level,
-        char*                       _buffer,
-        uint32_t                    _bufferSize,
-        char*                       _argBuffer,
-        uint32_t                    _argBufferSize,
-        std::tuple<Ts...> const&    _params,
-        LogLocation const&          _phyLoc,
-        std::source_location const& _loc)
+    struct UTF8Formatter
     {
-        LogRecord record{_buffer, _phyLoc, _loc, _level, 0, 0};
-        char*     argBufPtr     = _argBuffer;
-        uint32_t  totalArgBytes = 0;
-
-        constexpr size_t tupleSize = sizeof...(Ts);
-
-        // If tuple is not empty, apply formatters
-        if constexpr (tupleSize > 0)
+        void operator()(std::pmr::string& str, T const& value) const
         {
-            std::apply([&](auto&&... args) {
-                ((UTF8Formatter<std::decay_t<decltype(args)>>{}(args, argBufPtr, totalArgBytes, _argBufferSize)), ...);
-            }, _params);
-        }
-
-        uint32_t usedArgs  = 0;
-        bool     earlyExit = false;
-
-        while (!fmt.finished() && !earlyExit)
-        {
-            if (fmt.isFormatSpecifier() && usedArgs < tupleSize)
+            if constexpr (std::is_integral_v<T>)
             {
-                // There's an argument to format
-                if (argBufPtr < _argBuffer + _argBufferSize)
-                {
-                    uint32_t numBytes = *reinterpret_cast<uint32_t*>(argBufPtr);
-                    uint32_t len      = *reinterpret_cast<uint32_t*>(argBufPtr + sizeof(uint32_t));
-
-                    if (_bufferSize >= numBytes)
-                    {
-                        memcpy(_buffer, argBufPtr + 2 * sizeof(uint32_t), numBytes);
-                        _buffer += numBytes;
-                        _bufferSize -= numBytes;
-                        record.len += len;
-                        record.numBytes += numBytes;
-                    }
-
-                    argBufPtr += numBytes + 2 * sizeof(uint32_t);
-                    ++usedArgs;
-                }
+                str.append(std::to_string(value));
+            }
+            else if constexpr (std::is_floating_point_v<T>)
+            {
+                char buf[64];
+                if (std::snprintf(buf, sizeof(buf), "%.6g", value) > 0)
+                    str.append(buf);
+            }
+            else if constexpr (std::is_pointer_v<T>)
+            {
+                char buf[32];
+                if (std::snprintf(buf, sizeof(buf), "%p", value) > 0)
+                    str.append(buf);
+            }
+            else if constexpr (std::convertible_to<T, std::string_view>)
+            {
+                str.append(std::string_view(value));
             }
             else
             {
-                // Not a format specifier OR ran out of args � treat as literal
-                earlyExit             = tupleSize == 0 || usedArgs >= tupleSize;
-                CharRangeU8 portion   = *fmt;
-                char const* src       = portion.data;
-                uint32_t    remaining = earlyExit ? fmt.totalBytes() : portion.numBytes;
-
-                while (remaining > 0 && _bufferSize > 0)
-                {
-                    if (remaining >= 2 && src[0] == '{' && src[1] == '{')
-                    {
-                        *_buffer++ = '{';
-                        src += 2;
-                        remaining -= 2;
-                    }
-                    else if (remaining >= 2 && src[0] == '}' && src[1] == '}')
-                    {
-                        *_buffer++ = '}';
-                        src += 2;
-                        remaining -= 2;
-                    }
-                    else
-                    {
-                        *_buffer++ = *src++;
-                        remaining--;
-                    }
-                    _bufferSize--;
-                    record.len++;
-                    record.numBytes++;
-                }
+                static_assert(sizeof(T) == 0, "No UTF8Formatter defined for this type");
             }
 
-            if (!earlyExit)
-                ++fmt;
+            str.push_back('\0');
+        }
+    };
+
+    template <typename... Ts>
+    inline LogRecord createRecord(
+        FormatString<>              fmt,
+        ELogLevel                   level,
+        char*                       buffer,
+        uint32_t                    bufferSize,
+        char*                       argBuffer,
+        uint32_t                    argBufferSize,
+        std::tuple<Ts...> const&    params,
+        LogLocation const&          phyLoc,
+        std::source_location const& loc)
+    {
+        LogRecord record{.data = buffer, .phyLoc = phyLoc, .srcLoc = loc, .level = level, .len = 0, .numBytes = 0};
+
+        // --- 1. Serialize arguments into argStr (using \0 separator) ---
+        std::pmr::monotonic_buffer_resource mem{argBuffer, argBufferSize, std::pmr::null_memory_resource()};
+        std::pmr::string                    argStr{&mem};
+
+        if constexpr (sizeof...(Ts) > 0)
+        {
+            std::apply([&](auto const&... args) {
+                ((UTF8Formatter<std::decay_t<decltype(args)>>{}(argStr, args)), ...);
+            }, params);
         }
 
-        _buffer[record.numBytes < _bufferSize ? 0 : -1] = '\n';
-        record.numBytes++;
-        record.len++;
+        // --- 2. Assemble final log ---
+        char*       out       = buffer;
+        uint32_t    remaining = bufferSize;
+        char const* argCursor = argStr.data();
+        char const* argEnd    = argStr.data() + argStr.size();
+
+        while (!fmt.finished())
+        {
+            if (fmt.isFormatSpecifier() && argCursor < argEnd)
+            {
+                // Copy the next argument up to \0
+                char const* nextArgEnd = static_cast<char const*>(std::memchr(argCursor, '\0', argEnd - argCursor));
+                if (!nextArgEnd)
+                    nextArgEnd = argEnd; // last argument may not have \0
+
+                uint32_t argLen = static_cast<uint32_t>(nextArgEnd - argCursor);
+                uint32_t toCopy = std::min(argLen, remaining);
+
+                std::memcpy(out, argCursor, toCopy);
+                out += toCopy;
+                remaining -= toCopy;
+                record.numBytes += toCopy;
+
+                argCursor = nextArgEnd + 1; // skip the \0
+            }
+            else
+            {
+                // Literal text
+                CharRangeU8 lit    = *fmt;
+                uint32_t    toCopy = std::min(lit.numBytes, remaining);
+
+                std::memcpy(out, lit.data, toCopy);
+                out += toCopy;
+                remaining -= toCopy;
+                record.numBytes += toCopy;
+            }
+
+            ++fmt;
+        }
+
+        // Terminate with newline
+        if (remaining > 0)
+        {
+            *out++ = '\n';
+            ++record.numBytes;
+        }
 
         return record;
     }
@@ -552,191 +560,4 @@ namespace dmt {
                                                LogHandlerAllocate   _alloc   = ::dmt::os::allocate,
                                                LogHandlerDeallocate _dealloc = ::dmt::os::deallocate);
 
-    // ----------------------------------------------------------------------------------------------------------------
-    template <typename T>
-    T* implicit_aligned_alloc(std::size_t alignment, void*& p, std::size_t& sz)
-    {
-        void* aligned_ptr = p;
-        if (std::align(alignment, sizeof(T), aligned_ptr, sz))
-        {
-            T* result = std::launder(reinterpret_cast<T*>(aligned_ptr));
-            // move pointer past allocated object
-            p = static_cast<std::byte*>(aligned_ptr) + sizeof(T);
-            sz -= sizeof(T);
-            return result;
-        }
-        return nullptr; // not enough space
-    }
-
-    template <typename T>
-    struct UTF8Formatter;
-
-    template <std::floating_point T>
-    struct UTF8Formatter<T>
-    {
-        inline void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
-        {
-            void*       p  = _buffer + _offset;
-            std::size_t sz = _bufferSize;
-
-            // Align buffer for two uint32_t metadata
-            void* aligned_metadata = std::align(alignof(uint32_t), 2 * sizeof(uint32_t), p, sz);
-            if (!aligned_metadata || sz < 2 * sizeof(uint32_t))
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            uint32_t* numBytesPtr = std::launder(reinterpret_cast<uint32_t*>(aligned_metadata));
-            uint32_t* lenPtr      = numBytesPtr + 1;
-
-            // Align buffer for string write after metadata
-            char*       stringPos = reinterpret_cast<char*>(lenPtr + 1);
-            std::size_t stringSz  = sz - 2 * sizeof(uint32_t);
-
-            void*       aligned_string = stringPos;
-            std::size_t remaining      = stringSz;
-            aligned_string             = std::align(alignof(std::max_align_t), stringSz, aligned_string, remaining);
-            if (!aligned_string || remaining == 0)
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            char* writePos = reinterpret_cast<char*>(aligned_string);
-
-            // Format float/double/long double into buffer
-            int bytesWritten = std::snprintf(writePos, remaining, "%.6g", value); // Adjust precision if needed
-
-            if (bytesWritten <= 0 || static_cast<std::size_t>(bytesWritten) > remaining)
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
-            uint32_t len      = numBytes;
-
-            *numBytesPtr = numBytes;
-            *lenPtr      = len;
-
-            // Update offsets
-            _offset += (writePos - (_buffer + _offset)) + bytesWritten;
-            _bufferSize -= (writePos - (_buffer + _offset)) + bytesWritten;
-        }
-    };
-
-
-    template <typename T>
-        requires(std::integral<T> || (std::is_pointer_v<T> && (!std::convertible_to<T, std::string_view>)))
-    struct UTF8Formatter<T>
-    {
-        inline void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
-        {
-            void*       p  = _buffer + _offset;
-            std::size_t sz = _bufferSize;
-
-            // Align buffer for two uint32_t metadata
-            void* aligned_metadata = std::align(alignof(uint32_t), 2 * sizeof(uint32_t), p, sz);
-            if (!aligned_metadata || sz < 2 * sizeof(uint32_t))
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            uint32_t* numBytesPtr = std::launder(reinterpret_cast<uint32_t*>(aligned_metadata));
-            uint32_t* lenPtr      = numBytesPtr + 1;
-
-            // Align buffer for string write after metadata
-            char*       stringPos = reinterpret_cast<char*>(lenPtr + 1);
-            std::size_t stringSz  = sz - 2 * sizeof(uint32_t);
-
-            void*       aligned_string = stringPos;
-            std::size_t remaining      = stringSz;
-            aligned_string             = std::align(alignof(std::max_align_t), stringSz, aligned_string, remaining);
-            if (!aligned_string || remaining == 0)
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            char* writePos = reinterpret_cast<char*>(aligned_string);
-
-            // Format value into buffer
-            int bytesWritten = 0;
-            if constexpr (std::is_pointer_v<T>)
-                bytesWritten = std::snprintf(writePos, remaining, "%p", value);
-            else if constexpr (sizeof(T) == 8)
-                bytesWritten = std::snprintf(writePos, remaining, std::is_signed_v<T> ? "%zd" : "%zu", value);
-            else
-                bytesWritten = std::snprintf(writePos, remaining, std::is_signed_v<T> ? "%d" : "%u", value);
-
-            if (bytesWritten <= 0 || static_cast<std::size_t>(bytesWritten) > remaining)
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            uint32_t numBytes = static_cast<uint32_t>(bytesWritten);
-            uint32_t len      = numBytes;
-
-            *numBytesPtr = numBytes;
-            *lenPtr      = len;
-
-            // Update offsets
-            _offset += (writePos - (_buffer + _offset)) + bytesWritten;
-            _bufferSize -= (writePos - (_buffer + _offset)) + bytesWritten;
-        }
-    };
-
-    template <std::convertible_to<std::string_view> T>
-    struct UTF8Formatter<T>
-    {
-        inline void operator()(T const& value, char* _buffer, uint32_t& _offset, uint32_t& _bufferSize)
-        {
-            std::string_view sv = value; // convert to string_view
-
-            void*       p  = _buffer + _offset;
-            std::size_t sz = _bufferSize;
-
-            // Align buffer for two uint32_t metadata
-            void* aligned_metadata = std::align(alignof(uint32_t), 2 * sizeof(uint32_t), p, sz);
-            if (!aligned_metadata || sz < 2 * sizeof(uint32_t))
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            uint32_t* numBytesPtr = std::launder(reinterpret_cast<uint32_t*>(aligned_metadata));
-            uint32_t* lenPtr      = numBytesPtr + 1;
-
-            // Align buffer for string content
-            char*       stringPos = reinterpret_cast<char*>(lenPtr + 1);
-            std::size_t stringSz  = sz - 2 * sizeof(uint32_t);
-
-            void*       aligned_string = stringPos;
-            std::size_t remaining      = stringSz;
-            aligned_string             = std::align(alignof(std::max_align_t), sv.size(), aligned_string, remaining);
-            if (!aligned_string || remaining < sv.size())
-            {
-                _bufferSize = 0;
-                return;
-            }
-
-            char* writePos = reinterpret_cast<char*>(aligned_string);
-
-            // Copy string content
-            std::memcpy(writePos, sv.data(), sv.size());
-
-            uint32_t numBytes = static_cast<uint32_t>(sv.size());
-            uint32_t len      = numBytes;
-
-            *numBytesPtr = numBytes;
-            *lenPtr      = len;
-
-            // Update offsets
-            _offset += (writePos - (_buffer + _offset)) + numBytes;
-            _bufferSize -= (writePos - (_buffer + _offset)) + numBytes;
-        }
-    };
 } // namespace dmt

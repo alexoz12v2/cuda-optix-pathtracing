@@ -412,3 +412,15 @@ Then everytime (add `--fresh` to cleanup previus `cmake` runs)
 ```sh
 cmake .. --preset Debug-Linux -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DGLFW_BUILD_WAYLAND=ON -DCMAKE_CUDA_COMPILER=$CUDA_HOME/bin/nvcc
 ```
+
+### Ninja Requirements
+
+We require `ninja` with version >= 1.11 (C++20 module support)
+
+## Linux deal with corrupted coverage files
+
+```sh
+find build/ -name "*.gcda" -delete
+```
+
+Then use `cmake --build` with flag `--clean-first`

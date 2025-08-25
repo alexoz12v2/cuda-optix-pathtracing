@@ -2,6 +2,8 @@
 #include "platform-os-utils.linux.h"
 
 #include <backward.hpp>
+#include <fcntl.h>
+#include <memory_resource>
 #include <string>
 #include <string_view>
 #include <unistd.h>
@@ -103,6 +105,41 @@ namespace dmt::os {
         }
     } // namespace env
 
+    std::vector<std::string> cmdLine()
+    {
+        int const fd = open("/proc/self/cmdline", O_RDONLY);
+        if (fd == -1)
+            return {};
+
+        std::string buf{};
+        size_t      marker  = 0;
+        ssize_t     numRead = 0;
+
+        buf.resize(64);
+
+        while ((numRead = read(fd, buf.data() + marker, 64)) > 0)
+        {
+            buf.resize(buf.size() + 64);
+            marker += static_cast<size_t>(numRead);
+        }
+        buf.shrink_to_fit();
+
+        std::vector<std::string> args;
+
+        marker = 0;
+        while (marker < buf.size())
+        {
+            size_t pos = buf.find_first_of('\0', marker);
+            if (pos != std::string::npos && pos > marker)
+            {
+                args.emplace_back(buf.data() + marker, buf.data() + pos);
+            }
+            marker = pos + 1;
+        }
+
+        return args;
+    }
+
     // Path ----------------------------------------------------------------------------------------------------------
     static bool exists(char const* path)
     {
@@ -185,7 +222,7 @@ namespace dmt::os {
     m_data(content),
     m_capacity(capacity),
     m_dataSize(size),
-    m_isDir(true),
+    m_isDir(isDir(reinterpret_cast<char*>(content))),
     m_valid(content != nullptr && capacity > 0 && size > 0 && exists(reinterpret_cast<char*>(content)))
     {
     }
@@ -279,11 +316,35 @@ namespace dmt::os {
             }
         }
 
-        char* buffer = reinterpret_cast<char*>(resource->allocate(len + 1));
+        char* buffer = reinterpret_cast<char*>(resource->allocate(PATH_MAX));
         memcpy(buffer, tmp, len);
         buffer[len] = '\0';
 
         return Path{resource, buffer, static_cast<uint32_t>(len + 1), static_cast<uint32_t>(len)};
+    }
+
+    Path Path::fromString(std::string_view str, std::pmr::memory_resource* resource)
+    {
+        if (!resource)
+            resource = std::pmr::get_default_resource();
+        if (str.empty())
+            return invalid(resource);
+
+        // allocate size + 1 ('\0')
+        size_t const len    = str.size();
+        char*        buffer = reinterpret_cast<char*>(resource->allocate(PATH_MAX));
+        if (!buffer)
+            return invalid(resource);
+
+        std::memcpy(buffer, str.data(), len);
+        buffer[len] = '\0';
+
+        normalizePath(buffer);
+
+        if (exists(buffer))
+            return Path{resource, buffer, PATH_MAX, static_cast<uint32_t>(len + 1)};
+
+        return invalid(resource);
     }
 
     std::pmr::string Path::toUnderlying(std::pmr::memory_resource* resource) const

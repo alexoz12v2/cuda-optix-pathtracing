@@ -34,7 +34,7 @@ namespace dmt {
     {
         Context ctx;
 
-        for (uint32_t i = 1; i < argv.size(); i++)
+        for (uint32_t i = 0; i < argv.size(); i++)
         {
             std::string_view arg = argv[i];
 
@@ -53,7 +53,7 @@ namespace dmt {
                     return false;
                 }
 
-                std::string_view const key{it->names[0].data() + 2, it->names[0].data() + it->names.size()};
+                std::string_view const key{it->names[0].data() + 2, it->names[0].data() + it->names[0].size()};
 
                 if (it->requiresVal)
                 {
@@ -108,7 +108,7 @@ namespace dmt {
                     return false;
                 }
 
-                std::string_view const key{it->names[0].data() + 2, it->names[0].data() + it->names.size()};
+                std::string_view const key{it->names[0].data() + 2, it->names[0].data() + it->names[0].size()};
 
                 if (it->requiresVal)
                 {
@@ -236,17 +236,21 @@ namespace dmt {
         ctx.log("{}", std::make_tuple(str.str()));
     }
 
-    std::optional<std::string> ArgParser::getOption(std::string const& name, bool required, std::string const& defaultValue) const
+    OptionResult ArgParser::getOption(std::string const& name, bool required, std::string const* defaultValue) const
     {
+        using enum OptionEnum;
         if (auto it = m_options.find(name); it != m_options.end())
         {
-            return std::make_optional(it->second);
+            return {it->second, eValue};
         }
 
         if (required)
-            return std::nullopt;
+            return {{}, eRequiredNotPresent};
 
-        return std::make_optional(defaultValue);
+        if (defaultValue)
+            return {*defaultValue, eDefaultValue};
+
+        return {{}, eNotPresent};
     }
 
     bool ArgParser::hasFlag(std::string const& name) const

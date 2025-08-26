@@ -11,43 +11,50 @@
 message("Looking for FBX SDK")
 
 # ---------------------------------------------
-# Helper macro: copy runtimes and reassign vars
+# Helper function: copy one runtime (Debug/Release)
+# Arguments:
+#   runtime_var - CMake variable name (not value) holding path to runtime
+#   dest_dir    - bin or lib
+#   config      - "Release" or "Debug"
 # ---------------------------------------------
-function(fbxsdk_copy_runtime runtime_var runtime_dbg_var dest_dir)
-    # ensure dir exists
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/${dest_dir}")
-
-    # get basenames
-    get_filename_component(_runtime_name "${${runtime_var}}" NAME)
-    get_filename_component(_runtime_dbg_name "${${runtime_dbg_var}}" NAME)
-
-    # copy release
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${${runtime_var}}"
-                "${CMAKE_BINARY_DIR}/${dest_dir}/${_runtime_name}"
-        RESULT_VARIABLE _copy_runtime_result
-    )
-
-    # copy debug
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${${runtime_dbg_var}}"
-                "${CMAKE_BINARY_DIR}/${dest_dir}/${_runtime_dbg_name}"
-        RESULT_VARIABLE _copy_runtime_dbg_result
-    )
-
-    # update cache if ok
-    if(_copy_runtime_result EQUAL 0)
-        set(${runtime_var} "${CMAKE_BINARY_DIR}/${dest_dir}/${_runtime_name}" CACHE FILEPATH "FBXSDK runtime" FORCE)
-    else()
-        message(FATAL_ERROR "Failed to copy ${runtime_var} from ${${runtime_var}}")
+function(fbxsdk_copy_runtime runtime_var dest_dir config)
+    set(_src "${${runtime_var}}")
+    if(NOT EXISTS "${_src}")
+        message(FATAL_ERROR "Runtime ${runtime_var} not found at ${_src}")
     endif()
 
-    if(_copy_runtime_dbg_result EQUAL 0)
-        set(${runtime_dbg_var} "${CMAKE_BINARY_DIR}/${dest_dir}/${_runtime_dbg_name}" CACHE FILEPATH "FBXSDK debug runtime" FORCE)
+    # If already in build dir, skip copying
+    string(FIND "${_src}" "${CMAKE_BINARY_DIR}" _in_build_dir)
+    if(_in_build_dir EQUAL 0)
+        message(STATUS "Skipping copy of ${runtime_var}, already in build dir: ${_src}")
+        return()
+    endif()
+
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/${dest_dir}")
+
+    # Extract filename + extension
+    get_filename_component(_filename "${_src}" NAME)
+    get_filename_component(_name_we "${_src}" NAME_WE)
+    get_filename_component(_ext "${_src}" EXT)
+
+    # For debug, add -d suffix before extension
+    if(config STREQUAL "Debug")
+        set(_dst "${CMAKE_BINARY_DIR}/${dest_dir}/${_name_we}-d${_ext}")
     else()
-        message(FATAL_ERROR "Failed to copy ${runtime_dbg_var} from ${${runtime_dbg_var}}")
+        set(_dst "${CMAKE_BINARY_DIR}/${dest_dir}/${_filename}")
+    endif()
+
+    # Copy
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_src}" "${_dst}"
+        RESULT_VARIABLE _copy_result
+    )
+
+    if(_copy_result EQUAL 0)
+        # Reassign variable to new copied path
+        set(${runtime_var} "${_dst}" CACHE FILEPATH "FBXSDK runtime (${config})" FORCE)
+    else()
+        message(FATAL_ERROR "Failed to copy ${runtime_var} from ${_src} to ${_dst}")
     endif()
 endfunction()
 
@@ -59,8 +66,10 @@ if (DMT_OS_WINDOWS)
     set(_fbxsdk_libdir_release "lib/x64/release")
 
     # libs + dll names
-    set(_fbxsdk_libname_debug "libfbxsdk-md.lib")
-    set(_fbxsdk_libname_release "libfbxsdk-md.lib")
+    set(_fbxsdk_libname_debug "libfbxsdk.lib")
+    set(_fbxsdk_libname_release "libfbxsdk.lib")
+    #set(_fbxsdk_libname_debug "libfbxsdk-md.lib")
+    #set(_fbxsdk_libname_release "libfbxsdk-md.lib")
     set(_fbxsdk_dll_name "libfbxsdk.dll")
 
     set(_fbxsdk_alembic_libname_debug "alembic-md.lib")
@@ -85,13 +94,17 @@ if (DMT_OS_WINDOWS)
     find_library(FBXSDK_LIBRARY_DEBUG ${_fbxsdk_libname_debug}
                  PATHS ${_fbxsdk_root}
                  PATH_SUFFIXES ${_fbxsdk_libdir_debug})
+    message(STATUS "FBXSDK_LIBRARY ${FBXSDK_LIBRARY}")
+    message(STATUS "FBXSDK_LIBRARY_DEBUG ${FBXSDK_LIBRARY_DEBUG}")
 
-    find_library(FBXSDK_RUNTIME ${_fbxsdk_dll_name}
+    find_file(FBXSDK_RUNTIME ${_fbxsdk_dll_name}
                  PATHS ${_fbxsdk_root}
                  PATH_SUFFIXES ${_fbxsdk_libdir_release})
-    find_library(FBXSDK_RUNTIME_DEBUG ${_fbxsdk_dll_name}
+    find_file(FBXSDK_RUNTIME_DEBUG ${_fbxsdk_dll_name}
                  PATHS ${_fbxsdk_root}
                  PATH_SUFFIXES ${_fbxsdk_libdir_debug})
+    message(STATUS "FBXSDK_RUNTIME ${FBXSDK_RUNTIME}")
+    message(STATUS "FBXSDK_RUNTIME_DEBUG ${FBXSDK_RUNTIME_DEBUG}")
 
     # dependencies
     find_library(FBXSDK_ALEMBIC_LIBRARY ${_fbxsdk_alembic_libname_release}
@@ -117,7 +130,8 @@ if (DMT_OS_WINDOWS)
 
     if (FBXSDK_FOUND)
         # copy DLLs into bin
-        fbxsdk_copy_runtime(FBXSDK_RUNTIME FBXSDK_RUNTIME_DEBUG "bin")
+        fbxsdk_copy_runtime(FBXSDK_RUNTIME "bin" "Release")
+        fbxsdk_copy_runtime(FBXSDK_RUNTIME_DEBUG "bin" "Debug")
 
         add_library(FBXSDK::fbxsdk SHARED IMPORTED)
         set_target_properties(FBXSDK::fbxsdk PROPERTIES
@@ -185,7 +199,8 @@ elseif (DMT_OS_LINUX)
 
     if (FBXSDK_FOUND)
         # copy SOs into lib
-        fbxsdk_copy_runtime(FBXSDK_RUNTIME FBXSDK_RUNTIME_DEBUG "lib")
+        fbxsdk_copy_runtime(FBXSDK_RUNTIME "lib" "Release")
+        fbxsdk_copy_runtime(FBXSDK_RUNTIME_DEBUG "lib" "Debug")
 
         add_library(FBXSDK::fbxsdk SHARED IMPORTED)
         set_target_properties(FBXSDK::fbxsdk PROPERTIES

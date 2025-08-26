@@ -107,6 +107,8 @@ target_sources(dmt-core
     ${cudautils_implementation_files}
 )
 
+target_compile_definitions(dmt-core PRIVATE FBXSDK_SHARED)
+
 target_include_directories(dmt-core 
   PUBLIC
     $<TARGET_PROPERTY:dmt-platform,INTERFACE_INCLUDE_DIRECTORIES>

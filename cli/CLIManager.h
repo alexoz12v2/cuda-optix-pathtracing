@@ -1,7 +1,6 @@
 #pragma once
 
 #include <iostream>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -18,6 +17,19 @@ namespace dmt {
         std::vector<std::string> allowedVals;
     };
 
+    enum class OptionEnum {
+        eNotPresent = 0,
+        eRequiredNotPresent,
+        eValue,
+        eDefaultValue,
+        Count
+    };
+
+    struct OptionResult {
+        std::string value;
+        OptionEnum result;
+    };
+
     //-device cpu/gpu
     //-scene path
     //-time
@@ -27,7 +39,7 @@ namespace dmt {
     public:
         ArgParser() = default;
 
-        std::optional<std::string> getOption(std::string const& name, bool required = false, std::string const& defaultValue = "") const;
+        OptionResult getOption(std::string const& name, bool required = false, std::string const* defaultValue = nullptr) const;
 
         bool hasFlag(std::string const& name) const;
 

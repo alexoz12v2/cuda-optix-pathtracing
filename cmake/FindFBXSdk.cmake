@@ -77,6 +77,8 @@ if (DMT_OS_WINDOWS)
               PATHS ${_fbxsdk_root}
               PATH_SUFFIXES "include")
 
+    # main fbxsdk libs
+    
     find_library(FBXSDK_LIBRARY ${_fbxsdk_libname_release}
                  PATHS ${_fbxsdk_root}
                  PATH_SUFFIXES ${_fbxsdk_libdir_release})

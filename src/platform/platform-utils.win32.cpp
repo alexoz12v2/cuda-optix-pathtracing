@@ -7,6 +7,8 @@
 
 #pragma comment(lib, "mincore")
 #pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "Shell32.lib")
+#include <shellapi.h>
 #include <AclAPI.h>
 #include <Windows.h>
 #include <errhandlingapi.h>
@@ -84,9 +86,11 @@ namespace dmt::os {
 
     std::vector<std::string> cmdLine()
     {
-        wchar_t* argv = nullptr;
-        int      argc = 0;
-        argv          = CommandLineToArgW(GetCommandLineW(), &argc) if (argc) return {};
+        wchar_t** argv = nullptr;
+        int       argc = 0;
+        argv           = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (argc)
+            return {};
 
         std::vector<std::string> args;
         args.reserve(argc);

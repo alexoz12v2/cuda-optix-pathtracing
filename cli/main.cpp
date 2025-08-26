@@ -33,8 +33,6 @@ int32_t guardedMain()
         ctx.trace("Hello Cruel World", {});
         //get the command line arguments
         std::vector<std::string> argsCmdLine = dmt::os::cmdLine();
-        if (argsCmdLine.size())
-            argsCmdLine.erase(argsCmdLine.begin());
 
         if (argsCmdLine.size() <= 0)
         {
@@ -51,18 +49,18 @@ int32_t guardedMain()
         }
 
         argParser.parse(viewArgs);
-        if (auto opt= argParser.getOption("help"); opt)
+        if (auto const& [help, res] = argParser.getOption("help"); res == OptionEnum::eValue)
         {
             argParser.printHelp("dmt-tracer");
             return 0;
         }
 
         int device = 0;
-        if (auto optDev = argParser.getOption("device"); optDev)
+        if (auto const& [opt, res] = argParser.getOption("device"); res == OptionEnum::eValue || res == OptionEnum::eDefaultValue)
         {
-            if ((*optDev) == "cpu")
+            if (opt == "cpu")
                 device = -1;
-            else if ((*optDev) == "gpu")
+            else if (opt == "gpu")
             {
                 ctx.error("TODO", {});
                 return -1;
@@ -75,15 +73,15 @@ int32_t guardedMain()
         std::pmr::monotonic_buffer_resource stackBuf(buf, 256, std::pmr::null_memory_resource());
 
         dmt::UniqueRef<dmt::os::Path> path{nullptr, dmt::PmrDeleter::create<dmt::os::Path>(&stackBuf)};
-        if (auto optScene = argParser.getOption("scene"); optScene)
+        if (auto const& [scene, res] = argParser.getOption("scene"); res == OptionEnum::eValue)
         {
-            path = dmt::makeUniqueRef<dmt::os::Path>(&stackBuf, dmt::os::Path::fromString(*optScene));
+            path = dmt::makeUniqueRef<dmt::os::Path>(&stackBuf, dmt::os::Path::fromString(scene));
             if (!path->isValid() || !path->isFile())
             {
                 ctx.error(
                     "--scene option should be a valid path,"
                     " '{}' doesn't exist",
-                    std::make_tuple(*optScene));
+                    std::make_tuple(scene));
                 return -1;
             }
         }

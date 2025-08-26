@@ -89,13 +89,13 @@ namespace dmt::os {
         wchar_t** argv = nullptr;
         int       argc = 0;
         argv           = CommandLineToArgvW(GetCommandLineW(), &argc);
-        if (argc)
+        if (!argc)
             return {};
 
         std::vector<std::string> args;
         args.reserve(argc);
 
-        for (uint32_t i = 0; i < argc; ++i)
+        for (uint32_t i = 1; i < argc; ++i)
         {
             // UTF-16 -> UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);

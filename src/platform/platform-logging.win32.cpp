@@ -445,7 +445,7 @@ namespace dmt {
                 else
                     setColor(red);
 
-                std::pmr::wstring wData = os::win32::utf16FromUtf8({record.data, record.len}, &mem);
+                std::pmr::wstring wData = os::win32::utf16FromUtf8({record.data, record.numBytes}, &mem);
                 WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), wData.data(), static_cast<DWORD>(wData.size()), nullptr, nullptr);
 
                 setColor(white);

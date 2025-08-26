@@ -311,7 +311,7 @@ namespace dmt {
     // PremultiplyAlpha: bool GetPremultiplyAlpha() const;
     // This property handles the PremultiplyAlpha flag. If PremultiplyAlpha flag is true,
     // the R, G, and B components you store have already been multiplied in with the alpha.
-    // ùDefault value is true.
+    // ï¿½Default value is true.
 
     // Texture positioning
     //

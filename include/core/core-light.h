@@ -68,7 +68,7 @@ namespace dmt {
     //    4) compute emitted radiance in the sampled point (meaning sample image)
     // This light will still have a lightFromRender, because I can rotate the sphere
     // TODO: start with nearest filtering, then swap for Elliptic Weighted Average (wrap mode == octahedral sphere)
-    struct alignas(16) EnvLight
+    struct EnvLight
     {
         DMT_CORE_API EnvLight(RGB const*                 image,
                               int32_t                    xRes,

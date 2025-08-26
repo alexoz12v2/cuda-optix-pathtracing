@@ -55,18 +55,20 @@ int32_t guardedMain()
             return 0;
         }
 
-        int device = 0;
+        int device = -1;
         if (auto const& [opt, res] = argParser.getOption("device"); res == OptionEnum::eValue || res == OptionEnum::eDefaultValue)
         {
-            if (opt == "cpu")
-                device = -1;
-            else if (opt == "gpu")
+            if (opt == "gpu")
             {
                 ctx.error("TODO", {});
                 return -1;
             }
 
-            device = -1;
+            if (opt != "cpu")
+            {
+                ctx.error("Invalid Device Value. One of 'cpu', 'gpu'", {});
+                return -1;
+            }
         }
 
         alignas(32) char                    buf[256];

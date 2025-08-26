@@ -330,13 +330,39 @@ namespace dmt::os {
         if (str.empty())
             return invalid(resource);
 
-        // allocate size + 1 ('\0')
-        size_t const len    = str.size();
+        // temporary buffer for resolved absolute path
+        char absbuf[PATH_MAX];
+
+        // Convert to absolute:
+        if (str.front() == '/')
+        {
+            // already absolute → resolve symlinks and ".."
+            if (!realpath(std::string(str).c_str(), absbuf))
+            {
+                return invalid(resource);
+            }
+        }
+        else
+        {
+            // relative path → prepend current working dir
+            char cwd[PATH_MAX];
+            if (!getcwd(cwd, sizeof(cwd)))
+                return invalid(resource);
+
+            std::string tmp = std::string(cwd) + "/" + std::string(str);
+            if (!realpath(tmp.c_str(), absbuf))
+            {
+                return invalid(resource);
+            }
+        }
+
+        // Allocate and copy into PMR buffer
+        size_t const len    = std::strlen(absbuf);
         char*        buffer = reinterpret_cast<char*>(resource->allocate(PATH_MAX));
         if (!buffer)
             return invalid(resource);
 
-        std::memcpy(buffer, str.data(), len);
+        std::memcpy(buffer, absbuf, len);
         buffer[len] = '\0';
 
         normalizePath(buffer);

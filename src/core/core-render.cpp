@@ -429,15 +429,26 @@ namespace dmt::render_thread {
                 perInstanceBvhNodes.push_back(bvh::buildForInstance(scene, instanceIdx, primitives, memHeap, memHeap));
             }
 
-            auto* bvhRoot = reinterpret_cast<BVHBuildNode*>(memHeap->allocate(sizeof(BVHBuildNode)));
-            std::memset(bvhRoot, 0, sizeof(BVHBuildNode));
-            bvh::buildCombined(bvhRoot, perInstanceBvhNodes, memHeap, memHeap);
+            BVHBuildNode* bvhRoot = nullptr;
+            if (perInstanceBvhNodes.size() > 1)
+            {
+                bvhRoot = reinterpret_cast<BVHBuildNode*>(memHeap->allocate(sizeof(BVHBuildNode)));
+                std::memset(bvhRoot, 0, sizeof(BVHBuildNode));
+                bvh::buildCombined(bvhRoot, perInstanceBvhNodes, memHeap, memHeap);
+            }
+            else
+            {
+                bvhRoot = perInstanceBvhNodes[0];
+            }
 
             std::pmr::monotonic_buffer_resource tmp{4096};
 
             BVHWiVeCluster* wivebvh = bvh::buildBVHWive(bvhRoot, nodeCount, &tmp, memHeap);
 
-            bvh::cleanup(bvhRoot, memHeap);
+            if (perInstanceBvhNodes.size() > 1)
+            {
+                bvh::cleanup(bvhRoot, memHeap);
+            }
 
             return UniqueRef<BVHWiVeCluster[]>{wivebvh, PmrDeleter::create<BVHWiVeCluster[]>(memHeap, *nodeCount)};
         }

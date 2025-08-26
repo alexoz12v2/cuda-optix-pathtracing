@@ -5,6 +5,8 @@
 #include <numeric>
 #include <cstdlib>
 
+#define DMT_FORCE_BINNING
+
 namespace dmt::bvh {
     template <typename T, typename F>
         requires std::is_invocable_r_v<Bounds3f, F, T>
@@ -91,7 +93,7 @@ namespace dmt::bvh {
             while (childCandidates.size() < BranchingFactor && shouldContinue)
             {
                 auto maybeNode = dstd::move_to_back_and_pop_if(childCandidates, [](WorkingStackItem const& wItem) {
-                    return std::distance(wItem.beg, wItem.end) >= LeavesBranchingFactor;
+                    return std::distance(wItem.beg, wItem.end) > LeavesBranchingFactor;
                 });
 
                 if (!maybeNode)
@@ -136,6 +138,13 @@ namespace dmt::bvh {
                         primsMid = std::partition(primsBeg, primsEnd, [axis, mid = minimumSplitPosition](Primitive const* p) {
                             return p->bounds().centroid()[axis] < mid;
                         });
+#if defined(DMT_FORCE_BINNING)
+                        // Clamp partition to avoid empty halves
+                        if (primsMid <= _primsBeg)
+                            primsMid = _primsBeg + 1;
+                        if (primsMid >= _primsEnd)
+                            primsMid = _primsEnd - 1;
+#endif
                     }
 
                     if (primsMid == primsBeg || primsMid == primsEnd)
@@ -175,7 +184,10 @@ namespace dmt::bvh {
                         size_t midIdx = centroids.size() / 2;
 
                         primsMid = primsBeg + midIdx;
+#if defined(DMT_NO_FALLBACK_ALLOWED)
                         assert(false);
+                        std::abort();
+#endif
                     }
 
                     // last resort tie breaker: Index median split

@@ -112,6 +112,130 @@ namespace dmt::parse_helpers {
         return true;
     }
 
+    inline RGB* allocAlignedRGB(size_t count)
+    {
+        void* ptr = nullptr;
+        // allocate with 16-byte alignment
+        if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
+            return nullptr;
+        return reinterpret_cast<RGB*>(ptr);
+    }
+
+    static RGB* loadImageAsRGB(os::Path const& path, int& outWidth, int& outHeight)
+    {
+        if (!path.isValid() || !path.isFile())
+            return nullptr;
+
+        std::pmr::string pathStr = path.toUnderlying();
+
+        int  xRes     = 0;
+        int  yRes     = 0;
+        int  channels = 0;
+        RGB* result   = nullptr;
+
+        if (pathStr.ends_with("png"))
+        {
+            // Decode 8-bit LDR with stb_image
+            unsigned char* data = stbi_load(pathStr.c_str(), &xRes, &yRes, &channels, 0);
+            if (!data)
+                return nullptr;
+
+            result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
+            if (!result)
+            {
+                stbi_image_free(data);
+                return nullptr;
+            }
+
+            for (int i = 0; i < xRes * yRes; ++i)
+            {
+                if (channels >= 3)
+                {
+                    result[i].r = data[i * channels + 0] / 255.0f;
+                    result[i].g = data[i * channels + 1] / 255.0f;
+                    result[i].b = data[i * channels + 2] / 255.0f;
+                }
+                else
+                {
+                    float g     = data[i * channels + 0] / 255.0f;
+                    result[i].r = result[i].g = result[i].b = g;
+                }
+            }
+            stbi_image_free(data);
+        }
+        else if (pathStr.ends_with("exr"))
+        {
+            try
+            {
+                Imf::RgbaInputFile file(pathStr.c_str());
+                Imath::Box2i       dw = file.dataWindow();
+                xRes                  = dw.max.x - dw.min.x + 1;
+                yRes                  = dw.max.y - dw.min.y + 1;
+
+                Imf::Array2D<Imf::Rgba> pixels;
+                pixels.resizeErase(yRes, xRes);
+                file.setFrameBuffer(&pixels[0][0] - dw.min.x - dw.min.y * xRes, 1, xRes);
+                file.readPixels(dw.min.y, dw.max.y);
+
+                result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
+                if (!result)
+                    return nullptr;
+
+                for (int y = 0; y < yRes; ++y)
+                {
+                    for (int x = 0; x < xRes; ++x)
+                    {
+                        Imf::Rgba const& px  = pixels[y][x];
+                        int              idx = y * xRes + x;
+                        result[idx].r        = (float)px.r;
+                        result[idx].g        = (float)px.g;
+                        result[idx].b        = (float)px.b;
+                    }
+                }
+            } catch (...)
+            {
+                return nullptr;
+            }
+        }
+        else if (pathStr.ends_with("hdr"))
+        {
+            float* data = stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
+            if (!data)
+                return nullptr;
+
+            result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
+            if (!result)
+            {
+                stbi_image_free(data);
+                return nullptr;
+            }
+
+            for (int i = 0; i < xRes * yRes; ++i)
+            {
+                if (channels >= 3)
+                {
+                    result[i].r = data[i * channels + 0];
+                    result[i].g = data[i * channels + 1];
+                    result[i].b = data[i * channels + 2];
+                }
+                else
+                {
+                    float g     = data[i * channels + 0];
+                    result[i].r = result[i].g = result[i].b = g;
+                }
+            }
+            stbi_image_free(data);
+        }
+        else
+        {
+            return nullptr; // unsupported
+        }
+
+        outWidth  = xRes;
+        outHeight = yRes;
+        return result;
+    }
+
     static TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out)
     {
         using enum TempTexObjResult;
@@ -408,7 +532,7 @@ namespace dmt::parse_helpers {
         std::string name;
         try
         {
-            if (material.contains("name"))
+            if (!material.contains("name"))
             {
                 ctx.error(
                     "The material should have a unique 'name'"
@@ -417,7 +541,7 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
-            if (!state.materials.contains(material["name"]))
+            if (state.materials.contains(material["name"]))
             {
                 ctx.error("Duplicate material names", {});
                 return false;
@@ -638,7 +762,8 @@ namespace dmt::parse_helpers {
             // -- ggx-anisotropy
             if (material.contains("ggx-anisotropy"))
             {
-                if (!material["ggx-anisotropy"].is_number_float())
+                if (!material["ggx-anisotropy"].is_number() || static_cast<float>(material["ggx-anisotropy"]) < 0.f ||
+                    static_cast<float>(material["ggx-anisotropy"]) > 1.f)
                 {
                     ctx.error("material field 'ggx-anisotropy' should be a number from 0.0 to 1.0", {});
                     return false;
@@ -756,12 +881,6 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
-            if (!camera.contains("sensorSize"))
-            {
-                //insert error message
-                return false;
-            }
-
             if (!camera.contains("direction"))
             {
                 //insert error message
@@ -769,15 +888,15 @@ namespace dmt::parse_helpers {
             }
 
             //check on type
-            if (!camera["sensor"].is_number())
+            if (!camera["sensorSize"].is_number() || static_cast<float>(camera["sensorSize"]) <= 0.f)
             {
-                //insert error message
+                ctx.error("'sensorSize' should be a positive number", {});
                 return false;
             }
 
-            if (!camera["focalLength"].is_number())
+            if (!camera["focalLength"].is_number() || static_cast<float>(camera["focalLength"]) <= 0.f)
             {
-                //insert error message
+                ctx.error("'focalLength' should be a positive number", {});
                 return false;
             }
 
@@ -836,12 +955,13 @@ namespace dmt::parse_helpers {
         json        srt;
         try
         {
-            json jname = transform["name"];
-            if (!jname.is_string() && (name = jname).empty())
+            const json& jname = transform["name"];
+            if (!jname.is_string() || static_cast<std::string>(jname).empty())
             {
                 ctx.error("Expected 'name' to be a non-empty string", {});
                 return false;
             }
+            name = static_cast<std::string>(jname);
             srt = transform["srt"];
         } catch (...)
         {
@@ -852,7 +972,7 @@ namespace dmt::parse_helpers {
         // check existance
         if (state.transforms.contains(name))
         {
-            ctx.error("Transfor with name {} already exists", std::make_tuple(name));
+            ctx.error("Transform with name {} already exists", std::make_tuple(name));
             return false;
         }
 
@@ -958,7 +1078,8 @@ namespace dmt::parse_helpers {
                 ctx.error("Absent or invalid type for light 'type'", {});
                 return false;
             }
-            name = light["type"];
+            name = light["name"];
+            type = light["type"];
 
             if (type == "point") // if point, then only radiant-intensity is the other allowed field
             {
@@ -987,7 +1108,7 @@ namespace dmt::parse_helpers {
             }
             else if (type == "spot") // if spot, then radiant-intensity, cone-angle, falloff-percentage are the only allowed field
             {
-                if (light.size() > 4)
+                if (light.size() > 5)
                 {
                     ctx.error("Too many parameters for spot light specification", {});
                     return false;
@@ -1069,7 +1190,26 @@ namespace dmt::parse_helpers {
                 " Should be a PNG/EXR file relative to JSON file directory",
                 {});
         }
-        assert(false); // TODO construct envlight in params
+        int32_t    xRes  = 0;
+        int32_t    yRes  = 0;
+        Quaternion quat  = Quaternion::quatIdentity();
+        float      scale = 1.f; // TODO
+
+        // NOTE: This image is leaked!!! (on purpose?, TODO: renderer's destructor should call free on the buffer)
+        auto* image = loadImageAsRGB(envPath, xRes, yRes);
+        if (!image)
+        {
+            ctx.error("failed to load image at path '{}'", std::make_tuple(envPath.toUnderlying()));
+            return false;
+        }
+        renderer->params.envLight = makeUniqueRef<EnvLight>(renderer->scene.memory(), image, xRes, yRes, quat, scale);
+        if (!renderer->params.envLight)
+        {
+            ctx.error("failed to load image at path '{}'", std::make_tuple(envPath.toUnderlying()));
+            return false;
+        }
+
+        return true;
     }
 
     static bool object(Parser& parser, ParserState& state, json const& object, Renderer* rend, MeshFbxParser& meshParser)
@@ -1399,7 +1539,6 @@ namespace dmt {
             //existing key,
             for (auto const& [key, value] : data["world"].items())
             {
-
                 if (state.transforms.contains(key))
                 {
                     state.stackTrasforms.push_back(state.transforms[key]);
@@ -1410,10 +1549,6 @@ namespace dmt {
                 }
                 state.stackTrasforms.pop_back();
             }
-
-
-            // parse world
-            assert(false); // TODO
         } catch (...)
         {
             try
@@ -1425,8 +1560,10 @@ namespace dmt {
             {
                 ctx.error("[Parser JSON Exception] {}", std::make_tuple(e.what()));
             }
+
+            return false;
         }
         // true if successful
-        return false;
+        return true;
     }
 } // namespace dmt

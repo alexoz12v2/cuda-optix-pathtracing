@@ -1,56 +1,45 @@
 {
   "camera": {
-    "focalLength": 20, // millimetres
-    "sensorSize": 36, // millimetres
-    "direction": [ 3.12, 3.234, 1.34 ] // array of 3 floats normalize
+    "focalLength": 20,
+    "sensorSize": 36,
+    "direction": [ 0, 1, -0.5 ]
   },
   "film": {
-    "resolutionX": 1238, // integer
-    "resolutionY": 2313 // integer
+    "resolutionX": 128,
+    "resolutionY": 128 
   },
   "textures": [
-    {
-      "name": "tex1",
-      "type": "metallic",
-      "path": "path/to/tex.exr"
-    },
-    {}
   ],
   "materials": [
     {
-      "name": "diff",
-      "diffuse": "tex", // mandatory
-      "metallic": 0.0, // mandatory
-      "normal": [ 0.3, 0.3, 0.2 ], // mandatory
-      "roughness": 0.3, // mandatory
-      "ior": 1.4, // optional: default: glass
-      "eta": [ 3, 2, 1 ], // optional, default: gold
-      "etak": [ 3, 1, 2 ], // optional, default: gold
-      "ggx-anisotropy": 0, // default 1
-      "ggx-dielectic": {
-        "reflectance-tint": [ 1, 1, 1 ],
+      "name": "mat",
+      "diffuse": [0.4, 0.5, 0.2],
+      "metallic": 0.0,
+      "normal": [ 0.3, 0.3, 0.2 ],
+      "roughness": 0.3,
+      "ior": 1.4,
+      "ggx-anisotropy": 0,
+      "ggx-dielectric": {
+        "reflectance-tint": [ 0.2, 0.1, 0.1 ],
         "transmittance-tint": [ 1, 1, 1 ]
-      }, // if present oren-nayar-dielectric absent
-      "oren-nayar-dielectric": {
-        "multiscatter-multiplier": 1.3
       }
     }
   ],
   "objects": [
     {
-      "name": "nomeAcaso",
-      "type": "FBX",
-      "path": "rel/to/this/file.fbx",
-      "material": "mat-name"
+      "name": "the-cube",
+      "type": "primitive",
+      "shape": "cube",
+      "material": "mat"
     }
   ],
   "lights": [
     {
-      "name": "light-name",
+      "name": "my-spot",
       "type": "spot",
-      "cone-angle": 60, // number from 0 to 120. anything outside is clamped
-      "falloff-percentage": 12, // number from 0 to 100, anything outside is clamped
-      "radiant-intensity": [ 1, 1, 1 ]
+      "cone-angle": 60,
+      "falloff-percentage": 12,
+      "radiant-intensity": [ 1.3, 1.3, 1.3 ]
     },
     {
       "name": "my-point",
@@ -58,27 +47,29 @@
       "radiant-intensity": [ 1, 1, 1 ]
     }
   ],
-  "envlight": "path/img/equi.png",
+  "envlight": "veranda_polyhaven_1k.exr",
   "transforms": [
     {
-      "name": "position1",
+      "name": "position-obj",
       "srt": {
-        "translation-vector": [ 10, 0, 2 ]
+        "translation-vector": [ 0, 2, -1 ]
+      }
+    },
+    {
+      "name": "position-light",
+      "srt": {
+        "translation-vector": [ -1, 2.1, -1 ],
+        "rotate-axis": [0.005,0,1],
+        "rotate-degrees": 120
       }
     }
   ],
   "world": {
-    "transform1": {
-      "transform3": {
-        "instances": ["obj1", "obj2"],
-        "lights": ["lidght1"]
-      },
-      "instances": ["obj1", "obj2"],
-      "lights": ["lidght1"]
+    "position-obj": {
+      "instances": ["the-cube"]
     },
-    "transform2": {
-      "instances": ["obj1", "obj2"],
-      "lights": ["lidght1"]
+    "position-light": {
+      "lights": ["my-spot"]
     }
   }
 }

@@ -38,6 +38,7 @@ if (DMT_OS_WINDOWS)
               PATH_SUFFIXES "include")
 
     # main fbxsdk libs
+    
     find_library(FBXSDK_LIBRARY ${_fbxsdk_libname_release}
                  PATHS ${_fbxsdk_root}
                  PATH_SUFFIXES ${_fbxsdk_libdir_release})
@@ -74,11 +75,11 @@ if (DMT_OS_WINDOWS)
     endif()
 
     if (FBXSDK_FOUND)
-        add_library(FBXSDK::fbxsdk SHARED IMPORTED)
-
+        add_library(FBXSDK::fbxsdk STATIC IMPORTED)
+        
         set_target_properties(FBXSDK::fbxsdk PROPERTIES
-            IMPORTED_LOCATION_RELEASE "${FBXSDK_RUNTIME}"
-            IMPORTED_LOCATION_DEBUG   "${FBXSDK_RUNTIME_DEBUG}"
+            IMPORTED_LOCATION_RELEASE "${FBXSDK_LIBRARY}"
+            IMPORTED_LOCATION_DEBUG   "${FBXSDK_LIBRARY_DEBUG}"
             INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}"
         )
 

@@ -287,7 +287,17 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
-            param->filmResolution = Point2i{film["resolutionX"], film["resolutionY"]};
+            if (film.contains("samples"))
+            {
+                if (!film["samples"].is_number_integer() || static_cast<int32_t>(film["samples"]) <= 0)
+                {
+                    ctx.error("'samples' Should be positive integer", {});
+                    return false;
+                }
+                param->samplesPerPixel = film["samples"];
+            }
+
+            param->filmResolution  = Point2i{film["resolutionX"], film["resolutionY"]};
 
         } catch (...)
         {

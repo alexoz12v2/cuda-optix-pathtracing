@@ -130,7 +130,7 @@ namespace dmt::os {
         while (marker < buf.size())
         {
             size_t pos = buf.find_first_of('\0', marker);
-            if (pos != std::string::npos && pos > marker)
+            if (pos != std::string::npos && pos > marker && marker != 0)
             {
                 args.emplace_back(buf.data() + marker, buf.data() + pos);
             }

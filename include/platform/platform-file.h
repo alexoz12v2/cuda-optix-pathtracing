@@ -26,7 +26,9 @@ namespace dmt::os {
     public:
 
     private:
-        struct DMT_PLATFORM_API EndSentinel{};
+        struct DMT_PLATFORM_API EndSentinel
+        {
+        };
         struct DMT_PLATFORM_API InputIterator
         {
         public:

@@ -222,7 +222,7 @@ namespace dmt::os {
     m_data(content),
     m_capacity(capacity),
     m_dataSize(size),
-    m_isDir(isDir(reinterpret_cast<char*>(content))),
+    m_isDir(content && isDir(reinterpret_cast<char*>(content))),
     m_valid(content != nullptr && capacity > 0 && size > 0 && exists(reinterpret_cast<char*>(content)))
     {
     }

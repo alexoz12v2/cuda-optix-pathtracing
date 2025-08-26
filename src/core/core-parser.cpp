@@ -297,7 +297,7 @@ namespace dmt::parse_helpers {
                 param->samplesPerPixel = film["samples"];
             }
 
-            param->filmResolution  = Point2i{film["resolutionX"], film["resolutionY"]};
+            param->filmResolution = Point2i{film["resolutionX"], film["resolutionY"]};
 
         } catch (...)
         {

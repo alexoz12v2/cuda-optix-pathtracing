@@ -49,7 +49,7 @@ int32_t guardedMain()
         }
 
         argParser.parse(viewArgs);
-        if (auto const& [help, res] = argParser.getOption("help"); res == OptionEnum::eValue)
+        if (argParser.hasFlag("help"))
         {
             argParser.printHelp("dmt-tracer");
             return 0;

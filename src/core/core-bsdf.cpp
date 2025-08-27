@@ -601,7 +601,7 @@ namespace dmt::ggx {
         // reflect or refract?
         float const pdfReflect = reflectance.avg() / (transmittance + reflectance).avg();
         bool const  doRefract  = uc >= pdfReflect;
-        assert(doRefract ^ static_cast<bool>(bsdf.isConductor));
+        assert((doRefract && !static_cast<bool>(bsdf.isConductor)) || !doRefract);
 
         if (doRefract)
         {

@@ -560,12 +560,6 @@ namespace dmt::parse_helpers {
                 return false;
             }
 
-            if (!material.contains("normal"))
-            {
-                ctx.error("material should specify a 'normal' either as RGB or texture name", {});
-                return false;
-            }
-
             if (!material.contains("roughness"))
             {
                 ctx.error("material should specify a 'roughness' either as float or texture name", {});
@@ -610,40 +604,38 @@ namespace dmt::parse_helpers {
             }
 
             // -- normal
-            mat.useShadingNormals = true;
-            if (material["normal"].is_array())
+            if (!material.contains("normal"))
             {
-                Vector3f tmp{};
-                if (extractVec3f(material["normal"], &tmp) != ExtractVec3fResult::eOk)
-                {
-                    ctx.error("'normal' constant expected to be RGB value", {});
-                }
-                mat.normalvalue = octaFromNorm(normalize(tmp));
-            }
-            else if (material["normal"].is_string())
-            {
-                std::string normalName = material["normal"];
-                if (!state.texturesPath.contains(normalName))
-                {
-                    ctx.error("'normal' texture name should be an existing named texture", {});
-                    return false;
-                }
-
-                TexInfo const& texInfo = state.texturesPath.at(normalName);
-                if (texInfo.texType != "normal")
-                {
-                    ctx.error("'normal' material texture should point to a 'normal' texture", {});
-                    return false;
-                }
-                mat.normalkey    = baseKeyFromPath(texInfo.texPath);
-                mat.normalWidth  = texInfo.xRes;
-                mat.normalHeight = texInfo.yRes;
-                mat.texMatMap |= SurfaceMaterial::NormalMask;
+                mat.useShadingNormals = false;
             }
             else
             {
-                ctx.error("material 'normal' should be either texture name or RGB", {});
-                return false;
+                mat.useShadingNormals = true;
+                if (material["normal"].is_string())
+                {
+                    std::string normalName = material["normal"];
+                    if (!state.texturesPath.contains(normalName))
+                    {
+                        ctx.error("'normal' texture name should be an existing named texture", {});
+                        return false;
+                    }
+
+                    TexInfo const& texInfo = state.texturesPath.at(normalName);
+                    if (texInfo.texType != "normal")
+                    {
+                        ctx.error("'normal' material texture should point to a 'normal' texture", {});
+                        return false;
+                    }
+                    mat.normalkey    = baseKeyFromPath(texInfo.texPath);
+                    mat.normalWidth  = texInfo.xRes;
+                    mat.normalHeight = texInfo.yRes;
+                    mat.texMatMap |= SurfaceMaterial::NormalMask;
+                }
+                else
+                {
+                    ctx.error("material 'normal' should be an RGB texture name", {});
+                    return false;
+                }
             }
 
             // -- roughness
@@ -955,14 +947,14 @@ namespace dmt::parse_helpers {
         json        srt;
         try
         {
-            const json& jname = transform["name"];
+            json const& jname = transform["name"];
             if (!jname.is_string() || static_cast<std::string>(jname).empty())
             {
                 ctx.error("Expected 'name' to be a non-empty string", {});
                 return false;
             }
             name = static_cast<std::string>(jname);
-            srt = transform["srt"];
+            srt  = transform["srt"];
         } catch (...)
         {
             ctx.error("Expected 'name' and 'srt' as params for the transform object", {});

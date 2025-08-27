@@ -5,8 +5,9 @@
     "direction": [ 0, 1, -0.5 ]
   },
   "film": {
-    "resolutionX": 128,
-    "resolutionY": 128 
+    "resolutionX": 2048,
+    "resolutionY": 2048,
+    "samples": 512
   },
   "textures": [
   ],
@@ -15,7 +16,6 @@
       "name": "mat",
       "diffuse": [0.4, 0.5, 0.2],
       "metallic": 0.0,
-      "normal": [ 0.3, 0.3, 0.2 ],
       "roughness": 0.3,
       "ior": 1.4,
       "ggx-anisotropy": 0,

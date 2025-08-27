@@ -364,10 +364,13 @@ namespace dmt::job {
                             }
 
                             // 7. Sample new path direction
-                            BSDFSample const
+                            BSDFSample /*const*/
                                 bs = materialSample(mat, *data.texCache, texCtx, -ray.d, ng, sampler.get2D(), sampler.get1D());
                             if (bs.pdf == 0.f) // if doesn't bounce, path dies
                                 break;
+
+                            // TODO: remove
+                            bs.wi = normalize(bs.wi);
 
                             // 8. update path state variables and perform russian roulette to terminate the path early
                             beta *= bs.f * absDot(bs.wi, ns) / bs.pdf;

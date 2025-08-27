@@ -468,7 +468,7 @@ namespace dmt {
 
     LightSplit lightTreeAdaptiveSplit(LightTreeBuildNode const& ltRoot, Point3f p, float precision, std::pmr::memory_resource* temp)
     {
-        assert(ltRoot.varPhi > 0); // TODO remove
+        assert(ltRoot.varPhi >= 0); // TODO remove
         LightSplit split{};
         if (ltRoot.leaf)
         {

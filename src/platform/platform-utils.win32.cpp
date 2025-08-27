@@ -109,14 +109,18 @@ namespace dmt::os {
         LocalFree(argv);
         return args;
     }
-
+    static bool checkDirectory(void const*  ptr) { 
+        wchar_t const * strDir =reinterpret_cast<wchar_t const*> (ptr);
+        uint32_t attr = GetFileAttributesW(strDir);
+        return attr & FILE_ATTRIBUTE_DIRECTORY;
+    }
     // Path ----------------------------------------------------------------------------------------------------------
     Path::Path(std::pmr::memory_resource* resource, void* content, uint32_t capacity, uint32_t size) :
     m_resource(resource),
     m_data(content),
     m_capacity(capacity),
     m_dataSize(size),
-    m_isDir(true),
+    m_isDir(checkDirectory(content)),
     m_valid(PathFileExistsW(reinterpret_cast<wchar_t*>(content)) && capacity > 0 && size > 0)
     {
     }
@@ -512,6 +516,7 @@ namespace dmt::os {
 
         // Update validity
         pathStart = reinterpret_cast<wchar_t*>(m_data);
+
         m_valid   = PathFileExistsW(pathStart);
         if (m_valid)
             m_isDir = PathIsDirectoryW(pathStart);

@@ -117,7 +117,12 @@ namespace dmt::parse_helpers {
     {
         void* ptr = nullptr;
         // allocate with 16-byte alignment
+#if defined(DMT_OS_LINUX)
         if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
+#elif defined(DMT_OS_WINDOWS)
+        if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
+#else
+#endif
             return nullptr;
         return reinterpret_cast<RGB*>(ptr);
     }
@@ -462,7 +467,7 @@ namespace dmt::parse_helpers {
             return false;
         }
 
-        if (state.texturesPath.find(texture["name"]) != state.texturesPath.end())
+        if (!texture["name"].is_string() || state.texturesPath.contains(static_cast<std::string>(texture["name"])))
         {
             //insert error message
             return false;
@@ -926,7 +931,8 @@ namespace dmt::parse_helpers {
                 param->cameraPosition = tmp;
             }
 
-            if (camera.contains("max-depth")) {
+            if (camera.contains("max-depth"))
+            {
                 if (!camera["max-depth"].is_number_integer() || static_cast<int>(camera["max-depth"]) <= 0)
                 {
                     ctx.error("'max-depth' should be a positive integer", {});

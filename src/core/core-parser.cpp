@@ -117,7 +117,12 @@ namespace dmt::parse_helpers {
     {
         void* ptr = nullptr;
         // allocate with 16-byte alignment
+#if defined(DMT_OS_LINUX)
         if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
+#elif defined(DMT_OS_WINDOWS)
+        if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
+#else
+#endif
             return nullptr;
         return reinterpret_cast<RGB*>(ptr);
     }

@@ -969,16 +969,14 @@ namespace dmt::camera {
 namespace dmt::film {
     void RGBFilm::writeImage(os::Path const& imagePath, std::pmr::memory_resource* temp)
     {
-        using std::uint8_t;
-
         int const   width     = m_resolution.x;
         int const   height    = m_resolution.y;
         int const   numPixels = width * height;
-        int const   channels  = 3; // RGB, 24-bit
+        int const   channels  = 3; // RGB
         float const gamma     = 1.0f / 2.2f;
 
-        // Allocate 8-bit per channel RGB image buffer
-        UniqueRef<uint8_t[]> image = makeUniqueRef<uint8_t[]>(temp, numPixels * channels);
+        // Allocate float RGB buffer for HDR
+        UniqueRef<float[]> image = makeUniqueRef<float[]>(temp, static_cast<size_t>(numPixels) * channels);
 
         for (int y = 0; y < height; ++y)
         {
@@ -989,30 +987,19 @@ namespace dmt::film {
 
                 float const scale = px.weightSum > 0 ? 1.0f / px.weightSum : 0.0f;
 
-                // basic gamma correction
+                // Apply gamma correction (optional – HDR viewers may expect linear values)
                 float const r = std::pow(float(px.rgbSum[0] * scale), gamma);
                 float const g = std::pow(float(px.rgbSum[1] * scale), gamma);
                 float const b = std::pow(float(px.rgbSum[2] * scale), gamma);
 
-                // Clamp and convert to 8-bit
-                constexpr auto toByte = [](float v) -> uint8_t {
-                    return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-                };
-
-                image[static_cast<size_t>(idx) * 3 + 0] = toByte(r);
-                image[static_cast<size_t>(idx) * 3 + 1] = toByte(g);
-                image[static_cast<size_t>(idx) * 3 + 2] = toByte(b);
+                image[static_cast<size_t>(idx) * 3 + 0] = std::isfinite(r) ? r : 0.0f;
+                image[static_cast<size_t>(idx) * 3 + 1] = std::isfinite(g) ? g : 0.0f;
+                image[static_cast<size_t>(idx) * 3 + 2] = std::isfinite(b) ? b : 0.0f;
             }
         }
 
-        // Write PNG using stb_image_write
-        stbi_write_png(imagePath.toUnderlying(temp).c_str(), // path
-                       width,
-                       height,          // resolution
-                       channels,        // number of channels (RGB)
-                       image.get(),     // image buffer
-                       width * channels // stride in bytes
-        );
+        // Write Radiance HDR file
+        stbi_write_hdr(imagePath.toUnderlying(temp).c_str(), width, height, channels, image.get());
     }
 
     void RGBFilm::addSample(Point2i pixel, RGB sample, float weight)

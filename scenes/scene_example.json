@@ -6,8 +6,8 @@
     "max-depth": 12
   },
   "film": {
-    "resolutionX": 2048,
-    "resolutionY": 2048,
+    "resolutionX": 256,
+    "resolutionY": 256,
     "samples": 32
   },
   "textures": [

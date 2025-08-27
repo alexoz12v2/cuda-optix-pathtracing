@@ -462,7 +462,7 @@ namespace dmt::parse_helpers {
             return false;
         }
 
-        if (state.texturesPath.find(texture["name"]) != state.texturesPath.end())
+        if (!texture["name"].is_string() || state.texturesPath.contains(static_cast<std::string>(texture["name"])))
         {
             //insert error message
             return false;
@@ -926,7 +926,8 @@ namespace dmt::parse_helpers {
                 param->cameraPosition = tmp;
             }
 
-            if (camera.contains("max-depth")) {
+            if (camera.contains("max-depth"))
+            {
                 if (!camera["max-depth"].is_number_integer() || static_cast<int>(camera["max-depth"]) <= 0)
                 {
                     ctx.error("'max-depth' should be a positive integer", {});

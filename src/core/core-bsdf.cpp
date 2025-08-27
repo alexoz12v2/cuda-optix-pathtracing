@@ -579,7 +579,7 @@ namespace dmt::ggx {
 
         bool const singular = effectivelySmooth(bsdf.alphax, bsdf.alphay);
         if (singular)
-            eval1.wm = bsdf.closure.N;
+            eval1.wm = normalize(bsdf.closure.N);
         else // sample micronormal
         {
             wmLocal  = sampleMicroNormal(wiLocal, u, bsdf.alphax, bsdf.alphay);

@@ -8,8 +8,10 @@
 #pragma comment(lib, "mincore")
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "Pathcch.lib")
 #include <shellapi.h>
 #include <AclAPI.h>
+#include <pathcch.h>
 #include <Windows.h>
 #include <errhandlingapi.h>
 #include <fileapi.h>

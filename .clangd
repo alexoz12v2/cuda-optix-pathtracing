@@ -5,3 +5,4 @@ If:
 CompileFlags:
   Compiler: clang++-20
   CompilationDatabase: build/Debug-Linux/
+  Add: [-Ibuild/Debug-Linux/src/cuda-wrappers/]

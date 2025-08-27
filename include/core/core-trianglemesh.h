@@ -104,9 +104,9 @@ namespace dmt {
         DMT_CORE_API explicit Scene(std::pmr::memory_resource* memory = std::pmr::get_default_resource());
 
         Scene(Scene const&)                = delete;
-        Scene(Scene&&) noexcept            = delete;
+        Scene(Scene&&) noexcept            = default;
         Scene& operator=(Scene const&)     = delete;
-        Scene& operator=(Scene&&) noexcept = delete;
+        Scene& operator=(Scene&&) noexcept = default;
 
         DMT_FORCEINLINE std::pmr::memory_resource* memory() const { return geometry.get_allocator().resource(); }
 

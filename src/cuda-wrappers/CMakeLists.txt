@@ -177,6 +177,7 @@ target_sources(dmt-cuda-wrappers
       ${CMAKE_SOURCE_DIR}/include/cuda-wrappers/cuda-wrappers-utils.h
       ${CMAKE_SOURCE_DIR}/include/cuda-wrappers/cuda-wrappers-macros.h
   PRIVATE
+    cuda-wrappers-utils.cpp
     ${cuda_runtime_cpp_file} ${cuda_nvrtc_cpp_file} ${cuda_driver_cpp_file}
 )
 

@@ -111,9 +111,10 @@ namespace dmt::os {
         LocalFree(argv);
         return args;
     }
-    static bool checkDirectory(void const*  ptr) { 
-        wchar_t const * strDir =reinterpret_cast<wchar_t const*> (ptr);
-        uint32_t attr = GetFileAttributesW(strDir);
+    static bool checkDirectory(void const* ptr)
+    {
+        wchar_t const* strDir = reinterpret_cast<wchar_t const*>(ptr);
+        uint32_t       attr   = GetFileAttributesW(strDir);
         return attr & FILE_ATTRIBUTE_DIRECTORY;
     }
     // Path ----------------------------------------------------------------------------------------------------------
@@ -536,7 +537,7 @@ namespace dmt::os {
         // Update validity
         pathStart = reinterpret_cast<wchar_t*>(m_data);
 
-        m_valid   = PathFileExistsW(pathStart);
+        m_valid = PathFileExistsW(pathStart);
         if (m_valid)
             m_isDir = PathIsDirectoryW(pathStart);
     }

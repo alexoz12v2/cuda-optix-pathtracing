@@ -274,19 +274,27 @@ namespace dmt::os {
         int wideLen = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
         if (wideLen <= 0)
             return invalid(resource);
+
         // allocate buffer + long path prefix
         static constexpr uint32_t longPrefixLen = 4; // in wchar_ts
-        size_t const              bufferBytes   = (wideLen + longPrefixLen + 1) * sizeof(wchar_t);
-        size_t const              capacity      = std::max<size_t>(MAX_PATH << 1, bufferBytes);
+        size_t const              bufferChars   = wideLen + longPrefixLen + 1;
+        size_t const              capacity      = std::max<size_t>(MAX_PATH << 1, bufferChars * sizeof(wchar_t));
         wchar_t*                  buffer        = reinterpret_cast<wchar_t*>(resource->allocate(capacity));
         if (!buffer)
             return invalid(resource);
 
         // prepend long path prefix
         std::memcpy(buffer, L"\\\\?\\", longPrefixLen * sizeof(wchar_t));
-        // UT8 -> UTF16
         MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), buffer + longPrefixLen, wideLen);
         buffer[longPrefixLen + wideLen] = L'\0';
+
+        // ---- normalize using PathCchCanonicalize ----
+        std::unique_ptr<wchar_t[]> normBuffer(new wchar_t[capacity / sizeof(wchar_t)]);
+        if (SUCCEEDED(PathCchCanonicalize(normBuffer.get(), capacity / sizeof(wchar_t), buffer)))
+        {
+            std::wcsncpy(buffer, normBuffer.get(), capacity / sizeof(wchar_t));
+            buffer[capacity / sizeof(wchar_t) - 1] = L'\0';
+        }
 
         if (PathFileExistsW(buffer))
             return Path{resource,
@@ -477,7 +485,6 @@ namespace dmt::os {
             return; // Invalid input
 
         auto compBuffer = dmt::makeUniqueRef<wchar_t[]>(m_resource, compLen);
-
         MultiByteToWideChar(CP_UTF8, 0, pathComponent, -1, compBuffer.get(), compLen);
 
         // Compute new size needed
@@ -509,6 +516,16 @@ namespace dmt::os {
 
         // Ensure null termination
         pathEnd[compLen - 1] = L'\0';
+
+        // ---- normalize using PathCchCanonicalize ----
+        std::unique_ptr<wchar_t[]> normBuffer(new wchar_t[m_capacity / sizeof(wchar_t)]);
+        if (SUCCEEDED(
+                PathCchCanonicalize(normBuffer.get(), m_capacity / sizeof(wchar_t), reinterpret_cast<wchar_t*>(m_data))))
+        {
+            std::wcsncpy(reinterpret_cast<wchar_t*>(m_data), normBuffer.get(), m_capacity / sizeof(wchar_t));
+            reinterpret_cast<wchar_t*>(m_data)[m_capacity / sizeof(wchar_t) - 1] = L'\0';
+            m_dataSize = (wcslen(reinterpret_cast<wchar_t*>(m_data)) + 1) * sizeof(wchar_t);
+        }
 
         // Update validity
         pathStart = reinterpret_cast<wchar_t*>(m_data);

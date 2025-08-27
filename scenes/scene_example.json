@@ -2,12 +2,13 @@
   "camera": {
     "focalLength": 20,
     "sensorSize": 36,
-    "direction": [ 0, 1, -0.5 ]
+    "direction": [ 0, 1, -0.5 ],
+    "max-depth": 12
   },
   "film": {
     "resolutionX": 2048,
     "resolutionY": 2048,
-    "samples": 512
+    "samples": 32
   },
   "textures": [
   ],

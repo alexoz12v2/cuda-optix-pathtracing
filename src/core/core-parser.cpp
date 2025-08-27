@@ -2,6 +2,7 @@
 
 #include "core-light.h"
 #include "core-math.h"
+#include "core-render.h"
 #include "core-texture.h"
 #include "core-trianglemesh.h"
 #include "cudautils-transform.h"
@@ -377,7 +378,7 @@ namespace dmt::parse_helpers {
     {
         Context ctx;
 
-        if (film.size() != 2)
+        if (film.size() > 3)
         {
             //insert error message
             return false;
@@ -854,7 +855,7 @@ namespace dmt::parse_helpers {
     {
 
         Context ctx;
-        if (camera.size() != 3)
+        if (camera.size() > 4)
         {
             return false;
         }
@@ -923,6 +924,15 @@ namespace dmt::parse_helpers {
                     return false;
                 }
                 param->cameraPosition = tmp;
+            }
+
+            if (camera.contains("max-depth")) {
+                if (!camera["max-depth"].is_number_integer() || static_cast<int>(camera["max-depth"]) <= 0)
+                {
+                    ctx.error("'max-depth' should be a positive integer", {});
+                    return false;
+                }
+                param->maxDepth = camera["max-depth"];
             }
         } catch (...)
         {

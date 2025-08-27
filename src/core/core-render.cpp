@@ -151,12 +151,12 @@ namespace dmt::job {
                     while (true)
                     {
                         // TODO remove
-                        if (data.StartPixel.x != 0 && data.StartPixel.y != 0)
-                        {
-                            Context ctx;
-                            ctx.log("[Thread {}]  Ray O {} {} {} Ray D {} {} {}",
-                                    std::make_tuple(tid, ray.o.x, ray.o.y, ray.o.z, ray.d.x, ray.d.y, ray.d.z));
-                        }
+                        //if (data.StartPixel.x != 0 && data.StartPixel.y != 0)
+                        //{
+                        //    Context ctx;
+                        //    ctx.log("[Thread {}]  Ray O {} {} {} Ray D {} {} {}",
+                        //            std::make_tuple(tid, ray.o.x, ray.o.y, ray.o.z, ray.d.x, ray.d.y, ray.d.z));
+                        //}
 
 #if defined(DMT_DBG_PIXEL)
                         if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y && sampleIndex == DMT_DBG_SAMPLEINDEX &&

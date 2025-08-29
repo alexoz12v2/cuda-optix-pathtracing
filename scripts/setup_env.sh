@@ -92,16 +92,27 @@ while [ $# -gt 0 ]; do
 done
 
 # -----------------------------
-# Auto-detect latest CUDA version
+# Detect driver-supported CUDA version
 # -----------------------------
-CUDA_BASE="/usr/local"
-CUDA_DIR=$(ls -d ${CUDA_BASE}/cuda-* 2>/dev/null | sort -V | tail -n 1)
+DRIVER_CUDA=$(nvidia-smi | grep "CUDA Version" | awk '{print $3}')
+
+if [ -n "$DRIVER_CUDA" ]; then
+    echo "Driver supports CUDA $DRIVER_CUDA"
+    CUDA_DIR="${CUDA_BASE}/cuda-${DRIVER_CUDA}"
+fi
+
+# Fallback: pick latest installed if the driver-specific one doesn’t exist
+if [ -z "$CUDA_DIR" ] || [ ! -d "$CUDA_DIR" ]; then
+    CUDA_DIR=$(ls -d ${CUDA_BASE}/cuda-* 2>/dev/null | sort -V | tail -n 1)
+fi
+
 if [ -z "$CUDA_DIR" ] || [ ! -d "$CUDA_DIR" ]; then
     echo "Error: No CUDA installation found under $CUDA_BASE"
     return 1 2>/dev/null || exit 1
 fi
+
 export CUDA_HOME="$CUDA_DIR"
-echo "Detected CUDA installation: $CUDA_HOME"
+echo "Using CUDA installation: $CUDA_HOME"
 
 # -----------------------------
 # User option: LD_LIBRARY_PATH

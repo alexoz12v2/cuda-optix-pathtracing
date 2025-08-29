@@ -31,7 +31,7 @@ add_custom_command(
   --cpp-file ${cuda_driver_cpp_file}
   --header-file ${cuda_driver_h_file}
   -up
-  -em DMT_PLATFORM_API
+  #-em DMT_PLATFORM_API
   COMMENT "Python Script to generate library wrappers for the CUDA Driver API"
   VERBATIM
 )

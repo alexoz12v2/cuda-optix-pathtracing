@@ -36,6 +36,8 @@ set(cudautils_implementation_files
   ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-color.cu
   ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-numbers.cu
   ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-image.cu
+  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-bvh.cu
+  
 )
 set_source_files_properties(${cudautils_implementation_files} PROPERTIES LANGUAGE CXX)
 
@@ -59,6 +61,9 @@ set(cudautils_header_files
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-color.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-numbers.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-image.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-bvh.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-kernels.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-pools.h
 )
 set_source_files_properties(${cudautils_header_files} PROPERTIES
   LANGUAGE CXX
@@ -120,6 +125,7 @@ target_link_libraries(dmt-core
   PUBLIC
     gx::gx
     # CUDA UTILS LIBARIES (together with platform?)
+    dmt::cuda-wrappers
     glm::glm_static
     Eigen3::Eigen
   PRIVATE

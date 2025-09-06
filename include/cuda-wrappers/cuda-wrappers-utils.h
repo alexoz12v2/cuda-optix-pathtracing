@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cuda-wrappers/cuda-wrappers-macros.h"
-#include "cuda-wrappers/cuda-wrappers-cuda-driver.h" // imcludes <cuda.h>
+#include "cuda-wrappers/cuda-wrappers-cuda-driver.h" // includes <cuda.h>
 
 namespace dmt {
     /**

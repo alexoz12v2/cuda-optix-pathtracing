@@ -2,6 +2,5 @@
 
 #include "cudautils/cudautils-macro.h"
 
-class Film
-{
-};
+namespace dmt {
+}; // namespace dmt

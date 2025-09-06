@@ -169,6 +169,18 @@ namespace dmt {
         return result;
     }
 
+    DMT_CORE_API BSDFSample materialSamplegit(
+        SurfaceMaterial const&    material,
+        TextureCache&             cache,
+        TextureEvalContext const& texCtx,
+        Vector3f                  w,
+        Vector3f                  ng,
+        Point2f                   u,
+        float                     uc)
+    {
+        return DMT_CORE_API BSDFSample();
+    }
+
     BSDFEval materialEval(SurfaceMaterial const&    material,
                           TextureCache&             cache,
                           TextureEvalContext const& texCtx,

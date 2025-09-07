@@ -16,15 +16,6 @@ namespace dmt {
     };
     static_assert(std::is_trivial_v<VertexIndex> && std::is_standard_layout_v<VertexIndex>);
 
-    struct DMT_CORE_API GeoOffsets
-    {
-        size_t positionIdx;
-        size_t normalIdx;
-        size_t uvIdx;
-        size_t indexOff;
-    };
-    static_assert(std::is_trivial_v<GeoOffsets> && std::is_standard_layout_v<GeoOffsets>);
-
     struct DMT_CORE_API IndexedTri
     {
         IndexedTri(VertexIndex v0, VertexIndex v1, VertexIndex v2, int32_t matIdx) : v{v0, v1, v2}, matIdx{matIdx} {}
@@ -46,6 +37,8 @@ namespace dmt {
         DMT_CORE_API TriangleMesh(size_t cap = 256, std::pmr::memory_resource* memory = std::pmr::get_default_resource());
         TriangleMesh(TriangleMesh const&)            = delete;
         TriangleMesh& operator=(TriangleMesh const&) = delete;
+
+        DMT_CORE_API void computeSmoothNormals(float smoothAngleDeg = 66.f);
 
         DMT_CORE_API TriangleMesh& addPosition(Point3f p);
         DMT_CORE_API TriangleMesh& addNormal(Normal3f n);
@@ -69,7 +62,8 @@ namespace dmt {
         DMT_CORE_API Bounds3f transformedBounds(Transform const& t) const;
 
         DMT_CORE_API bool checkPosition(Point3f p, uint32_t& idx);
-        DMT_CORE_API bool checkNormal(Point3f p, uint32_t& idx);
+        DMT_CORE_API bool checkNormal(Vector3f n, uint32_t& idx);
+        DMT_CORE_API bool checkUV(Point2f uv, uint32_t& idx);
 
     private:
         std::pmr::vector<Point3f>    m_positions;
@@ -118,6 +112,15 @@ namespace dmt {
     private:
         std::pmr::memory_resource* m_memory;
     };
+
+    struct DMT_CORE_API GeoOffsets
+    {
+        size_t positionIdx;
+        size_t normalIdx;
+        size_t uvIdx;
+        size_t indexOff;
+    };
+    static_assert(std::is_trivial_v<GeoOffsets> && std::is_standard_layout_v<GeoOffsets>);
 
     struct BufferSpecification
     {

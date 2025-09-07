@@ -1,4 +1,5 @@
 #include "core-trianglemesh.h"
+#include "cudautils-vecmath.h"
 
 #include <numeric>
 
@@ -23,24 +24,39 @@ namespace dmt {
 
     bool TriangleMesh::checkPosition(Point3f p, uint32_t& idx)
     {
-        for (uint32_t i = 0; i < m_positions.size(); i++)
+        for (size_t i = 0; i < m_positions.size(); ++i)
         {
             if (m_positions[i].x == p.x && m_positions[i].y == p.y && m_positions[i].z == p.z)
             {
-                idx = i;
+                idx = static_cast<uint32_t>(i);
                 return true;
             }
         }
         return false;
     }
 
-    bool TriangleMesh::checkNormal(Point3f p, uint32_t& idx)
+    bool TriangleMesh::checkNormal(Vector3f n, uint32_t& idx)
     {
-        for (uint32_t i = 0; i < m_normals.size(); i++)
+        for (size_t i = 0; i < m_normals.size(); ++i)
         {
-            if (m_normals[i].x == p.x && m_normals[i].y == p.y && m_normals[i].z == p.z)
+            // Compare un-normalized vectors by reversing normalization (or accept tiny epsilon)
+            Vector3f diff = Vector3f(m_normals[i].x, m_normals[i].y, m_normals[i].z) - Vector3f(n.x, n.y, n.z);
+            if (dotSelf(diff) < 1e-6f)
             {
-                idx = i;
+                idx = static_cast<uint32_t>(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool TriangleMesh::checkUV(Point2f uv, uint32_t& idx)
+    {
+        for (size_t i = 0; i < m_uvs.size(); ++i)
+        {
+            if (std::abs(m_uvs[i].x - uv.x) < 1e-6f && std::abs(m_uvs[i].y - uv.y) < 1e-6f)
+            {
+                idx = static_cast<uint32_t>(i);
                 return true;
             }
         }
@@ -185,6 +201,161 @@ namespace dmt {
 
         mesh.addIndexedTriangle({0, 0, 0}, {3, 0, 3}, {2, 0, 2}, matIdx) //
             .addIndexedTriangle({0, 0, 0}, {1, 0, 1}, {3, 0, 3}, matIdx);
+    }
+
+    void TriangleMesh::computeSmoothNormals(float smoothAngleDeg)
+    {
+        float const  cosThreshold = std::cos(smoothAngleDeg * fl::pi() / 180.f);
+        size_t const T            = triCount();
+        if (T == 0)
+            return;
+
+        // --- step 1: face normals (robust to degenerate triangles) ---
+        std::vector<Vector3f> faceNormals(T);
+        for (size_t t = 0; t < T; ++t)
+        {
+            auto const    tri = getIndexedTri(t);
+            Point3f const p0  = getPosition(tri.v[0].positionIdx);
+            Point3f const p1  = getPosition(tri.v[1].positionIdx);
+            Point3f const p2  = getPosition(tri.v[2].positionIdx);
+
+            Vector3f n = cross(p1 - p0, p2 - p0);
+            if (dotSelf(n) > 1e-12f)
+                faceNormals[t] = normalize(n);
+            else
+            {
+                // try alternate edge combination or fallback
+                Vector3f alt = cross(p1 - p0, p2 - p0); // same expression, kept for clarity
+                if (dotSelf(alt) > 1e-12f)
+                    faceNormals[t] = normalize(alt);
+                else
+                    faceNormals[t] = Vector3f{0.f, 1.f, 0.f};
+            }
+        }
+
+        // --- step 2: vertex -> incident triangles adjacency ---
+        size_t const                     V = positionCount();
+        std::vector<std::vector<size_t>> vertexToTris(V);
+        vertexToTris.assign(V, {});
+        for (size_t t = 0; t < T; ++t)
+        {
+            auto const& tri = getIndexedTri(t);
+            for (int i = 0; i < 3; ++i)
+                vertexToTris[tri.v[i].positionIdx].push_back(t);
+        }
+
+        // --- step 3: clear normals (we will rebuild) ---
+        m_normals.clear();
+
+        // --- step 4: per-vertex clustering of incident faces by angle connectivity ---
+        for (size_t vi = 0; vi < V; ++vi)
+        {
+            auto& tris = vertexToTris[vi];
+            if (tris.empty())
+                continue;
+
+            // visited flags for the list of incident triangles
+            std::vector<char> visited(tris.size(), 0);
+
+            for (size_t ti = 0; ti < tris.size(); ++ti)
+            {
+                if (visited[ti])
+                    continue;
+
+                // BFS/DFS to collect connected component of faces (by angle test)
+                std::vector<size_t> stack;
+                std::vector<size_t> component; // stores indices into tris[]
+                stack.push_back(ti);
+                visited[ti] = 1;
+
+                while (!stack.empty())
+                {
+                    size_t cur_i = stack.back();
+                    stack.pop_back();
+                    component.push_back(cur_i);
+
+                    // neighbor test only among incident faces of this vertex
+                    for (size_t nj = 0; nj < tris.size(); ++nj)
+                    {
+                        if (visited[nj])
+                            continue;
+                        size_t faceA = tris[cur_i];
+                        size_t faceB = tris[nj];
+                        if (dot(faceNormals[faceA], faceNormals[faceB]) >= cosThreshold)
+                        {
+                            visited[nj] = 1;
+                            stack.push_back(nj);
+                        }
+                    }
+                }
+
+                // compute averaged normal for this component
+                Vector3f sum{0.f, 0.f, 0.f};
+                for (size_t comp_i : component)
+                    sum += faceNormals[tris[comp_i]];
+
+                if (dotSelf(sum) < 1e-12f)
+                {
+                    // fallback: use first face normal in component
+                    sum = faceNormals[tris[component.front()]];
+                }
+
+                Vector3f finalN = normalize(sum);
+
+                // deduplicate normals using existing checkNormal (preferred)
+                uint32_t normalIndex = 0;
+                Normal3f normalObj(finalN);
+                if (!checkNormal(normalObj, normalIndex))
+                {
+                    addNormal(normalObj);
+                    normalIndex = static_cast<uint32_t>(m_normals.size() - 1);
+                }
+
+                // assign this normal index to all triangle-vertex slots in the component
+                for (size_t comp_i : component)
+                {
+                    size_t triIdx = tris[comp_i];
+                    auto&  triRef = getIndexedTriRef(triIdx);
+                    for (int slot = 0; slot < 3; ++slot)
+                    {
+                        if (triRef.v[slot].positionIdx == vi)
+                            triRef.v[slot].normalIdx = normalIndex;
+                    }
+                }
+            }
+        }
+
+        // --- step 5: safety — make sure all triangle vertex normalIdx are valid ---
+        if (m_normals.empty())
+        {
+            // ensure at least one normal exists
+            addNormal(Normal3f(Vector3f{0.f, 1.f, 0.f}));
+        }
+
+        for (size_t t = 0; t < T; ++t)
+        {
+            auto& triRef = getIndexedTriRef(t);
+            for (int slot = 0; slot < 3; ++slot)
+            {
+                if (triRef.v[slot].normalIdx >= m_normals.size())
+                {
+                    // assign default normal index 0 if something slipped through
+                    triRef.v[slot].normalIdx = 0;
+                }
+            }
+        }
+
+        // sanity check
+        for (Normal3f const& n : m_normals)
+        {
+            assert(fabsf(dotSelf(n) - 1) < 1e-5f);
+        }
+        for (auto const& tri : m_tris)
+        {
+            assert(tri.v[0].normalIdx < m_normals.size() && fabsf(dotSelf(m_normals[tri.v[0].normalIdx]) - 1) < 1e-5f);
+            assert(tri.v[1].normalIdx < m_normals.size() && fabsf(dotSelf(m_normals[tri.v[1].normalIdx]) - 1) < 1e-5f);
+            assert(tri.v[2].normalIdx < m_normals.size() && fabsf(dotSelf(m_normals[tri.v[2].normalIdx]) - 1) < 1e-5f);
+        }
     }
 
     Scene::Scene(std::pmr::memory_resource* memory) : geometry{memory}, instances{memory}, m_memory{memory} {}

@@ -1,4 +1,7 @@
 #include "core-material.h"
+#include "core-texture.h"
+#include "cudautils-vecmath.h"
+#include "platform-utils.h"
 
 namespace dmt {
     static int32_t mipLevelsFromResolution(int32_t xRes, int32_t yRes)
@@ -55,14 +58,16 @@ namespace dmt {
         Point2i levelResLod0 = {std::max(1, width >> ilod), std::max(1, height >> ilod)};
         Point2i levelResLod1 = {std::max(1, width >> (ilod + 1)), std::max(1, height >> (ilod + 1))};
 
-        uint32_t    bytesLod0;
-        uint32_t    bytesLod1;
-        TexFormat   texFormat;
+        uint32_t    bytesLod0 = 0;
+        uint32_t    bytesLod1 = 0;
+        TexFormat   texFormat{};
         auto const* mortonLevelBufferLod0 = reinterpret_cast<unsigned char const*>(
             texCache.getOrInsert(key, ilod, bytesLod0, texFormat));
         auto const* mortonLevelBufferLod1 = reinterpret_cast<unsigned char const*>(
             texCache.getOrInsert(key, ilod + 1, bytesLod1, texFormat));
         assert(mortonLevelBufferLod0 && mortonLevelBufferLod1);
+        assert(isAligned(mortonLevelBufferLod0, alignPerPixel(texFormat)));
+        assert(isAligned(mortonLevelBufferLod1, alignPerPixel(texFormat)));
 
         // TODO handle wrap mode
         EWAParams paramsLod0{mortonLevelBufferLod0, levelResLod0, TexWrapMode::eMirror, TexWrapMode::eMirror, texFormat, normal};
@@ -87,8 +92,19 @@ namespace dmt {
             ns = normFromOcta(material.normalvalue);
             if (material.texMatMap & SurfaceMaterial::NormalMask)
             {
-                int w = static_cast<int>(material.normalWidth), h = static_cast<int>(material.normalHeight);
-                ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
+                int width  = static_cast<int>(material.normalWidth);
+                int height = static_cast<int>(material.normalHeight);
+                Vector3f nMap = 2.f * sampleMippedTexture(texCtx, cache, material.normalkey, width, height, true).asVec() -
+                                Vector3f::s(1.f);
+                Frame const frame = Frame::fromZ(ng);
+                nMap              = frame.fromLocal(nMap);
+                if (dotSelf(nMap) != 0)
+                    ns = normalize(nMap);
+                else
+                    ns = ng;
+#if defined(DMT_NORMAL_MAP_D3D_STYLE)
+                nMap.y = -nMap.y;
+#endif
                 assert(fl::abs(dotSelf(ns) - 1.f) < 1e-5f);
             }
         }

@@ -6,29 +6,6 @@
 
 
 namespace dmt {
-    class DMT_CORE_API FbxDeleter
-    {
-    public:
-        void operator()(void* raw) const;
-    };
-
-    class DMT_CORE_API FbxSettingsDeleter
-    {
-    public:
-        void operator()(void* raw) const;
-    };
-
-    class DMT_CORE_API FbxSceneDeleter
-    {
-    public:
-        void operator()(void* raw) const;
-    };
-
-
-    using dFbxManager    = std::unique_ptr<void, FbxDeleter>;
-    using dFbxIOSettings = std::unique_ptr<void, FbxSettingsDeleter>;
-    using dFbxScene      = std::unique_ptr<void, FbxSceneDeleter>;
-
     struct FbxResources
     {
         void* manager  = nullptr;
@@ -40,8 +17,6 @@ namespace dmt {
     public:
         void operator()(void* raw) const;
     };
-
-    dFbxManager DMT_CORE_API createFBXInstance();
 
 #if 0
     struct Settings

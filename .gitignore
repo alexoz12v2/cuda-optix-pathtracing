@@ -455,3 +455,6 @@ cuda-optix-pathtracing.code-workspace
 __pycache__/
 
 imgui.ini
+
+# scene files
+scene-ignored/

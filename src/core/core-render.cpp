@@ -1,7 +1,9 @@
 #include "core-render.h"
 
+#include "core-bsdf.h"
 #include "core-bvh-builder.h"
 #include "core-light-tree-builder.h"
+#include "core-texture.h"
 
 // write image dependencies
 #include <ImfRgbaFile.h>
@@ -143,10 +145,13 @@ namespace dmt::job {
                     Ray ray{camera::generateRay(cs, *data.cameraFromRaster, *data.renderFromCamera)};
 
                     RGB  L = RGB::fromScalar(0.f), beta = RGB::fromScalar(1.f);
-                    bool hadTransmission = false, specularBounce = false, anyNonSpecularBounces = false;
+                    bool hadTransmission       = false;
+                    bool specularBounce        = false;
+                    bool anyNonSpecularBounces = false;
                     // LightSampleContext prevIntrCtx; needed only for emissive surfaces
-                    float    bsdfPdf = 1.f, etascale = 1.f;
-                    uint32_t depth = 0;
+                    float    bsdfPdf  = 1.f;
+                    float    etascale = 1.f;
+                    uint32_t depth    = 0;
 
                     while (true)
                     {
@@ -170,15 +175,24 @@ namespace dmt::job {
                         triangle::Triisect trisect     = triangle::Triisect::nothing();
                         if (!bvh::traverseRay(ray, data.bvhRoot, data.bvhNodeNum, &instanceIdx, &triIdx, &trisect))
                         {
+                            assert(data.envLight); // TODO remove
                             if (data.envLight)
                             {
                                 float     pdfLight = 0;
                                 RGB const Le       = envLightEval(*data.envLight, ray.d, &pdfLight);
                                 // 2. if no intersection, light at infinity, break
                                 if (depth == 0 || specularBounce) // specular bounce = PDF BSDF is Dirac Delta
+                                {
                                     L += beta * Le;
+                                    Context ctx;
+                                    ctx.trace("NM L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
+                                }
                                 else // MIS
+                                {
                                     L += beta * (bsdfPdf / (bsdfPdf + pdfLight)) * Le;
+                                    Context ctx;
+                                    ctx.trace("MIS L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
+                                }
                             }
                             break;
                         }
@@ -186,7 +200,11 @@ namespace dmt::job {
                         {
                             // 3. check if maximum number of bounces has been reached and break
                             if (depth >= data.maxDepth)
+                            {
+                                Context ctx;
+                                ctx.warn("Maximum depth reached", {});
                                 break;
+                            }
                             depth++;
 
                             // 4. if intersection and emissive, account for emission (TODO later maybe)
@@ -268,7 +286,7 @@ namespace dmt::job {
                             texCtx.p    = p;
                             texCtx.dpdx = dpdx;
                             texCtx.dpdy = dpdy;
-                            texCtx.n    = ng;
+                            texCtx.n    = ensureValidSpecularReflection(ng, -ray.d, ng);
                             texCtx.uv   = uv;
                             texCtx.dUV  = duv_From_dp_dxy(uvCtx);
 
@@ -280,7 +298,7 @@ namespace dmt::job {
                             // TODO: If material is specular skip direct lighting estimation
                             LightSampleContext lightCtx{};
                             lightCtx.ray             = ray;
-                            lightCtx.n               = ns;
+                            lightCtx.n               = ensureValidSpecularReflection(ng, -ray.d, ns);
                             lightCtx.hadTransmission = hadTransmission;
                             lightCtx.p               = p;
 
@@ -381,10 +399,20 @@ namespace dmt::job {
                             if (bool transmission = bs.eta != 1.f; transmission)
                             {
                                 hadTransmission = true;
-                                etascale *= bs.eta * bs.eta; // TODO see if do the reciprocal when going inside-out
+                                etascale *= (dot(ng, -ray.d) > 0 ? 1.f : bs.eta * bs.eta);
                             }
                             // prevIntrCtx = ...
-                            Point3f nextOrigin = offsetRayOrigin(p, pErr, ng, bs.wi);
+                            Normal3f offsetNormal = texCtx.n;
+
+                            // if transmission, flip the normal to ensure offset goes in outgoing direction
+                            if (bs.eta != 1.f)
+                            {
+                                // flip normal if the outgoing direction is below the geometric surface
+                                if (dot(bs.wi, texCtx.n) < 0.f)
+                                    offsetNormal = -texCtx.n;
+                            }
+
+                            Point3f nextOrigin = offsetRayOrigin(p, pErr, offsetNormal, bs.wi);
                             ray                = Ray{nextOrigin, bs.wi};
 
                             // roussian roulette
@@ -393,7 +421,11 @@ namespace dmt::job {
                             {
                                 float q = fl::clamp01(rrBeta.max());
                                 if (sampler.get1D() < q)
-                                    break;     // kill ray
+                                {
+                                    Context ctx;
+                                    ctx.trace("Kill Ray", {});
+                                    break; // kill ray
+                                }
                                 beta /= 1 - q; // if survived, make it more significant
                             }
                         }

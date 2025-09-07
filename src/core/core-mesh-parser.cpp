@@ -1,6 +1,9 @@
 #include "core-mesh-parser.h"
 
+#include "platform-context.h"
+
 #include "fbxsdk.h"
+#include <string>
 
 namespace dmt {
 
@@ -429,37 +432,9 @@ namespace dmt {
     //TriangleMesh
 
     static void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const*, char const*>& chTex);
-    static void GetTextureName(FbxProperty                                        property,
+    static void GetTextureName(FbxProperty const&                                 property,
                                std::pmr::unordered_map<char const*, char const*>& chTex,
-                               uint32_t                                           texIdx,
-                               uint32_t                                           matIdx);
-
-    void FbxDeleter::operator()(void* raw) const
-    {
-        auto* manager = reinterpret_cast<FbxManager*>(raw);
-        if (manager)
-        {
-            manager->Destroy();
-        }
-    }
-
-    void FbxSettingsDeleter::operator()(void* raw) const
-    {
-        auto* settings = reinterpret_cast<FbxIOSettings*>(raw);
-        if (settings)
-        {
-            settings->Destroy();
-        }
-    }
-
-    void FbxSceneDeleter::operator()(void* raw) const
-    {
-        auto* importer = reinterpret_cast<FbxScene*>(raw);
-        if (importer)
-        {
-            importer->Destroy();
-        }
-    }
+                               uint32_t                                           texIdx);
 
     void FbxDeleterResources::operator()(void* raw) const
     {
@@ -476,19 +451,13 @@ namespace dmt {
         }
     };
 
-    static FbxManager*    getManager(dFbxManager& inst) { return reinterpret_cast<FbxManager*>(inst.get()); }
-    static FbxIOSettings* getIoSettings(dFbxIOSettings& inst) { return reinterpret_cast<FbxIOSettings*>(inst.get()); }
-    static FbxScene*      getScene(dFbxScene& inst) { return reinterpret_cast<FbxScene*>(inst.get()); }
-
-    dFbxManager createFBXInstance() { return dFbxManager{FbxManager::Create(), FbxDeleter{}}; }
-
     MeshFbxParser::MeshFbxParser()
     {
         InitFbxManager();
         //m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(m_mng), IOSROOT), FbxSettingsDeleter{}};
         m_res.settings = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
 
-        FbxIOSettings* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
+        auto* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
         //set flags for import settings
         set->SetBoolProp(IMP_FBX_MATERIAL, false);
         set->SetBoolProp(IMP_FBX_TEXTURE, true);
@@ -502,221 +471,245 @@ namespace dmt {
 
     bool MeshFbxParser::ImportFBX(char const* fileName, TriangleMesh* outMesh)
     {
-        FbxManager* mng = reinterpret_cast<FbxManager*>(m_res.manager);
+        auto* mng = reinterpret_cast<FbxManager*>(m_res.manager);
 
-        //check FBX's filename
-        os::Path const fbxDirectory = os::Path::executableDir() / fileName;
+        os::Path const fbxDirectory = os::Path::fromString(fileName);
         if (!fbxDirectory.isValid() || !fbxDirectory.isFile())
             return false;
 
-        m_fileName              = fbxDirectory.toUnderlying();
-        std::string fileNameStr = std::string(fileName);
+        m_fileName = fbxDirectory.toUnderlying();
 
-        if (fileNameStr.size() < 4)
+        std::string sceneName = std::string(fileName).substr(0, strlen(fileName) - 4) + "_scene";
+        FbxScene*   pScene    = FbxScene::Create(mng, sceneName.c_str());
+
+        FbxImporter* fbxImporter = FbxImporter::Create(mng, sceneName.c_str());
+        if (!fbxImporter->Initialize(fileName, -1, reinterpret_cast<FbxIOSettings*>(m_res.settings)))
             return false;
-
-        //Define the scene name
-        std::string sceneName = fileNameStr.substr(0, fileNameStr.size() - 4) + "_scene";
-        //Initialize the scene
-        FbxScene* pScene = FbxScene::Create(mng, sceneName.c_str());
-        //Initialize the Importer
-        FbxImporter* fbxImporter  = FbxImporter::Create(mng, sceneName.c_str());
-        bool         importStatus = fbxImporter->Initialize(fileName, -1, mng->GetIOSettings());
-
-        if (!importStatus)
+        if (!fbxImporter->Import(pScene))
+        {
+            fbxImporter->Destroy();
             return false;
-        //Import the scene
-        importStatus = fbxImporter->Import(pScene);
-
-        if (!importStatus)
-            return false;
-
+        }
         fbxImporter->Destroy();
 
-        //Channels<->TexturePath
-        m_ChannelsTexPath.clear();
-        //Get Info about the scene
-        FbxAxisSystem as = pScene->GetGlobalSettings().GetAxisSystem();
-        FbxSystemUnit su = pScene->GetGlobalSettings().GetSystemUnit();
-        //unit sys conversion
-        if (pScene->GetGlobalSettings().GetSystemUnit() == FbxSystemUnit::cm)
+        // Convert scene units and axes
+        if (pScene->GetGlobalSettings().GetSystemUnit() != FbxSystemUnit::m)
         {
-            FbxSystemUnit::ConversionOptions const lConversionOptions = {
-                true, /* mConvertRrsNodes */
-                true, /* mConvertLimits */
-                true, /* mConvertClusters */
-                true, /* mConvertLightIntensity */
-                true, /* mConvertPhotometricLProperties */
-                true  /* mConvertCameraClipPlanes */
-            };
-
-            // Convert the scene to meters using the defined options.
-            FbxSystemUnit::m.ConvertScene(pScene, lConversionOptions);
+            FbxSystemUnit::ConversionOptions const opts{.mConvertRrsNodes               = true,
+                                                        .mConvertLimits                 = true,
+                                                        .mConvertClusters               = true,
+                                                        .mConvertLightIntensity         = true,
+                                                        .mConvertPhotometricLProperties = true,
+                                                        .mConvertCameraClipPlanes       = true};
+            FbxSystemUnit::m.ConvertScene(pScene, opts);
         }
 
         if (pScene->GetGlobalSettings().GetAxisSystem() != FbxAxisSystem::MayaZUp)
-        {
-            // Convert the scene to meters using the defined options.
             FbxAxisSystem::MayaZUp.ConvertScene(pScene);
-        }
 
-        assert(pScene->GetGlobalSettings().GetSystemUnit() == FbxSystemUnit::m);
-        assert(pScene->GetGlobalSettings().GetAxisSystem() == FbxAxisSystem::MayaZUp);
+        FbxNode* rootNode = pScene->GetRootNode();
+        if (!rootNode)
+            return false;
 
-
-        //attraverse the hirarchy
-        FbxNode* lNode = pScene->GetRootNode();
-
-        if (lNode)
+        for (int i = 0; i < rootNode->GetChildCount(); ++i)
         {
-            for (uint32_t i = 0; i < lNode->GetChildCount(); i++)
+            FbxNode* child = rootNode->GetChild(i);
+            if (!child->GetNodeAttribute())
+                continue;
+            if (child->GetNodeAttribute()->GetAttributeType() != FbxNodeAttribute::eMesh)
+                continue;
+
+            auto* mesh = dynamic_cast<FbxMesh*>(child->GetNodeAttribute());
+            if (!mesh)
+                continue;
+
+            m_meshName       = mesh->GetName();
+            int32_t nPolygon = mesh->GetPolygonCount();
+            if (nPolygon <= 0)
+                continue;
+
+            FbxVector4* controlPoints   = mesh->GetControlPoints();
+            FbxAMatrix  globalTransform = child->EvaluateGlobalTransform();
+
+            int                          nElementNormal    = mesh->GetElementNormalCount();
+            int                          nElementSmoothing = mesh->GetElementSmoothingCount();
+            FbxGeometryElementSmoothing* smoothing = nElementSmoothing > 0 ? mesh->GetElementSmoothing(0) : nullptr;
+
+            FbxGeometryElementUV* uvLayer = mesh->GetElementUVCount() > 0 ? mesh->GetElementUV(0) : nullptr;
+            bool                  hasUV   = uvLayer != nullptr;
+
+            int vertexId = 0;
+            for (int k = 0; k < nPolygon; ++k)
             {
-                FbxNode* lChild = lNode->GetChild(i);
+                int polygonSize = mesh->GetPolygonSize(k);
+                if (polygonSize != 3)
+                    return false; // only triangles
 
-                if (lChild->GetNodeAttribute() == nullptr)
+                VertexIndex vIdx[3];
+                bool        isSmooth = false;
+                if (smoothing)
                 {
-                    return false;
-                }
-                else
-                {
-                    FbxNodeAttribute::EType lAttributeType = (lChild->GetNodeAttribute()->GetAttributeType());
-
-
-                    if (lAttributeType != FbxNodeAttribute::eMesh)
-                        continue;
-
-                    //Get Mesh Information
-                    FbxMesh* lMesh                  = (FbxMesh*)lChild->GetNodeAttribute();
-                    m_meshName                      = lMesh->GetName();
-                    uint32_t    nPolygon            = lMesh->GetPolygonCount();
-                    FbxVector4* lControlPointsArray = lMesh->GetControlPoints();
-                    uint32_t    nElementNormal      = lMesh->GetElementNormalCount();
-                    uint32_t    nElementBiNormal    = lMesh->GetElementBinormalCount();
-                    FbxAMatrix  globalTransform     = lChild->EvaluateGlobalTransform();
-                    //Polygon
-
-                    if (nPolygon <= 0)
-                        return false;
-
-                    //TriangleMesh tMesh{nPolygon, memory};
-
-                    //handle the mesh with Polygon groups
-                    for (int l = 0; l < lMesh->GetElementPolygonGroupCount(); l++)
+                    switch (smoothing->GetMappingMode())
                     {
-                        FbxGeometryElementPolygonGroup* lPolyGroup = lMesh->GetElementPolygonGroup(l);
-                        switch (lPolyGroup->GetMappingMode())
-                        {
-                            case FbxGeometryElement::eByPolygon:
-                                if (lPolyGroup->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
-                                {
-                                    int polyGroupId = lPolyGroup->GetIndexArray().GetAt(i);
-                                    //todo read vertex points
-                                }
-                            default: break;
-                        }
+                        case FbxGeometryElement::eByPolygon:
+                            if (smoothing->GetReferenceMode() == FbxGeometryElement::eDirect)
+                                isSmooth = smoothing->GetDirectArray().GetAt(k) != 0;
+                            else if (smoothing->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+                                isSmooth = smoothing->GetDirectArray().GetAt(smoothing->GetIndexArray().GetAt(k)) != 0;
+                            break;
+                        default: break;
                     }
-                    //FbxAxisSystem d;
+                }
 
-                    //Handle single polygon
-                    int vertexId = 0;
-                    for (uint32_t k = 0; k < nPolygon; k++)
+                // compute flat face normal
+                Vector3f faceNormal{};
+                if (!isSmooth)
+                {
+                    Vector3f p0{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][0]),
+                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][1]),
+                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][2])};
+                    Vector3f p1{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 1)][0]),
+                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 1)][1]),
+                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 1)][2])};
+                    Vector3f p2{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][0]),
+                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][1]),
+                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][2])};
+                    faceNormal = cross(p1 - p0, p2 - p0);
+                }
+
+                for (int j = 0; j < 3; ++j, ++vertexId)
+                {
+                    int        cpIndex     = mesh->GetPolygonVertex(k, j);
+                    FbxVector4 cp          = controlPoints[cpIndex];
+                    FbxVector4 transformed = globalTransform.MultT(cp);
+                    Point3f    pos{static_cast<float>(transformed[0]),
+                                static_cast<float>(transformed[1]),
+                                static_cast<float>(transformed[2])};
+
+                    uint32_t posIdx = 0;
+                    if (outMesh->checkPosition(pos, posIdx))
+                        vIdx[j].positionIdx = posIdx;
+                    else
                     {
-                        //polygon size
-                        uint32_t polygonSize = lMesh->GetPolygonSize(k);
-                        if (polygonSize > 4 && polygonSize > 2)
-                            return false;
+                        outMesh->addPosition(pos);
+                        vIdx[j].positionIdx = outMesh->positionCount() - 1;
+                    }
 
-                        VertexIndex vIdx[4];
+                    // --- Normals ---
+                    Vector3f nVec{0.f, 0.f, 0.f};
+                    Normal3f n;
 
-                        for (uint32_t j = 0; j < polygonSize; j++, vertexId++)
+                    if (nElementNormal > 0)
+                    {
+                        FbxGeometryElementNormal* normalLayer = mesh->GetElementNormal(0);
+                        bool hasCustomNormals = normalLayer && normalLayer->GetMappingMode() != FbxGeometryElement::eNone;
+                        if (hasCustomNormals)
                         {
-                            //normals handle
-                            for (uint32_t k = 0; k < nElementNormal; k++)
+                            int idx = vertexId;
+                            if (normalLayer->GetMappingMode() == FbxGeometryElement::eByControlPoint)
                             {
-                                FbxGeometryElementNormal* lENormal = lMesh->GetElementNormal(k);
-                                Normal3f                  normal{};
-                                if (lENormal->GetMappingMode() == FbxGeometryElement::eByControlPoint)
-                                {
-                                    switch (lENormal->GetReferenceMode())
-                                    {
-                                        case FbxGeometryElement::eDirect:
-                                        {
-                                            normal.x = static_cast<float>(lENormal->GetDirectArray().GetAt(vertexId)[0]);
-                                            normal.y = static_cast<float>(lENormal->GetDirectArray().GetAt(vertexId)[1]);
-                                            normal.z = static_cast<float>(lENormal->GetDirectArray().GetAt(vertexId)[2]);
-                                        }
-                                        break;
-                                        case FbxGeometryElement::eIndexToDirect:
-                                        {
-                                            int id   = lENormal->GetIndexArray().GetAt(vertexId);
-                                            normal.x = static_cast<float>(lENormal->GetDirectArray().GetAt(id)[0]);
-                                            normal.y = static_cast<float>(lENormal->GetDirectArray().GetAt(id)[1]);
-                                            normal.z = static_cast<float>(lENormal->GetDirectArray().GetAt(id)[2]);
-                                        }
-                                        break;
-                                        default: break;
-                                    }
-
-                                    uint32_t nidx = 0;
-                                    if (outMesh->checkNormal(normal, nidx))
-                                    {
-                                        vIdx[j].normalIdx = nidx;
-                                    }
-                                    else
-                                    {
-                                        outMesh->addNormal(normal);
-                                        vIdx[j].normalIdx = outMesh->getNormalSize() - 1;
-                                    }
-                                }
+                                idx = cpIndex;
+                                if (normalLayer->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+                                    idx = normalLayer->GetIndexArray().GetAt(cpIndex);
+                            }
+                            else if (normalLayer->GetMappingMode() == FbxGeometryElement::eByPolygonVertex)
+                            {
+                                if (normalLayer->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+                                    idx = normalLayer->GetIndexArray().GetAt(vertexId);
                             }
 
-                            int controlPointIndex = lMesh->GetPolygonVertex(k, j);
-
-
-                            if (controlPointIndex < 0)
-                            {
-                                return false;
-                            }
-                            //vertex
-                            uint32_t   idx         = 0;
-                            FbxVector4 cp          = lControlPointsArray[controlPointIndex];
-                            FbxVector4 transformed = globalTransform.MultT(cp);
-                            Point3f    controlPoint{
-                                   {static_cast<float>(cp[0]), static_cast<float>(cp[1]), static_cast<float>(cp[2])}};
-
-                            if (outMesh->checkPosition(controlPoint, idx))
-                            {
-                                vIdx[j].positionIdx = idx;
-                            }
-                            else
-                            {
-                                outMesh->addPosition(controlPoint);
-                                vIdx[j].positionIdx = outMesh->getPositionSize() - 1;
-                            }
-                            //add polygon
-                            if (j > 1)
-                            {
-                                outMesh->addIndexedTriangle(vIdx[j - 2], vIdx[j], vIdx[j - 1], -1);
-                            }
+                            FbxVector4 fn = normalLayer->GetDirectArray().GetAt(idx);
+                            nVec = Vector3f{static_cast<float>(fn[0]), static_cast<float>(fn[1]), static_cast<float>(fn[2])};
                         }
                     }
 
-                    //handle textures
-                    TextureNames(lMesh, this->m_ChannelsTexPath);
+                    // fallback zero-length normals
+                    if (dotSelf(nVec) < 1e-12f)
+                    {
+                        if (!isSmooth)
+                            nVec = faceNormal;
+                        else
+                        {
+                            Point3f p0 = outMesh->getPosition(vIdx[0].positionIdx);
+                            Point3f p1 = outMesh->getPosition(vIdx[1].positionIdx);
+                            Point3f p2 = outMesh->getPosition(vIdx[2].positionIdx);
+                            nVec       = normalize(cross(p1 - p0, p2 - p0));
+                        }
+                    }
+
+                    n             = Normal3f(nVec);
+                    uint32_t nIdx = 0;
+                    if (outMesh->checkNormal(n, nIdx))
+                        vIdx[j].normalIdx = nIdx;
+                    else
+                    {
+                        outMesh->addNormal(n);
+                        vIdx[j].normalIdx = outMesh->normalCount() - 1;
+                    }
+
+                    // --- UVs ---
+                    Point2f uv{0.f, 0.f};
+                    if (hasUV)
+                    {
+                        switch (uvLayer->GetMappingMode())
+                        {
+                            case FbxGeometryElement::eByControlPoint:
+                            {
+                                int        uvIndex = uvLayer->GetReferenceMode() == FbxGeometryElement::eDirect
+                                                         ? cpIndex
+                                                         : uvLayer->GetIndexArray().GetAt(cpIndex);
+                                FbxVector2 uvVal   = uvLayer->GetDirectArray().GetAt(uvIndex);
+                                uv = Point2f{static_cast<float>(uvVal[0]), static_cast<float>(uvVal[1])};
+                            }
+                            break;
+                            case FbxGeometryElement::eByPolygonVertex:
+                            {
+                                int        uvIndex = uvLayer->GetReferenceMode() == FbxGeometryElement::eDirect
+                                                         ? vertexId
+                                                         : uvLayer->GetIndexArray().GetAt(vertexId);
+                                FbxVector2 uvVal   = uvLayer->GetDirectArray().GetAt(uvIndex);
+                                uv = Point2f{static_cast<float>(uvVal[0]), static_cast<float>(uvVal[1])};
+                            }
+                            break;
+                            default: uv = Point2f{0.f, 0.f}; break;
+                        }
+                    }
+
+                    uint32_t uvIdx = 0;
+                    if (outMesh->checkUV(uv, uvIdx))
+                        vIdx[j].uvIdx = uvIdx;
+                    else
+                    {
+                        outMesh->addUV(uv);
+                        vIdx[j].uvIdx = outMesh->uvCount() - 1;
+                    }
                 }
+
+                // Add triangle
+                outMesh->addIndexedTriangle(vIdx[0], vIdx[1], vIdx[2], -1);
             }
         }
 
+        if (Context ctx; ctx.isValid() && ctx.isTraceEnabled())
+        {
+            std::string meshStats = "  Triangle Count: ";
+            meshStats.append(std::to_string(outMesh->triCount()));
+            meshStats.append("\n  UVs: ");
+            meshStats.append(std::to_string(outMesh->uvCount()));
+            meshStats.append("\n  Normals: ");
+            meshStats.append(std::to_string(outMesh->normalCount()));
+            meshStats.append("\n  Positions: ");
+            meshStats.append(std::to_string(outMesh->positionCount()));
+            ctx.trace("\n{}", std::make_tuple(meshStats));
+        }
 
         pScene->Destroy();
-
-
         return true;
     }
 
     char const* MeshFbxParser::GetMeshName() { return m_meshName.c_str(); }
 
-    MeshFbxParser::~MeshFbxParser() {}
+    MeshFbxParser::~MeshFbxParser() = default;
 
     void MeshFbxParser::InitFbxManager()
     {
@@ -729,52 +722,49 @@ namespace dmt {
     void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const*, char const*>& chTex)
     {
 
-        if (pGeometry->GetNode() == NULL)
+        if (!pGeometry || !pGeometry->GetNode())
             return;
 
-        uint32_t nMat = pGeometry->GetNode()->GetSrcObjectCount<FbxSurfaceMaterial>();
-        for (uint32_t matIdx = 0; matIdx < nMat; matIdx++)
+        int32_t nMat = pGeometry->GetNode()->GetSrcObjectCount<FbxSurfaceMaterial>();
+        for (int32_t matIdx = 0; matIdx < nMat; matIdx++)
         {
-            FbxSurfaceMaterial* lMaterial = pGeometry->GetNode()->GetSrcObject<FbxSurfaceMaterial>(matIdx);
+            auto* lMaterial = pGeometry->GetNode()->GetSrcObject<FbxSurfaceMaterial>(matIdx);
 
             //go through all the possible textures
             if (lMaterial)
             {
 
-                uint32_t texIdx;
+                uint32_t texIdx = 0;
                 FBXSDK_FOR_EACH_TEXTURE(texIdx)
                 {
 
                     FbxProperty property = lMaterial->FindProperty(FbxLayerElement::sTextureChannelNames[texIdx]);
-                    GetTextureName(property, chTex, texIdx, matIdx);
+                    GetTextureName(property, chTex, texIdx);
                 }
             }
         }
     }
 
-    void GetTextureName(FbxProperty                                        property,
-                        std::pmr::unordered_map<char const*, char const*>& chTex,
-                        uint32_t                                           texIdx,
-                        uint32_t                                           matIdx)
+    void GetTextureName(FbxProperty const& property, std::pmr::unordered_map<char const*, char const*>& chTex, uint32_t texIdx)
     {
         if (property.IsValid())
         {
-            uint32_t texCount = property.GetSrcObjectCount<FbxTexture>();
+            int32_t texCount = property.GetSrcObjectCount<FbxTexture>();
 
-            for (uint32_t j = 0; j < texCount; ++j)
+            for (int32_t j = 0; j < texCount; ++j)
             {
                 //Here we have to check if it's layeredtextures, or just textures:
-                FbxLayeredTexture* lLayeredTexture = property.GetSrcObject<FbxLayeredTexture>(j);
+                auto* lLayeredTexture = property.GetSrcObject<FbxLayeredTexture>(j);
                 if (lLayeredTexture)
                 {
-                    uint32_t nTextures = lLayeredTexture->GetSrcObjectCount<FbxTexture>();
-                    for (uint32_t k = 0; k < nTextures; ++k)
+                    int32_t nTextures = lLayeredTexture->GetSrcObjectCount<FbxTexture>();
+                    for (int32_t k = 0; k < nTextures; ++k)
                     {
-                        FbxTexture* lTexture = lLayeredTexture->GetSrcObject<FbxTexture>(k);
+                        auto* lTexture = lLayeredTexture->GetSrcObject<FbxTexture>(k);
                         if (lTexture)
                         {
 
-                            FbxFileTexture* lFileTexture                         = FbxCast<FbxFileTexture>(lTexture);
+                            auto* lFileTexture                                   = FbxCast<FbxFileTexture>(lTexture);
                             chTex[FbxLayerElement::sTextureChannelNames[texIdx]] = lFileTexture->GetFileName();
                         }
                     }
@@ -782,10 +772,10 @@ namespace dmt {
                 else
                 {
                     //no layered texture simply get on the property
-                    FbxTexture* lTexture = property.GetSrcObject<FbxTexture>(j);
+                    auto* lTexture = property.GetSrcObject<FbxTexture>(j);
                     if (lTexture)
                     {
-                        FbxFileTexture* lFileTexture                         = FbxCast<FbxFileTexture>(lTexture);
+                        auto* lFileTexture                                   = FbxCast<FbxFileTexture>(lTexture);
                         chTex[FbxLayerElement::sTextureChannelNames[texIdx]] = lFileTexture->GetFileName();
                     }
                 }

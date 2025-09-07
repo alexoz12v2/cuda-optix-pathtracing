@@ -94,16 +94,21 @@ done
 # -----------------------------
 # Detect driver-supported CUDA version
 # -----------------------------
-DRIVER_CUDA=$(nvidia-smi | grep "CUDA Version" | awk '{print $3}')
+DRIVER_CUDA=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}') # eg. "12.9"
+CUDA_BASE="/usr/local"
 
 if [ -n "$DRIVER_CUDA" ]; then
     echo "Driver supports CUDA $DRIVER_CUDA"
     CUDA_DIR="${CUDA_BASE}/cuda-${DRIVER_CUDA}"
+else
+    echo "Error: No CUDA Driver support found"
+    return 1 2>/dev/null || exit 1
 fi
 
 # Fallback: pick latest installed if the driver-specific one doesn’t exist
 if [ -z "$CUDA_DIR" ] || [ ! -d "$CUDA_DIR" ]; then
-    CUDA_DIR=$(ls -d ${CUDA_BASE}/cuda-* 2>/dev/null | sort -V | tail -n 1)
+    MAJOR_VERSION="${DRIVER_CUDA%.*}"
+    CUDA_DIR="${CUDA_BASE}/cuda-${MAJOR_VERSION}"
 fi
 
 if [ -z "$CUDA_DIR" ] || [ ! -d "$CUDA_DIR" ]; then

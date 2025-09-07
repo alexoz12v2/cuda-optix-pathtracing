@@ -1,4 +1,5 @@
 #include "core-texture-cache.h"
+#include "core-texture.h"
 #include <memory_resource>
 
 namespace dmt {
@@ -33,14 +34,14 @@ namespace dmt {
                 assert(false && "How did List and HashMap get out of sync");
                 return nullptr;
             }
-            if (std::next(listit) != m_lruKeyList.end()) // if not last swap to last
+            if (listit != m_lruKeyList.end() && std::next(listit) != m_lruKeyList.end()) // if not last swap to last
             {
                 lk.upgrade_to_exclusive();
                 m_lruKeyList.splice(m_lruKeyList.end(), m_lruKeyList, listit);
                 lk.downgrade_to_shared();
             }
 
-            return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
+            return reinterpret_cast<unsigned char const*>(it->second.data);// + it->second.startOffset;
         }
 
         // 2. handle cache miss
@@ -58,13 +59,15 @@ namespace dmt {
                 assert(false && "How did List and HashMap get out of sync");
                 return nullptr;
             }
-            if (std::next(listit) != m_lruKeyList.end()) // if not last swap to last
+
+            if (listit != m_lruKeyList.end() && std::next(listit) != m_lruKeyList.end()) // if not last swap to last
             {
                 m_lruKeyList.splice(m_lruKeyList.end(), m_lruKeyList, listit);
-                lk.downgrade_to_shared();
             }
 
-            return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
+            lk.downgrade_to_shared();
+
+            return reinterpret_cast<unsigned char const*>(it->second.data);// + it->second.startOffset;
         }
 
         uint32_t  mipSize            = 0;
@@ -119,6 +122,9 @@ namespace dmt {
             return nullptr;
         }
 
+        // check that the alignment is correct
+        assert(isAligned(it->second.data, alignPerPixel(it->second.texFormat)));
+
         m_lruKeyList.push_back(key);
         assert(m_cache.size() == m_lruKeyList.size());
 
@@ -127,6 +133,6 @@ namespace dmt {
 
         outBytes     = mipSize;
         outTexFormat = it->second.texFormat;
-        return reinterpret_cast<unsigned char const*>(it->second.data) + it->second.startOffset;
+        return reinterpret_cast<unsigned char const*>(it->second.data);// + it->second.startOffset;
     }
 } // namespace dmt

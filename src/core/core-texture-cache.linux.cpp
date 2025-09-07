@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <memory_resource>
+#include <numeric>
 #include <string>
 
 #include <fcntl.h> // stat
@@ -311,9 +312,13 @@ namespace dmt {
             uint32_t mipSizeUnaligned = mipBytes(header.width, header.height, level, header.texFormat);
 
             // --- Align offset down, size up ---
-            size_t   offsetAligned = (mipOffsetUnaligned / m_sectorSize) * m_sectorSize;
+            size_t const pixelAlign    = bytesPerPixel(header.texFormat);
+            size_t const combinedAlign = std::lcm<size_t>(m_sectorSize, pixelAlign);
+
+            size_t   offsetAligned = (mipOffsetUnaligned / combinedAlign) * combinedAlign;
             uint32_t sizeAligned   = static_cast<uint32_t>(
-                ((mipOffsetUnaligned + mipSizeUnaligned + m_sectorSize - 1) / m_sectorSize) * m_sectorSize - offsetAligned);
+                ((mipOffsetUnaligned + mipSizeUnaligned + combinedAlign - 1) / combinedAlign) * combinedAlign -
+                offsetAligned);
 
             *inOutBytes  = sizeAligned;
             *inOutOffset = offsetAligned;

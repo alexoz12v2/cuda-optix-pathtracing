@@ -183,6 +183,13 @@ namespace dmt {
         return result;
     }
 
+    constexpr bool isAligned(void const* ptr, size_t alignment)
+    {
+        void*  mutPtr = const_cast<void*>(ptr);
+        size_t space  = alignment;
+        return std::align(alignment, alignment, mutPtr, space) == ptr;
+    }
+
     using sid_t = uint64_t;
 
     template <typename Enum>

@@ -119,15 +119,19 @@ target_include_directories(dmt-core
 target_link_libraries(dmt-core 
   PUBLIC
     gx::gx
-    # CUDA UTILS LIBARIES (together with platform?)
     glm::glm_static
     Eigen3::Eigen
   PRIVATE
     dmt-platform
-    OpenEXR::OpenEXR # ALWAYS before FBX SDK
-    FBXSDK::fbxsdk
     stb::stb
     nlohmann_json::nlohmann_json
+    FBXSDK::fbxsdk
+    # all OpenEXR at the very end
+    OpenEXR::OpenEXR
+    OpenEXR::OpenEXRCore
+    OpenEXR::OpenEXRUtil
+    OpenEXR::Iex
+    OpenEXR::IlmThread
 )
 
 set_target_properties(dmt-core PROPERTIES FOLDER "Modules/Core")

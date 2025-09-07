@@ -1,6 +1,12 @@
 #include "core-bsdf.h"
 
 #include "core-math.h"
+#include "cudautils-float.h"
+
+// TODO remove
+#if 1
+    #include "platform-context.h"
+#endif
 
 namespace dmt {
     bool refract(Vector3f wi, Normal3f n, float eta, float* etap, Vector3f* wt)
@@ -39,7 +45,26 @@ namespace dmt {
         Vector3f const R = 2 * dot(N, I) * N - I;
 
         float Iz = dot(I, Ng);
+#if defined(DMT_CRASH_BSDF)
         assert(Iz >= 0); // TODO remove, caller should flip Normals
+#else
+        if (Iz < 0.0f)
+        {
+            // Either this was a backface or conventions differ. Flip both Ng and shading normal N
+            // so that Ng faces the incoming direction. This is safe for two-sided materials;
+            // for one-sided you should have culled this intersection earlier.
+            Ng = -Ng;
+            N  = -N;
+            Iz = -Iz;
+        }
+
+        // Now Iz >= 0 (or zero)
+        // If shading normal is in wrong hemisphere relative to Ng, flip it
+        if (dot(N, Ng) < 0.0f)
+        {
+            N = -N;
+        }
+#endif
 
         // Reflection rays may always be at least as shallow as the incoming ray.
         float const threshold = fminf(0.9f * Iz, 0.01f);
@@ -561,206 +586,366 @@ namespace dmt::ggx {
 
     BSDFSample DMT_FASTCALL sample(BSDF const& bsdf, Vector3f w, Vector3f ng, Point2f u, float uc)
     {
-        assert(!all(bsdf.T == Vector3f::s(0.f)) && "Tangent vector is zero");
-        assert(dot(bsdf.closure.N, w) > 0.f);
-        assert(u.x <= 1.f && u.x >= 0.f && u.y <= 1.f && u.y >= 0.f && uc >= 0.f && uc <= 1.f);
-        BSDFSample eval1{};
-        eval1.eta = 1.f;
+        BSDFSample bs{};
+        bs.eta = 1.f;
+        bs.f   = RGB::fromScalar(0.f);
+        bs.pdf = 0.f;
 
-        float const invEta = eval1.eta;
-        float const cosNI  = dot(bsdf.closure.N, w);
-        if (cosNI < 0) // incoming and normal not on same hemisphere
-            return eval1;
-
-        // compute wLocal and wmLocal
+        // --- tangent frame (shading normal) ---
         Frame const    tangentSpace = Frame::fromXZ(bsdf.T, bsdf.closure.N);
-        Vector3f const wiLocal      = tangentSpace.toLocal(w);
-        Vector3f       wmLocal{};
+        Vector3f const wLocal       = tangentSpace.toLocal(w); // incoming direction in tangent space
+        float const    cosI         = wLocal.z;
 
+        // sanity: incoming should be in the hemisphere of N
+        if (cosI <= 0.f)
+            return bs;
+
+        // --- roughness / singular check ---
         bool const singular = effectivelySmooth(bsdf.alphax, bsdf.alphay);
-        if (singular)
-            eval1.wm = normalize(bsdf.closure.N);
-        else // sample micronormal
-        {
-            wmLocal  = sampleMicroNormal(wiLocal, u, bsdf.alphax, bsdf.alphay);
-            eval1.wm = normalize(tangentSpace.fromLocal(wmLocal));
-        }
 
-        // eval1uate angles and fresnel (TODO evaluate on cos Theta i)
-        float const cosThetao = wiLocal.z;
-        RGB         reflectance{}, transmittance{};
+        // --- Fresnel-based mixture (macro-level) ---
+        // Use macroscopic cosine (cosI) to decide split between reflection/transmission.
+        RGB reflectTint{};
+        RGB transTint{};
         if (bsdf.isConductor)
-            reflectance = fresnel::reflectanceConductor(cosThetao, bsdf.fresnel.c.eta, bsdf.fresnel.c.etak);
+        {
+            // conductor: all reflection (no transmission), reflectance depends on micro-normal at sampling time,
+            // but for the mixture we treat it as pure reflection.
+            reflectTint = RGB::one(); // tint handled per-channel in conductor fresnel below
+            transTint   = RGB::fromScalar(0.f);
+        }
         else
         {
-            float const f = fresnel::reflectanceDielectric(cosThetao, bsdf.eta);
-            reflectance   = bsdf.fresnel.d.reflectanceTint * f;
-            transmittance = bsdf.fresnel.d.transmittanceTint * (1.f - f);
+            // dielectric: use Fresnel at macro angle as heuristic to mix
+            float Fmac  = fresnel::reflectanceDielectric(cosI, bsdf.eta);
+            reflectTint = RGB::fromScalar(Fmac) * bsdf.fresnel.d.reflectanceTint;
+            transTint   = RGB::fromScalar(1.f - Fmac) * bsdf.fresnel.d.transmittanceTint;
         }
 
-        // reflect or refract?
-        float const pdfReflect = reflectance.avg() / (transmittance + reflectance).avg();
-        bool const  doRefract  = uc >= pdfReflect;
-        assert((doRefract && !static_cast<bool>(bsdf.isConductor)) || !doRefract);
+        float denomMix   = (reflectTint + transTint).avg();
+        float pdfReflect = (denomMix > 1e-12f) ? reflectTint.avg() / denomMix
+                                               : (reflectTint.avg() > transTint.avg() ? 1.0f : 0.0f);
 
+        bool doRefract = (!bsdf.isConductor) && (uc >= pdfReflect);
+#if 1
         if (doRefract)
         {
-            if (!refract(w, eval1.wm, bsdf.eta, &eval1.eta, &eval1.wi))
-                return eval1;
-        }
-        else
-        {
-            eval1.wi = reflect(w, eval1.wm);
-            if (dot(eval1.wi, ng) < 0)
-                return eval1;
-        }
-
-        Vector3f    woLocal = tangentSpace.toLocal(eval1.wm);
-        float const cosHI   = dot(eval1.wm, w);
-
-        if (doRefract)
-        {
-            eval1.f   = transmittance / (eval1.eta * eval1.eta); // radiance symmetry compensation TODO test
-            eval1.pdf = fmaxf(1.f - pdfReflect, 0.f);
-        }
-        else
-        {
-            eval1.f   = reflectance;
-            eval1.pdf = pdfReflect;
-        }
-
-        if (singular) // MIS large values
-        {
-            eval1.f *= 1e4f;
-            eval1.pdf *= 1e4f;
-        }
-        else
-        {
-            float const D       = NDF(wmLocal, bsdf.alphax, bsdf.alphay);
-            float const lambdaI = auxiliaryLambda(wiLocal, bsdf.alphax, bsdf.alphay);
-            float const lambdaO = auxiliaryLambda(woLocal, bsdf.alphax, bsdf.alphay);
-
-            float const common = D / cosNI * (doRefract ? fabsf(cosHI * cosHI * invEta) : 0.25f);
-
-            eval1.pdf *= common / (1.f + lambdaI);
-            eval1.f *= common / (1.f + lambdaI + lambdaO);
-        }
-
-#if 0
-        // refl + singular  -> R / absCosThetai
-        // trans + singular -> T / absCosThetai
-        // refl             -> D G R / (4 cosThetai cosThetao)
-        // trans            -> D G T | dot(wi wm)dot(wo wm) / (denom cosThetai cosThetao) |
-        //                     where denom = (dot(wi wm) + dot(wo wm)/eta)^2
-        if (doRefract)
-        {
-            Vector3f const woLocal = tangentSpace.toLocal(eval1.wi);
-            assert(fl::abs(normL2(woLocal) - 1.f) < 1e-5f);
-            eval1.pdf = pt / (pr + pt);
-            if (!singular)
-            {
-                //$ p(\omega_i) = \frac{D_{\omega_o}(\omega_m)|\omega_o\cdot\omega_m|}
-                //                     {(\omega_i\cdot\omega_m+(\omega_o\cdot\omega_m)/\eta)^2} $
-                float denom = dot(eval1.wi, eval1.wm) + dot(w, eval1.wm) / eval1.eta;
-                denom *= denom;
-
-                float const dwm_dwi = absDot(eval1.wi, eval1.wm) / denom;
-                eval1.pdf *= PDF(wiLocal, wmLocal, bsdf.alphax, bsdf.alphay) * dwm_dwi;
-
-                eval1.f *= NDF(wmLocal, bsdf.alphax, bsdf.alphay) * heightCorrG(wiLocal, woLocal, bsdf.alphax, bsdf.alphay);
-                eval1.f *= fl::abs(dot(eval1.wi, eval1.wm) * dot(w, eval1.wm) / (woLocal.z * wiLocal.z * denom));
-            }
-            else
-            {
-                eval1.f /= fl::abs(woLocal.z);
-            }
-        }
-        else
-        {
-            eval1.eta = 1.f;
-            eval1.wi  = reflect(w, eval1.wm);
-
-            Vector3f const woLocal = tangentSpace.toLocal(eval1.wi);
-            assert(fl::abs(normL2(woLocal) - 1.f) < 1e-5f);
-            eval1.pdf = pr / (pr + pt);
-            eval1.f   = reflectance;
-            if (!singular)
-            {
-                float const dwm_dwi = fl::rcp(4 * absDot(w, eval1.wm));
-                eval1.pdf *= PDF(wiLocal, wmLocal, bsdf.alphax, bsdf.alphay) * dwm_dwi;
-
-                eval1.f *= NDF(wmLocal, bsdf.alphax, bsdf.alphay) *
-                           heightCorrG(wiLocal, woLocal, bsdf.alphax, bsdf.alphay) / (4 * woLocal.z * wiLocal.z);
-            }
-            else
-            {
-                eval1.f /= fl::abs(woLocal.z);
-            }
+            Context ctx;
+            ctx.trace("Transmitted", {});
         }
 #endif
-        // singular shouldn't have its PDF and multiplier multiplied, as we are handling them differently
-        eval1.f *= bsdf.energyScale;
-        assert(eval1.f == eval1.f.abs());
 
-        // eval1.pdf *= bsdf.closure.sampleWeight; needed if more than 1 Closure used
-        // single samples may be more than one
-        //assert(eval1.f.r >= 0.f && eval1.f.g >= 0.f && eval1.f.b >= 0.f);
-        //assert(eval1.f.r <= 1.f && eval1.f.g <= 1.f && eval1.f.b <= 1.f);
-        assert(!fl::isInfOrNaN(eval1.pdf) && "What");
-        return eval1;
+        // --- sample (visible) micro-normal in local frame ---
+        Vector3f wmLocal;
+        if (singular)
+        {
+            // delta case: micro-normal aligns with shading normal (tangent space z)
+            wmLocal = Vector3f(0.f, 0.f, 1.f);
+            bs.wm   = bsdf.closure.N;
+        }
+        else
+        {
+            wmLocal = sampleMicroNormal(wLocal, u, bsdf.alphax, bsdf.alphay); // returns normalized micro-normal
+            bs.wm   = normalize(tangentSpace.fromLocal(wmLocal));
+        }
+
+        // cos between incoming and micro-normal
+        float const cosWH = dot(wLocal, wmLocal);
+        if (cosWH <= 0.f)
+            return bs;
+
+        // --- compute outgoing local direction (woLocal) depending on branch ---
+        Vector3f woLocal; // outgoing direction in local frame
+        if (singular)
+        {
+            // deterministic specular: use geometric normal (closure.N) for reflection/refraction
+            if (doRefract)
+            {
+                // refract using geometric normal
+                Vector3f wt;
+                float    etaRel = bsdf.eta;
+                // refract expects wi (incoming), Normal3f n, eta, etap, wt
+                // create Normal3f from closure.N (Normal3f normalizes internally)
+                if (!refract(w, Normal3f(bsdf.closure.N), etaRel, &bs.eta, &wt))
+                    return bs; // TIR or failure
+                bs.wi = wt;
+                // delta transmission: assign pdf equal to mixture probability for transmission branch
+                bs.pdf = (1.0f - pdfReflect);
+                // delta BTDF: approximate via transTint / (eta^2) (radiance symmetry)
+                bs.f = transTint / (bs.eta * bs.eta);
+                return bs;
+            }
+            else
+            {
+                // perfect mirror reflection
+                Vector3f wr = reflect(w, Normal3f(bsdf.closure.N).asVec()); // reflect expects Vector3f,Normal3f
+                bs.wi       = wr;
+                bs.pdf      = pdfReflect;
+                // delta BRDF: reflectance uses conductor or dielectric microfacet F at cos between wo and normal
+                if (bsdf.isConductor)
+                {
+                    // conductor uses complex IOR Fresnel (per-channel)
+                    bs.f = fresnel::reflectanceConductor(fabsf(dot(wr, bsdf.closure.N)),
+                                                         bsdf.fresnel.c.eta,
+                                                         bsdf.fresnel.c.etak);
+                }
+                else
+                {
+                    float F = fresnel::reflectanceDielectric(fabsf(dot(wr, bsdf.closure.N)), bsdf.eta);
+                    bs.f    = bsdf.fresnel.d.reflectanceTint * F;
+                }
+                return bs;
+            }
+        }
+
+        // Non-singular: compute outgoing in local space using micro-normal wmLocal
+        if (doRefract)
+        {
+            // Transmission: need eta_i / eta_o consistent with refract helper semantics.
+            float etaI = 1.f;
+            float etaO = bsdf.eta;
+            // if incoming is below geometric normal we would have flipped earlier; here cosI > 0 so assume outside->inside
+            float relEta = etaI / etaO;
+
+            // compute sin^2 theta_t to check TIR
+            float sin2ThetaT = relEta * relEta * (fmaxf(0.f, 1.f - cosWH * cosWH));
+            if (sin2ThetaT >= 1.f)
+                return bs; // TIR for this micro-normal
+
+            float cosThetaT = fl::safeSqrt(1.f - sin2ThetaT);
+
+            // compute outgoing local vector (Walter eqn mapping)
+            // Using relation: woLocal = normalize(relEta * -wLocal + (relEta * cosWH - cosThetaT) * wmLocal)
+            woLocal = normalize(relEta * -wLocal + (relEta * cosWH - cosThetaT) * wmLocal);
+            bs.eta  = relEta;
+        }
+        else
+        {
+            // Reflection: standard microfacet reflection around micro-normal
+            woLocal = normalize(2.f * cosWH * wmLocal - wLocal);
+            bs.eta  = 1.f;
+        }
+
+        // ensure outgoing is in the upper hemisphere
+        if (!doRefract && woLocal.z <= 0.f)
+        {
+            if (doRefract)
+            {
+                Context ctx;
+                ctx.error("Trasmission died", {});
+            }
+            return bs;
+        }
+
+        // convert to world-space outgoing direction
+        bs.wi = normalize(tangentSpace.fromLocal(woLocal));
+
+        // --- evaluate microfacet terms ---
+        float const D = NDF(wmLocal, bsdf.alphax, bsdf.alphay);
+        float const G = heightCorrG(woLocal, wLocal, bsdf.alphax, bsdf.alphay);
+
+        // visible-normal PDF for the sampled micro-normal (in the local frame)
+        float const pdf_m = fmaxf(1e-12f, PDF(wLocal, wmLocal, bsdf.alphax, bsdf.alphay));
+
+        // compute Fresnel at micro-normal (cos between incident and micro-normal)
+        float const F_micro = bsdf.isConductor
+                                  ? fresnel::reflectanceConductor(fabsf(cosWH), bsdf.fresnel.c.eta, bsdf.fresnel.c.etak).avg()
+                                  : fresnel::reflectanceDielectric(fabsf(cosWH), bsdf.eta);
+
+        // compute common helper values
+        float const cosO = woLocal.z;
+        float const cosN = wLocal.z; // same as cosI earlier
+
+        // --- assemble PDF and BSDF depending on branch ---
+        if (!doRefract)
+        {
+            // Reflection (Walter eq. for reflection):
+            // f = (F * D * G) / (4 * cosI * cosO)
+            float denom = 4.f * cosN * cosO;
+            if (denom <= 1e-12f)
+                return bs;
+
+            // per-channel Fresnel: conductor returns RGB; dielectric returns scalar F_micro
+            RGB Fcol = bsdf.isConductor
+                           ? fresnel::reflectanceConductor(fabsf(cosWH), bsdf.fresnel.c.eta, bsdf.fresnel.c.etak)
+                           : bsdf.fresnel.d.reflectanceTint * RGB::fromScalar(F_micro);
+
+            bs.f = (Fcol * (D * G)) / denom;
+
+            // PDF change of variable: p(wo) = pdf_m / (4 * |dot(wo, wm)|)
+            float denomPDF = 4.f * fabsf(cosWH);
+            if (denomPDF <= 1e-12f)
+                return bs;
+
+            bs.pdf = pdfReflect * (pdf_m / denomPDF);
+            // mixture factor applied (pdfReflect)
+        }
+        else
+        {
+            // Transmission (Walter's BTDF eq.21)
+            // denom_term = (eta_i * (i·h) + eta_o * (o·h))^2
+            float const i_dot_h = dot(wLocal, wmLocal);
+            float const o_dot_h = dot(woLocal, wmLocal);
+            float const i_dot_n = fabsf(cosN);
+            float const o_dot_n = fabsf(cosO);
+
+            // eta_i = 1, eta_o = bsdf.eta under our convention (outside->inside)
+            float const eta_i     = 1.f;
+            float const eta_o     = bsdf.eta;
+            float       denomTerm = eta_i * i_dot_h + eta_o * o_dot_h;
+            denomTerm             = denomTerm * denomTerm;
+            if (denomTerm <= 1e-12f)
+                return bs;
+
+            // scalar 1 - F (use scalar Fresnel for dielectric)
+            float const oneMinusF = 1.f - F_micro;
+
+            // BTDF scalar factor per Walter eq.21:
+            float bt_scalar = (fabsf(i_dot_h) * fabsf(o_dot_h)) / (i_dot_n * o_dot_n);
+            bt_scalar *= (eta_o * eta_o) * oneMinusF * G * D / denomTerm;
+
+            // transmittance tint (RGB) applied
+            bs.f = bsdf.fresnel.d.transmittanceTint * bt_scalar;
+
+            // change-of-variable Jacobian (eq.17 swapped): (eta_i^2 * |i·h|) / denomTerm
+            float const jacobian = (eta_i * eta_i * fabsf(i_dot_h)) / denomTerm;
+
+            bs.pdf = (1.0f - pdfReflect) * pdf_m * jacobian;
+#if 1
+            {
+                Context ctx;
+                ctx.trace("Transmission still alive with PDF {}", std::make_tuple(bs.pdf));
+            }
+#endif
+        }
+
+        // final safety clamps
+        if (fl::isInfOrNaN(bs.pdf) || bs.pdf <= 0.f) // NaN or <=0
+        {
+            // nothing valid
+            bs.pdf = 0.f;
+            bs.f   = RGB::fromScalar(0.f);
+            return bs;
+        }
+
+        // ensure non-negative energy (tiny negative due to FP can happen)
+        bs.f = bs.f.saturate0();
+
+        return bs;
     }
 
     RGB DMT_FASTCALL eval(BSDF const& bsdf, Vector3f wo, Vector3f wi, Vector3f ng, float* pdf)
     {
-        Frame const tangentSpace = Frame::fromXZ(bsdf.T, bsdf.closure.N);
+        BSDFSample dummy{};
+        *pdf = 0.f;
 
-        Vector3f const woLocal = normalize(tangentSpace.toLocal(wo));
-        Vector3f const wiLocal = normalize(tangentSpace.toLocal(wi));
+        // --- tangent frame ---
+        Frame const    tangentSpace = Frame::fromXZ(bsdf.T, bsdf.closure.N);
+        Vector3f const woLocal      = normalize(tangentSpace.toLocal(wo));
+        Vector3f const wiLocal      = normalize(tangentSpace.toLocal(wi));
 
-        float const cosNI  = wiLocal.z;
-        float const cosNO  = woLocal.z;
-        float const cosNgO = dot(bsdf.closure.N, wo);
+        float const cosNO = woLocal.z;
+        float const cosNI = wiLocal.z;
+        if (cosNO <= 0.f || cosNI <= 0.f)
+            return RGB::fromScalar(0.f); // below hemisphere, invalid
 
-        // can refract?
-        bool const isTransmission = cosNgO < 0;
+        // --- determine reflection vs transmission ---
+        bool const isTransmission = dot(bsdf.closure.N, wo) * dot(bsdf.closure.N, wi) < 0.f;
         bool const canRefract     = !bsdf.isConductor && (bsdf.eta - 1.f) > 1e-3f &&
                                 bsdf.fresnel.d.transmittanceTint.max() > 1e-4f;
-        if (isTransmission && !canRefract)
-            return {};
 
-        // generalized half vector (TODO why minus?)
-        Vector3f H       = isTransmission ? -(bsdf.eta * wo + wi) : (wo + wi);
-        float    invLenH = normL2(H);
-        invLenH          = invLenH == 0.f ? 0.f : fl::rcp(invLenH);
-        H *= invLenH;
+        if (isTransmission && !canRefract)
+            return RGB::fromScalar(0.f);
+
+        // --- half-vector ---
+        Vector3f H      = isTransmission ? normalize(bsdf.eta * wo + wi) : normalize(wo + wi);
         Vector3f HLocal = normalize(tangentSpace.toLocal(H));
 
-        // fresnel coefficientes
-        float const cosHI = HLocal.z;
+        // --- Fresnel ---
+        float const cosHI = dot(wiLocal, HLocal);
         RGB         reflectance{}, transmittance{};
         if (bsdf.isConductor)
             reflectance = fresnel::reflectanceConductor(cosHI, bsdf.fresnel.c.eta, bsdf.fresnel.c.etak);
         else
         {
-            float const FDeg = fresnel::reflectanceDielectric(cosHI, bsdf.eta);
-            reflectance      = FDeg * bsdf.fresnel.d.reflectanceTint;
-            transmittance    = fmaxf(1.f - FDeg, 0.f) * bsdf.fresnel.d.transmittanceTint;
+            float F       = fresnel::reflectanceDielectric(fabsf(cosHI), bsdf.eta);
+            reflectance   = F * bsdf.fresnel.d.reflectanceTint;
+            transmittance = (1.f - F) * bsdf.fresnel.d.transmittanceTint;
         }
 
         if (reflectance.max() < 1e-7f && transmittance.max() < 1e-7f)
-            return {};
+            return RGB::fromScalar(0.f);
 
+        // --- microfacet terms ---
         float const D       = NDF(HLocal, bsdf.alphax, bsdf.alphay);
         float const lambdaI = auxiliaryLambda(wiLocal, bsdf.alphax, bsdf.alphay);
         float const lambdaO = auxiliaryLambda(woLocal, bsdf.alphax, bsdf.alphay);
+        float const G       = heightCorrG(woLocal, wiLocal, bsdf.alphax, bsdf.alphay);
 
-        float const common = D / cosNI *
-                             (isTransmission ? fl::sqr(bsdf.eta * invLenH) * fl::abs(cosHI * dot(H, wo)) : 0.25f);
+        // --- visible-normal PDF ---
+        float const pdf_m = fmaxf(1e-12f, PDF(wiLocal, HLocal, bsdf.alphax, bsdf.alphay));
 
-        float const pdfReflect = reflectance.avg() / (reflectance + transmittance).avg();
-        float const lobePDF    = isTransmission ? 1.f - pdfReflect : pdfReflect;
+        float pdfReflect = 0.f;
+        float lobePDF    = 1.f;
 
-        *pdf = common * lobePDF / (1.f + lambdaI); // change of variable factor
-        return (isTransmission ? transmittance : reflectance) * common / (1.f + lambdaO + lambdaI);
+        RGB f = RGB::fromScalar(0.f);
+
+        if (!isTransmission)
+        {
+            // --- reflection ---
+            float denom = 4.f * cosNI * cosNO;
+            if (denom <= 1e-12f)
+                return RGB::fromScalar(0.f);
+
+            RGB Fcol = bsdf.isConductor
+                           ? fresnel::reflectanceConductor(fabsf(cosHI), bsdf.fresnel.c.eta, bsdf.fresnel.c.etak)
+                           : bsdf.fresnel.d.reflectanceTint *
+                                 RGB::fromScalar(fresnel::reflectanceDielectric(fabsf(cosHI), bsdf.eta));
+
+            f = Fcol * D * G / denom;
+
+            pdfReflect = reflectance.avg() / (reflectance + transmittance).avg();
+            lobePDF    = pdfReflect;
+
+            *pdf = pdf_m / (4.f * fabsf(cosHI)) * lobePDF;
+        }
+        else
+        {
+            // --- transmission (BTDF) ---
+            float const i_dot_h = dot(wiLocal, HLocal);
+            float const o_dot_h = dot(woLocal, HLocal);
+            float const i_dot_n = cosNI;
+            float const o_dot_n = cosNO;
+
+            float const eta_i = 1.f;
+            float const eta_o = bsdf.eta;
+
+            float denomTerm = eta_i * i_dot_h + eta_o * o_dot_h;
+            denomTerm       = denomTerm * denomTerm;
+            if (denomTerm <= 1e-12f)
+                return RGB::fromScalar(0.f);
+
+            float const oneMinusF = 1.f - fresnel::reflectanceDielectric(fabsf(cosHI), bsdf.eta);
+            float       bt_scalar = (fabsf(i_dot_h) * fabsf(o_dot_h)) / (i_dot_n * o_dot_n) * G * D * oneMinusF *
+                              (eta_o * eta_o) / denomTerm;
+
+            f = bt_scalar * bsdf.fresnel.d.transmittanceTint;
+
+            pdfReflect = reflectance.avg() / (reflectance + transmittance).avg();
+            lobePDF    = 1.f - pdfReflect;
+
+            float jacobian = (eta_i * eta_i * fabsf(i_dot_h)) / denomTerm;
+            *pdf           = pdf_m * jacobian * lobePDF;
+        }
+
+        f = f.saturate0();
+        if (*pdf <= 0.f || fl::isInfOrNaN(*pdf))
+        {
+            *pdf = 0.f;
+            return RGB::fromScalar(0.f);
+        }
+
+        return f;
     }
+
 } // namespace dmt::ggx

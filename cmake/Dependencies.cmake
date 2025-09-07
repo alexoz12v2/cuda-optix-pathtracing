@@ -2,6 +2,27 @@ include(FetchContent)
 include(FindPackageHandleStandardArgs)
 
 macro(dmt_setup_dependencies)
+  # TODO BETTER: fix dependencies linknig on linux
+  # if you leave the CXX flags here, I think you can remove them from the target specific options
+  if (DMT_OS_LINUX)
+    # Tell Clang to use your custom libc++
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      if(DMT_OS_LINUX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(LIBCXX_INCLUDE_DIR "/usr/lib/llvm-20/include/c++/v1")
+        if(EXISTS "${LIBCXX_INCLUDE_DIR}")
+          message(STATUS "Adding libc++ include: ${LIBCXX_INCLUDE_DIR}")
+          set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -nostdlib++ -nostdinc++ -isystem ${LIBCXX_INCLUDE_DIR}")
+        else()
+          message(WARNING "Custom libc++ include directory not found: ${LIBCXX_INCLUDE_DIR}")
+        endif()
+        
+        set(CMAKE_CXX_STANDARD 20)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+      endif()
+
+    endif()
+  endif()
+
   set(IMATH_INSTALL OFF)
 
   # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html

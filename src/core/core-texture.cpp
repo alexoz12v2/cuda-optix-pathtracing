@@ -58,6 +58,21 @@ namespace dmt {
         }
     }
 
+    size_t alignPerPixel(TexFormat tex)
+    {
+        using enum TexFormat;
+        switch (tex)
+        {
+            case FloatRGB: [[fallthrough]];
+            case FloatGray: return 4;
+            case HalfRGB: [[fallthrough]];
+            case HalfGray: return 2;
+            case ByteRGB: [[fallthrough]];
+            case ByteGray: [[fallthrough]];
+            case Count: return 1;
+        }
+    }
+
     template <typename T>
     concept PixelType = std::is_same_v<T, RGB> || std::is_same_v<T, Half3> || std::is_same_v<T, Byte3> ||
                         std::is_same_v<T, float> || std::is_same_v<T, Half> || std::is_same_v<T, uint8_t>;
@@ -289,6 +304,8 @@ namespace dmt {
             auto* prevLevel = reinterpret_cast<unsigned char*>(tex.data) +
                               mortonLevelOffset(xRes, yRes, level - 1) * pixelSize;
             auto* currLevel = reinterpret_cast<unsigned char*>(tex.data) + mortonLevelOffset(xRes, yRes, level) * pixelSize;
+            assert(isAligned(prevLevel, alignPerPixel(tex.texFormat)));
+            assert(isAligned(currLevel, alignPerPixel(tex.texFormat)));
 
             for (int v = 0; v < currH; ++v)
             {
@@ -429,6 +446,7 @@ namespace dmt {
         void const* mortonLevelBuffer // NEW: generic pointer
     )
     {
+        assert(isAligned(mortonLevelBuffer, alignPerPixel(format)));
         constexpr auto wrapCoord = [](int coord, int size, TexWrapMode mode) -> int {
             switch (mode)
             {
@@ -609,13 +627,31 @@ namespace dmt {
         return res;
     }
 
-    DMT_CORE_API RGB EWAFormula(EWAParams const& p, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in)
+#define DMT_SAFETY_FIRST_EWA
+
+    RGB EWAFormula(EWAParams const& p, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in)
     {
         using enum TexFormat;
 
         // Scale derivatives to mip level texel space
         Vector2f dst0 = {dst0_in.x * p.levelRes.x, dst0_in.y * p.levelRes.y};
         Vector2f dst1 = {dst1_in.x * p.levelRes.x, dst1_in.y * p.levelRes.y};
+#if defined(DMT_SAFETY_FIRST_EWA)
+        float constexpr MinDeriv = 1e-4f;
+        if (std::abs(dst0.x) < MinDeriv && std::abs(dst0.y) < MinDeriv && std::abs(dst1.x) < MinDeriv &&
+            std::abs(dst1.y) < MinDeriv)
+        {
+            // fallback to nearest
+            return sampleMortonTexel(int(std::floor(st_in.x * p.levelRes.x)),
+                                     int(std::floor(st_in.y * p.levelRes.y)),
+                                     p.levelRes,
+                                     p.wrapX,
+                                     p.wrapY,
+                                     p.texFormat,
+                                     p.isNormal,
+                                     p.mortonLevelBuffer);
+        }
+#endif
 
         // Map st to texel space (centered at -0.5)
         float sx = st_in.x * float(p.levelRes.x) - 0.5f;
@@ -627,8 +663,8 @@ namespace dmt {
         float C = dst0.x * dst0.x + dst1.x * dst1.x;
 
         // Normalize
-        float invF = 1.0f / (A * C - 0.25f * B * B);
-        if (!(invF > 0.0f))
+        float const det = (A * C - 0.25f * B * B);
+        if (det <= 1e-12f)
         {
             return sampleMortonTexel(int(std::floor(sx + 0.5f)),
                                      int(std::floor(sy + 0.5f)),
@@ -639,6 +675,7 @@ namespace dmt {
                                      p.isNormal,
                                      p.mortonLevelBuffer);
         }
+        float invF = 1.0f / det;
         A *= invF;
         B *= invF;
         C *= invF;
@@ -648,6 +685,21 @@ namespace dmt {
         C += 1.0f;
 
         // Bounding box
+
+#if defined(DMT_SAFETY_FIRST_EWA)
+        float const detBB = A * C - 0.25f * B * B;
+        if (detBB <= 0.0f)
+        {
+            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
+                                     int(std::floor(sy + 0.5f)),
+                                     p.levelRes,
+                                     p.wrapX,
+                                     p.wrapY,
+                                     p.texFormat,
+                                     p.isNormal,
+                                     p.mortonLevelBuffer);
+        }
+#endif
         float invDet  = 1.0f / (A * C - 0.25f * B * B);
         float uRadius = std::sqrt(C * invDet);
         float vRadius = std::sqrt(A * invDet);

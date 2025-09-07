@@ -16,21 +16,17 @@
     {
       "name": "mat",
       "diffuse": [0.4, 0.5, 0.2],
-      "metallic": 0.0,
+      "metallic": 1.0,
       "roughness": 0.03,
       "ior": 1.4,
-      "ggx-anisotropy": 0,
-      "ggx-dielectric": {
-        "reflectance-tint": [ 0.2, 0.1, 0.1 ],
-        "transmittance-tint": [ 1, 1, 1 ]
-      }
+      "ggx-anisotropy": 0.3
     }
   ],
   "objects": [
     {
-      "name": "the-cube",
-      "type": "primitive",
-      "shape": "cube",
+      "name": "the-thing",
+      "type": "FBX",
+      "path": "sphere.fbx",
       "material": "mat"
     }
   ],
@@ -67,7 +63,7 @@
   ],
   "world": {
     "position-obj": {
-      "instances": ["the-cube"]
+      "instances": ["the-thing"]
     },
     "position-light": {
       "lights": ["my-spot"]

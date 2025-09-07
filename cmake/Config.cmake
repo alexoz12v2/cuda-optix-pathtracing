@@ -538,6 +538,10 @@ function(dmt_set_public_symbols_hidden target)
   set_target_properties(${target} PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES)
+  message(WARNING "Setting _GLIBC_USE_CXX_ABI=1, even though by default we use libc++ (llvm), and not libstdc++ (gnu)")
+  if(DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
+    target_compile_definitions(${target} PRIVATE _GLIBC_USE_CXX_ABI=1)
+  endif()
 endfunction()
 
 

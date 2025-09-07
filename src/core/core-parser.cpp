@@ -1,5 +1,6 @@
 #include "core-parser.h"
 
+#include "ImfRgba.h"
 #include "core-light.h"
 #include "core-math.h"
 #include "core-render.h"
@@ -11,6 +12,8 @@
 #include "platform/platform-context.h"
 
 // json parsing
+#include <algorithm>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
@@ -89,6 +92,20 @@ namespace dmt::parse_helpers {
         eCount
     };
 
+    static std::string_view tempTexObjResultToString(TempTexObjResult result)
+    {
+        switch (result)
+        {
+            case TempTexObjResult::eOk: return "Operation was successful.";
+            case TempTexObjResult::eNotExists: return "The texture object does not exist.";
+            case TempTexObjResult::eFormatNotSupported: return "The texture format is not supported.";
+            case TempTexObjResult::eFailLoad: return "Failed to load the texture.";
+            case TempTexObjResult::eNumChannelsIncorrect: return "The number of texture channels is incorrect.";
+            default: return "Unknown error.";
+        }
+    }
+
+
     static bool hasOnlyAllowedkeys(json const& object, std::unordered_set<std::string> const& allowedKeys)
     {
         if (!object.is_object())
@@ -133,13 +150,21 @@ namespace dmt::parse_helpers {
             return nullptr;
 
         std::pmr::string pathStr = path.toUnderlying();
+        std::string      pathExt;
+        if (pathStr.find_last_of('.') == std::pmr::string::npos)
+            return nullptr;
+        std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pathStr.find_last_of('.')),
+                  pathStr.end(),
+                  std::back_inserter(pathExt));
+
+        std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
 
         int  xRes     = 0;
         int  yRes     = 0;
         int  channels = 0;
         RGB* result   = nullptr;
 
-        if (pathStr.ends_with("png"))
+        if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
         {
             // Decode 8-bit LDR with stb_image
             unsigned char* data = stbi_load(pathStr.c_str(), &xRes, &yRes, &channels, 0);
@@ -169,7 +194,7 @@ namespace dmt::parse_helpers {
             }
             stbi_image_free(data);
         }
-        else if (pathStr.ends_with("exr"))
+        else if (pathExt.ends_with("exr"))
         {
             try
             {
@@ -203,7 +228,7 @@ namespace dmt::parse_helpers {
                 return nullptr;
             }
         }
-        else if (pathStr.ends_with("hdr"))
+        else if (pathExt.ends_with("hdr"))
         {
             float* data = stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
             if (!data)
@@ -242,6 +267,26 @@ namespace dmt::parse_helpers {
         return result;
     }
 
+    static std::string_view writeOpenEXRChannel(Imf::RgbaChannels channels)
+    {
+        using enum Imf::RgbaChannels;
+        switch (channels)
+        {
+            case WRITE_R: return "(OpenEXR) Red";
+            case WRITE_G: return "(OpenEXR) Green";
+            case WRITE_B: return "(OpenEXR) Blue";
+            case WRITE_A: return "(OpenEXR) Alpha";
+            case WRITE_Y: return "(OpenEXR) Luminance, for black-and-white images, or in combination with chroma";
+            case WRITE_C:
+                return "(OpenEXR) Chroma (two subsampled channels, RY and BY, supported only for scanline-based files)";
+            case WRITE_RGB: return "(OpenEXR) Red, green, blue";
+            case WRITE_RGBA: return "(OpenEXR) Red, green, blue, alpha";
+            case WRITE_YC: return "(OpenEXR) Luminance, chroma";
+            case WRITE_YA: return "(OpenEXR) Luminance, alpha";
+            case WRITE_YCA: return "(OpenEXR) Luminance, chroma, alpha";
+        }
+    }
+
     static TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out)
     {
         using enum TempTexObjResult;
@@ -254,7 +299,18 @@ namespace dmt::parse_helpers {
         int         xRes = 0, yRes = 0, channels = isRGB ? 3 : 1;
         void const* data = nullptr;
         TexFormat   format;
-        if (pathStr.ends_with("png"))
+
+        std::string pathExt;
+        if (pathStr.find_last_of('.') == std::pmr::string::npos)
+            return eNotExists;
+
+        std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pathStr.find_last_of('.')),
+                  pathStr.end(),
+                  std::back_inserter(pathExt));
+
+        std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
+
+        if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
         {
             // PNG file, no header parsing, 8 bppc only
             format = isRGB ? TexFormat::ByteRGB : TexFormat::ByteGray;
@@ -262,15 +318,57 @@ namespace dmt::parse_helpers {
             if (!data)
                 return eFailLoad;
             if (channels != (isRGB ? 3 : 1))
+            {
+                Context ctx;
+                ctx.error("  texture channels: {}", std::make_tuple(channels));
+                ctx.error("  texture expected: {}", std::make_tuple(isRGB ? 3 : 1));
                 return eNumChannelsIncorrect;
+            }
         }
-        else if (pathStr.ends_with("exr"))
+        else if (pathExt.ends_with("exr"))
         {
             // OpenEXR format, half16 per channel
             try
             {
                 Imf::RgbaInputFile file(pathStr.c_str());
                 Imath::Box2i       dw = file.dataWindow();
+
+                if (file.channels() != (isRGB ? Imf::RgbaChannels::WRITE_RGB : Imf::RgbaChannels::WRITE_Y))
+                {
+                    Context ctx;
+                    ctx.error("  texture channels: {}", std::make_tuple(writeOpenEXRChannel(file.channels())));
+                    ctx.error("  texture expected: {}",
+                              std::make_tuple(writeOpenEXRChannel(
+                                  isRGB ? Imf::RgbaChannels::WRITE_RGB : Imf::RgbaChannels::WRITE_Y)));
+                    return eNumChannelsIncorrect;
+                }
+
+                if (file.pixelAspectRatio() != 1.f)
+                {
+                    Context ctx;
+                    ctx.warn("  texture EXR pixel aspect ratio different than 1", {});
+                }
+
+                if (file.lineOrder() != Imf::LineOrder::INCREASING_Y)
+                {
+                    Context ctx;
+                    ctx.warn("  texture EXR line order differnet than increasing Y", {});
+                }
+
+                if (file.parts() > 1)
+                {
+                    Context ctx;
+                    ctx.error("  OpenEXR: No support for multi-view/multi-part EXR files", {});
+                    return eFormatNotSupported;
+                }
+
+                if (file.header().hasType() && file.header().type() != "scanlineimage")
+                {
+                    Context ctx;
+                    ctx.error("  OpenEXR: Expected type '{}', but got '{}'",
+                              std::make_tuple("scanlineimage", file.header().type()));
+                    return eFormatNotSupported;
+                }
 
                 xRes = dw.max.x - dw.min.x + 1;
                 yRes = dw.max.y - dw.min.y + 1;
@@ -311,8 +409,8 @@ namespace dmt::parse_helpers {
                         for (int x = 0; x < xRes; ++x)
                         {
                             Imf::Rgba const& px = pixels[y][x];
-                            // Simple luminance conversion (could be weighted differently)
-                            buf[y * xRes + x] = half(0.299f * px.r + 0.587f * px.g + 0.114f * px.b);
+                            assert((px.b == 0 && px.g == 0 && (px.a == 1 || px.a == 0)) || (px.r == px.g && px.g == px.b));
+                            buf[y * xRes + x] = px.r;
                         }
                     }
                     data = buf;
@@ -322,7 +420,7 @@ namespace dmt::parse_helpers {
                 return eFailLoad;
             }
         }
-        else if (pathStr.ends_with("hdr"))
+        else if (pathExt.ends_with("hdr"))
         {
             // Radiance RGBE pixel format through stb_image, which expands it into float32
             format = isRGB ? TexFormat::FloatRGB : TexFormat::FloatGray;
@@ -330,7 +428,11 @@ namespace dmt::parse_helpers {
             if (!data)
                 return eFailLoad;
             if (channels != (isRGB ? 3 : 1))
+            {
+                Context ctx;
+                ctx.error("  texture channels: {}", std::make_tuple(channels));
                 return eNumChannelsIncorrect;
+            }
         }
         else
         {
@@ -344,11 +446,20 @@ namespace dmt::parse_helpers {
     static void freeTempTexObj(os::Path const& path, ImageTexturev2& in)
     {
         std::pmr::string pathStr = path.toUnderlying();
-        if (pathStr.ends_with("png") || pathStr.ends_with("hdr"))
+        std::string      pathExt;
+        if (pathStr.find_last_of('.') == std::pmr::string::npos)
+            return;
+
+        std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pathStr.find_last_of('.')),
+                  pathStr.end(),
+                  std::back_inserter(pathExt));
+
+        std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
+        if (pathExt.ends_with("png") || pathExt.ends_with("hdr") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
         {
             stbi_image_free(in.data);
         }
-        else if (pathStr.ends_with("exr"))
+        else if (pathExt.ends_with("exr"))
         {
             free(in.data);
         }
@@ -443,44 +554,50 @@ namespace dmt::parse_helpers {
     {
         Context ctx;
 
-        if (texture.size() != 3)
+        thread_local std::unordered_set<std::string> const allowed{"name", "type", "path"};
+
+        if (!hasOnlyAllowedkeys(texture, allowed))
         {
-            //insert error message
+            ctx.error("Texture object should contain only attributes 'path', 'name', 'type'", {});
             return false;
         }
 
-        if (!texture.contains("name"))
+        if (!texture.contains("name") || !texture["name"].is_string())
         {
-            //insert error message
+            ctx.error("Texture object should contain attribute 'name' and it should be a string", {});
             return false;
         }
 
-        if (!texture.contains("type"))
+        std::string texName = texture["name"];
+        ctx.log("Texture: Loading texture '{}'", std::make_tuple(texName));
+
+        if (!texture.contains("type") || !texture["type"].is_string())
         {
-            //insert error message
+            ctx.error("Texture object should contain attribute 'type' and it should be a string", {});
             return false;
         }
 
-        if (!texture.contains("path"))
+        if (!texture.contains("path") || !texture["path"].is_string())
         {
-            //insert error message
+            ctx.error("Texture object should contain attribute 'path' and it should be a string", {});
             return false;
         }
 
-        if (!texture["name"].is_string() || state.texturesPath.contains(static_cast<std::string>(texture["name"])))
+        if (state.texturesPath.contains(static_cast<std::string>(texture["name"])))
         {
-            //insert error message
+            ctx.error("texture {} already exists", std::make_tuple(static_cast<std::string>(texture["name"])));
             return false;
         }
 
-        if (texture["type"] != "diffuse" && texture["type"] != "normal" && texture["type"] != "metallic")
-        {
-            //insert error message
-            return false;
-        }
-
-        std::string texName                 = texture["name"];
         state.texturesPath[texName].texType = texture["type"];
+
+        if (state.texturesPath[texName].texType != "diffuse" && state.texturesPath[texName].texType != "normal" &&
+            state.texturesPath[texName].texType != "metallic" && state.texturesPath[texName].texType != "roughness")
+        {
+            ctx.error("texture: unrecognized type '{}'", std::make_tuple(state.texturesPath[texName].texType));
+            return false;
+        }
+
         os::Path texPath = parser.fileDirectory() / static_cast<std::string>(texture["path"]).c_str();
 
         if (!texPath.isValid() || !texPath.isFile())
@@ -490,14 +607,20 @@ namespace dmt::parse_helpers {
         }
 
         state.texturesPath[texName].texPath = std::string(texPath.toUnderlying());
-        ImageTexturev2   imgTex;
+        ImageTexturev2   imgTex{};
         TempTexObjResult res = tempTexObj(texPath,
                                           state.texturesPath[texName].texType == "diffuse" ||
                                               state.texturesPath[texName].texType == "normal",
                                           &imgTex);
         if (res != TempTexObjResult::eOk)
         {
-            ctx.error("Error loading texture", {});
+            ctx.error("Error loading texture '{}'", std::make_tuple(texName));
+            ctx.error("{}", std::make_tuple(tempTexObjResultToString(res)));
+            if (res == TempTexObjResult::eNumChannelsIncorrect)
+            {
+                ctx.error("metallic, roughness expect 1 channel", {});
+                ctx.error("diffuse, normal, expect 3 channels", {});
+            }
             return false;
         }
         state.texturesPath[texName].xRes = static_cast<uint32_t>(imgTex.width);
@@ -517,7 +640,27 @@ namespace dmt::parse_helpers {
             ctx.error("The 'materials' array should contain only objects", {});
             return false;
         }
-        static std::unordered_set<std::string> const
+
+        if (!material.contains("name") || !material["name"].is_string())
+        {
+            ctx.error(
+                "The material should have a unique 'name' *string*"
+                "field in the materials namespace",
+                {});
+            return false;
+        }
+
+        std::string const name = material["name"];
+
+        if (state.materials.contains(name))
+        {
+            ctx.error("Duplicate material name '{}'", std::make_tuple(name));
+            return false;
+        }
+
+        ctx.log("Material: Loading material '{}'", std::make_tuple(name));
+
+        thread_local std::unordered_set<std::string> const
             allowedKeys{"name",
                         "diffuse",
                         "metallic",
@@ -531,28 +674,21 @@ namespace dmt::parse_helpers {
                         "oren-nayar-dielectric"};
         if (!hasOnlyAllowedkeys(material, allowedKeys))
         {
-            ctx.error("material has extraneous key", {});
+            std::string extraneous;
+            for (auto const& [key, val] : material.items())
+            {
+                if (!allowedKeys.contains(key))
+                {
+                    extraneous = key;
+                    break;
+                }
+            }
+            ctx.error("material '{}' has extraneous key '{}'", std::make_tuple(name, extraneous));
             return false;
         }
 
-        std::string name;
         try
         {
-            if (!material.contains("name"))
-            {
-                ctx.error(
-                    "The material should have a unique 'name'"
-                    "field in the materials namespace",
-                    {});
-                return false;
-            }
-
-            if (state.materials.contains(material["name"]))
-            {
-                ctx.error("Duplicate material names", {});
-                return false;
-            }
-            name = material["name"];
             // - mandatory fields parsing
             if (!material.contains("diffuse"))
             {
@@ -951,14 +1087,29 @@ namespace dmt::parse_helpers {
 
     static bool transform(Parser& parser, ParserState& state, json const& transform)
     {
-        Context ctx;
-        // common: All transforms have a unique name: fail if name absent or duplicate
-        // one of: "SRT"
-        if (transform.size() != 2)
+        Context                                            ctx;
+        thread_local std::unordered_set<std::string> const allowedKeys{"name", "srt"};
+        if (!transform.is_object())
         {
-            ctx.error("[Transform] unexpected number of elements", {});
+            ctx.error("Error: Transform Expected a JSON Object", {});
             return false;
         }
+
+        if (!hasOnlyAllowedkeys(transform, allowedKeys))
+        {
+            std::string extraneous;
+            for (auto const& [key, value] : transform.items())
+            {
+                if (!allowedKeys.contains(key))
+                {
+                    extraneous = key;
+                    break;
+                }
+            }
+            ctx.error("Transform has extraneous key '{}'", std::make_tuple(extraneous));
+            return false;
+        }
+
         std::string name;
         json        srt;
         try
@@ -970,12 +1121,13 @@ namespace dmt::parse_helpers {
                 return false;
             }
             name = static_cast<std::string>(jname);
-            srt  = transform["srt"];
         } catch (...)
         {
             ctx.error("Expected 'name' and 'srt' as params for the transform object", {});
             return false;
         }
+
+        ctx.log("Transform: Loading Transform '{}'", std::make_tuple(name));
 
         // check existance
         if (state.transforms.contains(name))
@@ -990,53 +1142,57 @@ namespace dmt::parse_helpers {
         float    rotateDegrees = 0;
         Vector3f translationVector{};
         Vector3f scale{1, 1, 1}; // TODO should we allow small scales
-        try
+        if (transform.contains("srt"))
         {
-            if (srt.contains("rotate-axis"))
+            srt = transform["srt"];
+            try
             {
-                Vector3f tmp{};
-                if (extractVec3f(srt["rotate-axis"], &tmp) != ExtractVec3fResult::eOk)
+                if (srt.contains("rotate-axis"))
                 {
-                    ctx.error("Error extracting field 'rotate-axis'", {});
-                    return false;
+                    Vector3f tmp{};
+                    if (extractVec3f(srt["rotate-axis"], &tmp) != ExtractVec3fResult::eOk)
+                    {
+                        ctx.error("Error extracting field 'rotate-axis'", {});
+                        return false;
+                    }
+                    rotateAxis = normalize(tmp);
                 }
-                rotateAxis = normalize(tmp);
-            }
-            if (srt.contains("rotate-degrees"))
+                if (srt.contains("rotate-degrees"))
+                {
+                    if (!srt["rotate-degrees"].is_number())
+                    {
+                        ctx.error("Error extracting field 'rotate-degrees'", {});
+                        return false;
+                    }
+                    rotateDegrees = srt["rotate-degrees"];
+                }
+                if (srt.contains("translation-vector"))
+                {
+                    Vector3f tmp{};
+                    if (extractVec3f(srt["translation-vector"], &tmp) != ExtractVec3fResult::eOk)
+                    {
+                        ctx.error("Error extracting field 'translation-vector'", {});
+                        return false;
+                    }
+                    translationVector = tmp;
+                }
+                if (srt.contains("scale"))
+                {
+                    if (srt["scale"].is_number())
+                        scale = Vector3f::s(static_cast<float>(srt["scale"]));
+                    else if (Vector3f tmp{}; extractVec3f(srt["scale"], &tmp) == ExtractVec3fResult::eOk)
+                        scale = tmp;
+                    else
+                    {
+                        ctx.error("Error parsing field 'scale'", {});
+                        return false;
+                    }
+                }
+            } catch (...)
             {
-                if (!srt["rotate-degrees"].is_number())
-                {
-                    ctx.error("Error extracting field 'rotate-degrees'", {});
-                    return false;
-                }
-                rotateDegrees = srt["rotate-degrees"];
+                ctx.error("Unknown error during transform parsing", {});
+                return false;
             }
-            if (srt.contains("translation-vector"))
-            {
-                Vector3f tmp{};
-                if (extractVec3f(srt["translation-vector"], &tmp) != ExtractVec3fResult::eOk)
-                {
-                    ctx.error("Error extracting field 'translation-vector'", {});
-                    return false;
-                }
-                translationVector = tmp;
-            }
-            if (srt.contains("scale"))
-            {
-                if (srt["scale"].is_number())
-                    scale = Vector3f::s(static_cast<float>(srt["scale"]));
-                else if (Vector3f tmp{}; extractVec3f(srt["scale"], &tmp) == ExtractVec3fResult::eOk)
-                    scale = tmp;
-                else
-                {
-                    ctx.error("Error parsing field 'scale'", {});
-                    return false;
-                }
-            }
-        } catch (...)
-        {
-            ctx.error("Unknown error during transform parsing", {});
-            return false;
         }
 
         Transform t = Transform::translate(translationVector) * Transform::rotate(rotateDegrees, rotateAxis) *
@@ -1048,14 +1204,16 @@ namespace dmt::parse_helpers {
 
     static bool light(Parser& parser, ParserState& state, json const& light)
     {
-        Context          ctx;
-        std::string_view allowedKeysPoint[]{
-            "name",
-            "type",
-            "cone-angle",
-            "falloff-percentage",
-            "radiant-intensity",
-        };
+        Context                                            ctx;
+        thread_local std::unordered_set<std::string> const allowedKeysPoint{"name", "type", "radiant-intensity"};
+        thread_local std::unordered_set<std::string> const
+            allowedKeysSpot{"name",
+                            "type",
+                            "cone-angle",
+                            "falloff-percentage",
+                            "radiant-intensity",
+                            "cone-angle",
+                            "falloff-percentage"};
 
         if (!light.is_object())
         {
@@ -1074,7 +1232,10 @@ namespace dmt::parse_helpers {
                 ctx.error("Absent or invalid type for light 'name'", {});
                 return false;
             }
+
             name = light["name"];
+            ctx.log("Light: Loading light '{}'", std::make_tuple(name));
+
             if (state.lights.contains(name))
             {
                 ctx.error("Duplicated 'name' light found", {});
@@ -1091,9 +1252,19 @@ namespace dmt::parse_helpers {
 
             if (type == "point") // if point, then only radiant-intensity is the other allowed field
             {
-                if (light.size() > 3) // name, type, radiant-intensity
+                if (!hasOnlyAllowedkeys(light, allowedKeysPoint))
                 {
-                    ctx.error("Too many parameters for point light specification", {});
+                    std::string extraneous;
+                    for (auto const& [key, value] : light.items())
+                    {
+                        if (!allowedKeysPoint.contains(key))
+                        {
+                            extraneous = key;
+                            break;
+                        }
+                    }
+
+                    ctx.error("Light: unexpected parameter '{}' for point light '{}'", std::make_tuple(extraneous, name));
                     return false;
                 }
 
@@ -1116,9 +1287,18 @@ namespace dmt::parse_helpers {
             }
             else if (type == "spot") // if spot, then radiant-intensity, cone-angle, falloff-percentage are the only allowed field
             {
-                if (light.size() > 5)
+                if (!hasOnlyAllowedkeys(light, allowedKeysSpot))
                 {
-                    ctx.error("Too many parameters for spot light specification", {});
+                    std::string extraneous;
+                    for (auto const& [key, value] : light.items())
+                    {
+                        if (!allowedKeysSpot.contains(key))
+                        {
+                            extraneous = key;
+                            break;
+                        }
+                    }
+                    ctx.error("Light: unexpected parameter '{}' for spot light '{}'", std::make_tuple(extraneous, name));
                     return false;
                 }
 
@@ -1188,14 +1368,11 @@ namespace dmt::parse_helpers {
         }
 
         os::Path envPath = parser.fileDirectory() / static_cast<std::string>(envLight).c_str();
-#if defined(DMT_OS_WINDOWS)
-        __debugbreak(); // TODO remove
-#endif
         if (!envPath.isValid() || !envPath.isFile())
         {
             ctx.error(
                 "invalid path specified on 'envlight'."
-                " Should be a PNG/EXR file relative to JSON file directory",
+                " Should be a supported image file relative to JSON file directory",
                 {});
         }
         int32_t    xRes  = 0;
@@ -1204,7 +1381,7 @@ namespace dmt::parse_helpers {
         float      scale = 1.f; // TODO
 
         // NOTE: This image is leaked!!! (on purpose?, TODO: renderer's destructor should call free on the buffer)
-        auto* image = loadImageAsRGB(envPath, xRes, yRes);
+        RGB* image = loadImageAsRGB(envPath, xRes, yRes);
         if (!image)
         {
             ctx.error("failed to load image at path '{}'", std::make_tuple(envPath.toUnderlying()));
@@ -1241,7 +1418,10 @@ namespace dmt::parse_helpers {
                 ctx.error("object specification mandates a unique 'name' as string", {});
                 return false;
             }
+
             name = object["name"];
+            ctx.log("Object: Loading object '{}'", std::make_tuple(name));
+
             if (state.objects.contains(name))
             {
                 ctx.error("object 'name's should be unique", {});
@@ -1278,32 +1458,47 @@ namespace dmt::parse_helpers {
                 allowedKeys.insert("path");
                 if (!hasOnlyAllowedkeys(object, allowedKeys))
                 {
-                    ctx.error("Unrecognized keys in object", {});
+                    std::string extraneous;
+                    for (auto const& [key, value] : object.items())
+                    {
+                        if (!allowedKeys.contains(key))
+                        {
+                            extraneous = key;
+                            break;
+                        }
+                    }
+
+                    ctx.error("Object: unexpected parameter '{}' while loading object '{}'",
+                              std::make_tuple(extraneous, name));
                     return false;
                 }
+
                 // check path is valid and file, then go to fbx parsing function
                 if (!object.contains("path") || !object["path"].is_string())
                 {
                     ctx.error("FBX object should contain a string 'path' field", {});
                     return false;
                 }
-                os::Path const fbxPath = parser.fileDirectory() / static_cast<std::string>(object["path"]).c_str();
+                os::Path const fbxPath      = parser.fileDirectory() / static_cast<std::string>(object["path"]).c_str();
+                std::pmr::string const path = fbxPath.toUnderlying();
                 if (!fbxPath.isValid() || !fbxPath.isFile())
                 {
                     ctx.error("FBX object 'path' field should point to a existing FBX file. Got `{}`",
-                              std::make_tuple(fbxPath.toUnderlying()));
+                              std::make_tuple(path));
                     return false;
                 }
 
-                if (!meshParser.ImportFBX(fbxPath.toUnderlying().c_str(), &mesh))
+                ctx.trace("Object: FBX Object detected. single-mesh FBX File Path: '{}'. Loading...",
+                          std::make_tuple(path));
+                if (!meshParser.ImportFBX(path.c_str(), &mesh))
                 {
-                    ctx.error("FBX: Error during parsing of FBX file", {});
+                    ctx.error("Object: ('{}') Error during parsing of FBX file '{}'", std::make_tuple(name, path));
                     return false;
                 }
 
                 for (size_t tri = 0; tri < mesh.triCount(); ++tri)
                 {
-                    mesh.getIndexedTriRef(tri).matIdx = materialIdx;
+                    mesh.getIndexedTriRef(tri).matIdx = static_cast<int32_t>(materialIdx);
                 }
             }
             else if (type == "primitive")
@@ -1311,7 +1506,18 @@ namespace dmt::parse_helpers {
                 allowedKeys.insert("shape");
                 if (!hasOnlyAllowedkeys(object, allowedKeys))
                 {
-                    ctx.error("Unrecognized keys in object", {});
+                    std::string extraneous;
+                    for (auto const& [key, value] : object.items())
+                    {
+                        if (!allowedKeys.contains(key))
+                        {
+                            extraneous = key;
+                            break;
+                        }
+                    }
+
+                    ctx.error("Object: unexpected parameter '{}' while loading object '{}'",
+                              std::make_tuple(extraneous, name));
                     return false;
                 }
 
@@ -1323,9 +1529,9 @@ namespace dmt::parse_helpers {
 
                 std::string const shape = object["shape"];
                 if (shape == "cube")
-                    TriangleMesh::unitCube(mesh, materialIdx);
+                    TriangleMesh::unitCube(mesh, static_cast<int32_t>(materialIdx));
                 else if (shape == "plane")
-                    TriangleMesh::unitPlane(mesh, materialIdx);
+                    TriangleMesh::unitPlane(mesh, static_cast<int32_t>(materialIdx));
                 else
                 {
                     ctx.error("Unrecognized 'shape' `{}`", std::make_tuple(shape));
@@ -1457,6 +1663,11 @@ namespace dmt {
         Context ctx;
         if (!ctx.isValid())
             return false;
+
+        ctx.log("Starting scene Parsing...", {});
+#if defined(DMT_OS_LINUX)
+        ctx.warn("  (remember to delete once in a while the content of ~/.cache/dmt-mipc/)", {});
+#endif
 
         std::ifstream f(m_path.toUnderlying(m_tmp).c_str());
         if (!f)

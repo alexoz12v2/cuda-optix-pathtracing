@@ -543,7 +543,7 @@ def main():
 
     path = library_json[platform.system()]
     if not path.exists():
-        raise ValueError(f"Path {str(path)} doesn't exist")
+        raise ValueError(f"Path {path} doesn't exist")
 
     header_file = Path(remove_matching_quotes(args.header_file))
     cpp_file = Path(remove_matching_quotes(args.cpp_file))

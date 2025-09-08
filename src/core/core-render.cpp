@@ -3,6 +3,7 @@
 #include "core-bsdf.h"
 #include "core-bvh-builder.h"
 #include "core-light-tree-builder.h"
+#include "core-material.h"
 #include "core-texture.h"
 
 // write image dependencies
@@ -383,7 +384,7 @@ namespace dmt::job {
 
                             // 7. Sample new path direction
                             BSDFSample /*const*/
-                                bs = materialSample(mat, *data.texCache, texCtx, -ray.d, ng, sampler.get2D(), sampler.get1D());
+                                bs = materialSamplegit(mat, *data.texCache, texCtx, -ray.d, ng, sampler.get2D(), sampler.get1D());
                             if (bs.pdf == 0.f) // if doesn't bounce, path dies
                                 break;
 

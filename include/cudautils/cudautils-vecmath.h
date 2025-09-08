@@ -1020,6 +1020,7 @@ namespace dmt {
         float    time = 0;
     };
 
+
     struct DMT_CORE_API RayDifferential : public Ray
     {
         RayDifferential() = default;

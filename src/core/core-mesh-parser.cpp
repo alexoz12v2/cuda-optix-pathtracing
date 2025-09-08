@@ -531,7 +531,9 @@ namespace dmt {
             FbxVector4* controlPoints   = mesh->GetControlPoints();
             FbxAMatrix  globalTransform = child->EvaluateGlobalTransform();
 
-            int                          nElementNormal    = mesh->GetElementNormalCount();
+            int                       nElementNormal = mesh->GetElementNormalCount();
+            FbxGeometryElementNormal* normalLayer    = nElementNormal > 0 ? mesh->GetElementNormal(0) : nullptr;
+
             int                          nElementSmoothing = mesh->GetElementSmoothingCount();
             FbxGeometryElementSmoothing* smoothing = nElementSmoothing > 0 ? mesh->GetElementSmoothing(0) : nullptr;
 
@@ -543,10 +545,11 @@ namespace dmt {
             {
                 int polygonSize = mesh->GetPolygonSize(k);
                 if (polygonSize != 3)
-                    return false; // only triangles
+                    return false; // only triangles supported
 
                 VertexIndex vIdx[3];
                 bool        isSmooth = false;
+
                 if (smoothing)
                 {
                     switch (smoothing->GetMappingMode())
@@ -561,9 +564,8 @@ namespace dmt {
                     }
                 }
 
-                // compute flat face normal
+                // compute flat face normal (always needed as fallback)
                 Vector3f faceNormal{};
-                if (!isSmooth)
                 {
                     Vector3f p0{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][0]),
                                 static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][1]),
@@ -574,7 +576,7 @@ namespace dmt {
                     Vector3f p2{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][0]),
                                 static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][1]),
                                 static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][2])};
-                    faceNormal = cross(p1 - p0, p2 - p0);
+                    faceNormal = normalize(cross(p1 - p0, p2 - p0));
                 }
 
                 for (int j = 0; j < 3; ++j, ++vertexId)
@@ -595,49 +597,33 @@ namespace dmt {
                         vIdx[j].positionIdx = outMesh->positionCount() - 1;
                     }
 
-                    // --- Normals ---
+                    // --- Normals (tiered system) ---
                     Vector3f nVec{0.f, 0.f, 0.f};
-                    Normal3f n;
 
-                    if (nElementNormal > 0)
+                    if (normalLayer) // 1. custom normals (preferred)
                     {
-                        FbxGeometryElementNormal* normalLayer = mesh->GetElementNormal(0);
-                        bool hasCustomNormals = normalLayer && normalLayer->GetMappingMode() != FbxGeometryElement::eNone;
-                        if (hasCustomNormals)
-                        {
-                            int idx = vertexId;
-                            if (normalLayer->GetMappingMode() == FbxGeometryElement::eByControlPoint)
-                            {
-                                idx = cpIndex;
-                                if (normalLayer->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
-                                    idx = normalLayer->GetIndexArray().GetAt(cpIndex);
-                            }
-                            else if (normalLayer->GetMappingMode() == FbxGeometryElement::eByPolygonVertex)
-                            {
-                                if (normalLayer->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
-                                    idx = normalLayer->GetIndexArray().GetAt(vertexId);
-                            }
+                        int idx = (normalLayer->GetMappingMode() == FbxGeometryElement::eByControlPoint) ? cpIndex : vertexId;
+                        if (normalLayer->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
+                            idx = normalLayer->GetIndexArray().GetAt(idx);
 
-                            FbxVector4 fn = normalLayer->GetDirectArray().GetAt(idx);
-                            nVec = Vector3f{static_cast<float>(fn[0]), static_cast<float>(fn[1]), static_cast<float>(fn[2])};
-                        }
+                        FbxVector4 fn = normalLayer->GetDirectArray().GetAt(idx);
+                        nVec = Vector3f{static_cast<float>(fn[0]), static_cast<float>(fn[1]), static_cast<float>(fn[2])};
+                    }
+                    else if (isSmooth) // 2. smoothing groups (simple average with face normal for now)
+                    {
+                        nVec = faceNormal;
+                    }
+                    else // 3. fallback: flat normal
+                    {
+                        nVec = faceNormal;
                     }
 
-                    // fallback zero-length normals
-                    if (dotSelf(nVec) < 1e-12f)
-                    {
-                        if (!isSmooth)
-                            nVec = faceNormal;
-                        else
-                        {
-                            Point3f p0 = outMesh->getPosition(vIdx[0].positionIdx);
-                            Point3f p1 = outMesh->getPosition(vIdx[1].positionIdx);
-                            Point3f p2 = outMesh->getPosition(vIdx[2].positionIdx);
-                            nVec       = normalize(cross(p1 - p0, p2 - p0));
-                        }
-                    }
+                    if (dotSelf(nVec) < 1e-12f || !std::isfinite(nVec.x) || !std::isfinite(nVec.y) ||
+                        !std::isfinite(nVec.z))
+                        nVec = faceNormal;
 
-                    n             = Normal3f(nVec);
+                    Normal3f n = normalize(nVec);
+
                     uint32_t nIdx = 0;
                     if (outMesh->checkNormal(n, nIdx))
                         vIdx[j].normalIdx = nIdx;
@@ -692,14 +678,10 @@ namespace dmt {
 
         if (Context ctx; ctx.isValid() && ctx.isTraceEnabled())
         {
-            std::string meshStats = "  Triangle Count: ";
-            meshStats.append(std::to_string(outMesh->triCount()));
-            meshStats.append("\n  UVs: ");
-            meshStats.append(std::to_string(outMesh->uvCount()));
-            meshStats.append("\n  Normals: ");
-            meshStats.append(std::to_string(outMesh->normalCount()));
-            meshStats.append("\n  Positions: ");
-            meshStats.append(std::to_string(outMesh->positionCount()));
+            std::string meshStats = "  Triangle Count: " + std::to_string(outMesh->triCount()) +
+                                    "\n  UVs: " + std::to_string(outMesh->uvCount()) +
+                                    "\n  Normals: " + std::to_string(outMesh->normalCount()) +
+                                    "\n  Positions: " + std::to_string(outMesh->positionCount());
             ctx.trace("\n{}", std::make_tuple(meshStats));
         }
 

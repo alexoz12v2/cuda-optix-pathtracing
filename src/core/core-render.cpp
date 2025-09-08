@@ -184,14 +184,14 @@ namespace dmt::job {
                                 if (depth == 0 || specularBounce) // specular bounce = PDF BSDF is Dirac Delta
                                 {
                                     L += beta * Le;
-                                    Context ctx;
-                                    ctx.trace("NM L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
+                                    //Context ctx;
+                                    //ctx.trace("NM L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
                                 }
                                 else // MIS
                                 {
                                     L += beta * (bsdfPdf / (bsdfPdf + pdfLight)) * Le;
-                                    Context ctx;
-                                    ctx.trace("MIS L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
+                                    //Context ctx;
+                                    //ctx.trace("MIS L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
                                 }
                             }
                             break;
@@ -422,8 +422,8 @@ namespace dmt::job {
                                 float q = fl::clamp01(rrBeta.max());
                                 if (sampler.get1D() < q)
                                 {
-                                    Context ctx;
-                                    ctx.trace("Kill Ray", {});
+                                    //Context ctx;
+                                    //ctx.trace("Kill Ray", {});
                                     break; // kill ray
                                 }
                                 beta /= 1 - q; // if survived, make it more significant

@@ -1,8 +1,7 @@
 #pragma once
 #include "cudautils/cudautils-macro.h"
-#include <algorithm>
+
 #include <cstdint>
-#include <memory>
 
 namespace dmt {
 
@@ -35,6 +34,7 @@ namespace dmt {
         uint32_t  size; // device-side atomic count for enqueue/dequeue
     };
 
+#if 0 // todo move in exe target
     void allocHitPool(CUDADriverLibrary* cudaApi, HitPool& H, uint32_t n)
     {
         H.capacity = n;
@@ -84,4 +84,5 @@ namespace dmt {
         cudaApi->cuMemAlloc(reinterpret_cast<unsigned long long*>(&P.rngState0), sizeof(uint32_t) * n);
         cudaApi->cuMemAlloc(reinterpret_cast<unsigned long long*>(&P.rngState1), sizeof(uint32_t) * n);
     }
+#endif
 }; // namespace dmt

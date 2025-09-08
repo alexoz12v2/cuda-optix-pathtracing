@@ -41,7 +41,7 @@ namespace dmt {
                 lk.downgrade_to_shared();
             }
 
-            return reinterpret_cast<unsigned char const*>(it->second.data);// + it->second.startOffset;
+            return reinterpret_cast<unsigned char const*>(it->second.data); // + it->second.startOffset;
         }
 
         // 2. handle cache miss
@@ -67,7 +67,7 @@ namespace dmt {
 
             lk.downgrade_to_shared();
 
-            return reinterpret_cast<unsigned char const*>(it->second.data);// + it->second.startOffset;
+            return reinterpret_cast<unsigned char const*>(it->second.data); // + it->second.startOffset;
         }
 
         uint32_t  mipSize            = 0;
@@ -133,6 +133,6 @@ namespace dmt {
 
         outBytes     = mipSize;
         outTexFormat = it->second.texFormat;
-        return reinterpret_cast<unsigned char const*>(it->second.data);// + it->second.startOffset;
+        return reinterpret_cast<unsigned char const*>(it->second.data); // + it->second.startOffset;
     }
 } // namespace dmt

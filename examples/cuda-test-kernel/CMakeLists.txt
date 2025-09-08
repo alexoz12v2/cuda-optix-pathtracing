@@ -11,6 +11,6 @@ add_custom_command(
   COMMENT "copy file"
 )
 add_custom_target(copy_cuda_kernel_example ALL DEPENDS ${cuda_kernel_out_file})
-add_dependencies(dmt-test-cuda-kernel copy_cuda_kernel_example)
+add_dependencies(dmt-test-cuda-kernel copy_cuda_kernel_example dmt-copy-cudautils)
 target_include_directories(dmt-test-cuda-kernel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(dmt-test-cuda-kernel PRIVATE dmt::platform stb::stb dmt::cuda-wrappers OpenEXR::OpenEXR)

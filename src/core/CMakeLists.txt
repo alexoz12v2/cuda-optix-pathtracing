@@ -17,29 +17,6 @@ endif()
 set_source_files_properties(${core_unused_sources} PROPERTIES HEADER_FILE_ONLY TRUE)
 
 ## CUDA utils (TODO better and copy to build)
-set(cudautils_implementation_files
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils.cu 
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-float.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-vecmath.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-light.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-transform.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-camera.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-media.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-lightsampler.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-texture.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-material.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-sampler.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-film.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-filter.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-bxdf.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-spectrum.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-color.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-numbers.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-image.cu
-  ${CMAKE_SOURCE_DIR}/src/cudautils/cudautils-bvh.cu
-  
-)
-set_source_files_properties(${cudautils_implementation_files} PROPERTIES LANGUAGE CXX)
 
 set(cudautils_header_files
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils.h
@@ -60,15 +37,33 @@ set(cudautils_header_files
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-spectrum.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-color.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-numbers.h
-  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-image.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-bvh.h
-  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-kernels.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-pools.h
 )
+
 set_source_files_properties(${cudautils_header_files} PROPERTIES
   LANGUAGE CXX
   HEADER_FILE_ONLY TRUE
 )
+
+source_group("CUDA Files" FILES ${cudautils_header_files})
+
+add_custom_target(dmt-copy-cudautils ALL COMMENT "Copy cudautils files")
+
+# custom target to copy shaders for runtime kernel compilation
+add_custom_command(
+  TARGET dmt-copy-cudautils
+  PRE_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders
+)
+
+foreach(shader_file IN LISTS cudautils_header_files)
+  add_custom_command(
+    TARGET dmt-copy-cudautils
+    COMMAND ${CMAKE_COMMAND} -E copy ${shader_file} ${CMAKE_BINARY_DIR}/bin/shaders/
+    COMMENT "Copying ${shader_file}"
+  )
+endforeach()
 
 # target definition
 dmt_add_module_library(dmt-core core SHARED)
@@ -107,9 +102,9 @@ target_sources(dmt-core
     core-material.cpp
     core-render.cpp
     core-texture-cache.cpp
+    core-cudautils-cpubuild.cpp
     ${core_os_private_sources}
     ${core_unused_sources}
-    ${cudautils_implementation_files}
 )
 
 target_compile_definitions(dmt-core PRIVATE FBXSDK_SHARED)

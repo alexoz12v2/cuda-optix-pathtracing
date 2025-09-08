@@ -209,7 +209,7 @@ namespace dmt::ggx {
     DMT_CORE_API float DMT_FASTCALL PDF(Vector3f w, Vector3f wm, float alphax, float alphay);
 
     /// if this is true, then microsurface is basically planar, hence you shouldn't use roughnesses so low
-    DMT_CORE_API inline bool effectivelySmooth(float alphax, float alphay) { return alphax < 1e-3f &&  alphay < 1e-3f; }
+    DMT_CORE_API inline bool effectivelySmooth(float alphax, float alphay) { return alphax < 1e-3f && alphay < 1e-3f; }
 
     /// GGX VNDF importance sampling algorithm from: Sampling the GGX Distribution of Visible Normals.
     /// Eric Heitz, JCGT Vol. 7, No. 4, 2018. https://jcgt.org/published/0007/04/01/

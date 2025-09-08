@@ -384,7 +384,7 @@ namespace dmt::job {
 
                             // 7. Sample new path direction
                             BSDFSample /*const*/
-                                bs = materialSamplegit(mat, *data.texCache, texCtx, -ray.d, ng, sampler.get2D(), sampler.get1D());
+                                bs = materialSample(mat, *data.texCache, texCtx, -ray.d, ng, sampler.get2D(), sampler.get1D());
                             if (bs.pdf == 0.f) // if doesn't bounce, path dies
                                 break;
 

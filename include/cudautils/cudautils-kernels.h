@@ -2,14 +2,70 @@
 
 #include "cudautils/cudautils-macro.h"
 
+#include <cstdint>
+
 namespace dmt {
+
+    //Take trace of the allocations in the global memory
+    template <typename T>
+    struct DeviceBuffer
+    {
+        T*       ptr      = nullptr;
+        uint32_t capacity = 0;
+    };
+
+    // ---------- Simple queue of indices ----------
+    struct IndexQueue
+    {
+        uint32_t* items    = nullptr; // indices into RayPool/ShadowPool/etc.
+        uint32_t* tail     = nullptr; // atomic append pointer
+        uint32_t  capacity = 0;
+    };
+
+
+    // ---- Slot decode helpers: adapt to your packing scheme ----
+    DMT_GPU inline bool     slot_is_valid(uint64_t slot) { return (slot != 0ull); }
+    DMT_GPU inline bool     slot_is_leaf(uint64_t slot) { return ((slot >> 24) & 0x1ull) != 0ull; }
+    DMT_GPU inline uint32_t slot_index(uint64_t slot) { return uint32_t(slot & 0x00FFFFFFu); }
+
+#if defined(__CUDA_ARCH__)
+    static __inline__ __device__ uint32_t lane_id() { return threadIdx.x & 31; }
+    static __inline__ __device__ uint32_t warp_id_in_block() { return threadIdx.x >> 5; }
+
+    // ---------- Warp bulk enqueue ----------
+    // Active lanes call with valid=true and provide 'val' to enqueue to q.
+    // Returns the global position written by each active lane.
+    static DMT_FORCEINLINE DMT_GPU uint32_t warp_enqueue(IndexQueue q, bool valid, uint32_t val)
+    {
+        unsigned mask  = __ballot_sync(0xffffffff, valid);
+        int      count = __popc(mask);
+        if (count == 0)
+            return 0u;
+        int lane = lane_id();
+        int rank = __popc(mask & ((1u << lane) - 1));
+
+        uint32_t base = 0;
+        if (rank == 0)
+        { // first active lane reserves space
+            base = atomicAdd(q.tail, count);
+        }
+        base = __shfl_sync(0xffffffff, base, __ffs(mask) - 1);
+        if (valid)
+        {
+            uint32_t pos = base + rank;
+            if (pos < q.capacity)
+                q.items[pos] = val;
+            return pos;
+        }
+        return 0u;
+    }
+
     // ===================================================
     // Kernel 1: RayGen ? fill RayPool and enqueue indices
     // Each warp generates one ray; we map one ray per warp here,
     // but to keep occupancy, we *allow* each thread to handle one ray
     // and rely on warp size being a multiple of 32.
     // ===================================================
-    static char const* kRayGen = R"a(
     __global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY, int tileW, int tileH, int spp, RayPool rayPool, IndexQueue rayQ)
     {
         // One thread == one pixel-sample; warps will cooperatively enqueue
@@ -63,8 +119,7 @@ namespace dmt {
             // Enqueue
             warp_enqueue(rayQ, true, rayIdx);
         }
-    } 
-)a";
+    }
     /*
      * trace_kernel_warp
      *
@@ -106,119 +161,132 @@ namespace dmt {
      * - __syncwarp(mask)                  : synchronize lanes in a warp for cooperative work.
      *
      */
-    static char const* trace_kernel = R"a(
-    __global__ void trace_kernel_warp(const Ray* __restrict__ rays,
-                                  int numRays,
-                                  const BVHWiVeCluster* __restrict__ nodes,
-                                  int nodeCount,
-                                  GpuHaltonOwenSampler*              samplers,
-                                  HitOut* __restrict__ hitOut)
-{
-    int warpId = (blockDim.x * blockIdx.x + threadIdx.x) / warpSize;
-    if (warpId >= numRays) return;
+    __global__ void trace_kernel_warp(Ray const* __restrict__ rays,
+                                      int numRays,
+                                      BVHWiVeCluster const* __restrict__ nodes,
+                                      int                   nodeCount,
+                                      GpuHaltonOwenSampler* samplers,
+                                      HitOut* __restrict__ hitOut)
+    {
+        int warpId = (blockDim.x * blockIdx.x + threadIdx.x) / warpSize;
+        if (warpId >= numRays)
+            return;
 
-    int laneId = threadIdx.x % warpSize;
-    unsigned mask = 0xFFFFFFFF;
+        int      laneId = threadIdx.x % warpSize;
+        unsigned mask   = 0xFFFFFFFF;
 
-    // Lane 0 loads the ray
-    Ray ray;
-    if (laneId == 0) ray = rays[warpId];
-    ray.o = __shfl_sync(mask, ray.o, 0);
-    ray.d = __shfl_sync(mask, ray.d, 0);
-    ray.invd = __shfl_sync(mask, ray.invd, 0);
+        // Lane 0 loads the ray
+        Ray ray;
+        if (laneId == 0)
+            ray = rays[warpId];
+        ray.o    = __shfl_sync(mask, ray.o, 0);
+        ray.d    = __shfl_sync(mask, ray.d, 0);
+        ray.invd = __shfl_sync(mask, ray.invd, 0);
 
-    float bestT = 1e30f;
-    int bestTri = -1, bestInst = -1;
+        float bestT   = 1e30f;
+        int   bestTri = -1, bestInst = -1;
 
-    // Per-warp stack in shared memory
-    __shared__ int warpStack[64 * 4]; // 64 depth * 4 warps per block
-    int* stack = &warpStack[(threadIdx.x / warpSize) * 64];
-    int sp = 0;
-    if (laneId == 0) stack[sp++] = 0; // root index
-    sp = __shfl_sync(mask, sp, 0);
-
-    while (sp > 0) {
-        int nodeIdx;
-        if (laneId == 0) nodeIdx = stack[--sp];
-        nodeIdx = __shfl_sync(mask, nodeIdx, 0);
+        // Per-warp stack in shared memory
+        __shared__ int warpStack[64 * 4]; // 64 depth * 4 warps per block
+        int*           stack = &warpStack[(threadIdx.x / warpSize) * 64];
+        int            sp    = 0;
+        if (laneId == 0)
+            stack[sp++] = 0; // root index
         sp = __shfl_sync(mask, sp, 0);
 
-        const BVHWiVeCluster& node = nodes[nodeIdx];
+        while (sp > 0)
+        {
+            int nodeIdx;
+            if (laneId == 0)
+                nodeIdx = stack[--sp];
+            nodeIdx = __shfl_sync(mask, nodeIdx, 0);
+            sp      = __shfl_sync(mask, sp, 0);
 
-        // Each of 8 lanes checks one child AABB
-        int c = laneId;
-        bool hit = false;
-        uint32_t childIdx = 0;
-        bool isLeaf = false;
-        float tmin;
+            BVHWiVeCluster const& node = nodes[nodeIdx];
 
-        if (c < SIMDWidth) {
-            uint64_t slot = node.slotEntries[c];
-            if (slot != 0ull) {
-                childIdx = slot_index(slot);
-                isLeaf = slot_is_leaf(slot);
-                hit = aabb_intersect_local(ray,
-                                           node.bxmin[c], node.bxmax[c],
-                                           node.bymin[c], node.bymax[c],
-                                           node.bzmin[c], node.bzmax[c],
-                                           bestT, tmin);
+            // Each of 8 lanes checks one child AABB
+            int      c        = laneId;
+            bool     hit      = false;
+            uint32_t childIdx = 0;
+            bool     isLeaf   = false;
+            float    tmin;
+
+            if (c < SIMDWidth)
+            {
+                uint64_t slot = node.slotEntries[c];
+                if (slot != 0ull)
+                {
+                    childIdx = slot_index(slot);
+                    isLeaf   = slot_is_leaf(slot);
+                    hit      = aabb_intersect_local(ray,
+                                               node.bxmin[c],
+                                               node.bxmax[c],
+                                               node.bymin[c],
+                                               node.bymax[c],
+                                               node.bzmin[c],
+                                               node.bzmax[c],
+                                               bestT,
+                                               tmin);
+                }
             }
-        }
 
-        unsigned hitMask = __ballot_sync(mask, hit);
+            unsigned hitMask = __ballot_sync(mask, hit);
 
-        // Process hit children one by one
-        while (hitMask) {
-            int childLane = __ffs(hitMask) - 1; // first set bit
-            hitMask &= ~(1u << childLane);
+            // Process hit children one by one
+            while (hitMask)
+            {
+                int childLane = __ffs(hitMask) - 1; // first set bit
+                hitMask &= ~(1u << childLane);
 
-            uint32_t ci = __shfl_sync(mask, childIdx, childLane);
-            bool leaf  = __shfl_sync(mask, isLeaf, childLane);
+                uint32_t ci   = __shfl_sync(mask, childIdx, childLane);
+                bool     leaf = __shfl_sync(mask, isLeaf, childLane);
 
-            if (leaf) {
-                // reinterpret as leaf
-                const BVHWiVeLeaf* leafNode = reinterpret_cast<const BVHWiVeLeaf*>(&nodes[ci]);
-                int triCount = leafNode->triCount;
+                if (leaf)
+                {
+                    // reinterpret as leaf
+                    BVHWiVeLeaf const* leafNode = reinterpret_cast<BVHWiVeLeaf const*>(&nodes[ci]);
+                    int                triCount = leafNode->triCount;
 
-                // distribute triangles
-                if (laneId < triCount) {
-                    float tHit;
-                    if (intersect_tri_mt(ray,
-                                         leafNode->v0s[laneId],
-                                         leafNode->v1s[laneId],
-                                         leafNode->v2s[laneId],
-                                         bestT, tHit)) {
-                        if (tHit < bestT) {
-                            bestT = tHit;
-                            bestTri = leafNode->triIdx[laneId];
-                            bestInst = leafNode->instanceIdx;
+                    // distribute triangles
+                    if (laneId < triCount)
+                    {
+                        float tHit;
+                        if (intersect_tri_mt(ray, leafNode->v0s[laneId], leafNode->v1s[laneId], leafNode->v2s[laneId], bestT, tHit))
+                        {
+                            if (tHit < bestT)
+                            {
+                                bestT    = tHit;
+                                bestTri  = leafNode->triIdx[laneId];
+                                bestInst = leafNode->instanceIdx;
+                            }
                         }
                     }
+                    // sync warp before next child
+                    __syncwarp(mask);
                 }
-                // sync warp before next child
-                __syncwarp(mask);
-            } else {
-                if (laneId == 0) {
-                    stack[sp++] = ci;
+                else
+                {
+                    if (laneId == 0)
+                    {
+                        stack[sp++] = ci;
+                    }
+                    sp = __shfl_sync(mask, sp, 0);
                 }
-                sp = __shfl_sync(mask, sp, 0);
             }
         }
-    }
 
-    if (laneId == 0) {
-        hitOut[warpId].t = bestT;
-        hitOut[warpId].triIdx = bestTri;
-        hitOut[warpId].instanceIdx = bestInst;
+        if (laneId == 0)
+        {
+            hitOut[warpId].t           = bestT;
+            hitOut[warpId].triIdx      = bestTri;
+            hitOut[warpId].instanceIdx = bestInst;
+        }
     }
-}
-)a";
 
     // ===================================================
     // Kernel 2: Intersect ? miss adds env to film; hit ? HitPool + ShadeQ
     // ===================================================
-    static char const* kIntersect = R"a(
-__global__ void kIntersect(DeviceBVH bvh, DeviceLights lights, FilmSOA film, RayPool rays, HitPool hits, IndexQueue inRayQ, IndexQueue shadeQ)
+    __global__ void kIntersect(DeviceBVH bvh, DeviceLights lights, FilmSOA film, RayPool rays, HitPool hits, IndexQueue inRayQ, IndexQueue shadeQ)
     {
         int      tid       = blockIdx.x * blockDim.x + threadIdx.x;
         int      threads   = gridDim.x * blockDim.x;
@@ -271,14 +339,7 @@ __global__ void kIntersect(DeviceBVH bvh, DeviceLights lights, FilmSOA film, Ray
             warp_enqueue(shadeQ, true, rayIdx);
         }
     }
-)a";
 
-
-    // ===================================================
-    // Kernel 3: Shade ? direct light (optional) + BSDF sample ? enqueue nextRay
-    // (Shadow rays omitted here for brevity; add a ShadowQ pass later.)
-    // ===================================================
-    static char const* kShade = R"a(
     __global__ void kShade(DeviceBVH       bvh,
                            DeviceLights    lights,
                            DeviceMaterials mats,
@@ -379,5 +440,5 @@ __global__ void kIntersect(DeviceBVH bvh, DeviceLights lights, FilmSOA film, Ray
             warp_enqueue(nextRayQ, true, rayIdx);
         }
     }
-)a";
+#endif
 } // namespace dmt

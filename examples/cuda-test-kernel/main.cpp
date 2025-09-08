@@ -108,9 +108,9 @@ int32_t guardedMain()
             return -1;
         }
 
-        nvrtcProgram  prog = 0;
+        nvrtcProgram     prog = 0;
         std::pmr::string path = (dmt::os::Path::executableDir() / "cuda-kernel.cu").toUnderlying();
-        std::ifstream file{path.c_str()};
+        std::ifstream    file{path.c_str()};
 
         if (!file)
             return -1;
@@ -136,7 +136,7 @@ int32_t guardedMain()
         }
 
         size_t cubinSize = 0;
-        
+
         if (auto res = j.nvrtcApi->nvrtcGetPTXSize(prog, &cubinSize); res != ::NVRTC_SUCCESS)
         {
             ctx.log("{}", std::make_tuple(j.nvrtcApi->nvrtcGetErrorString(res)));

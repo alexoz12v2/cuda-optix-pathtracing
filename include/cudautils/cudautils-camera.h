@@ -10,9 +10,9 @@
 namespace dmt {
     struct DeviceCamera
     {
-        float  focalLength = 20.f;
-        float  sensorSize  = 36.f;
-        float3 dir{0.f, 1.f, 0.f};
+        float    focalLength = 20.f;
+        float    sensorSize  = 36.f;
+        Vector3f dir{0.f, 1.f, 0.f};
         //float camDirX     = 0.f;
         //float camDirY     = 1;
         //float camDirZ     = 0.f;
@@ -20,11 +20,12 @@ namespace dmt {
         //float camPosX     = 0.f;
         //float camPosY     = 0.f;
         //float camPosZ     = 0.f;
-        float3 pos{0.f, 0.f, 0.f};
-        int    width  = 128;
-        int    height = 128;
+        Vector3f pos{0.f, 0.f, 0.f};
+        int      width  = 128;
+        int      height = 128;
     };
 
+#if defined(__CUDA_ARCH__)
     DMT_FORCEINLINE DMT_GPU void generate_camera_ray(
         DeviceCamera cam,
         int          px,
@@ -51,10 +52,6 @@ namespace dmt {
         rdy = ndc.y;
         rdz = -1.f;
     }
-
+#endif
 
 } // namespace dmt
-
-#if defined(DMT_CUDAUTILS_IMPL) || defined(DMT_CUDAUTILS_CAMERA_IMPL)
-    #include "cudautils-camera.cu"
-#endif

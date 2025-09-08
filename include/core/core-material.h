@@ -84,7 +84,7 @@ namespace dmt {
     };
     static_assert(alignof(SurfaceMaterial) == 16 && std::is_standard_layout_v<SurfaceMaterial>);
 
-    DMT_CORE_API BSDFSample materialSamplegit(
+    DMT_CORE_API BSDFSample materialSample(
         SurfaceMaterial const&    material,
         TextureCache&             cache,
         TextureEvalContext const& texCtx, /// n to represent shading normal

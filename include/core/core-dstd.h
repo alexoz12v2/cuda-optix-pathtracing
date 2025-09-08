@@ -6,6 +6,7 @@
 
 #include <type_traits>
 #include <optional>
+#include <span>
 
 namespace dstd {
     template <std::copyable T, typename A, typename UnaryPredicate>

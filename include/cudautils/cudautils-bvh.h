@@ -2,8 +2,7 @@
 
 #include "cudautils/cudautils-macro.h"
 #include "cudautils/cudautils.h"
-#include <cudautils/cudautils-vecmath.h>
-#include "core/core-bvh-builder.h"
+#include "cudautils/cudautils-vecmath.h"
 
 #define WARP_SIZE       32
 #define CHILDREN        8
@@ -23,7 +22,8 @@ namespace dmt {
         bool  isInner;
     };
 
-    // ---- Device triangle intersection (Möller–Trumbore) ----
+#if defined(__CUDA_ARCH__)
+    // ---- Device triangle intersection (Mï¿½llerï¿½Trumbore) ----
     DMT_GPU bool intersect_tri_mt(Ray const& r, float3 const& v0, float3 const& v1, float3 const& v2, float tMax, float& tOut)
     {
         float const EPS = 1e-7f;
@@ -88,6 +88,5 @@ namespace dmt {
         }
         return false;
     }
-
-
+#endif
 }; // namespace dmt

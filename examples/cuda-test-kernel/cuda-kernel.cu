@@ -1,5 +1,5 @@
 #ifndef __NVCC__
-#define __NVCC__
+    #define __NVCC__
 #endif
 
 #include "cuda-queue.h"

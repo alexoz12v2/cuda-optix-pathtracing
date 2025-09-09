@@ -183,7 +183,7 @@ namespace dmt {
         return result;
     }
 
-    constexpr bool isAligned(void const* ptr, size_t alignment)
+    inline bool isAligned(void const* ptr, size_t alignment)
     {
         void*  mutPtr = const_cast<void*>(ptr);
         size_t space  = alignment;

@@ -19,6 +19,7 @@ set_source_files_properties(${core_unused_sources} PROPERTIES HEADER_FILE_ONLY T
 ## CUDA utils (TODO better and copy to build)
 
 set(cudautils_header_files
+  ${CMAKE_SOURCE_DIR}/include/dmtmacros.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-float.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-vecmath.h

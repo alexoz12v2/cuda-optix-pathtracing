@@ -1,36 +1,20 @@
+#include "cuda-test.h"
 #define DMT_ENTRY_POINT
 #define DMT_WINDOWS_CLI
 #include "platform/platform.h"
+
 #include "cuda-wrappers/cuda-wrappers-cuda-driver.h"
 #include "cuda-wrappers/cuda-wrappers-utils.h"
 #include "cuda-wrappers/cuda-wrappers-nvrtc.h"
+
+#include "cuda-queue.h"
+#include "cuda-test.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
 #include <fstream>
 #include <iterator>
-
-namespace /*static*/ {
-    using namespace dmt;
-
-    static std::vector<char const*> const s_nvccOpts{
-        "-std=c++20",
-        "-arch",
-        "compute_60",
-        "-lineinfo",
-        "-G",
-        "--use_fast_math",
-        "-default-device",
-        "-rdc",
-        "true",
-    };
-} // namespace
-
-//TODO: move to another file
-namespace dmt {
-
-} // namespace dmt
-
 
 int32_t guardedMain()
 {
@@ -102,56 +86,44 @@ int32_t guardedMain()
         if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxCreate(&j.cuCtx, 0, device)))
             return 1;
 
+        int major = 0;
+        int minor = 0;
+        j.cudaApi->cuDeviceComputeCapability(&major, &minor, device);
+        ctx.log("CUDA Compute Capability: {}.{}", std::make_tuple(major, minor));
+
         if (!j.loadNVRTC())
         {
             ctx.error("Couldn't load NVRTC Library", {});
             return -1;
         }
 
-        nvrtcProgram     prog = 0;
-        std::pmr::string path = (dmt::os::Path::executableDir() / "cuda-kernel.cu").toUnderlying();
-        std::ifstream    file{path.c_str()};
-
-        if (!file)
-            return -1;
-
-        std::string srcKernel{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-
-
-        if (j.nvrtcApi->nvrtcCreateProgram(&prog, srcKernel.c_str(), "cuda-kernel.cu", 0, nullptr, nullptr) != ::NVRTC_SUCCESS)
+        if (ctx.isTraceEnabled())
         {
-            ctx.error("Couldn't create program", {});
-            return -1;
+            ctx.trace("NVRTC Supported arch:", {});
+            int32_t supported = 0;
+            j.nvrtcApi->nvrtcGetNumSupportedArchs(&supported);
+            auto psupp = std::make_unique<int[]>(supported);
+            j.nvrtcApi->nvrtcGetSupportedArchs(psupp.get());
+
+            for (int32_t i = 0; i < supported; ++i)
+            {
+                ctx.trace("  compute_{}", std::make_tuple(psupp[i]));
+            }
         }
 
-        if (j.nvrtcApi->nvrtcCompileProgram(prog, s_nvccOpts.size(), s_nvccOpts.data()) != ::NVRTC_SUCCESS)
-        {
-            size_t logSize;
-            j.nvrtcApi->nvrtcGetProgramLogSize(prog, &logSize);
-            std::string log(logSize, '\0');
-            j.nvrtcApi->nvrtcGetProgramLog(prog, log.data());
-            ctx.error("NVRTC Compilation Failed: {}", std::make_tuple(log));
-            j.nvrtcApi->nvrtcDestroyProgram(&prog);
-            return 1;
-        }
+        dmt::os::Path path       = dmt::os::Path::executableDir() / "shaders" / "cuda-kernel.cu";
+        auto          nvccOpts   = dmt::getnvccOpts(true);
+        std::string   includeOpt = "--include-path=";
+        includeOpt.append((dmt::os::Path::executableDir() / "shaders").toUnderlying());
+        nvccOpts.push_back(includeOpt.c_str());
 
-        size_t cubinSize = 0;
-
-        if (auto res = j.nvrtcApi->nvrtcGetPTXSize(prog, &cubinSize); res != ::NVRTC_SUCCESS)
-        {
-            ctx.log("{}", std::make_tuple(j.nvrtcApi->nvrtcGetErrorString(res)));
-            return -1;
-        }
-        std::unique_ptr<char[]> cubinBuffer = std::make_unique<char[]>(cubinSize);
-
-        j.nvrtcApi->nvrtcGetPTX(prog, cubinBuffer.get());
-        j.nvrtcApi->nvrtcDestroyProgram(&prog);
+        std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
 
         CUmodule   mod  = nullptr;
         CUfunction func = nullptr;
 
-        j.cudaApi->cuModuleLoadData(&mod, cubinBuffer.get());
-        j.cudaApi->cuModuleGetFunction(&func, mod, "saxpy_grid_stride");
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleLoadData(&mod, saxpyPTX.get()));
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&func, mod, "saxpy_grid_stride"));
 
         // Example: launch parameters
         int    n = 1024;
@@ -185,8 +157,9 @@ int32_t guardedMain()
         );
         if (res != CUDA_SUCCESS)
         {
-            std::cerr << "Failed to launch kernel" << std::endl;
-            return 1;
+            char const* err = nullptr;
+            j.cudaApi->cuGetErrorString(res, &err);
+            ctx.error("Error cuLaunchKernel saxpy: {}", std::make_tuple(std::string_view(err)));
         }
 
         // Wait for completion
@@ -194,9 +167,61 @@ int32_t guardedMain()
 
 
         // Clean up
-        j.cudaApi->cuModuleUnload(mod);
         j.cudaApi->cuMemFree((CUdeviceptr)d_x);
         j.cudaApi->cuMemFree((CUdeviceptr)d_y);
+
+        // testing queues
+        ctx.log("--- Testing Queues ---", {});
+        size_t queueBytes  = 0;
+        size_t queueBytes1 = 0;
+        auto*  queue       = dmt::ManagedQueue<int>::allocateManaged(*j.cudaApi, 256, queueBytes);
+        auto*  queue1      = dmt::ManagedQueue<int>::allocateManaged(*j.cudaApi, 256, queueBytes1);
+        if (!queue || !queue1)
+        {
+            ctx.error("Error allocating queue", {});
+        }
+        else
+        {
+            ctx.log("Allocated Queue in __managed__ memory with attach to host strategy", {});
+            for (int i = 0; i < queue->capacity; ++i)
+                queue->pushHost(i);
+
+            CUfunction kqueueDouble = nullptr;
+            j.cudaApi->cuModuleGetFunction(&kqueueDouble, mod, "kqueueDouble");
+
+            // attach __managed__ memory to stream
+            j.cudaApi->cuStreamAttachMemAsync(0, std::bit_cast<CUdeviceptr>(queue), queueBytes, 0);
+            j.cudaApi->cuStreamAttachMemAsync(0, std::bit_cast<CUdeviceptr>(queue1), queueBytes1, 0);
+
+            // optional: prefetch
+            j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes >> 3, device, 0);
+            j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes1 >> 3, device, 0);
+
+            // launch
+            void* kArgs[] = {&queue, &queue1};
+            res           = j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, 0, kArgs, nullptr);
+            if (res != CUDA_SUCCESS)
+                std::cerr << "Failed to launch kernel" << std::endl;
+
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(0));
+
+            int         element = 0;
+            std::string log;
+            while (queue1->popHost(&element))
+            {
+                log += std::to_string(element);
+                log += ", ";
+            }
+            log.pop_back();
+            log.pop_back();
+            ctx.log("Queue Elements: [ {} ]", std::make_tuple(log));
+
+            dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue);
+            dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue1);
+        }
+
+        // clean up
+        j.cudaApi->cuModuleUnload(mod);
     }
 
     return 0;

@@ -99,7 +99,14 @@ CUDA_BASE="/usr/local"
 
 if [ -n "$DRIVER_CUDA" ]; then
     echo "Driver supports CUDA $DRIVER_CUDA"
-    CUDA_DIR="${CUDA_BASE}/cuda-${DRIVER_CUDA}"
+    MAJOR_VERSION="${DRIVER_CUDA%.*}"
+
+    # override: if major 12 then try minor 6
+    if [ "$MAJOR_VERSION" = "12" ] && [ -d "${CUDA_BASE}/cuda-12.6" ]; then
+        CUDA_DIR="${CUDA_BASE}/cuda-12.6"
+    else
+        CUDA_DIR="${CUDA_BASE}/cuda-${DRIVER_CUDA}"
+    fi
 else
     echo "Error: No CUDA Driver support found"
     return 1 2>/dev/null || exit 1

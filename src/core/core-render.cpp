@@ -1021,9 +1021,9 @@ namespace dmt::film {
                 float const scale = px.weightSum > 0 ? 1.0f / px.weightSum : 0.0f;
 
                 // Apply gamma correction (optional – HDR viewers may expect linear values)
-                float const r = std::pow(float(px.rgbSum[0] * scale), gamma);
-                float const g = std::pow(float(px.rgbSum[1] * scale), gamma);
-                float const b = std::pow(float(px.rgbSum[2] * scale), gamma);
+                auto const r = static_cast<float>(px.rgbSum[0] * scale); // std::pow(float(px.rgbSum[0] * scale), gamma);
+                auto const g = static_cast<float>(px.rgbSum[1] * scale); // std::pow(float(px.rgbSum[1] * scale), gamma);
+                auto const b = static_cast<float>(px.rgbSum[2] * scale); // std::pow(float(px.rgbSum[2] * scale), gamma);
 
                 image[static_cast<size_t>(idx) * 3 + 0] = std::isfinite(r) ? r : 0.0f;
                 image[static_cast<size_t>(idx) * 3 + 1] = std::isfinite(g) ? g : 0.0f;

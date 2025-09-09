@@ -17,7 +17,8 @@ extern "C"
 }
 
 namespace dmt {
-    static __device__ Ray generateRayGPU(float2 p) {
+    static __device__ Ray generateRayGPU(float2 p)
+    {
         Point3f const pxImage{{p.x, p.y, 0}};
         Point3f const pCamera{{d_cameraFromRaster(pxImage)}};
         // TODO add lens?
@@ -41,7 +42,7 @@ extern "C" __global__ void kraygen(RaygenParams params)
     sampler.get2D(sx, sy);
 
     float2 sample = d_filter.sample(make_float2(sx, sy), &pdf);
-    Ray ray = dmt::generateRayGPU(sample);
+    Ray    ray    = dmt::generateRayGPU(sample);
 
     // enqueue ray, pdf
 }

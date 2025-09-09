@@ -2,15 +2,23 @@ dmt_add_cli(dmt-test-cuda-kernel)
 target_sources(dmt-test-cuda-kernel
   PRIVATE main.cpp cuda-test.cpp cuda-kernel.cu
 )
-set_source_files_properties(cuda-kernel.cu PROPERTIES HEADER_FILE_ONLY TRUE)
-source_group("CUDA Files" FILES cuda-kernel.cu)
-set(cuda_kernel_out_file ${CMAKE_BINARY_DIR}/bin/cuda-kernel.cu)
-add_custom_command(
-  OUTPUT ${cuda_kernel_out_file}
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/cuda-kernel.cu ${CMAKE_BINARY_DIR}/bin
-  COMMENT "copy file"
+
+set(cuda_test_kernel_files
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda-kernel.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda-queue.h
 )
-add_custom_target(copy_cuda_kernel_example ALL DEPENDS ${cuda_kernel_out_file})
-add_dependencies(dmt-test-cuda-kernel copy_cuda_kernel_example dmt-copy-cudautils)
+
+set_source_files_properties(${cuda_test_kernel_files} PROPERTIES HEADER_FILE_ONLY TRUE)
+source_group("CUDA Files" FILES ${cuda_test_kernel_files})
+
+add_custom_target(dmt-cuda-test-kernel-copy-files ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders
+  COMMAND ${CMAKE_COMMAND} -E copy
+          ${cuda_test_kernel_files}
+          ${CMAKE_BINARY_DIR}/bin/shaders
+  COMMENT "Copying CUDA kernel files to shaders/"
+)
+
+add_dependencies(dmt-test-cuda-kernel dmt-cuda-test-kernel-copy-files dmt-copy-cudautils)
 target_include_directories(dmt-test-cuda-kernel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(dmt-test-cuda-kernel PRIVATE dmt::platform stb::stb dmt::cuda-wrappers OpenEXR::OpenEXR)

@@ -6,13 +6,11 @@
 namespace dmt {
     std::vector<char const*> getnvccOpts(bool debug)
     {
-        std::vector<char const*> opts{
-            "--gpu-architecture=compute_60", // TODO check compatibility with current context device
-            "--use_fast_math",
-            "--relocatable-device-code=true",
-            "--std=c++17",
-            "-default-device"
-        };
+        std::vector<char const*> opts{"--gpu-architecture=compute_60", // TODO check compatibility with current context device
+                                      "--use_fast_math",
+                                      "--relocatable-device-code=true",
+                                      "--std=c++17",
+                                      "-default-device"};
 
         if (debug)
         {
@@ -84,12 +82,12 @@ namespace dmt {
             return nullptr;
         }
 
-        #if 1
-            // TODO Remove: Dump compiled file to current working directory such that debugger picks on it
-            std::ofstream ptxFile{"saxpy.cu"};
-            ptxFile << srcKernel;
-            ptxFile.flush();
-        #endif
+#if 1
+        // TODO Remove: Dump compiled file to current working directory such that debugger picks on it
+        std::ofstream ptxFile{"saxpy.cu"};
+        ptxFile << srcKernel;
+        ptxFile.flush();
+#endif
         size_t ptxSize = 0;
 
         if (auto res = nvrtcApi->nvrtcGetPTXSize(prog, &ptxSize); res != ::NVRTC_SUCCESS)

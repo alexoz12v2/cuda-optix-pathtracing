@@ -22,7 +22,7 @@ extern "C" __global__ void kqueueDouble(dmt::ManagedQueue<int>* queue, dmt::Mana
 
 extern "C" __global__ void kmmqDouble(dmt::ManagedMultiQueue<double, int>* queue, dmt::ManagedMultiQueue<double, int>* queue1)
 {
-    int num = 0;
+    int    num  = 0;
     double fnum = 0.0;
     if (!queue->popDevice(&fnum, &num))
         return;

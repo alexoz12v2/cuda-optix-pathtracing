@@ -8,6 +8,9 @@
 #include "cuda-wrappers/cuda-wrappers-utils.h"
 #include "cuda-wrappers/cuda-wrappers-nvrtc.h"
 
+#include "cudautils/cudautils-transform.h"
+#include "cudautils/cudautils-filter.h"
+
 #include "cuda-queue.h"
 #include "cuda-test.h"
 
@@ -346,7 +349,7 @@ int32_t guardedMain()
                 size_t const chunkSize = 256;
                 size_t const num       = dmt::ceilDiv<size_t>(resLog.size(), 256);
                 ctx.log("MMQ: [", {});
-                for (size_t i = 0; i < num; i += chunkSize)
+                for (size_t i = 0; i < resLog.size(); i += chunkSize)
                 {
                     std::string_view view{resLog.data() + i, std::min(chunkSize, log.size() - i)};
                     ctx.log("{}", std::make_tuple(view));
@@ -357,8 +360,45 @@ int32_t guardedMain()
                 dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq1);
             }
 
-            // clean up
-            j.cudaApi->cuStreamDestroy(stream);
+            //------------------------Test Raygen----------------------
+            path                              = dmt::os::Path::executableDir() / "shaders" / "raygen.cu";
+            std::unique_ptr<char[]> raygenPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "raygen.cu", nvccOpts);
+
+            // launch kernel
+            CUfunction kmmqDouble = nullptr;
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
+            void* kargs[] = {&mmq, &mmq1};
+            dmt::cudaDriverCall(j.cudaApi.get(),
+                                j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kargs, nullptr));
+
+            // synchronize and check result
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
+            CUmodule raygenMod = 0;
+            dmt::cudaDriverCall(j.cudaApi.get(),
+                                j.cudaApi->cuModuleLoadDataEx(&raygenMod,
+                                                              raygenPTX.get(),
+                                                              static_cast<uint32_t>(opts.size()),
+                                                              opts.data(),
+                                                              vals.data()));
+
+            CUfunction kraygen;
+            j.cudaApi->cuModuleGetFunction(&kraygen, raygenMod, "kraygen");
+            CUdeviceptr ptr;
+            size_t      numByte;
+            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_cameraFromRaster");
+            static_assert(std::is_standard_layout_v<dmt::Transform>);
+            dmt::Transform transfCR{};
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr,&transfCR,numByte));
+            
+            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_renderFromCamera");
+            dmt::Transform transfRC{};
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr,&transfRC,numByte));
+            
+            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_filter");
+            dmt::gpu::FilterSamplerGPU filter{};
+                // clean up
+                j.cudaApi->cuStreamDestroy(stream);
+            j.cudaApi->cuModuleUnload(raygenMod);
         }
 
         // clean up

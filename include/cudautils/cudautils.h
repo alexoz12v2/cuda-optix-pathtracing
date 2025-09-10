@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include "cudautils/cudautils-macro.h"
 
 #include "cudautils/cudautils-enums.h"

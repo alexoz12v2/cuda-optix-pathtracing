@@ -22,4 +22,4 @@ add_custom_target(dmt-cuda-test-kernel-copy-files ALL
 
 add_dependencies(dmt-test-cuda-kernel dmt-cuda-test-kernel-copy-files dmt-copy-cudautils)
 target_include_directories(dmt-test-cuda-kernel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(dmt-test-cuda-kernel PRIVATE dmt::platform stb::stb dmt::cuda-wrappers OpenEXR::OpenEXR)
+target_link_libraries(dmt-test-cuda-kernel PRIVATE dmt::platform stb::stb dmt::cuda-wrappers dmt::core OpenEXR::OpenEXR)

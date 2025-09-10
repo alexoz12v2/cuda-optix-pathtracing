@@ -13,6 +13,7 @@ struct DeviceFilter
     float  integral;
 };
 
+#if defined(__CUDA_ARCH__)
 // binary search for CDF (cdf length = n+1). returns index in [0..n-1]
 inline __device__ int binarySearchCdf(float const* cdf, int n, float u)
 {
@@ -33,7 +34,7 @@ inline __device__ int binarySearchCdf(float const* cdf, int n, float u)
         idx = n - 1;
     return idx;
 }
-
+#endif
 struct FilterSampleDevice
 {
     dmt::float2 p;
@@ -69,7 +70,6 @@ DMT_GPU FilterSampleDevice sampleFilter2D(DeviceFilter const& F, float u0, float
 }
 #endif
 
-#if defined(__CUDA_ARCH__)
 namespace dmt::gpu {
     /// Mitchell filter sampler for CUDA
     struct MitchellFilterGPU
@@ -77,7 +77,8 @@ namespace dmt::gpu {
         float radiusX;
         float radiusY;
         float B, C;
-
+        
+    #if defined(__CUDA_ARCH__)
         __device__ float mitchell1D(float x) const
         {
             x = fabsf(x);
@@ -101,6 +102,7 @@ namespace dmt::gpu {
         }
 
         __device__ float2 radius() const { return make_float2(radiusX, radiusY); }
+    #endif
     };
 
     /// Pre-tabulated distribution (flattened arrays uploaded from host)
@@ -110,9 +112,16 @@ namespace dmt::gpu {
         float const* conditionalCdf; // size: Ny * (Nx+1)
         float const* marginalCdf;    // size: Ny+1
         int          Nx, Ny;
+        
+        #if defined(__CUDA_ARCH__)
         float2       pMin, pMax;
+        #else
+        Point2f pMin, pMax;
+        #endif
         float        integral;
 
+        
+        #if defined(__CUDA_ARCH__)
         // Sample 1D from CDF (binary search)
         __device__ int sampleCdf(float const* cdf, int size, float u, float* du) const
         {
@@ -162,6 +171,7 @@ namespace dmt::gpu {
 
             return p;
         }
+        #endif
     };
 
     /// Combined sampler
@@ -170,11 +180,12 @@ namespace dmt::gpu {
     {
         MitchellFilterGPU filter;
         FilterDistrib2D   distrib;
-
+        
+    #if defined(__CUDA_ARCH__)
         __device__ float2 sample(float2 u, float* pdfOut = nullptr) const { return distrib.sample(u, pdfOut); }
 
         __device__ float evaluate(float2 p) const { return filter.evaluate(p); }
+    #endif
     };
 
 } // namespace dmt::gpu
-#endif

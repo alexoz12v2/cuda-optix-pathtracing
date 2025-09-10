@@ -85,7 +85,7 @@ add_custom_command(
   -i cuda_runtime_api.h glad/gl.h cuda_gl_interop.h
   -v "_v{n}"
   -l
-  -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_runtime$<$<BOOL:DEFINED DMT_OS_LINUX>:_11>.json\""
+  -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_runtime_11.json\""
   --cpp-file "\"${cuda_runtime_cpp_file}\""
   --header-file "\"${cuda_runtime_h_file}\""
   -up

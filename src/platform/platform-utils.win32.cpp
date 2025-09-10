@@ -499,7 +499,7 @@ namespace dmt::os {
         if (!hasSeparator)
             additionalSize += sizeof(wchar_t); // Extra space for separator
 
-        if (m_dataSize + additionalSize > m_capacity)
+        if (m_dataSize + additionalSize + sizeof(wchar_t) > m_capacity)
         {
             // Reallocate memory
             size_t   newCapacity = m_dataSize + additionalSize + 32; // Add extra buffer
@@ -531,7 +531,7 @@ namespace dmt::os {
         {
             std::wcsncpy(reinterpret_cast<wchar_t*>(m_data), normBuffer.get(), m_capacity / sizeof(wchar_t));
             reinterpret_cast<wchar_t*>(m_data)[m_capacity / sizeof(wchar_t) - 1] = L'\0';
-            m_dataSize = (wcslen(reinterpret_cast<wchar_t*>(m_data)) + 1) * sizeof(wchar_t);
+            m_dataSize = (wcslen(reinterpret_cast<wchar_t*>(m_data))) * sizeof(wchar_t);
         }
 
         // Update validity

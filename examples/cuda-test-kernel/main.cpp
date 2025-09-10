@@ -24,7 +24,7 @@ int32_t guardedMain()
     public:
         ~Janitor()
         {
-            if (cuCtx)
+            if (cuCtx && !cuCtxIsPrimary)
                 cudaApi->cuCtxDestroy(cuCtx);
 
             if (m_nvrtcLoaded)
@@ -61,6 +61,7 @@ int32_t guardedMain()
         dmt::os::LibraryLoader             loader{true};
 
         CUcontext cuCtx = 0;
+        bool cuCtxIsPrimary = false;
 
     private:
         bool m_cudaLoaded  = false;
@@ -83,8 +84,21 @@ int32_t guardedMain()
         j.cudaApi->cuInit(0);
         if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuDeviceGet(&device, 0)))
             return 1;
-        if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxCreate(&j.cuCtx, 0, device)))
+        //if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxCreate(&j.cuCtx, 0, device)))
+        //    return 1;
+        if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuDevicePrimaryCtxRetain(&j.cuCtx, device)))
             return 1;
+        j.cuCtxIsPrimary = true;
+
+        if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSetCurrent(j.cuCtx)))
+            return 1;
+        
+        unsigned int flags;
+        int active;
+        j.cudaApi->cuDevicePrimaryCtxGetState(device, &flags, &active);
+        ctx.log("active = {} (should be one), flags = {}\n", std::make_tuple(active, flags));
+        unsigned int vers;
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxGetApiVersion(j.cuCtx, &vers));
 
         int major = 0;
         int minor = 0;
@@ -118,7 +132,7 @@ int32_t guardedMain()
         nvccOpts.push_back(includeOpt.c_str());
 
         std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
-
+        
         CUmodule   mod  = nullptr;
         CUfunction func = nullptr;
 
@@ -132,8 +146,8 @@ int32_t guardedMain()
         float* d_y; // device pointer to y
 
         // Allocate device memory (example)
-        j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_x, n * sizeof(float));
-        j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_y, n * sizeof(float));
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_x, n * sizeof(float)));
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_y, n * sizeof(float)));
 
         // Kernel launch parameters
         uint32_t threadsPerBlock = 256;
@@ -163,12 +177,11 @@ int32_t guardedMain()
         }
 
         // Wait for completion
-        res = j.cudaApi->cuCtxSynchronize();
-
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize(j.cuCtx));
 
         // Clean up
-        j.cudaApi->cuMemFree((CUdeviceptr)d_x);
-        j.cudaApi->cuMemFree((CUdeviceptr)d_y);
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_x));
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_y));
 
         // testing queues
         ctx.log("--- Testing Queues ---", {});
@@ -187,23 +200,31 @@ int32_t guardedMain()
                 queue->pushHost(i);
 
             CUfunction kqueueDouble = nullptr;
-            j.cudaApi->cuModuleGetFunction(&kqueueDouble, mod, "kqueueDouble");
-
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kqueueDouble, mod, "kqueueDouble"));
+            CUstream stream;
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamCreate(&stream, CU_STREAM_DEFAULT));
             // attach __managed__ memory to stream
-            j.cudaApi->cuStreamAttachMemAsync(0, std::bit_cast<CUdeviceptr>(queue), queueBytes, 0);
-            j.cudaApi->cuStreamAttachMemAsync(0, std::bit_cast<CUdeviceptr>(queue1), queueBytes1, 0);
+
+            dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(queue), queueBytes, CU_MEM_ATTACH_SINGLE));
+            dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(queue1), queueBytes1, CU_MEM_ATTACH_SINGLE));
+
+            CUmemLocation memLoc;
+            memLoc.type = CU_MEM_LOCATION_TYPE_DEVICE;
+            memLoc.id   = 1;
 
             // optional: prefetch
-            j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes >> 3, device, 0);
-            j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes1 >> 3, device, 0);
+            // TODO:: check the getAttribute to verify the compatibilty with the concurrent managed access
+            // int concurrentManagedAccess = 0;
+            //cuDeviceGetAttribute(&concurrentManagedAccess,
+            //             CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+            //             dev);
+            //dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes >> 3, memLoc, 0, stream));
+            //dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes1 >> 3, memLoc, 0, stream));
 
             // launch
             void* kArgs[] = {&queue, &queue1};
-            res           = j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, 0, kArgs, nullptr);
-            if (res != CUDA_SUCCESS)
-                std::cerr << "Failed to launch kernel" << std::endl;
-
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(0));
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
 
             int         element = 0;
             std::string log;
@@ -212,10 +233,23 @@ int32_t guardedMain()
                 log += std::to_string(element);
                 log += ", ";
             }
-            log.pop_back();
-            log.pop_back();
-            ctx.log("Queue Elements: [ {} ]", std::make_tuple(log));
 
+
+            if (log.size() >= 2)
+            {
+                log.pop_back();
+                log.pop_back();
+            }
+
+            ctx.log("Queue Elements: [ ", {});
+            // Break the log into chunks of 256 characters
+            size_t const chunkSize = 256;
+            for (size_t i = 0; i < log.size(); i += chunkSize)
+            {
+                std::string_view chunk(log.data() + i, std::min(chunkSize, log.size() - i));
+                ctx.log("{}", std::make_tuple(chunk));
+            }
+            ctx.log(" ]", {});
             dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue);
             dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue1);
         }

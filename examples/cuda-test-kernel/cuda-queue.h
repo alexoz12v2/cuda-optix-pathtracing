@@ -116,7 +116,7 @@ namespace dmt {
         static inline ManagedQueue<T>* allocateManaged(CUDADriverLibrary const& nvApi,
                                                        int                      cap,
                                                        size_t&                  out_bytes,
-                                                       uint32_t                 flags = CU_MEM_ATTACH_HOST)
+                                                       uint32_t                 flags = CU_MEM_ATTACH_GLOBAL)
         {
             static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable for this queue.");
             size_t const headerSize = sizeof(ManagedQueue<T>);

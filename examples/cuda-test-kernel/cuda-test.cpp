@@ -1,6 +1,7 @@
 #include "cuda-test.h"
 
 #include "platform/platform-context.h"
+#include <algorithm>
 
 namespace dmt {
     std::vector<char const*> getnvccOpts(bool debug)

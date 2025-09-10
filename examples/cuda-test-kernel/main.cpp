@@ -176,7 +176,7 @@ int32_t guardedMain()
             ctx.error("Error cuLaunchKernel saxpy: {}", std::make_tuple(std::string_view(err)));
         }
 
-// Wait for completion 
+// Wait for completion
 #if defined(DMT_OS_LINUX)
         dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize());
 #elif defined(DMT_OS_WINDOWS)

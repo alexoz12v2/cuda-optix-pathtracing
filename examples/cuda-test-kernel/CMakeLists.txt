@@ -1,11 +1,12 @@
 dmt_add_cli(dmt-test-cuda-kernel)
 target_sources(dmt-test-cuda-kernel
-  PRIVATE main.cpp cuda-test.cpp cuda-kernel.cu
+  PRIVATE main.cpp cuda-test.cpp cuda-kernel.cu raygen.cu
 )
 
 set(cuda_test_kernel_files
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda-kernel.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda-queue.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/raygen.cu
 )
 
 set_source_files_properties(${cuda_test_kernel_files} PROPERTIES HEADER_FILE_ONLY TRUE)

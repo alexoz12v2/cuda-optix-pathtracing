@@ -1,12 +1,29 @@
 #define DMT_CUDAUTILS_IMPLEMENTATION
 #include "cudautils.h"
+#include "cuda-queue.h"
 
-struct RaygenParams
-{
-    int32_t px;
-    int32_t py;
-    int32_t sampleIndex;
-};
+#define DMT_RAYGEN_WIDTH 1024
+
+namespace dmt {
+
+    struct RaygenPayload
+    {
+        ManagedQueue<float>* ox;
+        ManagedQueue<float>* oy;
+        ManagedQueue<float>* oz;
+        ManagedQueue<float>* dx;
+        ManagedQueue<float>* dy;
+        ManagedQueue<float>* dz;
+    };
+
+    struct RaygenParams
+    {
+        int32_t px;
+        int32_t py;
+        int32_t sampleIndex;
+        
+    };
+} // namespace dmt
 
 
 extern "C"

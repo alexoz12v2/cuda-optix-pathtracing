@@ -19,3 +19,12 @@ extern "C" __global__ void kqueueDouble(dmt::ManagedQueue<int>* queue, dmt::Mana
         return;
     queue1->pushDevice(num * 2);
 }
+
+extern "C" __global__ void kmmqDouble(dmt::ManagedMultiQueue<double, int>* queue, dmt::ManagedMultiQueue<double, int>* queue1)
+{
+    int num = 0;
+    double fnum = 0.0;
+    if (!queue->popDevice(&fnum, &num))
+        return;
+    queue1->pushDevice(fnum * 2, num * 3);
+}

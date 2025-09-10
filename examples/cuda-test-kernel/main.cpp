@@ -1,4 +1,5 @@
 #include "cuda-test.h"
+#include <array>
 #define DMT_ENTRY_POINT
 #define DMT_WINDOWS_CLI
 #include "platform/platform.h"
@@ -132,11 +133,33 @@ int32_t guardedMain()
         nvccOpts.push_back(includeOpt.c_str());
 
         std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
+#if 1
+        if (saxpyPTX)
+        {
+            // TODO Remove: Dump compiled file to current working directory such that debugger picks on it
+            std::ofstream ptxFile{"saxpy.cu"};
+            ptxFile << saxpyPTX;
+        }
+#endif
 
         CUmodule   mod  = nullptr;
         CUfunction func = nullptr;
 
+
+#if 0
         dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleLoadData(&mod, saxpyPTX.get()));
+#else
+        // TODO: remove when debug symbols are not needed anymore
+        std::array<CUjit_option, 3> opts = {CU_JIT_GENERATE_DEBUG_INFO, CU_JIT_GENERATE_LINE_INFO, CU_JIT_LOG_VERBOSE};
+        std::array<void*, 3>        vals = {(void*)1, (void*)1, (void*)1};
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuModuleLoadDataEx(&mod,
+                                                          saxpyPTX.get(),
+                                                          static_cast<uint32_t>(opts.size()),
+                                                          opts.data(),
+                                                          vals.data()));
+#endif
+
         dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&func, mod, "saxpy_grid_stride"));
 
         // Example: launch parameters
@@ -241,6 +264,10 @@ int32_t guardedMain()
                                 j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
 
+
+            if (int peek = 0; queue1->peekHost(10, &peek))
+                ctx.log("Peeking element 10: {}", std::make_tuple(peek));
+
             int         element = 0;
             std::string log;
             while (queue1->popHost(&element))
@@ -267,6 +294,78 @@ int32_t guardedMain()
             ctx.log(" ]", {});
             dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue);
             dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue1);
+            queue = nullptr, queue1 = nullptr;
+
+            // --------------------------- Test Managed Multi Queue ------------------------------------------------
+            ctx.log("--------------------------- Test Managed Multi Queue -------------------------------------------", {});
+
+            // allocate queues
+            size_t mmqbytes = 0;
+            auto*  mmq      = dmt::ManagedMultiQueue<double, int>::allocateManaged(*j.cudaApi, 256, mmqbytes);
+            auto*  mmq1     = dmt::ManagedMultiQueue<double, int>::allocateManaged(*j.cudaApi, 256, mmqbytes);
+            if (!mmq || !mmq1)
+            {
+                ctx.error("Couldn't allocate managed queues", {});
+            }
+            else
+            {
+                // fill first queue
+                for (uint32_t i = 0; i < 256; ++i)
+                    mmq->pushHost(std::make_tuple(static_cast<double>(i) / 2, i));
+
+                for (int i = 0; i < mmq->count; ++i)
+                {
+                    if (std::tuple<double, int> res; mmq->peekHost(i, &res))
+                        ctx.log("Peeking MMQ Element {}: {} {}", std::make_tuple(i, std::get<0>(res), std::get<1>(res)));
+                }
+
+                // attach to stream
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(mmq), 0, CU_MEM_ATTACH_SINGLE));
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(mmq1), 0, CU_MEM_ATTACH_SINGLE));
+
+                // launch kernel
+                CUfunction kmmqDouble = nullptr;
+                dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
+                void* kargs[] = {&mmq, &mmq1};
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
+
+                // synchronize and check result
+                dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
+
+                ctx.log("----------------------------------------------------------------------", {});
+                ctx.log("Size of MMQ: {}", std::make_tuple(mmq->count));
+                ctx.log("Size of MMQ1: {}", std::make_tuple(mmq1->count));
+
+                std::tuple<double, int> res;
+                std::string             resLog;
+                while (mmq1->popHost(&res))
+                    resLog += "( " + std::to_string(std::get<0>(res)) + " " + std::to_string(std::get<1>(res)) + " ), ";
+
+                if (resLog.size() >= 2)
+                {
+                    resLog.pop_back();
+                    resLog.pop_back();
+                }
+
+                size_t const chunkSize = 256;
+                size_t const num       = dmt::ceilDiv<size_t>(resLog.size(), 256);
+                ctx.log("MMQ: [", {});
+                for (size_t i = 0; i < num; i += chunkSize)
+                {
+                    std::string_view view{resLog.data() + i, std::min(chunkSize, log.size() - i)};
+                    ctx.log("{}", std::make_tuple(view));
+                }
+                ctx.log("]", {});
+
+                dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq);
+                dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq1);
+            }
+
+            // clean up
+            j.cudaApi->cuStreamDestroy(stream);
         }
 
         // clean up

@@ -21,7 +21,6 @@ namespace dmt {
         int32_t px;
         int32_t py;
         int32_t sampleIndex;
-        
     };
 } // namespace dmt
 

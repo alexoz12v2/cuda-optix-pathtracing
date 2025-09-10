@@ -11,6 +11,7 @@ namespace dmt {
             "--use_fast_math",
             "--relocatable-device-code=true",
             "--std=c++17",
+            "-default-device"
         };
 
         if (debug)

@@ -323,7 +323,7 @@ int32_t guardedMain()
                 dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
                 void* kargs[] = {&mmq, &mmq1};
                 dmt::cudaDriverCall(j.cudaApi.get(),
-                                    j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
+                                    j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kargs, nullptr));
 
                 // synchronize and check result
                 dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));

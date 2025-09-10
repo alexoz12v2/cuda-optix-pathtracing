@@ -31,6 +31,7 @@
     "CuCTXGETDEVICE" :"CUresult (CUDAAPI *) (CUdevice *device)",
     "CuCTXGETFLAGS" :"CUresult (CUDAAPI *) (unsigned int *flags)",
     "CuCTXSYNCHRONIZE" :"CUresult (CUDAAPI *) (void)",
+    "CuCTXSYNCHRONIZE_v2" :"CUresult (CUDAAPI *) (CUcontext ctx)",
     "CuCTXSETLIMIT" :"CUresult (CUDAAPI *) (CUlimit limit, size_t value)",
     "CuCTXGETLIMIT" :"CUresult (CUDAAPI *) (size_t *pvalue, CUlimit limit)",
     "CuCTXGETCACHECONFIG" :"CUresult (CUDAAPI *) (CUfunc_cache *pconfig)",

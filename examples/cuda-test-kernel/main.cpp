@@ -60,8 +60,8 @@ int32_t guardedMain()
         std::unique_ptr<NVRTCLibrary>      nvrtcApi = std::make_unique<NVRTCLibrary>();
         dmt::os::LibraryLoader             loader{true};
 
-        CUcontext cuCtx = 0;
-        bool cuCtxIsPrimary = false;
+        CUcontext cuCtx          = 0;
+        bool      cuCtxIsPrimary = false;
 
     private:
         bool m_cudaLoaded  = false;
@@ -92,9 +92,9 @@ int32_t guardedMain()
 
         if (!dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSetCurrent(j.cuCtx)))
             return 1;
-        
+
         unsigned int flags;
-        int active;
+        int          active;
         j.cudaApi->cuDevicePrimaryCtxGetState(device, &flags, &active);
         ctx.log("active = {} (should be one), flags = {}\n", std::make_tuple(active, flags));
         unsigned int vers;
@@ -132,7 +132,7 @@ int32_t guardedMain()
         nvccOpts.push_back(includeOpt.c_str());
 
         std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
-        
+
         CUmodule   mod  = nullptr;
         CUfunction func = nullptr;
 
@@ -176,8 +176,14 @@ int32_t guardedMain()
             ctx.error("Error cuLaunchKernel saxpy: {}", std::make_tuple(std::string_view(err)));
         }
 
-        // Wait for completion
+// Wait for completion (Linux -> CUDA 11.8, Windows -> 12.6 (TODO: Downgrade Windows + versioned functions))
+#if defined(DMT_OS_LINUX)
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize());
+#elif defined(DMT_OS_WINDOWS)
         dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize(j.cuCtx));
+#else
+    #error "unsupported OS"
+#endif
 
         // Clean up
         dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_x));
@@ -205,8 +211,16 @@ int32_t guardedMain()
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamCreate(&stream, CU_STREAM_DEFAULT));
             // attach __managed__ memory to stream
 
-            dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(queue), queueBytes, CU_MEM_ATTACH_SINGLE));
-            dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(queue1), queueBytes1, CU_MEM_ATTACH_SINGLE));
+            dmt::cudaDriverCall(j.cudaApi.get(),
+                                j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                                  std::bit_cast<CUdeviceptr>(queue),
+                                                                  queueBytes,
+                                                                  CU_MEM_ATTACH_SINGLE));
+            dmt::cudaDriverCall(j.cudaApi.get(),
+                                j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                                  std::bit_cast<CUdeviceptr>(queue1),
+                                                                  queueBytes1,
+                                                                  CU_MEM_ATTACH_SINGLE));
 
             CUmemLocation memLoc;
             memLoc.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -223,7 +237,8 @@ int32_t guardedMain()
 
             // launch
             void* kArgs[] = {&queue, &queue1};
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
+            dmt::cudaDriverCall(j.cudaApi.get(),
+                                j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
 
             int         element = 0;

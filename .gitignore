@@ -458,3 +458,7 @@ imgui.ini
 
 # scene files
 scene-ignored/
+
+# debug compiled kernels
+*.debug.cu
+saxpy.cu

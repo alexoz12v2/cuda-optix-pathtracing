@@ -78,7 +78,7 @@ enable_language(C)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 # Link: https://forums.developer.nvidia.com/t/how-to-include-optix-8-0-in-cmake-project/269123
-set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+# set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 include(cmake/Config.cmake)
 include(cmake/Dependencies.cmake)
@@ -127,11 +127,18 @@ add_custom_target(dmt-link-assets
 )
 
 # Declare targets to Copy CUDA Device code inside the build/shaders directory
-add_custom_target(dmt-copy-cuda-device-code ALL 
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${OPTIX80_PATH}/include ${CUDAToolkit_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}/shaders
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${OPTIX80_PATH}/include/internal ${CUDAToolkit_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}/shaders/internal
-  COMMENT "Copy CUDA Device code source header files for JIT compilation"
+# add_custom_target(dmt-copy-cuda-device-code ALL 
+#   COMMAND ${CMAKE_COMMAND} -E copy_directory ${OPTIX80_PATH}/include ${CUDAToolkit_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}/shaders
+#   COMMAND ${CMAKE_COMMAND} -E copy_directory ${OPTIX80_PATH}/include/internal ${CUDAToolkit_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}/shaders/internal
+#   COMMENT "Copy CUDA Device code source header files for JIT compilation"
+# )
+
+add_custom_target(dmt-copy-cuda-dlls ALL
+  COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/copy_dlls.py ${CMAKE_BINARY_DIR}/bin
+  COMMENT "Copy DLLs to bin"
 )
+
+set(dmt_cuda_toolkit_include_dir $ENV{CUDA_HOME}/include)
 
 # add library code
 add_subdirectory(src)

@@ -74,6 +74,7 @@ manage_ld_library_path() {
 # -----------------------------
 OPTIX_ARG=""
 FBX_ARG=""
+PRE_TURING=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --optix-dir)
@@ -83,6 +84,9 @@ while [ $# -gt 0 ]; do
         --autodesk-fbx-sdk-dir)
             shift
             FBX_ARG="$1"
+            ;;
+        --pre-turing)
+            PRE_TURING=1
             ;;
         *)
             echo "Warning: Unknown argument: $1"
@@ -97,7 +101,17 @@ done
 DRIVER_CUDA=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}') # eg. "12.9"
 CUDA_BASE="/usr/local"
 
-if [ -n "$DRIVER_CUDA" ]; then
+if [ $PRE_TURING -eq 1 ]; then
+    if [ -d "${CUDA_BASE}/cuda-11.8" ]; then
+        echo "Using CUDA 11.8 due to --pre-turing flag"
+        CUDA_DIR="${CUDA_BASE}/cuda-11.8"
+    else
+        echo "Warning: --pre-turing requested but ${CUDA_BASE}/cuda-11.8 not found"
+        CUDA_DIR="" # fall back to normal logic below
+    fi
+fi
+
+if [ -z "$CUDA_DIR" ] && [ -n "$DRIVER_CUDA" ]; then
     echo "Driver supports CUDA $DRIVER_CUDA"
     MAJOR_VERSION="${DRIVER_CUDA%.*}"
 
@@ -107,9 +121,6 @@ if [ -n "$DRIVER_CUDA" ]; then
     else
         CUDA_DIR="${CUDA_BASE}/cuda-${DRIVER_CUDA}"
     fi
-else
-    echo "Error: No CUDA Driver support found"
-    return 1 2>/dev/null || exit 1
 fi
 
 # Fallback: pick latest installed if the driver-specific one doesn’t exist

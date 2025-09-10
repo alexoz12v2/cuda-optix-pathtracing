@@ -20,6 +20,10 @@ def which_lib_from_string(value: str) -> dll_names.EWhichLib:
 def find_first_matching_file(directory: str, pattern: str) -> str:
     """Find the first file matching a pattern in the given directory."""
     path = Path(directory)
+    if isinstance(pattern, list):
+        patternn = pattern[0]
+    else:
+        patternn = pattern
 
     if not path.is_dir() or not path.exists():
         raise ValueError(f"Provided path '{directory}' is not a valid directory.")
@@ -28,7 +32,7 @@ def find_first_matching_file(directory: str, pattern: str) -> str:
         p = path if subpath == "" else path / subpath
         if p.exists() and p.is_dir():
             matches = sorted(
-                p.glob(pattern),
+                p.glob(patternn),
                 key=lambda f: (".alt." in f.name, f.name),  # Prioritize non-alt files
             )
             if matches:

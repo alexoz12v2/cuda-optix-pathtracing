@@ -177,7 +177,7 @@ def write_type_declarations_and_populate_method_data(
     for base_name, latest_version in exports.items():
         # Use tmap lookup if available, otherwise default to void(*)()
         func_ptr_type = tmap.get(
-            base_name.lower(), "void(*)()"
+            latest_version.lower(), tmap.get(base_name.lower(), "void(*)()")
         )  # Default to function pointer
         t_sig = (
             f"using {latest_version}_t = {func_ptr_type};"  # Using the latest version

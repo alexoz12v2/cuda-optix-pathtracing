@@ -6,10 +6,10 @@ namespace dmt {
     std::vector<char const*> getnvccOpts(bool debug)
     {
         std::vector<char const*> opts{
-            "--gpu-architecture=compute_75",
+            "--gpu-architecture=compute_60", // TODO check compatibility with current context device
             "--use_fast_math",
             "--relocatable-device-code=true",
-            "--std=c++20",
+            "--std=c++17",
         };
 
         if (debug)

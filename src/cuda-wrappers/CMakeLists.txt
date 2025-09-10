@@ -85,7 +85,7 @@ add_custom_command(
   -i cuda_runtime_api.h glad/gl.h cuda_gl_interop.h
   -v "_v{n}"
   -l
-  -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_runtime.json\""
+  -j "\"${CMAKE_SOURCE_DIR}/scripts/dll_wrapper_type_mapper_cuda_runtime$<$<BOOL:DEFINED DMT_OS_LINUX>:_11>.json\""
   --cpp-file "\"${cuda_runtime_cpp_file}\""
   --header-file "\"${cuda_runtime_h_file}\""
   -up
@@ -182,7 +182,7 @@ target_sources(dmt-cuda-wrappers
 )
 
 # Add dependencies for copying DLLs before building the target
-add_dependencies(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls copy_nvidia_driver)
+add_dependencies(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls copy_nvidia_driver dmt-copy-cuda-dlls)
 
 string(STRIP "$ENV{CUDA_HOME}" cuda_toolkit_headers)
 if (NOT DEFINED ENV{CUDA_HOME})
@@ -190,7 +190,7 @@ if (NOT DEFINED ENV{CUDA_HOME})
 endif()
 set(cuda_toolkit_headers "${cuda_toolkit_headers}/include")
 
-target_include_directories(dmt-cuda-wrappers PUBLIC "${cuda_toolkit_headers}")
+target_include_directories(dmt-cuda-wrappers PUBLIC "${cuda_toolkit_headers}" PRIVATE ${dmt_cuda_toolkit_include_dir})
 
 # Link target to the platform
 target_link_libraries(dmt-cuda-wrappers PUBLIC dmt-platform glad::glad)

@@ -680,7 +680,7 @@ function(dmt_add_module_library name module_name)
 
   # create alias
   add_library(${alias_name} ALIAS ${name})
-  dmt_debug_print_target_props(${name} ${module_name})
+  # dmt_debug_print_target_props(${name} ${module_name})
 endfunction()
 
 

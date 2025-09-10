@@ -22,10 +22,10 @@ def dll_files(which_lib: EWhichLib = EWhichLib.eAll) -> list[str] | str:
         case "Linux":
             match which_lib:
                 case EWhichLib.eAll:
-                    return ["libcudart.so*", "libnvrtc.so*"]
+                    return ["libcudart.so*", "libnvrtc.so*", "libnvrtc-builtins.so*"]
                 case EWhichLib.eCudart:
                     return "libcudart.so*"
                 case EWhichLib.eNvrtc:
-                    return "libnvrtc.so*"
+                    return ["libnvrtc.so*", "libnvrtc-builtins.so*"]
         case _:
             raise RuntimeError(f"Unsupported OS: {system}")

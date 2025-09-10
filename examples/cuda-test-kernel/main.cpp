@@ -133,14 +133,7 @@ int32_t guardedMain()
         nvccOpts.push_back(includeOpt.c_str());
 
         std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
-#if 1
-        if (saxpyPTX)
-        {
-            // TODO Remove: Dump compiled file to current working directory such that debugger picks on it
-            std::ofstream ptxFile{"saxpy.cu"};
-            ptxFile << saxpyPTX;
-        }
-#endif
+
 
         CUmodule   mod  = nullptr;
         CUfunction func = nullptr;

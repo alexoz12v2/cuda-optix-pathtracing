@@ -84,6 +84,12 @@ namespace dmt {
             return nullptr;
         }
 
+        #if 1
+            // TODO Remove: Dump compiled file to current working directory such that debugger picks on it
+            std::ofstream ptxFile{"saxpy.cu"};
+            ptxFile << srcKernel;
+            ptxFile.flush();
+        #endif
         size_t ptxSize = 0;
 
         if (auto res = nvrtcApi->nvrtcGetPTXSize(prog, &ptxSize); res != ::NVRTC_SUCCESS)

@@ -2,13 +2,19 @@
 
 #include "cudautils/cudautils-macro.h"
 
-#include <algorithm>
-#include <bit>
-#include <numbers>
+#if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
+    #include <algorithm>
+    #include <bit>
 
-#include <cmath>
-#include <cstdint>
-#include <limits>
+    #include <cmath>
+    #include <cstdint>
+    #include <limits>
+    #include <numbers>
+#else
+    #include <cuda_fp16.h>
+    #include <numbers>
+    #include <limits>
+#endif
 
 #define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
@@ -383,7 +389,9 @@ namespace dmt {
     // TODO SOA
     struct DMT_CORE_API Intervalf
     {
-        struct DMT_CORE_API SOA{};
+        struct DMT_CORE_API SOA
+        {
+        };
 
     public:
         Intervalf() = default;
@@ -655,7 +663,11 @@ namespace dmt::fl {
     {
         float ret = x;
     #if !defined(DMT_SKIP_FLOAT_TESTS)
+        #if defined(__CUDA_ARCH__)
+        if (glm::epsilonEqual(x, 0.f, 1e-7f))
+        #else
         if (glm::epsilonEqual(x, 0.f, eqTol()))
+        #endif
             return std::numeric_limits<float>::infinity();
     #endif
 
@@ -673,8 +685,25 @@ namespace dmt::fl {
     #endif
         return ret;
     }
-    __host__ __device__ bool  nearZero(float x, float tol) { return glm::epsilonEqual(x, 0.f, tol); }
-    __host__ __device__ bool  near(float x, float y) { return glm::epsilonEqual(x, y, eqTol()); }
+
+    __host__ __device__ bool nearZero(float x, float tol)
+    {
+    #if defined(__CUDA_ARCH__)
+        return glm::epsilonEqual(x, 0.f, 1e-7f);
+    #else
+        return glm::epsilonEqual(x, 0.f, tol);
+    #endif
+    }
+
+    __host__ __device__ bool near(float x, float y)
+    {
+    #if defined(__CUDA_ARCH__)
+        return glm::epsilonEqual(x, 0.f, 1e-7f);
+    #else
+        return glm::epsilonEqual(x, y, eqTol());
+    #endif
+    }
+
     __host__ __device__ float pythag(float a, float b)
     {
         float absa = glm::abs(a);
@@ -725,34 +754,70 @@ namespace dmt {
 
     __host__ __device__ Intervalf operator*(Intervalf a, Intervalf b)
     {
-        float lp[4] = {fl::mulRoundDown(a.low, b.low),
-                       fl::mulRoundDown(a.high, b.low),
-                       fl::mulRoundDown(a.low, b.high),
-                       fl::mulRoundDown(a.high, b.high)};
-        float hp[4] = {fl::mulRoundUp(a.low, b.low),
-                       fl::mulRoundUp(a.high, b.low),
-                       fl::mulRoundUp(a.low, b.high),
-                       fl::mulRoundUp(a.high, b.high)};
-        return {std::min({lp[0], lp[1], lp[2], lp[3]}), std::max({hp[0], hp[1], hp[2], hp[3]})};
+        float lp0 = fl::mulRoundDown(a.low, b.low);
+        float lp1 = fl::mulRoundDown(a.high, b.low);
+        float lp2 = fl::mulRoundDown(a.low, b.high);
+        float lp3 = fl::mulRoundDown(a.high, b.high);
+
+        float hp0 = fl::mulRoundUp(a.low, b.low);
+        float hp1 = fl::mulRoundUp(a.high, b.low);
+        float hp2 = fl::mulRoundUp(a.low, b.high);
+        float hp3 = fl::mulRoundUp(a.high, b.high);
+
+        float low = lp0;
+        if (lp1 < low)
+            low = lp1;
+        if (lp2 < low)
+            low = lp2;
+        if (lp3 < low)
+            low = lp3;
+
+        float high = hp0;
+        if (hp1 > high)
+            high = hp1;
+        if (hp2 > high)
+            high = hp2;
+        if (hp3 > high)
+            high = hp3;
+
+        return {low, high};
     }
 
     __host__ __device__ Intervalf operator/(Intervalf a, Intervalf b)
     {
-        // if the interval of the divisor contains zero, return the whole extended real number line
+        // if divisor interval contains zero → full real line
         if (b.low < 0.f && b.high > 0.f)
-            return {-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()};
+            return {-__builtin_inff(), __builtin_inff()};
 
-        float lowQuot[4]  = {fl::divRoundDown(a.low, b.low),
-                             fl::divRoundDown(a.high, b.low),
-                             fl::divRoundDown(a.low, b.high),
-                             fl::divRoundDown(a.high, b.high)};
-        float highQuot[4] = {fl::divRoundUp(a.low, b.low),
-                             fl::divRoundUp(a.high, b.low),
-                             fl::divRoundUp(a.low, b.high),
-                             fl::divRoundUp(a.high, b.high)};
-        return {std::min({lowQuot[0], lowQuot[1], lowQuot[2], lowQuot[3]}),
-                std::max({highQuot[0], highQuot[1], highQuot[2], highQuot[3]})};
+        float lq0 = fl::divRoundDown(a.low, b.low);
+        float lq1 = fl::divRoundDown(a.high, b.low);
+        float lq2 = fl::divRoundDown(a.low, b.high);
+        float lq3 = fl::divRoundDown(a.high, b.high);
+
+        float hq0 = fl::divRoundUp(a.low, b.low);
+        float hq1 = fl::divRoundUp(a.high, b.low);
+        float hq2 = fl::divRoundUp(a.low, b.high);
+        float hq3 = fl::divRoundUp(a.high, b.high);
+
+        float low = lq0;
+        if (lq1 < low)
+            low = lq1;
+        if (lq2 < low)
+            low = lq2;
+        if (lq3 < low)
+            low = lq3;
+
+        float high = hq0;
+        if (hq1 > high)
+            high = hq1;
+        if (hq2 > high)
+            high = hq2;
+        if (hq3 > high)
+            high = hq3;
+
+        return {low, high};
     }
+
 } // namespace dmt
 
 #endif

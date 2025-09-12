@@ -19,8 +19,8 @@ set_source_files_properties(${core_unused_sources} PROPERTIES HEADER_FILE_ONLY T
 ## CUDA utils (TODO better and copy to build)
 
 set(cudautils_header_files
-  ${CMAKE_SOURCE_DIR}/include/dmtmacros.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils.h
+  ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-macro.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-float.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-vecmath.h
   ${CMAKE_SOURCE_DIR}/include/cudautils/cudautils-enums.h
@@ -56,15 +56,21 @@ add_custom_command(
   TARGET dmt-copy-cudautils
   PRE_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders/cudautils
 )
 
 foreach(shader_file IN LISTS cudautils_header_files)
   add_custom_command(
     TARGET dmt-copy-cudautils
-    COMMAND ${CMAKE_COMMAND} -E copy ${shader_file} ${CMAKE_BINARY_DIR}/bin/shaders/
+    COMMAND ${CMAKE_COMMAND} -E copy ${shader_file} ${CMAKE_BINARY_DIR}/bin/shaders/cudautils
     COMMENT "Copying ${shader_file}"
   )
 endforeach()
+add_custom_command(
+  TARGET dmt-copy-cudautils
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/include/dmtmacros.h ${CMAKE_BINARY_DIR}/bin/shaders
+  COMMENT "copying macros file"
+)
 
 # target definition
 dmt_add_module_library(dmt-core core SHARED)

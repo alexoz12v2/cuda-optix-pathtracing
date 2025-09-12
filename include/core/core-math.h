@@ -190,7 +190,13 @@ namespace dmt {
         Point2f DMT_CORE_API sample(Point2f u, float* pdf = nullptr, Point2i* offset = nullptr) const;
 
         float DMT_CORE_API pdf(Point2f pr) const;
+        std::span<float const> conditionalCdfRow(int y) const {
+        return m_pConditionalV[y].CDF();
+    }
 
+    std::span<float const> marginalCdf() const {
+        return m_pMarginalV.CDF();
+    }
     private: // assume variables are u and v, v -> marginal, u -> computed through conditional probability
         Bounds2f                              m_domain;
         std::pmr::vector<PiecewiseConstant1D> m_pConditionalV;

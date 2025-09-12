@@ -10,6 +10,7 @@
 
 #include "cudautils/cudautils-transform.h"
 #include "cudautils/cudautils-filter.h"
+#include "cudautils/cudautils-sampler.h"
 
 #include "cuda-queue.h"
 #include "cuda-test.h"
@@ -363,7 +364,15 @@ int32_t guardedMain()
             //------------------------Test Raygen----------------------
             path                              = dmt::os::Path::executableDir() / "shaders" / "raygen.cu";
             std::unique_ptr<char[]> raygenPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "raygen.cu", nvccOpts);
+            //-----------------------Sampler----------------------------
+            //Fill
+            dmt::filtering::Mitchell filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f};
+            int                      nx         = 256;
+            int                      ny         = 256;
+            dmt::PiecewiseConstant2D cpuDistrib = dmt::precalculateMitchellDistrib(filter, nx, ny);
 
+            dmt::GpuSamplerHandle samplerHandle = dmt::uploadFilterDistrib(j.cudaApi.get(), cpuDistrib, filter);
+            
             // launch kernel
             CUfunction kmmqDouble = nullptr;
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));

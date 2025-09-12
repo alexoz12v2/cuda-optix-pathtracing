@@ -259,7 +259,8 @@ namespace dmt::filtering {
         m_sampler(*this, memory, temp) // needs radius, b and c, cause evaluate and radius needs to work at this point
         {
         }
-
+        DMT_FORCEINLINE float        b() const { return m_b; }
+        DMT_FORCEINLINE float        c() const { return m_c; }
         DMT_FORCEINLINE FilterSample sample(Point2f u) const { return m_sampler.sample(u); }
 
         DMT_FORCEINLINE float evaluate(Point2f p) const

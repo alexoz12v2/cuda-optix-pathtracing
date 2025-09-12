@@ -1,9 +1,26 @@
 #pragma once
 
+#include "cudautils/cudautils-filter.h"
 #include "cudautils/cudautils-macro.h"
 #include "cudautils/cudautils-vecmath.h"
 
 namespace dmt {
+
+    struct GpuSamplerHandle
+    {
+        gpu::FilterSamplerGPU sampler;
+        float*           dConditionalCdf = nullptr;
+        float*           dMarginalCdf    = nullptr;
+
+        //static inline void freeGpuSamplerHandle(CUDADriverLibrary const* cudaApi)
+        //{
+        //    if (dConditionalCdf)
+        //        cudaFree(dConditionalCdf);
+        //    if (dMarginalCdf)
+        //        cudaFree(dMarginalCdf);
+        //}
+    };
+
 #if 0
     // Maximum number of Halton dimensions (primes)
     DMT_GPU __constant__ int d_primes[16] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53};

@@ -24,14 +24,19 @@
 #include <glm/gtx/matrix_decompose.hpp> // glm::decompose
 #include <glm/gtx/norm.hpp>             // glm::length2
 
-#include <Eigen/Dense>
+#if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
+    #include <Eigen/Dense>
+#endif
 #if defined(__NVCC__)
     #pragma nv_diag_default 20012
     #pragma nv_diag_default 3012
 #endif
 #undef diag_suppress
 
+#if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
 #include <platform/platform-utils.h>
+#endif
+
 #include "cudautils/cudautils-float.h"
 
 #include <array>
@@ -951,8 +956,10 @@ namespace dmt {
     // define a rotation in the plane defined by two axes
     DMT_CORE_API DMT_CPU_GPU Matrix4f givensRotation(int32_t axis0, int32_t axis1, float theta);
     DMT_CORE_API DMT_CPU_GPU QR       qr(Matrix4f const& m, int32_t numIter = 10);
-    DMT_CORE_API DMT_CPU SVD          svd(Matrix4f const& m);
-    DMT_CORE_API DMT_CPU bool         isSingular(Matrix4f const& m, float tolerance = 1e-6f);
+#if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
+    DMT_CORE_API DMT_CPU SVD  svd(Matrix4f const& m);
+    DMT_CORE_API DMT_CPU bool isSingular(Matrix4f const& m, float tolerance = 1e-6f);
+#endif
 
     DMT_CORE_API DMT_CPU_GPU Matrix4f operator+(Matrix4f const& a, Matrix4f const& b);
     DMT_CORE_API DMT_CPU_GPU Matrix4f operator-(Matrix4f const& a, Matrix4f const& b);
@@ -2722,6 +2729,7 @@ namespace dmt {
         return ret;
     }
 
+    #if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
     __host__ SVD svd(Matrix4f const& m, uint32_t maxIterations = 100)
     {
         static constexpr int32_t numCols = 4;
@@ -2776,6 +2784,7 @@ namespace dmt {
 
         return false; // Matrix is non-singular
     }
+    #endif
 
     __host__ __device__ Matrix4f operator+(Matrix4f const& a, Matrix4f const& b)
     {

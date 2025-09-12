@@ -397,16 +397,16 @@ int32_t guardedMain()
             j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_cameraFromRaster");
             static_assert(std::is_standard_layout_v<dmt::Transform>);
             dmt::Transform transfCR{};
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr,&transfCR,numByte));
-            
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfCR, numByte));
+
             j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_renderFromCamera");
             dmt::Transform transfRC{};
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr,&transfRC,numByte));
-            
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfRC, numByte));
+
             j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_filter");
             dmt::gpu::FilterSamplerGPU filter{};
-                // clean up
-                j.cudaApi->cuStreamDestroy(stream);
+            // clean up
+            j.cudaApi->cuStreamDestroy(stream);
             j.cudaApi->cuModuleUnload(raygenMod);
         }
 

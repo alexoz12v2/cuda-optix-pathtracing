@@ -1,5 +1,28 @@
+#ifndef __NVCC__
+    #define __NVCC__
+#endif
+
+// ==== GLM ==== (hacks to make it work under JIT compilation)
+#include "cuda.h"
+#ifndef CUDA_VERSION
+    #define CUDA_VERSION 11800
+#endif
+#define GLM_FORCE_CUDA
+#define GLM_FORCE_PURE
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+// EIGEN not Made for JIT compilation
+//// ==== Eigen ====
+//#define EIGEN_DEVICE_FUNC __host__ __device__
+//#define EIGEN_NO_DEBUG
+//#define EIGEN_DISABLE_THREADS
+//#define EIGEN_USE_GPU
+//#include <Eigen/Core>
+
 #define DMT_CUDAUTILS_IMPLEMENTATION
-#include "cudautils.h"
+#include "cudautils/cudautils.h"
 #include "cuda-queue.h"
 #include "cudautils/cudautils-filter.h"
 

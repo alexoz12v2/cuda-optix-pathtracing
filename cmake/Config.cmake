@@ -553,7 +553,48 @@ function(dmt_add_compile_definitions target properties_visibility)
     else()
       set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
     endif()
-    target_compile_definitions(${target} ${properties_visibility} ${DMT_OS} "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\"" ${DMT_BUILD_TYPE} ${DMT_ARCH} ${DMT_COMPILER})
+
+    if (WIN32)
+    # Use vswhere to locate MSVC toolchain
+    execute_process(
+        COMMAND vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        OUTPUT_VARIABLE VS_INSTALL_PATH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    # Typical MSVC include path looks like:
+    # <VS_INSTALL_PATH>/VC/Tools/MSVC/<version>/include
+    file(GLOB MSVC_TOOLSET_DIR "${VS_INSTALL_PATH}/VC/Tools/MSVC/*")
+    list(SORT MSVC_TOOLSET_DIR)
+    list(GET MSVC_TOOLSET_DIR -1 MSVC_TOOLSET_DIR) # take latest
+    set(DMT_CPP_INCLUDE_PATH "${MSVC_TOOLSET_DIR}/include")
+
+    elseif(UNIX)
+        # Assume LLVM libc++
+        set(DMT_CPP_INCLUDE_PATH "/usr/lib/llvm-20/include/c++/v1")
+    endif()
+
+    message(STATUS "C++ include path: ${DMT_CPP_INCLUDE_PATH}")
+    if(DEFINED DMT_OS_LINUX)
+      execute_process(
+        COMMAND readlink -f "$ENV{CUDA_HOME}/include"
+        OUTPUT_VARIABLE CUDA_INCLUDE_REAL
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+    else()
+      set(CUDA_INCLUDE_REAL "$ENV{CUDA_HOME}/include")
+    endif()
+
+    target_compile_definitions(${target} ${properties_visibility} 
+      ${DMT_OS}
+      "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\""
+      ${DMT_BUILD_TYPE} 
+      ${DMT_ARCH} 
+      ${DMT_COMPILER} 
+      "CUDA_HOME=\"${CUDA_INCLUDE_REAL}\""
+      "DMT_CPP_INCLUDE_PATH=\"${DMT_CPP_INCLUDE_PATH}\""
+    )
+
     if(DMT_OS_WINDOWS)
       target_compile_definitions(${target} ${properties_visibility} WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
       if(CMAKE_GENERATOR MATCHES "Visual Studio")
@@ -795,10 +836,10 @@ function(dmt_add_example target)
     dmt_win32_add_custom_application_manifest(${target}-launcher)
   endif()
 
-  message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
-  message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
-  message(STATUS "${target} ARGS_PUBLIC_DEPS ${ARGS_PUBLIC_DEPS}")
-  message(STATUS "${target} ARGS_PRIVATE_DEPS ${ARGS_PRIVATE_DEPS}")
+  # message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}")
+  # message(STATUS "${target} ARGS_PRIVATE_SOURCES ${ARGS_PRIVATE_SOURCES}")
+  # message(STATUS "${target} ARGS_PUBLIC_DEPS ${ARGS_PUBLIC_DEPS}")
+  # message(STATUS "${target} ARGS_PRIVATE_DEPS ${ARGS_PRIVATE_DEPS}")
   dmt_set_cpu_architecture_features(${target} PRIVATE)
   dmt_set_linux_specific_compile_options(${target} PRIVATE)
 
@@ -825,15 +866,15 @@ function(dmt_add_test target)
     "FILES;DEPENDENCIES" # multiple arguments keys
     ${ARGN}
   )
-  message(STATUS "[dmt_add_test(${target})] TARGET_LIST ${THIS_ARGS_TARGET_LIST}")
-  message(STATUS "[dmt_add_test(${target})] FILES ${THIS_ARGS_FILES}")
-  message(STATUS "[dmt_add_test(${target})] DEPENDENCIES ${THIS_ARGS_DEPENDENCIES}")
-  if(NOT DEFINED THIS_ARGS_FILES)
-    message(FATAL_ERROR "[dmt_add_test] test target ${target} had no files: ${THIS_ARGS_FILES}")
-  endif()
-  if(NOT DEFINED ${THIS_ARGS_TARGET_LIST})
-    message(FATAL_ERROR "[dmt_add_test] target list wasn't passed ${THIS_ARGS_TARGET_LIST}")
-  endif()
+  # message(STATUS "[dmt_add_test(${target})] TARGET_LIST ${THIS_ARGS_TARGET_LIST}")
+  # message(STATUS "[dmt_add_test(${target})] FILES ${THIS_ARGS_FILES}")
+  # message(STATUS "[dmt_add_test(${target})] DEPENDENCIES ${THIS_ARGS_DEPENDENCIES}")
+  # if(NOT DEFINED THIS_ARGS_FILES)
+  #   message(FATAL_ERROR "[dmt_add_test] test target ${target} had no files: ${THIS_ARGS_FILES}")
+  # endif()
+  # if(NOT DEFINED ${THIS_ARGS_TARGET_LIST})
+  #   message(FATAL_ERROR "[dmt_add_test] target list wasn't passed ${THIS_ARGS_TARGET_LIST}")
+  # endif()
 
   add_executable(${target})
   target_sources(${target} PRIVATE ${THIS_ARGS_FILES})

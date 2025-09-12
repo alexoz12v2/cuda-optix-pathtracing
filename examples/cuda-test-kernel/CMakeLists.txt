@@ -17,6 +17,10 @@ add_custom_target(dmt-cuda-test-kernel-copy-files ALL
   COMMAND ${CMAKE_COMMAND} -E copy
           ${cuda_test_kernel_files}
           ${CMAKE_BINARY_DIR}/bin/shaders
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders/glm
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/_deps/glm-src/glm ${CMAKE_BINARY_DIR}/bin/shaders/glm
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders/Eigen
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/_deps/eigen-src/Eigen ${CMAKE_BINARY_DIR}/bin/shaders/Eigen
   COMMENT "Copying CUDA kernel files to shaders/"
 )
 

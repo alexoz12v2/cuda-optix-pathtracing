@@ -738,4 +738,85 @@ inline constexpr double phi      = phi_v<double>;
 
         return ptxBuffer;
     }
+
+    // ------------------------------------------------------------
+    // Precompute the filter distribution in host memory
+    // ------------------------------------------------------------
+    PiecewiseConstant2D precalculateMitchellDistrib(filtering::Mitchell const& filter,
+                                                    int                        Nx,
+                                                    int                        Ny,
+                                                    std::pmr::memory_resource* mem)
+    {
+        Bounds2f domain;
+        domain.pMin = Point2f(-filter.radius().x, -filter.radius().y);
+        domain.pMax = Point2f(filter.radius().x, filter.radius().y);
+
+        dstd::Array2D<float> values(Nx, Ny);
+
+        Vector2f cellSize((domain.pMax.x - domain.pMin.x) / Nx, (domain.pMax.y - domain.pMin.y) / Ny);
+
+        for (int y = 0; y < Ny; ++y)
+        {
+            for (int x = 0; x < Nx; ++x)
+            {
+                // Cell center
+                float px = domain.pMin.x + (x + 0.5f) * cellSize.x;
+                float py = domain.pMin.y + (y + 0.5f) * cellSize.y;
+
+                float val    = filter.evaluate(Point2f(px, py));
+                values(x, y) = std::max(0.0f, val);
+            }
+        }
+
+        return PiecewiseConstant2D(values, domain, mem);
+    }
+
+    GpuSamplerHandle uploadFilterDistrib(CUDADriverLibrary*         cudaApi,
+                                         PiecewiseConstant2D const& cpuDistrib,
+                                         filtering::Mitchell const& cpuFilter)
+    {
+        //device pointer
+        GpuSamplerHandle handle;
+
+        int Nx = cpuDistrib.resolution().x;
+        int Ny = cpuDistrib.resolution().y;
+
+        // Flatten conditional CDF (Nx+1 per row)
+        std::vector<float> conditionalFlat;
+        conditionalFlat.reserve(Ny * (Nx + 1));
+        for (int y = 0; y < Ny; ++y)
+        {
+            auto const& rowCdf = cpuDistrib.conditionalCdfRow(y);
+            conditionalFlat.insert(conditionalFlat.end(), rowCdf.begin(), rowCdf.end());
+        }
+
+        // Flatten marginal CDF (Ny+1)
+        auto const& marginalCdf = cpuDistrib.marginalCdf();
+
+        // Allocate GPU memory
+        cudaApi->cuMemAlloc((CUdeviceptr*) &handle.dConditionalCdf, conditionalFlat.size() * sizeof(float));
+        cudaApi->cuMemAlloc((CUdeviceptr*) &handle.dMarginalCdf, marginalCdf.size() * sizeof(float));
+
+        // Copy to GPU
+        cudaApi->cuMemcpyHtoD((CUdeviceptr)handle.dConditionalCdf, conditionalFlat.data(), conditionalFlat.size() * sizeof(float));
+        cudaApi->cuMemcpyHtoD((CUdeviceptr)handle.dMarginalCdf, marginalCdf.data(), marginalCdf.size() * sizeof(float));
+
+        // Fill GPU sampler struct
+        handle.sampler.filter.radiusX = cpuFilter.radius().x;
+        handle.sampler.filter.radiusY = cpuFilter.radius().y;
+        handle.sampler.filter.B       = cpuFilter.b();
+        handle.sampler.filter.C       = cpuFilter.c();
+
+        handle.sampler.distrib.conditionalCdf = handle.dConditionalCdf;
+        handle.sampler.distrib.marginalCdf    = handle.dMarginalCdf;
+        handle.sampler.distrib.Nx             = Nx;
+        handle.sampler.distrib.Ny             = Ny;
+        handle.sampler.distrib.pMin           = Point2f(cpuDistrib.domain().pMin.x, cpuDistrib.domain().pMin.y);
+        handle.sampler.distrib.pMax           = Point2f(cpuDistrib.domain().pMax.x, cpuDistrib.domain().pMax.y);
+        handle.sampler.distrib.integral       = cpuDistrib.integral();
+
+        return handle;
+    }
+
+
 } // namespace dmt

@@ -24,6 +24,7 @@
 #define DMT_CUDAUTILS_IMPLEMENTATION
 #include "cudautils/cudautils.h"
 #include "cuda-queue.h"
+#include "cudautils/cudautils-filter.h"
 
 #define DMT_RAYGEN_WIDTH 1024
 
@@ -140,7 +141,8 @@ extern "C" __global__ void kraygen(RaygenParams params)
 
     float2 sample = d_filter.sample(make_float2(sx, sy), &pdf);
     Ray    ray    = dmt::generateRayGPU(sample);
+    // enqueue ray, pdf
     params.rayPayload.mmq->pushDevice(ray.o.x, ray.o.y, ray.o.z, ray.d.x, ray.d.y, ray.d.z, pdf);
 
-    // enqueue ray, pdf
+    
 }

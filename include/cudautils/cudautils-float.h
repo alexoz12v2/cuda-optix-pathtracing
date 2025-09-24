@@ -36,7 +36,7 @@ namespace dmt::fl {
     DMT_CPU_GPU inline constexpr float oneMinusEps() { return 0x1.fffffep-1; }
     DMT_CPU_GPU inline constexpr float infinity() { return std::numeric_limits<float>::infinity(); }
     DMT_CPU_GPU inline constexpr float eqTol() { return std::numeric_limits<float>::epsilon(); }
-    DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5; }
+    DMT_CPU_GPU inline constexpr float machineEpsilon() { return std::numeric_limits<float>::epsilon() * 0.5f; }
     DMT_CPU_GPU inline constexpr float pi() { return std::numbers::pi_v<float>; }
     DMT_CPU_GPU inline constexpr float twoPi() { return 2.f * std::numbers::pi_v<float>; }
     DMT_CPU_GPU inline constexpr float piOver4() { return 0.25f * std::numbers::pi_v<float>; }
@@ -50,7 +50,7 @@ namespace dmt::fl {
     /** Boltzmann's constant */
     DMT_CPU_GPU inline constexpr float kBoltz() { return 1.3806488e-23f; }
 
-    DMT_CPU_GPU inline constexpr float degFromRad() { return 57.295779513082320876798154814105; }
+    DMT_CPU_GPU inline constexpr float degFromRad() { return 57.295779513082320876798154814105f; }
 
     DMT_CPU_GPU inline bool isinf(float f)
     {
@@ -100,7 +100,7 @@ namespace dmt::fl {
 
     DMT_CPU_GPU inline constexpr float gamma(int32_t n)
     {
-        float f = n * machineEpsilon();
+        float f = static_cast<float>(n) * machineEpsilon();
         return f / (1 - f);
     }
 
@@ -124,7 +124,7 @@ namespace dmt::fl {
     DMT_CPU_GPU inline float nextFloatDown(float v)
     {
         // Handle infinity and positive zero for _NextFloatDown()_
-        if (isinf(v) && v < 0.)
+        if (isinf(v) && v < 0.f)
             return v;
         if (v == 0.f)
             v = -0.f;
@@ -355,7 +355,7 @@ namespace dmt::fl {
 #endif
     }
 
-    DMT_CORE_API DMT_CPU_GPU inline float xorf(float f, int32_t mask) { return bitsToFloat(floatToBits(f) & mask); }
+    DMT_CORE_API DMT_CPU_GPU inline float xorf(float f, uint32_t mask) { return bitsToFloat(floatToBits(f) & mask); }
 
     DMT_CORE_API DMT_CPU_GPU float rsqrt(float x);
     DMT_CORE_API DMT_CPU_GPU float abs(float x);
@@ -416,23 +416,23 @@ namespace dmt {
     {
         uint32_t u;
         float    f;
-        struct
+        struct F
         {
             unsigned int Mantissa : 23;
             unsigned int Exponent : 8;
             unsigned int Sign     : 1;
-        };
+        } c;
     };
 
     union FP16
     {
         uint16_t u;
-        struct
+        struct F
         {
             unsigned int Mantissa : 10;
             unsigned int Exponent : 5;
             unsigned int Sign     : 1;
-        };
+        } c;
     };
 
     class Half
@@ -479,7 +479,7 @@ namespace dmt {
 
                     // and one integer subtract of the bias later, we have our final
                     // float!
-                    o.u = f.u - denorm_magic.u;
+                    o.u = static_cast<uint16_t>(f.u - denorm_magic.u);
                 }
                 else
                 {
@@ -490,7 +490,7 @@ namespace dmt {
                     // rounding bias part 2
                     f.u += mant_odd;
                     // take the bits!
-                    o.u = f.u >> 13;
+                    o.u = static_cast<uint16_t>(f.u >> 13);
                 }
             }
 
@@ -507,15 +507,15 @@ namespace dmt {
 #ifdef __CUDA_ARCH__
             return __half2float(__ushort_as_half(h));
 #else
-            FP16 h;
-            h.u                                   = this->h;
+            FP16 hh;
+            hh.u                                  = this->h;
             static const FP32         magic       = {113 << 23};
             static unsigned int const shifted_exp = 0x7c00 << 13; // exponent mask after shift
             FP32                      o;
 
-            o.u              = (h.u & 0x7fff) << 13; // exponent/mantissa bits
-            unsigned int exp = shifted_exp & o.u;    // just the exponent
-            o.u += (127 - 15) << 23;                 // exponent adjust
+            o.u              = static_cast<uint16_t>((hh.u & 0x7fff) << 13); // exponent/mantissa bits
+            unsigned int exp = shifted_exp & o.u;                            // just the exponent
+            o.u += (127 - 15) << 23;                                         // exponent adjust
 
             // handle exponent special cases
             if (exp == shifted_exp)      // Inf/NaN?
@@ -526,12 +526,12 @@ namespace dmt {
                 o.f -= magic.f; // renormalize
             }
 
-            o.u |= (h.u & 0x8000) << 16; // sign bit
+            o.u |= static_cast<uint16_t>((hh.u & 0x8000) << 16); // sign bit
             return o.f;
 #endif
         }
         DMT_CPU_GPU
-        explicit operator double() const { return (float)(*this); }
+        explicit operator double() const { return static_cast<double>(static_cast<float>(*this)); }
 
         DMT_CPU_GPU
         bool operator==(Half const& v) const

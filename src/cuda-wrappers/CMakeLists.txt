@@ -154,6 +154,16 @@ add_custom_command(
 )
 
 #################################################################################
+# CUDA Toolkit Headers
+#################################################################################
+add_custom_target(dmt-copy-cuda-headers ALL 
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/shaders/cuda-include
+  COMMAND ${CMAKE_COMMAND} -E copy_directory $ENV{CUDA_HOME}/include ${CMAKE_BINARY_DIR}/bin/shaders/cuda-include
+  COMMENT "Copying CUDA Toolkit Headers from $ENV{CUDA_HOME}/include files to bin/shaders/cuda-include"
+)
+
+#################################################################################
 # The rest
 #################################################################################
 
@@ -182,7 +192,7 @@ target_sources(dmt-cuda-wrappers
 )
 
 # Add dependencies for copying DLLs before building the target
-add_dependencies(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls copy_nvidia_driver dmt-copy-cuda-dlls)
+add_dependencies(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls copy_nvidia_driver dmt-copy-cuda-dlls dmt-copy-cuda-headers)
 
 string(STRIP "$ENV{CUDA_HOME}" cuda_toolkit_headers)
 if (NOT DEFINED ENV{CUDA_HOME})

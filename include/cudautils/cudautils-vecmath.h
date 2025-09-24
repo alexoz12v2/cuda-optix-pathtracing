@@ -34,7 +34,8 @@
 #undef diag_suppress
 
 #if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
-#include <platform/platform-utils.h>
+    #include <platform/platform-utils.h>
+    #include <bit>
 #endif
 
 #include "cudautils/cudautils-float.h"
@@ -49,6 +50,11 @@
     #include <immintrin.h>
 #endif
 
+#if defined(__CUDA_ARCH__)
+    #include <cstddef>
+    #include <cuda/std/type_traits>
+#endif
+
 #if defined(DMT_OS_WINDOWS)
     #pragma push_macro("near")
     #undef near
@@ -56,6 +62,7 @@
 
 namespace dmt {
     // Vector Types ---------------------------------------------------------------------------------------------------
+#if __cplusplus >= 202002L
     // clang-format off
     template <typename T>
     concept Vector2 = requires(T t) {
@@ -111,29 +118,50 @@ namespace dmt {
     template <typename T>
     concept VectorNormalized = Vector<T> && has_normalized<T>::value;
     // clang-format on
+#endif
 
+#if __cplusplus >= 202002L
     template <Scalar S>
+#else
+    template <typename S>
+#endif
     struct Tuple2
     {
         DMT_CPU_GPU static constexpr Tuple2<S> zero() { return {.x = static_cast<S>(0), .y = static_cast<S>(0)}; }
         DMT_CPU_GPU static constexpr Tuple2<S> s(S s) { return {.x = static_cast<S>(s), .y = static_cast<S>(s)}; }
 
         using value_type = S;
+#if __cplusplus >= 202002L
         static consteval int32_t numComponents() { return 2; }
-        DMT_CPU_GPU S&           operator[](int32_t i)
+#else
+        static constexpr int32_t numComponents() { return 2; }
+#endif
+        DMT_CPU_GPU S& operator[](int32_t i)
         {
             assert(i >= 0 && i < 2);
+#if defined(__CUDA_ARCH__)
+            return *(reinterpret_cast<S*>(this) + i);
+#else
             return *(std::bit_cast<S*>(this) + i);
+#endif
         }
         DMT_CPU_GPU S const& operator[](int32_t i) const
         {
             assert(i >= 0 && i < 2);
+#if defined(__CUDA_ARCH__)
+            return *(reinterpret_cast<S const*>(this) + i);
+#else
             return *(std::bit_cast<S const*>(this) + i);
+#endif
         }
         S x, y;
     };
 
+#if __cplusplus >= 202002L
     template <Scalar S>
+#else
+    template <typename S>
+#endif
     struct Tuple3
     {
         DMT_CPU_GPU static constexpr Tuple3<S> zero()
@@ -162,21 +190,37 @@ namespace dmt {
         }
 
         using value_type = S;
+#if __cplusplus >= 202002L
         static consteval int32_t numComponents() { return 3; }
-        DMT_CPU_GPU S&           operator[](int32_t i)
+#else
+        static constexpr int32_t numComponents() { return 3; }
+#endif
+        DMT_CPU_GPU S& operator[](int32_t i)
         {
             assert(i >= 0 && i < 3);
+#if defined(__CUDA_ARCH__)
+            return *(reinterpret_cast<S*>(this) + i);
+#else
             return *(std::bit_cast<S*>(this) + i);
+#endif
         }
         DMT_CPU_GPU S const& operator[](int32_t i) const
         {
             assert(i >= 0 && i < 3);
+#if defined(__CUDA_ARCH__)
+            return *(reinterpret_cast<S const*>(this) + i);
+#else
             return *(std::bit_cast<S const*>(this) + i);
+#endif
         }
         S x, y, z;
     };
 
+#if __cplusplus >= 202002L
     template <Scalar S>
+#else
+    template <typename S>
+#endif
     struct Tuple4
     {
         DMT_CPU_GPU static constexpr Tuple4<S> zero()
@@ -193,16 +237,28 @@ namespace dmt {
         }
 
         using value_type = S;
+#if __cplusplus >= 202002L
         static consteval int32_t numComponents() { return 4; }
-        DMT_CPU_GPU S&           operator[](int32_t i)
+#else
+        static constexpr int32_t numComponents() { return 4; }
+#endif
+        DMT_CPU_GPU S& operator[](int32_t i)
         {
             assert(i >= 0 && i < 4);
+#if defined(__CUDA_ARCH__)
+            return *(reinterpret_cast<S*>(this) + i);
+#else
             return *(std::bit_cast<S*>(this) + i);
+#endif
         }
         DMT_CPU_GPU S const& operator[](int32_t i) const
         {
             assert(i >= 0 && i < 4);
+#if defined(__CUDA_ARCH__)
+            return *(reinterpret_cast<S const*>(this) + i);
+#else
             return *(std::bit_cast<S const*>(this) + i);
+#endif
         }
         S x, y, z, w;
     };
@@ -243,19 +299,47 @@ namespace dmt {
     struct DMT_CORE_API Normal2f : public Tuple2f, public Normalized
     {
         Normal2f() = default;
-        DMT_CPU_GPU                        Normal2f(Tuple2f t) : Tuple2f(normalize(t)) {}
-        DMT_CPU_GPU                        Normal2f(float x, float y) : Normal2f(Tuple2f{x, y}) {}
-        DMT_CPU_GPU inline Vector2f&       asVec() { return *std::bit_cast<Vector2f*>(this); }
-        DMT_CPU_GPU inline Vector2f const& asVec() const { return *std::bit_cast<Vector2f const*>(this); }
+        DMT_CPU_GPU                  Normal2f(Tuple2f t) : Tuple2f(normalize(t)) {}
+        DMT_CPU_GPU                  Normal2f(float x, float y) : Normal2f(Tuple2f{x, y}) {}
+        DMT_CPU_GPU inline Vector2f& asVec()
+        {
+#if defined(__CUDA_ARCH__)
+            return *reinterpret_cast<Vector2f*>(this);
+#else
+            return *std::bit_cast<Vector2f*>(this);
+#endif
+        }
+        DMT_CPU_GPU inline Vector2f const& asVec() const
+        {
+#if defined(__CUDA_ARCH__)
+            return *reinterpret_cast<Vector2f const*>(this);
+#else
+            return *std::bit_cast<Vector2f const*>(this);
+#endif
+        }
     };
 
     struct DMT_CORE_API Normal3f : public Tuple3f, public Normalized
     {
         Normal3f() = default;
-        DMT_CPU_GPU                        Normal3f(Tuple3f t) : Tuple3f(normalize(t)) {}
-        DMT_CPU_GPU                        Normal3f(float x, float y, float z) : Normal3f(Tuple3f{x, y, z}) {}
-        DMT_CPU_GPU inline Vector3f&       asVec() { return *std::bit_cast<Vector3f*>(this); }
-        DMT_CPU_GPU inline Vector3f const& asVec() const { return *std::bit_cast<Vector3f const*>(this); }
+        DMT_CPU_GPU                  Normal3f(Tuple3f t) : Tuple3f(normalize(t)) {}
+        DMT_CPU_GPU                  Normal3f(float x, float y, float z) : Normal3f(Tuple3f{x, y, z}) {}
+        DMT_CPU_GPU inline Vector3f& asVec()
+        {
+#if defined(__CUDA_ARCH__)
+            return *reinterpret_cast<Vector3f*>(this);
+#else
+            return *std::bit_cast<Vector3f*>(this);
+#endif
+        }
+        DMT_CPU_GPU inline Vector3f const& asVec() const
+        {
+#if defined(__CUDA_ARCH__)
+            return *reinterpret_cast<Vector3f const*>(this);
+#else
+            return *std::bit_cast<Vector3f const*>(this);
+#endif
+        }
     };
 
     DMT_CORE_API DMT_CPU_GPU Normal2f normalFrom(Vector2f v);
@@ -407,7 +491,11 @@ namespace dmt {
 
 
     // Vector Types: Common Inline Methods ----------------------------------------------------------------------------
+#if __cplusplus >= 202002L
     template <Vector T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T bcast(typename T::value_type t)
     {
         T ret;
@@ -416,7 +504,11 @@ namespace dmt {
         return ret;
     }
 
+#if __cplusplus >= 202002L
     template <VectorScalable T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T operator*(T v, typename T::value_type k)
     {
         T ret;
@@ -424,7 +516,11 @@ namespace dmt {
             ret[i] = k * v[i];
         return ret;
     }
+#if __cplusplus >= 202002L
     template <VectorScalable T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T operator*(typename T::value_type k, T v)
     {
         T ret;
@@ -432,7 +528,11 @@ namespace dmt {
             ret[i] = k * v[i];
         return ret;
     }
+#if __cplusplus >= 202002L
     template <VectorScalable T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T operator/(T v, typename T::value_type k)
     {
         T ret;
@@ -440,7 +540,11 @@ namespace dmt {
             ret[i] = v[i] / k;
         return ret;
     }
+#if __cplusplus >= 202002L
     template <VectorScalable T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T operator/(typename T::value_type k, T v)
     {
         T ret;
@@ -449,14 +553,22 @@ namespace dmt {
         return ret;
     }
 
+#if __cplusplus >= 202002L
     template <VectorScalable T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T& operator*=(T& v, typename T::value_type k)
     {
         for (int32_t i = 0; i < T::numComponents(); ++i)
             v[i] *= k;
         return v;
     }
+#if __cplusplus >= 202002L
     template <VectorScalable T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T& operator/=(T& v, typename T::value_type k)
     {
         for (int32_t i = 0; i < T::numComponents(); ++i)
@@ -465,7 +577,12 @@ namespace dmt {
     }
 
     // Vector Types: Component Operations -----------------------------------------------------------------------------
+
+#if __cplusplus >= 202002L
     template <Vector T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline int32_t maxComponentIndex(T v)
     {
         int32_t max = 0;
@@ -476,7 +593,11 @@ namespace dmt {
         return max;
     }
 
+#if __cplusplus >= 202002L
     template <Vector T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline typename T::value_type maxComponent(T v)
     {
         int32_t max = 0;
@@ -487,7 +608,11 @@ namespace dmt {
         return v[max];
     }
 
+#if __cplusplus >= 202002L
     template <Vector T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline int32_t minComponentIndex(T v)
     {
         int32_t min = 0;
@@ -498,7 +623,11 @@ namespace dmt {
         return min;
     }
 
+#if __cplusplus >= 202002L
     template <Vector T>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline typename T::value_type minComponent(T v)
     {
         int32_t min = 0;
@@ -509,8 +638,12 @@ namespace dmt {
         return v[min];
     }
 
+#if __cplusplus >= 202002L
     template <Vector T>
         requires(T::numComponents() == 2)
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T permute(T v, int32_t i0, int32_t i1)
     {
         T ret;
@@ -518,8 +651,12 @@ namespace dmt {
         ret[1] = v[i1];
         return ret;
     }
+#if __cplusplus >= 202002L
     template <Vector T>
         requires(T::numComponents() == 3)
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T permute(T v, int32_t i0, int32_t i1, int32_t i2)
     {
         T ret;
@@ -528,8 +665,12 @@ namespace dmt {
         ret[2] = v[i2];
         return ret;
     }
+#if __cplusplus >= 202002L
     template <Vector T>
         requires(T::numComponents() == 4)
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline T permute(T v, int32_t i0, int32_t i1, int32_t i2, int32_t i3)
     {
         T ret;
@@ -540,8 +681,12 @@ namespace dmt {
         return ret;
     }
 
+#if __cplusplus >= 202002L
     template <Vector T>
-    DMT_CPU_GPU inline T::value_type hprod(T v)
+#else
+    template <typename T>
+#endif
+    DMT_CPU_GPU inline typename T::value_type hprod(T v)
     {
         typename T::value_type ret = v[0];
         for (int32_t i = 1; i < T::numComponents(); ++i)
@@ -549,8 +694,12 @@ namespace dmt {
         return ret;
     }
 
+#if __cplusplus >= 202002L
     template <Vector T>
         requires std::is_floating_point_v<typename T::value_type>
+#else
+    template <typename T>
+#endif
     DMT_CPU_GPU inline bool hasNaN(T v)
     {
         for (int32_t i = 0; i < T::numComponents(); ++i)
@@ -670,8 +819,12 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU Tuple4f::value_type dotSelf(Tuple4f v);
 
     // Vector Types: Geometric Functions ------------------------------------------------------------------------------
+#if __cplusplus >= 202002L
     template <VectorNormalized N, Vector V>
         requires(std::is_same_v<typename N::value_type, typename V::value_type> && N::numComponents() == V::numComponents())
+#else
+    template <typename N, typename V>
+#endif
     DMT_CPU_GPU inline N faceForward(N direction, V vector)
     {
         return (dot(direction, vector) < 0.f) ? -direction : direction;
@@ -680,7 +833,11 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU float angleBetween(Normal3f a, Normal3f b);
     DMT_CORE_API DMT_CPU_GPU float angleBetween(Quaternion a, Quaternion b);
 
+#if __cplusplus >= 202002L
     template <Vector V>
+#else
+    template <typename V>
+#endif
     DMT_CPU_GPU inline V gramSchmidt(V v, V w)
     {
         V dt = {dot(v, w)};
@@ -889,10 +1046,9 @@ namespace dmt {
 
     DMT_CORE_API DMT_CPU_GPU inline constexpr Index2 sym(Index2 i)
     {
-        Index2 const j{
-            .row = i.col,
-            .col = i.row,
-        };
+        Index2 j{};
+        j.row = i.col;
+        j.col = i.row;
         return j;
     }
 
@@ -928,17 +1084,30 @@ namespace dmt {
         }
 
         // clang-format on
-        DMT_CPU_GPU inline float&          operator[](Index2 i) { return m[i.col * 4 + i.row]; }
-        DMT_CPU_GPU inline float const&    operator[](Index2 i) const { return m[i.col * 4 + i.row]; }
-        DMT_CPU_GPU inline Vector4f&       operator[](int32_t i) { return *std::bit_cast<Vector4f*>(&m[i * 4]); }
+        DMT_CPU_GPU inline float&       operator[](Index2 i) { return m[i.col * 4 + i.row]; }
+        DMT_CPU_GPU inline float const& operator[](Index2 i) const { return m[i.col * 4 + i.row]; }
+        DMT_CPU_GPU inline Vector4f&    operator[](int32_t i)
+        {
+#if defined(__CUDA_ARCH__)
+            return *reinterpret_cast<Vector4f*>(&m[i * 4]);
+#else
+            return *std::bit_cast<Vector4f*>(&m[i * 4]);
+#endif
+        }
         DMT_CPU_GPU inline Vector4f const& operator[](int32_t i) const
         {
+#if defined(__CUDA_ARCH__)
+            return *reinterpret_cast<Vector4f const*>(&m[i * 4]);
+#else
             return *std::bit_cast<Vector4f const*>(&m[i * 4]);
+#endif
         }
 
         alignas(16) float m[16];
     };
+#if !defined(__CUDA_ARCH__)
     static_assert(std::is_trivial_v<Matrix4f> && std::is_standard_layout_v<Matrix4f>);
+#endif
 
     struct DMT_CORE_API SVD
     {
@@ -991,10 +1160,7 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU DMT_FASTCALL Vector3f rotate(Quaternion quat, Vector3f v);
     DMT_CORE_API DMT_CPU_GPU DMT_FASTCALL Normal3f rotate(Quaternion quat, Normal3f v);
 
-// Vector Types: Interval -----------------------------------------------------------------------------------------
-#if !defined(DMT_ARCH_X86_64)
-    #error "Point3fi (__host__) is currently using SSE"
-#endif
+    // Vector Types: Interval -----------------------------------------------------------------------------------------
     struct DMT_CORE_API Point3fi
     {
         Point3fi() = default;
@@ -1023,7 +1189,7 @@ namespace dmt {
 
         DMT_CPU_GPU bool      hasNaN() const;
         DMT_CPU_GPU uintptr_t getMedium() const;
-        DMT_CPU_GPU Point3f   operator()(float t) const { return o * d * time; }
+        DMT_CPU_GPU Point3f   operator()(float t) const { return o * d * t; }
         uintptr_t             medium = 0; // information about hasDifferentials embedded in the low bit
         Point3f               o{};
         Vector3f              d{{0, 0, 1}};
@@ -1222,7 +1388,7 @@ namespace dstd {
         bool has_value() const { return set; }
 
     private:
-#ifdef __NVCC__
+#ifdef __CUDA_ARCH__
         // Work-around NVCC bug
         DMT_CPU_GPU
         T* ptr() { return reinterpret_cast<T*>(&optionalValue); }
@@ -1233,27 +1399,36 @@ namespace dstd {
         DMT_CPU_GPU T const* ptr() const { return std::launder(reinterpret_cast<T const*>(&optionalValue)); }
 #endif
 
+#if !defined(__CUDA_ARCH__)
         std::aligned_storage_t<sizeof(T), alignof(T)> optionalValue;
-        bool                                          set = false;
+#else
+        alignas(T) unsigned char optionalValue[sizeof(T)];
+#endif
+        bool set = false;
     };
 
-    template <typename T, std::size_t N>
+    template <typename T, size_t N>
     class InlinedVector
     {
         static_assert(N > 0, "InlinedVector must have non-zero capacity");
 
     public:
         using value_type = T;
-        using size_type  = std::size_t;
+        using size_type  = size_t;
 
         InlinedVector() : _size(0) {}
 
         /// @note by copy only
         InlinedVector(size_t sz, T const& v) : _size(sz)
         {
+#if !defined(__CUDA_ARCH__)
             assert(sz <= N && "Exceeding capacity");
             for (size_t i = 0; i < sz; ++i)
                 std::construct_at(&reinterpret_cast<T*>(&_storage)[i], v);
+#else
+            for (size_t i = 0; i < sz; ++i)
+                new (&reinterpret_cast<T*>(&_storage)[i]) T{v};
+#endif
         }
 
         ~InlinedVector() { clear(); }
@@ -1296,16 +1471,20 @@ namespace dstd {
 
         void push_back(T const& value)
         {
+#if !defined(__CUDA_ARCH__)
             if (_size >= N)
                 throw std::overflow_error("InlinedVector capacity exceeded");
+#endif
             new (data() + _size) T(value);
             ++_size;
         }
 
         void push_back(T&& value)
         {
+#if !defined(__CUDA_ARCH__)
             if (_size >= N)
                 throw std::overflow_error("InlinedVector capacity exceeded");
+#endif
             new (data() + _size) T(std::move(value));
             ++_size;
         }
@@ -1313,38 +1492,48 @@ namespace dstd {
         template <typename... Args>
         void emplace_back(Args&&... args)
         {
+#if !defined(__CUDA_ARCH__)
             if (_size >= N)
                 throw std::overflow_error("InlinedVector capacity exceeded");
+#endif
             new (data() + _size) T(std::forward<Args>(args)...);
             ++_size;
         }
 
         void pop_back()
         {
+#if !defined(__CUDA_ARCH__)
             if (_size == 0)
                 throw std::underflow_error("InlinedVector is empty");
+#endif
             --_size;
             data()[_size].~T();
         }
 
         T& operator[](size_type index)
         {
+#if !defined(__CUDA_ARCH__)
             if (index >= _size)
                 throw std::out_of_range("InlinedVector index out of range");
+#endif
             return data()[index];
         }
 
         T const& operator[](size_type index) const
         {
+#if !defined(__CUDA_ARCH__)
             if (index >= _size)
                 throw std::out_of_range("InlinedVector index out of range");
+#endif
             return data()[index];
         }
 
         void resize(size_type new_size)
         {
+#if !defined(__CUDA_ARCH__)
             if (new_size > N)
                 throw std::overflow_error("InlinedVector resize beyond capacity");
+#endif
 
             if (new_size > _size)
             {
@@ -1360,8 +1549,10 @@ namespace dstd {
 
         void resize(size_type new_size, T const& value)
         {
+#if !defined(__CUDA_ARCH__)
             if (new_size > N)
                 throw std::overflow_error("InlinedVector resize beyond capacity");
+#endif
 
             if (new_size > _size)
             {
@@ -1392,8 +1583,12 @@ namespace dstd {
         T const* end() const { return data() + _size; }
 
     private:
+#if !defined(__CUDA_ARCH__)
         using Storage = typename std::aligned_storage<sizeof(T), alignof(T)>::type;
-        Storage   _storage[N];
+        Storage _storage[N];
+#else
+        alignas(T) unsigned char _storage[sizeof(T) * N];
+#endif
         size_type _size;
 
         T*       data() { return reinterpret_cast<T*>(&_storage[0]); }
@@ -1414,6 +1609,67 @@ namespace dmt {
     template <typename T, typename Enable = void>
     struct to_glm;
 
+#if defined(__CUDA_ARCH__)
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_integral_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(int32_t) &&
+                                           ::cuda::std::is_signed_v<typename T::value_type> && T::numComponents() == 2>>
+    {
+        using type = typename glm::ivec2;
+    };
+
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_floating_point_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(float) && T::numComponents() == 2>>
+    {
+        using type = typename glm::vec2;
+    };
+
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_integral_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(int32_t) &&
+                                           ::cuda::std::is_signed_v<typename T::value_type> && T::numComponents() == 3>>
+    {
+        using type = typename glm::ivec3;
+    };
+
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_floating_point_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(float) && T::numComponents() == 3>>
+    {
+        using type = typename glm::vec3;
+    };
+
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_integral_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(int32_t) &&
+                                           ::cuda::std::is_signed_v<typename T::value_type> && T::numComponents() == 4>>
+    {
+        using type = glm::ivec4;
+    };
+
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_floating_point_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(float) && T::numComponents() == 4 &&
+                                           !::cuda::std::is_same_v<T, Quaternion>>>
+    {
+        using type = glm::vec4;
+    };
+    template <typename T>
+    struct to_glm<T,
+                  ::cuda::std::enable_if_t<::cuda::std::is_floating_point_v<typename T::value_type> &&
+                                           sizeof(typename T::value_type) == sizeof(float) && T::numComponents() == 4 &&
+                                           ::cuda::std::is_same_v<T, Quaternion>>>
+    {
+        using type = glm::quat;
+    };
+#else
     template <typename T>
     struct to_glm<T,
                   std::enable_if_t<std::is_integral_v<typename T::value_type> && sizeof(typename T::value_type) == sizeof(int32_t) &&
@@ -1468,105 +1724,162 @@ namespace dmt {
     {
         using type = glm::quat;
     };
+#endif
+#if __cplusplus >= 202002L
     template <Vector T>
-    using to_glm_t = to_glm<T>::type;
+#else
+    template <typename T>
+#endif
+    using to_glm_t = typename to_glm<T>::type;
 
+#if __cplusplus >= 202002L
     template <Vector T>
-    inline constexpr __host__ __device__ to_glm_t<T>& toGLM(T& v)
+#else
+    template <typename T>
+#endif
+    inline __host__ __device__ to_glm_t<T>* toGLM(T* v)
     {
-        return *std::bit_cast<to_glm_t<T>*>(&v);
+        static_assert(sizeof(T) == sizeof(to_glm_t<T>), "Size mismatch");
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<to_glm_t<T>*>(v);
+#else
+        return std::bit_cast<to_glm_t<T>*>(v);
+#endif
     }
+#if __cplusplus >= 202002L
     template <Vector T>
-    inline constexpr __host__ __device__ to_glm_t<T> const& toGLM(T const& v)
+#else
+    template <typename T>
+#endif
+    inline __host__ __device__ to_glm_t<T> const* toGLM(T const* v)
     {
-        return *std::bit_cast<to_glm_t<T> const*>(&v);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<to_glm_t<T> const*>(v);
+#else
+        return std::bit_cast<to_glm_t<T> const*>(v);
+#endif
     }
 
+#if __cplusplus >= 202002L
     template <int32_t n, Scalar T, glm::qualifier Q>
+#else
+    template <int32_t n, typename T, glm::qualifier Q>
+#endif
     struct from_glm;
+#if __cplusplus >= 202002L
     template <Scalar T, glm::qualifier Q>
+#else
+    template <typename T, glm::qualifier Q>
+#endif
     struct from_glm<2, T, Q>
     {
         using type = Tuple2<T>;
     };
+#if _cplusplus >= 202002L
     template <Scalar T, glm::qualifier Q>
+#else
+    template <typename T, glm::qualifier Q>
+#endif
     struct from_glm<3, T, Q>
     {
         using type = Tuple3<T>;
     };
+#if _cplusplus >= 202002L
     template <Scalar T, glm::qualifier Q>
+#else
+    template <typename T, glm::qualifier Q>
+#endif
     struct from_glm<4, T, Q>
     {
         using type = Tuple4<T>;
     };
+#if _cplusplus >= 202002L
     template <int32_t n, Scalar T, glm::qualifier Q>
-    using from_glm_t = from_glm<n, T, Q>::type;
+#else
+    template <int32_t n, typename T, glm::qualifier Q>
+#endif
+    using from_glm_t = typename from_glm<n, T, Q>::type;
 
+#if _cplusplus >= 202002L
     template <int32_t n, Scalar T, glm::qualifier Q>
-    inline constexpr __host__ __device__ from_glm_t<n, T, Q>& fromGLM(glm::vec<n, T, Q>& v)
+#else
+    template <int32_t n, typename T, glm::qualifier Q>
+#endif
+    inline __host__ __device__ from_glm_t<n, T, Q>* fromGLM(glm::vec<n, T, Q>* v)
     {
-        return *std::bit_cast<from_glm_t<n, T, Q>*>(&v);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<from_glm_t<n, T, Q>*>(v);
+#else
+        return std::bit_cast<from_glm_t<n, T, Q>*>(v);
+#endif
     }
+#if _cplusplus >= 202002L
     template <int32_t n, Scalar T, glm::qualifier Q>
-    inline constexpr __host__ __device__ from_glm_t<n, T, Q> const& fromGLM(glm::vec<n, T, Q> const& v)
+#else
+    template <int32_t n, typename T, glm::qualifier Q>
+#endif
+    inline __host__ __device__ from_glm_t<n, T, Q> const* fromGLM(glm::vec<n, T, Q> const* v)
     {
-        return *std::bit_cast<from_glm_t<n, T, Q> const*>(&v);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<from_glm_t<n, T, Q> const*>(v);
+#else
+        return std::bit_cast<from_glm_t<n, T, Q> const*>(v);
+#endif
     }
 
-    inline constexpr __host__ __device__ Quaternion& fromGLMquat(glm::quat& q)
+    inline __host__ __device__ Quaternion* fromGLMquat(glm::quat* q)
     {
-        return *std::bit_cast<Quaternion*>(&q);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<Quaternion*>(q);
+#else
+        return std::bit_cast<Quaternion*>(q);
+#endif
     }
 
-    inline constexpr __host__ __device__ Quaternion const& fromGLMquat(glm::quat const& q)
+    inline __host__ __device__ Quaternion const* fromGLMquat(glm::quat const* q)
     {
-        return *std::bit_cast<Quaternion const*>(&q);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<Quaternion const*>(q);
+#else
+        return std::bit_cast<Quaternion const*>(q);
+#endif
     }
 
-    inline constexpr __host__ __device__ glm::mat4& toGLMmat(Matrix4f& m) { return *std::bit_cast<glm::mat4*>(&m); }
-    inline constexpr __host__ __device__ glm::mat4 const& toGLMmat(Matrix4f const& m)
+    inline __host__ __device__ glm::mat4* toGLMmat(Matrix4f* m)
     {
-        return *std::bit_cast<glm::mat4 const*>(&m);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<glm::mat4*>(m);
+#else
+        return std::bit_cast<glm::mat4*>(m);
+#endif
     }
-    inline constexpr __host__ __device__ Matrix4f& fromGLMmat(glm::mat4& m) { return *std::bit_cast<Matrix4f*>(&m); }
-    inline constexpr __host__ __device__ Matrix4f const& fromGLMmat(glm::mat4 const& m)
+    inline __host__ __device__ glm::mat4 const* toGLMmat(Matrix4f const* m)
     {
-        return *std::bit_cast<Matrix4f const*>(&m);
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<glm::mat4 const*>(m);
+#else
+        return std::bit_cast<glm::mat4 const*>(m);
+#endif
+    }
+    inline __host__ __device__ Matrix4f* fromGLMmat(glm::mat4* m)
+    {
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<Matrix4f*>(m);
+#else
+        return std::bit_cast<Matrix4f*>(m);
+#endif
+    }
+    inline __host__ __device__ Matrix4f const* fromGLMmat(glm::mat4 const* m)
+    {
+#if defined(__CUDA_ARCH__)
+        return reinterpret_cast<Matrix4f const*>(m);
+#else
+        return std::bit_cast<Matrix4f const*>(m);
+#endif
     }
 
 
 } // namespace dmt
-
-/**
- * List of PBRT's SOA classes:
- * - pbrt core classes
- *   - Interval
- *   - Point2f
- *   - Point2i
- *   - Point3f
- *   - Vector3f
- *   - Normal3f
- *   - Point3fi
- *   - Ray
- *   - SubsurfaceInteraction
- *   - Frame
- *   - VisibleSurface
- *   - MediumInterface
- *   - TabulatedBSSRDF
- *   - LightSampleContext
- * - wavefront workitems
- *   - PixelSampleState
- *   - RayWorkItem
- *   - EscapedRayWorkItem
- *   - ShadowRayWorkItem
- *   - GetBSSRDFAndProbaRayWorkItem
- *   - SubsurfaceScatterWorkItem
- *   - MediumSampleWorkItem
- *   - MediumScatterWrokItem<ConcretePhaseFunction>
- *   - MaterialEvalWorkItem<ConcreteMaterial>
- */
-namespace dmt {
-}
 
 #if defined(DMT_OS_WINDOWS)
     #pragma pop_macro("near")
@@ -1579,6 +1892,7 @@ namespace dmt {
 
 namespace dmt {
     // Vector Types: Static Assertions --------------------------------------------------------------------------------
+    #if __cplusplus >= 202002L
     static_assert(VectorNormalized<Normal2f>);
     static_assert(VectorNormalized<Normal3f>);
     static_assert(VectorScalable<Vector2i>);
@@ -1593,6 +1907,7 @@ namespace dmt {
     static_assert(VectorScalable<Point3f>);
     static_assert(VectorScalable<Point4i>);
     static_assert(VectorScalable<Point4f>);
+    #endif
 
     // Vector Types: Basic Operations ---------------------------------------------------------------------------------
     __host__ __device__ bool operator==(Point2i a, Point2i b) { return a.x == b.x && a.y == b.y; }
@@ -1604,430 +1919,856 @@ namespace dmt {
         return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
     }
 
-    __host__ __device__ Point2i::operator Vector2i() { return *std::bit_cast<Vector2i const*>(this); }
-    __host__ __device__ Point2f::operator Vector2f() { return *std::bit_cast<Vector2f const*>(this); }
-    __host__ __device__ Point3i::operator Vector3i() { return *std::bit_cast<Vector3i const*>(this); }
-    __host__ __device__ Point3f::operator Vector3f() { return *std::bit_cast<Vector3f const*>(this); }
-    __host__ __device__ Point4i::operator Vector4i() { return *std::bit_cast<Vector4i const*>(this); }
-    __host__ __device__ Point4f::operator Vector4f() { return *std::bit_cast<Vector4f const*>(this); }
+    __host__ __device__ Point2i::operator Vector2i()
+    {
+    #if defined(__CUDA_ARCH__)
+        return *reinterpret_cast<Vector2i const*>(this);
+    #else
+        return *std::bit_cast<Vector2i const*>(this);
+    #endif
+    }
+    __host__ __device__ Point2f::operator Vector2f()
+    {
+    #if defined(__CUDA_ARCH__)
+        return *reinterpret_cast<Vector2f const*>(this);
+    #else
+        return *std::bit_cast<Vector2f const*>(this);
+    #endif
+    }
+    __host__ __device__ Point3i::operator Vector3i()
+    {
+    #if defined(__CUDA_ARCH__)
+        return *reinterpret_cast<Vector3i const*>(this);
+    #else
+        return *std::bit_cast<Vector3i const*>(this);
+    #endif
+    }
+    __host__ __device__ Point3f::operator Vector3f()
+    {
+    #if defined(__CUDA_ARCH__)
+        return *reinterpret_cast<Vector3f const*>(this);
+    #else
+        return *std::bit_cast<Vector3f const*>(this);
+    #endif
+    }
+    __host__ __device__ Point4i::operator Vector4i()
+    {
+    #if defined(__CUDA_ARCH__)
+        return *reinterpret_cast<Vector4i const*>(this);
+    #else
+        return *std::bit_cast<Vector4i const*>(this);
+    #endif
+    }
+    __host__ __device__ Point4f::operator Vector4f()
+    {
+    #if defined(__CUDA_ARCH__)
+        return *reinterpret_cast<Vector4f const*>(this);
+    #else
+        return *std::bit_cast<Vector4f const*>(this);
+    #endif
+    }
 
-    __host__ __device__ Point2i  operator+(Point2i a, Vector2i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Point2f  operator+(Point2f a, Vector2f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Point3i  operator+(Point3i a, Vector3i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Point3f  operator+(Point3f a, Vector3f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Point4i  operator+(Point4i a, Vector4i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Point4f  operator+(Point4f a, Vector4f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Vector2i operator+(Vector2i a, Vector2i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Vector2f operator+(Vector2f a, Vector2f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Vector3i operator+(Vector3i a, Vector3i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Vector3f operator+(Vector3f a, Vector3f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Vector4i operator+(Vector4i a, Vector4i b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
-    __host__ __device__ Vector4f operator+(Vector4f a, Vector4f b) { return {fromGLM(toGLM(a) + toGLM(b))}; }
+    __host__ __device__ Point2i operator+(Point2i a, Vector2i b)
+    {
+        glm::ivec2 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Point2f operator+(Point2f a, Vector2f b)
+    {
+        glm::vec2 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Point3i operator+(Point3i a, Vector3i b)
+    {
+        glm::ivec3 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Point3f operator+(Point3f a, Vector3f b)
+    {
+        glm::vec3 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Point4i operator+(Point4i a, Vector4i b)
+    {
+        glm::ivec4 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Point4f operator+(Point4f a, Vector4f b)
+    {
+        glm::vec4 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Vector2i operator+(Vector2i a, Vector2i b)
+    {
+        glm::ivec2 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Vector2f operator+(Vector2f a, Vector2f b)
+    {
+        glm::vec2 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Vector3i operator+(Vector3i a, Vector3i b)
+    {
+        glm::ivec3 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Vector3f operator+(Vector3f a, Vector3f b)
+    {
+        glm::vec3 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Vector4i operator+(Vector4i a, Vector4i b)
+    {
+        glm::ivec4 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
+    __host__ __device__ Vector4f operator+(Vector4f a, Vector4f b)
+    {
+        glm::vec4 sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLM(&sum);
+    }
     __host__ __device__ Normal2f operator+(Normal2f a, Normal2f b)
     {
-        return {fromGLM(glm::normalize(toGLM(a) + toGLM(b)))};
+        glm::vec2 sum = glm::normalize(*toGLM(&a) + *toGLM(&b));
+        return *fromGLM(&sum);
     }
     __host__ __device__ Normal3f operator+(Normal3f a, Normal3f b)
     {
-        return {fromGLM(glm::normalize(toGLM(a) + toGLM(b)))};
+        glm::vec3 sum = glm::normalize(*toGLM(&a) + *toGLM(&b));
+        return *fromGLM(&sum);
     }
 
-    __host__ __device__ Quaternion operator+(Quaternion a, Quaternion b) { return fromGLMquat(toGLM(a) + toGLM(b)); }
+    __host__ __device__ Quaternion operator+(Quaternion a, Quaternion b)
+    {
+        glm::quat sum = *toGLM(&a) + *toGLM(&b);
+        return *fromGLMquat(&sum);
+    }
 
-    __host__ __device__ Vector2i operator-(Point2i a, Point2i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector2f operator-(Point2f a, Point2f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector3i operator-(Point3i a, Point3i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector3f operator-(Point3f a, Point3f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector4i operator-(Point4i a, Point4i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector4f operator-(Point4f a, Point4f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector2i operator-(Point2i a, Vector2i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector2f operator-(Point2f a, Vector2f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector3i operator-(Point3i a, Vector3i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector3f operator-(Point3f a, Vector3f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector4i operator-(Point4i a, Vector4i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector4f operator-(Point4f a, Vector4f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector2i operator-(Vector2i a, Vector2i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector2f operator-(Vector2f a, Vector2f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector3i operator-(Vector3i a, Vector3i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector3f operator-(Vector3f a, Vector3f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector4i operator-(Vector4i a, Vector4i b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
-    __host__ __device__ Vector4f operator-(Vector4f a, Vector4f b) { return {fromGLM(toGLM(a) - toGLM(b))}; }
+    __host__ __device__ Vector2i operator-(Point2i a, Point2i b)
+    {
+        glm::ivec2 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2f operator-(Point2f a, Point2f b)
+    {
+        glm::vec2 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3i operator-(Point3i a, Point3i b)
+    {
+        glm::ivec3 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3f operator-(Point3f a, Point3f b)
+    {
+        glm::vec3 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4i operator-(Point4i a, Point4i b)
+    {
+        glm::ivec4 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4f operator-(Point4f a, Point4f b)
+    {
+        glm::vec4 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2i operator-(Point2i a, Vector2i b)
+    {
+        glm::ivec2 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2f operator-(Point2f a, Vector2f b)
+    {
+        glm::vec2 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3i operator-(Point3i a, Vector3i b)
+    {
+        glm::ivec3 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3f operator-(Point3f a, Vector3f b)
+    {
+        glm::vec3 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4i operator-(Point4i a, Vector4i b)
+    {
+        glm::ivec4 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4f operator-(Point4f a, Vector4f b)
+    {
+        glm::vec4 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2i operator-(Vector2i a, Vector2i b)
+    {
+        glm::ivec2 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2f operator-(Vector2f a, Vector2f b)
+    {
+        glm::vec2 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3i operator-(Vector3i a, Vector3i b)
+    {
+        glm::ivec3 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3f operator-(Vector3f a, Vector3f b)
+    {
+        glm::vec3 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4i operator-(Vector4i a, Vector4i b)
+    {
+        glm::ivec4 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4f operator-(Vector4f a, Vector4f b)
+    {
+        glm::vec4 dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLM(&dif);
+    }
     __host__ __device__ Normal2f operator-(Normal2f a, Normal2f b)
     {
-        return {fromGLM(glm::normalize(toGLM(a) - toGLM(b)))};
+        glm::vec2 dif = glm::normalize(*toGLM(&a) - *toGLM(&b));
+        return *fromGLM(&dif);
     }
     __host__ __device__ Normal3f operator-(Normal3f a, Normal3f b)
     {
-        return {fromGLM(glm::normalize(toGLM(a) - toGLM(b)))};
+        glm::vec3 dif = glm::normalize(*toGLM(&a) - *toGLM(&b));
+        return *fromGLM(&dif);
     }
 
-    __host__ __device__ Quaternion operator-(Quaternion a, Quaternion b) { return fromGLMquat(toGLM(a) - toGLM(b)); }
+    __host__ __device__ Quaternion operator-(Quaternion a, Quaternion b)
+    {
+        glm::quat dif = *toGLM(&a) - *toGLM(&b);
+        return *fromGLMquat(&dif);
+    }
 
-    __host__ __device__ Vector2i operator-(Point2i v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector2f operator-(Point2f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector3i operator-(Point3i v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector3f operator-(Point3f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector4i operator-(Point4i v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector4f operator-(Point4f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector2i operator-(Vector2i v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector2f operator-(Vector2f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector3i operator-(Vector3i v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector3f operator-(Vector3f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector4i operator-(Vector4i v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Vector4f operator-(Vector4f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Normal2f operator-(Normal2f v) { return {fromGLM(-toGLM(v))}; }
-    __host__ __device__ Normal3f operator-(Normal3f v) { return {fromGLM(-toGLM(v))}; }
+    __host__ __device__ Vector2i operator-(Point2i v)
+    {
+        glm::ivec2 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2f operator-(Point2f v)
+    {
+        glm::vec2 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3i operator-(Point3i v)
+    {
+        glm::ivec3 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3f operator-(Point3f v)
+    {
+        glm::vec3 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4i operator-(Point4i v)
+    {
+        glm::ivec4 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4f operator-(Point4f v)
+    {
+        glm::vec4 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2i operator-(Vector2i v)
+    {
+        glm::ivec2 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector2f operator-(Vector2f v)
+    {
+        glm::vec2 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3i operator-(Vector3i v)
+    {
+        glm::ivec3 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector3f operator-(Vector3f v)
+    {
+        glm::vec3 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4i operator-(Vector4i v)
+    {
+        glm::ivec4 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Vector4f operator-(Vector4f v)
+    {
+        glm::vec4 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Normal2f operator-(Normal2f v)
+    {
+        glm::vec2 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
+    __host__ __device__ Normal3f operator-(Normal3f v)
+    {
+        glm::vec3 dif = -*toGLM(&v);
+        return *fromGLM(&dif);
+    }
 
-    __host__ __device__ Quaternion operator-(Quaternion q) { return fromGLMquat(-toGLM(q)); }
+    __host__ __device__ Quaternion operator-(Quaternion q)
+    {
+        glm::quat dif = -*toGLM(&q);
+        return *fromGLMquat(&dif);
+    }
 
-    __host__ __device__ Vector2i operator*(Vector2i a, Vector2i b) { return {fromGLM(toGLM(a) * toGLM(b))}; }
-    __host__ __device__ Vector2f operator*(Vector2f a, Vector2f b) { return {fromGLM(toGLM(a) * toGLM(b))}; }
-    __host__ __device__ Vector3i operator*(Vector3i a, Vector3i b) { return {fromGLM(toGLM(a) * toGLM(b))}; }
-    __host__ __device__ Vector3f operator*(Vector3f a, Vector3f b) { return {fromGLM(toGLM(a) * toGLM(b))}; }
-    __host__ __device__ Vector4i operator*(Vector4i a, Vector4i b) { return {fromGLM(toGLM(a) * toGLM(b))}; }
-    __host__ __device__ Vector4f operator*(Vector4f a, Vector4f b) { return {fromGLM(toGLM(a) * toGLM(b))}; }
+    __host__ __device__ Vector2i operator*(Vector2i a, Vector2i b)
+    {
+        glm::ivec2 mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLM(&mul);
+    }
+    __host__ __device__ Vector2f operator*(Vector2f a, Vector2f b)
+    {
+        glm::vec2 mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLM(&mul);
+    }
+    __host__ __device__ Vector3i operator*(Vector3i a, Vector3i b)
+    {
+        glm::ivec3 mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLM(&mul);
+    }
+    __host__ __device__ Vector3f operator*(Vector3f a, Vector3f b)
+    {
+        glm::vec3 mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLM(&mul);
+    }
+    __host__ __device__ Vector4i operator*(Vector4i a, Vector4i b)
+    {
+        glm::ivec4 mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLM(&mul);
+    }
+    __host__ __device__ Vector4f operator*(Vector4f a, Vector4f b)
+    {
+        glm::vec4 mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLM(&mul);
+    }
 
-    __host__ __device__ Quaternion operator*(Quaternion a, Quaternion b) { return fromGLMquat(toGLM(a) * toGLM(b)); }
+    __host__ __device__ Quaternion operator*(Quaternion a, Quaternion b)
+    {
+        glm::quat mul = *toGLM(&a) * *toGLM(&b);
+        return *fromGLMquat(&mul);
+    }
 
-    __host__ __device__ Vector2i operator/(Vector2i a, Vector2i b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
-    __host__ __device__ Vector2f operator/(Vector2f a, Vector2f b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
-    __host__ __device__ Vector3i operator/(Vector3i a, Vector3i b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
-    __host__ __device__ Vector3f operator/(Vector3f a, Vector3f b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
-    __host__ __device__ Vector4i operator/(Vector4i a, Vector4i b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
-    __host__ __device__ Vector4f operator/(Vector4f a, Vector4f b) { return {fromGLM(toGLM(a) / toGLM(b))}; }
+    __host__ __device__ Vector2i operator/(Vector2i a, Vector2i b)
+    {
+        glm::ivec2 div = *toGLM(&a) / *toGLM(&b);
+        return *fromGLM(&div);
+    }
+    __host__ __device__ Vector2f operator/(Vector2f a, Vector2f b)
+    {
+        glm::vec2 div = *toGLM(&a) / *toGLM(&b);
+        return *fromGLM(&div);
+    }
+    __host__ __device__ Vector3i operator/(Vector3i a, Vector3i b)
+    {
+        glm::ivec3 div = *toGLM(&a) / *toGLM(&b);
+        return *fromGLM(&div);
+    }
+    __host__ __device__ Vector3f operator/(Vector3f a, Vector3f b)
+    {
+        glm::vec3 div = *toGLM(&a) / *toGLM(&b);
+        return *fromGLM(&div);
+    }
+    __host__ __device__ Vector4i operator/(Vector4i a, Vector4i b)
+    {
+        glm::ivec4 div = *toGLM(&a) / *toGLM(&b);
+        return *fromGLM(&div);
+    }
+    __host__ __device__ Vector4f operator/(Vector4f a, Vector4f b)
+    {
+        glm::vec4 div = *toGLM(&a) / *toGLM(&b);
+        return *fromGLM(&div);
+    }
 
     __host__ __device__ Point2i& operator+=(Point2i& a, Vector2i b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Point2f& operator+=(Point2f& a, Vector2f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Point3i& operator+=(Point3i& a, Vector3i b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Point3f& operator+=(Point3f& a, Vector3f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Point4i& operator+=(Point4i& a, Vector4i b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Point4f& operator+=(Point4f& a, Vector4f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector2i& operator+=(Vector2i& a, Vector2i b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector2f& operator+=(Vector2f& a, Vector2f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3i& operator+=(Vector3i& a, Vector3i b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3f& operator+=(Vector3f& a, Vector3f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4i& operator+=(Vector4i& a, Vector4i b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4f& operator+=(Vector4f& a, Vector4f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Normal2f& operator+=(Normal2f& a, Normal2f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
     __host__ __device__ Normal3f& operator+=(Normal3f& a, Normal3f b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
 
     __host__ __device__ Quaternion& operator+=(Quaternion& a, Quaternion b)
     {
-        toGLM(a) += toGLM(b);
+        *toGLM(&a) += *toGLM(&b);
         return a;
     }
 
     __host__ __device__ Vector2i& operator-=(Vector2i& a, Vector2i b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector2f& operator-=(Vector2f& a, Vector2f b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3i& operator-=(Vector3i& a, Vector3i b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3f& operator-=(Vector3f& a, Vector3f b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4i& operator-=(Vector4i& a, Vector4i b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4f& operator-=(Vector4f& a, Vector4f b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Normal2f& operator-=(Normal2f& a, Normal2f b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
     __host__ __device__ Normal3f& operator-=(Normal3f& a, Normal3f b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
 
     __host__ __device__ Quaternion& operator-=(Quaternion& a, Quaternion b)
     {
-        toGLM(a) -= toGLM(b);
+        *toGLM(&a) -= *toGLM(&b);
         return a;
     }
 
     __host__ __device__ Vector2i& operator*=(Vector2i& a, Vector2i b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector2f& operator*=(Vector2f& a, Vector2f b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3i& operator*=(Vector3i& a, Vector3i b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3f& operator*=(Vector3f& a, Vector3f b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4i& operator*=(Vector4i& a, Vector4i b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4f& operator*=(Vector4f& a, Vector4f b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
 
     __host__ __device__ Quaternion& operator*=(Quaternion& a, Quaternion b)
     {
-        toGLM(a) *= toGLM(b);
+        *toGLM(&a) *= *toGLM(&b);
         return a;
     }
 
     __host__ __device__ Vector2i& operator/=(Vector2i& a, Vector2i b)
     {
-        toGLM(a) /= toGLM(b);
+        *toGLM(&a) /= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector2f& operator/=(Vector2f& a, Vector2f b)
     {
-        toGLM(a) /= toGLM(b);
+        *toGLM(&a) /= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3i& operator/=(Vector3i& a, Vector3i b)
     {
-        toGLM(a) /= toGLM(b);
+        *toGLM(&a) /= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector3f& operator/=(Vector3f& a, Vector3f b)
     {
-        toGLM(a) /= toGLM(b);
+        *toGLM(&a) /= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4i& operator/=(Vector4i& a, Vector4i b)
     {
-        toGLM(a) /= toGLM(b);
+        *toGLM(&a) /= *toGLM(&b);
         return a;
     }
     __host__ __device__ Vector4f& operator/=(Vector4f& a, Vector4f b)
     {
-        toGLM(a) /= toGLM(b);
+        *toGLM(&a) /= *toGLM(&b);
         return a;
     }
 
-    __host__ __device__ Normal2f normalFrom(Vector2f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
-    __host__ __device__ Normal3f normalFrom(Vector3f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
+    __host__ __device__ Normal2f normalFrom(Vector2f v)
+    {
+        glm::vec2 nrm = glm::normalize(*toGLM(&v));
+        return *fromGLM(&nrm);
+    }
+    __host__ __device__ Normal3f normalFrom(Vector3f v)
+    {
+        glm::vec3 nrm = glm::normalize(*toGLM(&v));
+        return *fromGLM(&nrm);
+    }
 
     // Vector Types: Generic Tuple Operations -------------------------------------------------------------------------
-    __host__ __device__ Tuple2f abs(Tuple2f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple2i abs(Tuple2i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple3f abs(Tuple3f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple3i abs(Tuple3i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple4f abs(Tuple4f v) { return {fromGLM(glm::abs(toGLM(v)))}; }
-    __host__ __device__ Tuple4i abs(Tuple4i v) { return {fromGLM(glm::abs(toGLM(v)))}; }
+    __host__ __device__ Tuple2f abs(Tuple2f v)
+    {
+        glm::vec2 res = glm::abs(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple2i abs(Tuple2i v)
+    {
+        glm::ivec2 res = glm::abs(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f abs(Tuple3f v)
+    {
+        glm::vec3 res = glm::abs(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3i abs(Tuple3i v)
+    {
+        glm::ivec3 res = glm::abs(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f abs(Tuple4f v)
+    {
+        glm::vec4 res = glm::abs(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4i abs(Tuple4i v)
+    {
+        glm::ivec4 res = glm::abs(*toGLM(&v));
+        return *fromGLM(&res);
+    }
 
-    __host__ __device__ Tuple2f ceil(Tuple2f v) { return {fromGLM(glm::ceil(toGLM(v)))}; }
-    __host__ __device__ Tuple3f ceil(Tuple3f v) { return {fromGLM(glm::ceil(toGLM(v)))}; }
-    __host__ __device__ Tuple4f ceil(Tuple4f v) { return {fromGLM(glm::ceil(toGLM(v)))}; }
+    __host__ __device__ Tuple2f ceil(Tuple2f v)
+    {
+        glm::vec2 res = glm::ceil(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f ceil(Tuple3f v)
+    {
+        glm::vec3 res = glm::ceil(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f ceil(Tuple4f v)
+    {
+        glm::vec4 res = glm::ceil(*toGLM(&v));
+        return *fromGLM(&res);
+    }
 
-    __host__ __device__ Tuple2f floor(Tuple2f v) { return {fromGLM(glm::floor(toGLM(v)))}; }
-    __host__ __device__ Tuple3f floor(Tuple3f v) { return {fromGLM(glm::floor(toGLM(v)))}; }
-    __host__ __device__ Tuple4f floor(Tuple4f v) { return {fromGLM(glm::floor(toGLM(v)))}; }
+    __host__ __device__ Tuple2f floor(Tuple2f v)
+    {
+        glm::vec2 res = glm::floor(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f floor(Tuple3f v)
+    {
+        glm::vec3 res = glm::floor(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f floor(Tuple4f v)
+    {
+        glm::vec4 res = glm::floor(*toGLM(&v));
+        return *fromGLM(&res);
+    }
 
-    __host__ __device__ Tuple2f sqrt(Tuple2f v) { return fromGLM(glm::sqrt(toGLM(v))); }
-    __host__ __device__ Tuple3f sqrt(Tuple3f v) { return fromGLM(glm::sqrt(toGLM(v))); }
-    __host__ __device__ Tuple4f sqrt(Tuple4f v) { return fromGLM(glm::sqrt(toGLM(v))); }
+    __host__ __device__ Tuple2f sqrt(Tuple2f v)
+    {
+        glm::vec2 res = glm::sqrt(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f sqrt(Tuple3f v)
+    {
+        glm::vec3 res = glm::sqrt(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f sqrt(Tuple4f v)
+    {
+        glm::vec4 res = glm::sqrt(*toGLM(&v));
+        return *fromGLM(&res);
+    }
 
     __host__ __device__ Tuple2f lerp(float t, Tuple2f zero, Tuple2f one)
     {
-        return {fromGLM(glm::mix(toGLM(one), toGLM(zero), t))};
+        glm::vec2 mx = glm::mix(*toGLM(&one), *toGLM(&zero), t);
+        return *fromGLM(&mx);
     }
     __host__ __device__ Tuple3f lerp(float t, Tuple3f zero, Tuple3f one)
     {
-        return {fromGLM(glm::mix(toGLM(one), toGLM(zero), t))};
+        glm::vec3 mx = glm::mix(*toGLM(&one), *toGLM(&zero), t);
+        return *fromGLM(&mx);
     }
     __host__ __device__ Tuple4f lerp(float t, Tuple4f zero, Tuple4f one)
     {
-        return {fromGLM(glm::mix(toGLM(one), toGLM(zero), t))};
+        glm::vec4 mx = glm::mix(*toGLM(&one), *toGLM(&zero), t);
+        return *fromGLM(&mx);
     }
 
     __host__ __device__ Tuple2f fma(Tuple2f mult0, Tuple2f mult1, Tuple2f add)
     {
-        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
+        glm::vec2 fmares = *toGLM(&mult0) * *toGLM(&mult1) + *toGLM(&add);
+        return *fromGLM(&fmares);
     }
     __host__ __device__ Tuple2i fma(Tuple2i mult0, Tuple2i mult1, Tuple2i add)
     {
-        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
+        glm::ivec2 fmares = *toGLM(&mult0) * *toGLM(&mult1) + *toGLM(&add);
+        return *fromGLM(&fmares);
     }
     __host__ __device__ Tuple3f fma(Tuple3f mult0, Tuple3f mult1, Tuple3f add)
     {
-        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
+        glm::vec3 fmares = *toGLM(&mult0) * *toGLM(&mult1) + *toGLM(&add);
+        return *fromGLM(&fmares);
     }
     __host__ __device__ Tuple3i fma(Tuple3i mult0, Tuple3i mult1, Tuple3i add)
     {
-        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
+        glm::ivec3 fmares = *toGLM(&mult0) * *toGLM(&mult1) + *toGLM(&add);
+        return *fromGLM(&fmares);
     }
     __host__ __device__ Tuple4f fma(Tuple4f mult0, Tuple4f mult1, Tuple4f add)
     {
-        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
+        glm::vec4 fmares = *toGLM(&mult0) * *toGLM(&mult1) + *toGLM(&add);
+        return *fromGLM(&fmares);
     }
     __host__ __device__ Tuple4i fma(Tuple4i mult0, Tuple4i mult1, Tuple4i add)
     {
-        return {fromGLM(toGLM(mult0) * toGLM(mult1) + toGLM(add))};
+        glm::ivec4 fmares = *toGLM(&mult0) * *toGLM(&mult1) + *toGLM(&add);
+        return *fromGLM(&fmares);
     }
 
-    __host__ __device__ Tuple2f min(Tuple2f a, Tuple2f b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple2i min(Tuple2i a, Tuple2i b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple3f min(Tuple3f a, Tuple3f b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple3i min(Tuple3i a, Tuple3i b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple4f min(Tuple4f a, Tuple4f b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple4i min(Tuple4i a, Tuple4i b) { return {fromGLM(glm::min(toGLM(a), toGLM(b)))}; }
-
-    __host__ __device__ Tuple2f max(Tuple2f a, Tuple2f b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple2i max(Tuple2i a, Tuple2i b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple3f max(Tuple3f a, Tuple3f b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple3i max(Tuple3i a, Tuple3i b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple4f max(Tuple4f a, Tuple4f b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
-    __host__ __device__ Tuple4i max(Tuple4i a, Tuple4i b) { return {fromGLM(glm::max(toGLM(a), toGLM(b)))}; }
+    __host__ __device__ Tuple2f min(Tuple2f a, Tuple2f b)
+    {
+        glm::vec2 res = glm::min(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple2i min(Tuple2i a, Tuple2i b)
+    {
+        glm::ivec2 res = glm::min(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f min(Tuple3f a, Tuple3f b)
+    {
+        glm::vec3 res = glm::min(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3i min(Tuple3i a, Tuple3i b)
+    {
+        glm::ivec3 res = glm::min(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f min(Tuple4f a, Tuple4f b)
+    {
+        glm::vec4 res = glm::min(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4i min(Tuple4i a, Tuple4i b)
+    {
+        glm::ivec4 res = glm::min(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple2f max(Tuple2f a, Tuple2f b)
+    {
+        glm::vec2 res = glm::max(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple2i max(Tuple2i a, Tuple2i b)
+    {
+        glm::ivec2 res = glm::max(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f max(Tuple3f a, Tuple3f b)
+    {
+        glm::vec3 res = glm::max(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3i max(Tuple3i a, Tuple3i b)
+    {
+        glm::ivec3 res = glm::max(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f max(Tuple4f a, Tuple4f b)
+    {
+        glm::vec4 res = glm::max(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4i max(Tuple4i a, Tuple4i b)
+    {
+        glm::ivec4 res = glm::max(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&res);
+    }
 
     __host__ __device__ bool near(Tuple2f a, Tuple2f b, float tolerance)
     {
-        auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
+        auto bvec = glm::epsilonEqual(*toGLM(&a), *toGLM(&b), tolerance);
         return bvec.x && bvec.y;
     }
     __host__ __device__ bool near(Tuple2i a, Tuple2i b)
     {
-        auto bvec = toGLM(a) = toGLM(b);
+        auto bvec = *toGLM(&a) = *toGLM(&b);
         return bvec.x && bvec.y;
     }
     __host__ __device__ bool near(Tuple3f a, Tuple3f b, float tolerance)
     {
-        auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
+        auto bvec = glm::epsilonEqual(*toGLM(&a), *toGLM(&b), tolerance);
         return bvec.x && bvec.y && bvec.z;
     }
     __host__ __device__ bool near(Tuple3i a, Tuple3i b)
     {
-        auto bvec = toGLM(a) = toGLM(b);
+        auto bvec = *toGLM(&a) = *toGLM(&b);
         return bvec.x && bvec.y && bvec.z;
     }
     __host__ __device__ bool near(Tuple4f a, Tuple4f b, float tolerance)
     {
-        auto bvec = glm::epsilonEqual(toGLM(a), toGLM(b), tolerance);
+        auto bvec = glm::epsilonEqual(*toGLM(&a), *toGLM(&b), tolerance);
         return bvec.x && bvec.y && bvec.z && bvec.w;
     }
     __host__ __device__ bool near(Tuple4i a, Tuple4i b)
     {
-        auto bvec = toGLM(a) = toGLM(b);
+        auto bvec = *toGLM(&a) = *toGLM(&b);
         return bvec.x && bvec.y && bvec.z && bvec.w;
     }
 
-    __host__ __device__ Tuple2f::value_type dot(Tuple2f a, Tuple2f b) { return glm::dot(toGLM(a), toGLM(b)); }
-    __host__ __device__ Tuple3f::value_type dot(Tuple3f a, Tuple3f b) { return glm::dot(toGLM(a), toGLM(b)); }
-    __host__ __device__ Tuple4f::value_type dot(Tuple4f a, Tuple4f b) { return glm::dot(toGLM(a), toGLM(b)); }
+    __host__ __device__ Tuple2f::value_type dot(Tuple2f a, Tuple2f b) { return glm::dot(*toGLM(&a), *toGLM(&b)); }
+    __host__ __device__ Tuple3f::value_type dot(Tuple3f a, Tuple3f b) { return glm::dot(*toGLM(&a), *toGLM(&b)); }
+    __host__ __device__ Tuple4f::value_type dot(Tuple4f a, Tuple4f b) { return glm::dot(*toGLM(&a), *toGLM(&b)); }
 
     __host__ __device__ Tuple2f::value_type absDot(Tuple2f a, Tuple2f b)
     {
-        return glm::abs(glm::dot(toGLM(a), toGLM(b)));
+        return glm::abs(glm::dot(*toGLM(&a), *toGLM(&b)));
     }
     __host__ __device__ Tuple3f::value_type absDot(Tuple3f a, Tuple3f b)
     {
-        return glm::abs(glm::dot(toGLM(a), toGLM(b)));
+        return glm::abs(glm::dot(*toGLM(&a), *toGLM(&b)));
     }
     __host__ __device__ Tuple4f::value_type absDot(Tuple4f a, Tuple4f b)
     {
-        return glm::abs(glm::dot(toGLM(a), toGLM(b)));
+        return glm::abs(glm::dot(*toGLM(&a), *toGLM(&b)));
     }
 
-    __host__ __device__ Tuple3f cross(Tuple3f a, Tuple3f b) { return {fromGLM(glm::cross(toGLM(a), toGLM(b)))}; }
+    __host__ __device__ Tuple3f cross(Tuple3f a, Tuple3f b)
+    {
+        glm::vec3 x = glm::cross(*toGLM(&a), *toGLM(&b));
+        return *fromGLM(&x);
+    }
 
-    __host__ __device__ Tuple2f normalize(Tuple2f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
-    __host__ __device__ Tuple3f normalize(Tuple3f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
-    __host__ __device__ Tuple4f normalize(Tuple4f v) { return {fromGLM(glm::normalize(toGLM(v)))}; }
+    __host__ __device__ Tuple2f normalize(Tuple2f v)
+    {
+        glm::vec2 res = glm::normalize(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple3f normalize(Tuple3f v)
+    {
+        glm::vec3 res = glm::normalize(*toGLM(&v));
+        return *fromGLM(&res);
+    }
+    __host__ __device__ Tuple4f normalize(Tuple4f v)
+    {
+        glm::vec4 res = glm::normalize(*toGLM(&v));
+        return *fromGLM(&res);
+    }
 
-    __host__ __device__ Tuple2f::value_type normL2(Tuple2f v) { return glm::length(toGLM(v)); }
-    __host__ __device__ Tuple3f::value_type normL2(Tuple3f v) { return glm::length(toGLM(v)); }
-    __host__ __device__ Tuple4f::value_type normL2(Tuple4f v) { return glm::length(toGLM(v)); }
+    __host__ __device__ Tuple2f::value_type normL2(Tuple2f v) { return glm::length(*toGLM(&v)); }
+    __host__ __device__ Tuple3f::value_type normL2(Tuple3f v) { return glm::length(*toGLM(&v)); }
+    __host__ __device__ Tuple4f::value_type normL2(Tuple4f v) { return glm::length(*toGLM(&v)); }
 
-    __host__ __device__ bool all(Tuple2f v) { return v.x && v.y; }
-    __host__ __device__ bool all(Tuple3f v) { return v.x && v.y && v.z; }
-    __host__ __device__ bool all(Tuple4f v) { return v.x && v.y && v.z && v.w; }
+    __host__ __device__ bool all(Tuple2f v) { return v.x != 0 && v.y != 0; }
+    __host__ __device__ bool all(Tuple3f v) { return v.x != 0 && v.y != 0 && v.z != 0; }
+    __host__ __device__ bool all(Tuple4f v) { return v.x != 0 && v.y != 0 && v.z != 0 && v.w != 0; }
 
-    __host__ __device__ bool any(Tuple2f v) { return v.x || v.y; }
-    __host__ __device__ bool any(Tuple3f v) { return v.x || v.y || v.z; }
-    __host__ __device__ bool any(Tuple4f v) { return v.x || v.y || v.z || v.w; }
+    __host__ __device__ bool any(Tuple2f v) { return v.x != 0 || v.y != 0; }
+    __host__ __device__ bool any(Tuple3f v) { return v.x != 0 || v.y != 0 || v.z != 0; }
+    __host__ __device__ bool any(Tuple4f v) { return v.x != 0 || v.y != 0 || v.z != 0 || v.w != 0; }
 
     __host__ __device__ Tuple2f operator>(Tuple2f v0, Tuple2f v1)
     {
@@ -2163,23 +2904,23 @@ namespace dmt {
 
     __host__ __device__ Tuple2f::value_type distanceL2(Tuple2f a, Tuple2f b)
     {
-        return glm::distance(toGLM(a), toGLM(b));
+        return glm::distance(*toGLM(&a), *toGLM(&b));
     }
     __host__ __device__ Tuple3f::value_type distanceL2(Tuple3f a, Tuple3f b)
     {
-        return glm::distance(toGLM(a), toGLM(b));
+        return glm::distance(*toGLM(&a), *toGLM(&b));
     }
     __host__ __device__ Tuple4f::value_type distanceL2(Tuple4f a, Tuple4f b)
     {
-        return glm::distance(toGLM(a), toGLM(b));
+        return glm::distance(*toGLM(&a), *toGLM(&b));
     }
 
-    __host__ __device__ Tuple2f::value_type dotSelf(Tuple2f v) { return glm::length2(toGLM(v)); }
-    __host__ __device__ Tuple3f::value_type dotSelf(Tuple3f v) { return glm::length2(toGLM(v)); }
-    __host__ __device__ Tuple4f::value_type dotSelf(Tuple4f v) { return glm::length2(toGLM(v)); }
+    __host__ __device__ Tuple2f::value_type dotSelf(Tuple2f v) { return glm::length2(*toGLM(&v)); }
+    __host__ __device__ Tuple3f::value_type dotSelf(Tuple3f v) { return glm::length2(*toGLM(&v)); }
+    __host__ __device__ Tuple4f::value_type dotSelf(Tuple4f v) { return glm::length2(*toGLM(&v)); }
 
     // Vector Types: Geometric Functions ------------------------------------------------------------------------------
-    __host__ __device__ float angleBetween(Normal3f a, Normal3f b) { return glm::dot(toGLM(a), toGLM(b)); }
+    __host__ __device__ float angleBetween(Normal3f a, Normal3f b) { return glm::dot(*toGLM(&a), *toGLM(&b)); }
     __host__ __device__ float angleBetween(Quaternion a, Quaternion b)
     {
         if (dot(a, b) < 0.f)
@@ -2239,8 +2980,8 @@ namespace dmt {
         float     b    = xAxis.z * xAxis.y * a;
         glm::vec3 y    = {(1 + sign + xAxis.x * xAxis.x * a), (sign * b), (-sign * xAxis.x)};
         glm::vec3 z    = {(b), (sign + xAxis.y * xAxis.y * a), (-xAxis.y)};
-        frame.yAxis    = {fromGLM(glm::normalize(y))};
-        frame.zAxis    = {fromGLM(glm::normalize(z))};
+        frame.yAxis    = normalFrom(*fromGLM(&y));
+        frame.zAxis    = normalFrom(*fromGLM(&z));
         return frame;
     }
 
@@ -2258,7 +2999,8 @@ namespace dmt {
 
     __host__ __device__ Quaternion slerp(float t, Quaternion zero, Quaternion one)
     {
-        return fromGLMquat(glm::slerp(toGLM(one), toGLM(zero), t));
+        glm::quat q = glm::slerp(*toGLM(&one), *toGLM(&zero), t);
+        return *fromGLMquat(&q);
     }
 
     // Vector Types: Spherical Geometry Functions ---------------------------------------------------------------------
@@ -2475,7 +3217,7 @@ namespace dmt {
     __host__ __device__ void Bounds3f::boundingSphere(Point3f& outCenter, float& outRadius) const
     {
         outCenter = (pMin + pMax) / 2.f;
-        outRadius = inside(outCenter, *this) ? glm::distance(toGLM(outCenter), toGLM(pMax)) : 0.f;
+        outRadius = inside(outCenter, *this) ? glm::distance(*toGLM(&outCenter), *toGLM(&pMax)) : 0.f;
     }
 
     __host__ __device__ bool Bounds3f::isEmpty() const
@@ -2649,7 +3391,7 @@ namespace dmt {
     __host__ __device__ void Bounds2f::boundingCircle(Point2f& outCenter, float& outRadius) const
     {
         outCenter = (pMin + pMax) / 2.f;
-        outRadius = inside(outCenter, *this) ? glm::distance(toGLM(outCenter), toGLM(pMax)) : 0.f;
+        outRadius = inside(outCenter, *this) ? glm::distance(*toGLM(&outCenter), *toGLM(&pMax)) : 0.f;
     }
 
     __host__ __device__ bool Bounds2f::isEmpty() const { return pMin.x >= pMax.x || pMin.y >= pMax.y; }
@@ -2693,7 +3435,7 @@ namespace dmt {
     {
         QR                    ret;
         alignas(16) glm::mat4 QT{1.f};
-        alignas(16) glm::mat4 R = toGLMmat(m);
+        alignas(16) glm::mat4 R = *toGLMmat(&m);
         for (int32_t iter = 0; iter < numIter; ++iter)
         {
             for (int32_t idx = 0; idx < 3; ++idx)
@@ -2714,8 +3456,8 @@ namespace dmt {
                     //float theta = glm::acos(elem0 / glm::sqrt(elem0 * elem0 + elem1 * elem1));
                     float    theta = fl::atan2(-elem1, elem0);
                     Matrix4f G     = givensRotation(i.row, i.col, theta);
-                    QT             = toGLMmat(G) * QT;
-                    R              = toGLMmat(G) * R;
+                    QT             = *toGLMmat(&G) * QT;
+                    R              = *toGLMmat(&G) * R;
                 }
 
                 if (converge)
@@ -2724,8 +3466,8 @@ namespace dmt {
         }
         QT = glm::transpose(QT);
 
-        ret.qOrthogonal = fromGLMmat(QT);
-        ret.rUpper      = fromGLMmat(R);
+        ret.qOrthogonal = *fromGLMmat(&QT);
+        ret.rUpper      = *fromGLMmat(&R);
         return ret;
     }
 
@@ -2788,18 +3530,18 @@ namespace dmt {
 
     __host__ __device__ Matrix4f operator+(Matrix4f const& a, Matrix4f const& b)
     {
-        alignas(16) glm::mat4 sum = toGLMmat(a) + toGLMmat(b);
-        return fromGLMmat(sum);
+        alignas(16) glm::mat4 sum = *toGLMmat(&a) + *toGLMmat(&b);
+        return *fromGLMmat(&sum);
     }
     __host__ __device__ Matrix4f operator-(Matrix4f const& a, Matrix4f const& b)
     {
-        alignas(16) glm::mat4 sub = toGLMmat(a) - toGLMmat(b);
-        return fromGLMmat(sub);
+        alignas(16) glm::mat4 sub = *toGLMmat(&a) - *toGLMmat(&b);
+        return *fromGLMmat(&sub);
     }
     __host__ __device__ Matrix4f operator*(Matrix4f const& a, Matrix4f const& b)
     {
-        alignas(16) glm::mat4 prod = toGLMmat(a) * toGLMmat(b);
-        return fromGLMmat(prod);
+        alignas(16) glm::mat4 prod = *toGLMmat(&a) * *toGLMmat(&b);
+        return *fromGLMmat(&prod);
     }
 
     __host__ __device__ Matrix4f operator*(float v, Matrix4f const& m)
@@ -2828,17 +3570,17 @@ namespace dmt {
 
     __host__ __device__ Matrix4f& operator+=(Matrix4f& a, Matrix4f const& b)
     {
-        toGLMmat(a) += toGLMmat(b);
+        *toGLMmat(&a) += *toGLMmat(&b);
         return a;
     }
     __host__ __device__ Matrix4f& operator-=(Matrix4f& a, Matrix4f const& b)
     {
-        toGLMmat(a) -= toGLMmat(b);
+        *toGLMmat(&a) -= *toGLMmat(&b);
         return a;
     }
     __host__ __device__ Matrix4f& operator*=(Matrix4f& a, Matrix4f const& b)
     {
-        toGLMmat(a) *= toGLMmat(b);
+        *toGLMmat(&a) *= *toGLMmat(&b);
         return a;
     }
 
@@ -2855,8 +3597,8 @@ namespace dmt {
 
     __host__ __device__ Matrix4f fromQuat(Quaternion q)
     {
-        alignas(16) glm::mat4 mat = glm::mat4_cast(toGLM(q));
-        return fromGLMmat(mat);
+        alignas(16) glm::mat4 mat = glm::mat4_cast(*toGLM(&q));
+        return *fromGLMmat(&mat);
     }
 
     __host__ __device__ bool near(Matrix4f const& a, Matrix4f const& b)
@@ -2871,26 +3613,30 @@ namespace dmt {
         return result;
     }
 
-    __host__ __device__ float determinant(Matrix4f const& m) { return glm::determinant(toGLMmat(m)); }
+    __host__ __device__ float determinant(Matrix4f const& m) { return glm::determinant(*toGLMmat(&m)); }
 
     __host__ __device__ Matrix4f inverse(Matrix4f const& m)
     {
-        alignas(16) glm::mat4 minv = glm::inverse(toGLMmat(m));
-        return fromGLMmat(minv);
+        alignas(16) glm::mat4 minv = glm::inverse(*toGLMmat(&m));
+        return *fromGLMmat(&minv);
     }
 
     __host__ __device__ Matrix4f transpose(Matrix4f const& m)
     {
-        alignas(16) glm::mat4 t = glm::transpose(toGLMmat(m));
-        return fromGLMmat(t);
+        alignas(16) glm::mat4 t = glm::transpose(*toGLMmat(&m));
+        return *fromGLMmat(&t);
     }
 
-    __host__ __device__ Vector4f mul(Matrix4f const& m, Vector4f v) { return {fromGLM(toGLMmat(m) * toGLM(v))}; }
+    __host__ __device__ Vector4f mul(Matrix4f const& m, Vector4f v)
+    {
+        glm::vec4 res = *toGLMmat(&m) * *toGLM(&v);
+        return *fromGLM(&res);
+    }
 
     __host__ __device__ Vector3f mul(Matrix4f const& m, Vector3f const& v)
     {
         glm::vec4 w{v.x, v.y, v.z, 0.f};
-        w = toGLMmat(m) * w;
+        w = *toGLMmat(&m) * w;
         assert(fl::nearZero(w.w));
         return {{w.x, w.y, w.z}};
     }
@@ -2898,7 +3644,7 @@ namespace dmt {
     __host__ __device__ Normal3f mul(Matrix4f const& m, Normal3f const& v)
     {
         glm::vec4 w{v.x, v.y, v.z, 0.f};
-        w = toGLMmat(m) * w;
+        w = *toGLMmat(&m) * w;
         assert(fl::nearZero(w.w));
         w = glm::normalize(w);
         return {{w.x, w.y, w.z}};
@@ -2908,7 +3654,7 @@ namespace dmt {
     {
         Normal3f         ret;
         glm::vec4        w{v.x, v.y, v.z, 0.f};
-        glm::mat4 const& glmMat = toGLMmat(m);
+        glm::mat4 const& glmMat = *toGLMmat(&m);
 
     #if 0 // 1Mil dollar question: who is the transpose?
         ret.x = glmMat[0][0] * w.x + glmMat[1][0] * w.y + glmMat[2][0] * w.z + glmMat[3][0] * w.w;
@@ -2927,7 +3673,7 @@ namespace dmt {
     __host__ __device__ Point3f mul(Matrix4f const& m, Point3f const& p)
     {
         glm::vec4 w{p.x, p.y, p.z, 1.f};
-        w = toGLMmat(m) * w;
+        w = *toGLMmat(&m) * w;
         w /= w.w;
         return {{w.x, w.y, w.z}};
     }

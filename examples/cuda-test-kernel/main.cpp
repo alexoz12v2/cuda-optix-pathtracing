@@ -60,6 +60,11 @@ int32_t guardedMain()
             return m_nvrtcLoaded;
         }
 
+        // Must die after NVRTC api
+        std::pmr::string const includeOpt0 = "--include-path=" + (dmt::os::Path::executableDir() / "shaders").toUnderlying();
+        std::pmr::string const includeOpt1 = "--include-path=" +
+                                             (dmt::os::Path::executableDir() / "shaders" / "cuda-include").toUnderlying();
+
         std::unique_ptr<CUDADriverLibrary> cudaApi  = std::make_unique<CUDADriverLibrary>();
         std::unique_ptr<NVRTCLibrary>      nvrtcApi = std::make_unique<NVRTCLibrary>();
         dmt::os::LibraryLoader             loader{true};
@@ -71,7 +76,6 @@ int32_t guardedMain()
         bool m_cudaLoaded  = false;
         bool m_nvrtcLoaded = false;
     } j;
-
 
     {
         dmt::Context ctx;
@@ -129,11 +133,10 @@ int32_t guardedMain()
             }
         }
 
-        dmt::os::Path path       = dmt::os::Path::executableDir() / "shaders" / "cuda-kernel.cu";
-        auto          nvccOpts   = dmt::getnvccOpts(true);
-        std::string   includeOpt = "--include-path=";
-        includeOpt.append((dmt::os::Path::executableDir() / "shaders").toUnderlying());
-        nvccOpts.push_back(includeOpt.c_str());
+        dmt::os::Path path     = dmt::os::Path::executableDir() / "shaders" / "cuda-kernel.cu";
+        auto          nvccOpts = dmt::getnvccOpts(true);
+        nvccOpts.push_back(j.includeOpt0.c_str());
+        nvccOpts.push_back(j.includeOpt1.c_str());
 
         std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
 

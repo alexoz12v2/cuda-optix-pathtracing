@@ -4,6 +4,7 @@
 #include <algorithm>
 
 namespace dmt {
+    // !! TODO: copy cuda/std in build directory!
     static std::pair<std::vector<char const*>, std::vector<char const*>> getNvrtcHeaderOverrides()
     {
         // clang-format off
@@ -41,9 +42,13 @@ namespace dmt {
             )",
             R"(
 #pragma once
+typedef decltype(sizeof(0)) size_t;
+typedef decltype(nullptr) nullptr_t;
+typedef unsigned char byte;
 namespace std {
     typedef decltype(sizeof(0)) size_t;
     typedef decltype(nullptr) nullptr_t;
+    typedef unsigned char byte;
 }
             )",
             R"(
@@ -77,6 +82,7 @@ namespace std {
 } // namespace std
             )",
             "#pragma once\n"
+            "typedef unsigned long long uintptr_t;\n"
             "typedef signed char        int8_t;\n"
             "typedef short              int16_t;\n"
             "typedef int                int32_t;\n"
@@ -172,6 +178,7 @@ template<> struct make_unsigned<long long> { using type = unsigned long long; };
             R"(
 #pragma once
 
+// https://stackoverflow.com/questions/8812422/how-to-find-epsilon-min-and-max-constants-for-cuda
 // Single-precision (float) limits
 #define FLT_RADIX       2
 #define FLT_MANT_DIG    24
@@ -254,7 +261,7 @@ template<> struct numeric_limits<float> {
     static constexpr int digits10 = FLT_DIG;
     static constexpr bool is_signed = true;
     static constexpr bool is_integer = false;
-    static constexpr float epsilon() noexcept { return __FLT_EPSILON__; }
+    static constexpr float epsilon() noexcept { return FLT_EPSILON; }
     static constexpr float infinity() noexcept { return __builtin_inff(); }
     __host__ __device__ static float quiet_NaN() noexcept { return __nanf(); }
     __host__ __device__ static float signaling_NaN() noexcept { return __nanf(); } // usually same bit pattern
@@ -271,7 +278,7 @@ template<> struct numeric_limits<double> {
     static constexpr int digits10 = DBL_DIG;
     static constexpr bool is_signed = true;
     static constexpr bool is_integer = false;
-    static constexpr double epsilon() noexcept { return __DBL_EPSILON__; }
+    static constexpr double epsilon() noexcept { return DBL_EPSILON; }
     static constexpr double infinity() noexcept { return __builtin_inf(); }
     __host__ __device__ static double quiet_NaN() noexcept { return __nand(); }
     __host__ __device__ static double signaling_NaN() noexcept { return __nand(); }
@@ -619,7 +626,8 @@ inline constexpr double phi      = phi_v<double>;
             //"--define-macro=__ORDER_LITTLE_ENDIAN__=1234",
             //"--define-macro=__ORDER_BIG_ENDIAN__=4321",
             //"--define-macro=__ORDER_PDP_ENDIAN__=3412",
-            "--include-path=" CUDA_HOME,
+            //"--include-path=" CUDA_HOME,
+            //"--include-path=" CUDA_HOME "/cuda/std",
             //"--include-path=" DMT_CPP_INCLUDE_PATH,
 
             "-default-device" // TODO remove or better, parametrize
@@ -692,12 +700,20 @@ inline constexpr double phi      = phi_v<double>;
             std::string logStr(logBuf.get());
 
             // Break the log into chunks of 256 characters
-            size_t const chunkSize = 256;
-            for (size_t i = 0; i < logStr.size(); i += chunkSize)
+            std::istringstream iss(logStr);
+            std::string        line;
+            ctx.error("({}) nvrtcCompileProgram Failed:\n", std::make_tuple(kernelFileName));
+            while (std::getline(iss, line))
             {
-                std::string_view chunk(logStr.data() + i, std::min(chunkSize, logStr.size() - i));
-                ctx.error("({}) nvrtcCompileProgram Failed:\n{}", std::make_tuple(kernelFileName, chunk));
+                if (!line.empty())
+                {
+                    if (line.find("warning:") != decltype(line)::npos || line.find("warning #") != decltype(line)::npos)
+                        ctx.warn("{}", std::make_tuple(line));
+                    else
+                        ctx.error("{}", std::make_tuple(line));
+                }
             }
+
 
             return nullptr;
         }

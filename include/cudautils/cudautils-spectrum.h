@@ -1,10 +1,13 @@
 #pragma once
 
 #include "cudautils/cudautils-macro.h"
-#include <platform/platform-utils.h>
-// #include <platform/platform-cuda-utils.h>
+#include "cudautils/cudautils-vecmath.h"
 
-#include <concepts>
+#if !defined(__CUDA_ARCH__)
+    #include <platform/platform-utils.h>
+
+    #include <concepts>
+#endif
 
 namespace dmt {
     /** https://www.desmos.com/calculator/e0arbln6ip
@@ -15,10 +18,9 @@ namespace dmt {
     DMT_CPU_GPU inline constexpr float    lambdaMin() { return 360.f; }
     DMT_CPU_GPU inline constexpr float    lambdaMax() { return 830.f; }
     DMT_CPU_GPU inline constexpr uint32_t numSpectrumSamples() { return 4u; }
+#if !defined(__CUDA_ARCH__)
     static_assert(numSpectrumSamples() > 0 && nextPOT(numSpectrumSamples()) == numSpectrumSamples());
-
-    template <typename T>
-    struct SOA;
+#endif
 
     // TODO move elsewhere
     /** type which encapsulates a real values function with up to two float parameters  */
@@ -41,8 +43,6 @@ namespace dmt {
     // Sampled Spectrum and Sampled Wavelengths: Class Definitions ----------------------------------------------------
     struct DMT_CORE_API SampledSpectrum
     {
-        friend struct SOA<SampledSpectrum>;
-
         SampledSpectrum() = default;
         DMT_CPU_GPU SampledSpectrum(ArrayView<float> values);
         DMT_CPU_GPU explicit SampledSpectrum(float c)
@@ -55,8 +55,6 @@ namespace dmt {
 
     struct DMT_CORE_API SampledWavelengths
     {
-        friend struct SOA<SampledWavelengths>;
-
         SampledWavelengths() = default;
         /**
          * After phenomena like light dispersion or any scattering event which causes two wavelengths to travel
@@ -98,6 +96,9 @@ namespace dmt {
     DMT_CORE_API DMT_CPU_GPU SampledSpectrum    PDF(SampledWavelengths& wavelengths);
 
     // Spectrum Concept -----------------------------------------------------------------------------------------------
+
+#if __cplusplus >= 202002L
+
     // clang-format off
     template <typename T>
     concept SpectrumType = requires (T t) {
@@ -106,6 +107,8 @@ namespace dmt {
         { t.sample(std::declval<SampledWavelengths>()) } -> std::same_as<SampledSpectrum>;
     };
     // clang-format on
+
+#endif
 
     // Spectrum Classes: Constant Spectrum ----------------------------------------------------------------------------
     /**
@@ -122,7 +125,9 @@ namespace dmt {
     private:
         float m_value;
     };
+#if __cplusplus >= 202002L
     static_assert(SpectrumType<ConstantSpectrum>);
+#endif
 
     /**
      * Class holding a buffer whose floating point values represent samples of a spectral distribution over the
@@ -208,6 +213,33 @@ namespace dmt {
     static constexpr uint32_t residual = numSpectrumSamples() % 4;
     static constexpr uint32_t numVect  = numSpectrumSamples() / 4;
 
+    #if defined(__CUDA_ARCH__)
+    inline __device__ bool float_equal_strict(float a, float b)
+    {
+        // exact bitwise comparison for float
+        return a == b;
+    }
+
+    inline __device__ float expm1f_kahan(float x)
+    {
+        float u = expf(x);
+
+        if (float_equal_strict(u, 1.0f))
+        {
+            return x; // small x, exp(x)-1 ≈ x
+        }
+
+        float um1 = u - 1.0f;
+        if (float_equal_strict(um1, -1.0f))
+        {
+            return -1.0f; // x very negative, exp(x)-1 ≈ -1
+        }
+
+        float logu = logf(u);
+        return float_equal_strict(u, logu) ? u : (u - 1.0f) * x / logu;
+    }
+    #endif
+
     __host__ __device__ float blackbody(float lambdaNanometers, float TKelvin)
     {
         float                  Le          = 0.f;
@@ -222,7 +254,13 @@ namespace dmt {
         float const lambdaT = tmp * TKelvin;
         float const expArg  = _hc_over_kb * fl::rcp(lambdaT);
         assert(expArg <= 700.f); // exp(700) is near float limit
-        Le = _2hc / (lambdaMeters5 * Eigen::numext::expm1(expArg));
+        Le = _2hc / (lambdaMeters5 *
+    #if defined(__CUDA_ARCH__)
+                     expm1f_kahan(expArg)
+    #else
+                     Eigen::numext::expm1(expArg)
+    #endif
+                    );
         return Le;
     }
 
@@ -256,7 +294,7 @@ namespace dmt {
         {
             for (uint32_t i = 1; i < numVect; ++i)
             {
-                bool isNotZero = std::bit_cast<glm::vec4 const*>(&lambda[0])[i] != zero;
+                bool isNotZero = reinterpret_cast<glm::vec4 const*>(&lambda[0])[i] != zero;
                 if (isNotZero)
                     return false;
             }
@@ -300,7 +338,7 @@ namespace dmt {
     __host__ __device__ SampledSpectrum& operator+=(SampledSpectrum& spec0, SampledSpectrum const& spec1)
     {
         for (uint32_t i = 0; i < numVect; ++i)
-            std::bit_cast<glm::vec4*>(&spec0.values[0])[i] += std::bit_cast<glm::vec4 const*>(&spec1.values[0])[i];
+            reinterpret_cast<glm::vec4*>(&spec0.values[0])[i] += reinterpret_cast<glm::vec4 const*>(&spec1.values[0])[i];
         if constexpr (residual != 0)
         {
             for (uint32_t i = numVect << 2; i < numSpectrumSamples(); ++i)
@@ -311,7 +349,7 @@ namespace dmt {
     __host__ __device__ SampledSpectrum& operator-=(SampledSpectrum& spec0, SampledSpectrum const& spec1)
     {
         for (uint32_t i = 0; i < numVect; ++i)
-            std::bit_cast<glm::vec4*>(&spec0.values[0])[i] -= std::bit_cast<glm::vec4 const*>(&spec1.values[0])[i];
+            reinterpret_cast<glm::vec4*>(&spec0.values[0])[i] -= reinterpret_cast<glm::vec4 const*>(&spec1.values[0])[i];
         if constexpr (residual != 0)
         {
             for (uint32_t i = numVect << 2; i < numSpectrumSamples(); ++i)
@@ -322,7 +360,7 @@ namespace dmt {
     __host__ __device__ SampledSpectrum& operator*=(SampledSpectrum& spec0, SampledSpectrum const& spec1)
     {
         for (uint32_t i = 0; i < numVect; ++i)
-            std::bit_cast<glm::vec4*>(&spec0.values[0])[i] *= std::bit_cast<glm::vec4 const*>(&spec1.values[0])[0];
+            reinterpret_cast<glm::vec4*>(&spec0.values[0])[i] *= reinterpret_cast<glm::vec4 const*>(&spec1.values[0])[0];
         if constexpr (residual != 0)
         {
             for (uint32_t i = numVect << 2; i < numSpectrumSamples(); ++i)
@@ -333,7 +371,7 @@ namespace dmt {
     __host__ __device__ SampledSpectrum& operator/=(SampledSpectrum& spec0, SampledSpectrum const& spec1)
     {
         for (uint32_t i = 0; i < numVect; ++i)
-            std::bit_cast<glm::vec4*>(&spec0.values[0])[i] /= std::bit_cast<glm::vec4 const*>(&spec1.values[0])[i];
+            reinterpret_cast<glm::vec4*>(&spec0.values[0])[i] /= reinterpret_cast<glm::vec4 const*>(&spec1.values[0])[i];
         if constexpr (residual != 0)
         {
             for (uint32_t i = numVect << 2; i < numSpectrumSamples(); ++i)
@@ -353,7 +391,7 @@ namespace dmt {
     }
     __host__ __device__ ValueIndex max(SampledSpectrum const& spec)
     {
-        ValueIndex ret{.value = -std::numeric_limits<float>::infinity(), .index = -1};
+        ValueIndex ret{-std::numeric_limits<float>::infinity(), -1};
         for (uint32_t i = 0; i < numSpectrumSamples(); ++i)
         {
             if (ret.value < spec.values[i])
@@ -366,7 +404,7 @@ namespace dmt {
     }
     __host__ __device__ ValueIndex min(SampledSpectrum const& spec)
     {
-        ValueIndex ret{.value = std::numeric_limits<float>::infinity(), .index = -1};
+        ValueIndex ret{std::numeric_limits<float>::infinity(), -1};
         for (uint32_t i = 0; i < numSpectrumSamples(); ++i)
         {
             if (ret.value > spec.values[i])
@@ -412,9 +450,9 @@ namespace dmt {
         for (uint32_t i = 0; i < numVect; ++i)
         {
             ups -= static_cast<glm::vec4>(glm::greaterThan(ups, _one)) * _one;
-            std::bit_cast<Vector4f*>(&ret.lambda[0])[i] = sampling::sampleVisibleWavelengths(fromGLM(ups));
-            std::bit_cast<Vector4f*>(&ret.pdf[0])[i]    = sampling::visibleWavelengthsPDF(
-                std::bit_cast<Vector4f*>(&ret.lambda[0])[i]);
+            reinterpret_cast<Vector4f*>(&ret.lambda[0])[i] = sampling::sampleVisibleWavelengths(*fromGLM(&ups));
+            reinterpret_cast<Vector4f*>(&ret.pdf[0])[i]    = sampling::visibleWavelengthsPDF(
+                reinterpret_cast<Vector4f*>(&ret.lambda[0])[i]);
         }
         if constexpr (residual != 0)
         {

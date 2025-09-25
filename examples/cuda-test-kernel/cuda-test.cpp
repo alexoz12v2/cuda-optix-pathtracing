@@ -287,6 +287,7 @@ template<> struct numeric_limits<double> {
 // int
 template<> struct numeric_limits<int> {
     static constexpr bool is_specialized = true;
+    static constexpr bool is_iec559 = false;
     static constexpr int min() noexcept { return INT_MIN; }
     static constexpr int max() noexcept { return INT_MAX; }
     static constexpr int lowest() noexcept { return INT_MIN; }
@@ -298,6 +299,7 @@ template<> struct numeric_limits<int> {
 // unsigned int
 template<> struct numeric_limits<unsigned int> {
     static constexpr bool is_specialized = true;
+    static constexpr bool is_iec559 = false;
     static constexpr unsigned int min() noexcept { return 0; }
     static constexpr unsigned int max() noexcept { return UINT_MAX; }
     static constexpr unsigned int lowest() noexcept { return 0; }
@@ -742,10 +744,7 @@ inline constexpr double phi      = phi_v<double>;
     // ------------------------------------------------------------
     // Precompute the filter distribution in host memory
     // ------------------------------------------------------------
-    PiecewiseConstant2D precalculateMitchellDistrib(filtering::Mitchell const& filter,
-                                                    int                        Nx,
-                                                    int                        Ny,
-                                                    std::pmr::memory_resource* mem)
+    PiecewiseConstant2D precalculateMitchellDistrib(filtering::Mitchell const& filter, int Nx, int Ny, std::pmr::memory_resource* mem)
     {
         Bounds2f domain;
         domain.pMin = Point2f(-filter.radius().x, -filter.radius().y);
@@ -794,11 +793,13 @@ inline constexpr double phi      = phi_v<double>;
         auto const& marginalCdf = cpuDistrib.marginalCdf();
 
         // Allocate GPU memory
-        cudaApi->cuMemAlloc((CUdeviceptr*) &handle.dConditionalCdf, conditionalFlat.size() * sizeof(float));
-        cudaApi->cuMemAlloc((CUdeviceptr*) &handle.dMarginalCdf, marginalCdf.size() * sizeof(float));
+        cudaApi->cuMemAlloc((CUdeviceptr*)&handle.dConditionalCdf, conditionalFlat.size() * sizeof(float));
+        cudaApi->cuMemAlloc((CUdeviceptr*)&handle.dMarginalCdf, marginalCdf.size() * sizeof(float));
 
         // Copy to GPU
-        cudaApi->cuMemcpyHtoD((CUdeviceptr)handle.dConditionalCdf, conditionalFlat.data(), conditionalFlat.size() * sizeof(float));
+        cudaApi->cuMemcpyHtoD((CUdeviceptr)handle.dConditionalCdf,
+                              conditionalFlat.data(),
+                              conditionalFlat.size() * sizeof(float));
         cudaApi->cuMemcpyHtoD((CUdeviceptr)handle.dMarginalCdf, marginalCdf.data(), marginalCdf.size() * sizeof(float));
 
         // Fill GPU sampler struct

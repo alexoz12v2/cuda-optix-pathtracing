@@ -503,3 +503,24 @@ namespace dmt {
     };
 
 } // namespace dmt
+
+// TODO move elsewhere: Payloads and params for each thing
+
+namespace dmt {
+
+    struct RaygenPayload
+    {
+        // ox, oy, oz
+        // dx, dy, dz
+        // sample weight
+        ManagedMultiQueue<float, float, float, float, float, float, float>* mmq;
+    };
+
+    struct RaygenParams
+    {
+        RaygenPayload rayPayload;
+        int32_t       px;
+        int32_t       py;
+        int32_t       sampleIndex;
+    };
+} // namespace dmt

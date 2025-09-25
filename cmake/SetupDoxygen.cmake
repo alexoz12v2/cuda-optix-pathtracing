@@ -1,17 +1,14 @@
-
-macro(dmt_setup_doxygen)
+macro (dmt_setup_doxygen)
   find_package(Doxygen REQUIRED dot)
-  if(NOT DOXYGEN_FOUND)
+  if (NOT DOXYGEN_FOUND)
     message(FATAL_ERROR "doxygen executable is required to build documentation")
-  else()
+  else ()
     message(STATUS "found ${DOXYGEN_EXECUTABLE} executable --version ${DOXYGEN_VERSION}")
-  endif()
+  endif ()
 
   set(DOXYGEN_GENERATE_HTML YES)
-  doxygen_add_docs(dmt-doxygen
-    ${PROJECT_SOURCE_DIR}
+  doxygen_add_docs(
+    dmt-doxygen ${PROJECT_SOURCE_DIR}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    COMMENT "generate doxygen"
-    CONFIG_FILE ${PROJECT_SOURCE_DIR}/docs/Doxyfile
-  )
-endmacro()
+    COMMENT "generate doxygen" CONFIG_FILE ${PROJECT_SOURCE_DIR}/docs/Doxyfile)
+endmacro ()

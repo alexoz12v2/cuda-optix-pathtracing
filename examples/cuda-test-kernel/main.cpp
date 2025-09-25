@@ -375,7 +375,7 @@ int32_t guardedMain()
             dmt::PiecewiseConstant2D cpuDistrib = dmt::precalculateMitchellDistrib(filter, nx, ny);
 
             dmt::GpuSamplerHandle samplerHandle = dmt::uploadFilterDistrib(j.cudaApi.get(), cpuDistrib, filter);
-            
+
             // launch kernel
             CUfunction kmmqDouble = nullptr;
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
@@ -399,15 +399,15 @@ int32_t guardedMain()
             size_t      numByte;
             j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_cameraFromRaster");
             static_assert(std::is_standard_layout_v<dmt::Transform>);
-            dmt::Transform transfCR{};
+            dmt::Transform transfCR{dmt::Matrix4f::identity()};
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfCR, numByte));
 
             j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_renderFromCamera");
-            dmt::Transform transfRC{};
+            dmt::Transform transfRC{dmt::Matrix4f::identity()};
             dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfRC, numByte));
 
             j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_filter");
-            dmt::gpu::FilterSamplerGPU filter{};
+            dmt::gpu::FilterSamplerGPU gpufilter{};
             // clean up
             j.cudaApi->cuStreamDestroy(stream);
             j.cudaApi->cuModuleUnload(raygenMod);

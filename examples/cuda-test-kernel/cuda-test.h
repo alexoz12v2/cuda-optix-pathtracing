@@ -29,8 +29,8 @@ namespace dmt {
     GpuSamplerHandle        uploadFilterDistrib(CUDADriverLibrary*         cudaApi,
                                                 PiecewiseConstant2D const& cpuDistrib,
                                                 filtering::Mitchell const& cpuFilter);
-    PiecewiseConstant2D precalculateMitchellDistrib(filtering::Mitchell const& filter,
-                                                    int                        Nx,
-                                                    int                        Ny,
-                                                    std::pmr::memory_resource* mem = std::pmr::get_default_resource());
+    PiecewiseConstant2D     precalculateMitchellDistrib(filtering::Mitchell const& filter,
+                                                        int                        Nx,
+                                                        int                        Ny,
+                                                        std::pmr::memory_resource* mem = std::pmr::get_default_resource());
 } // namespace dmt

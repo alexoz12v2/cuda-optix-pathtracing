@@ -1,8 +1,3 @@
-If:
-  PathMatch: [.*\.h, .*\.cpp, .*\.cu]
-  PathExclude: [extern/.*, build/.*/_deps/.*]
-
 CompileFlags:
-  Compiler: clang++-20
-  CompilationDatabase: build/Debug-Linux/
-  Add: [-Ibuild/Debug-Linux/src/cuda-wrappers/]
+  CompilationDatabase: build/Debug-Linux/compile_commands.json
+  Add: [-Iinclude, -Ibuild/Debug-Linux/src/cuda-wrappers]

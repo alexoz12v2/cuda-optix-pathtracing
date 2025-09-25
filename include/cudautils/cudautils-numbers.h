@@ -5,13 +5,25 @@
 
 // u = random uniformly distributed fp32 number between 0 and 1
 namespace dmt {
-    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE inline Point2f cartesianFromPolar(float rho, float phi)
+    DMT_CORE_API DMT_CPU_GPU 
+#if defined(__CUDA_ARCH__)
+    DMT_FORCEINLINE
+#else
+    DMT_FORCEINLINE inline 
+#endif 
+    Point2f cartesianFromPolar(float rho, float phi)
     {
         return {rho * cosf(phi), rho * sinf(phi)};
     }
 
     // using elevation angle as theta
-    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE inline Vector3f cartesianFromSpherical(float rho, float phi, float theta)
+    DMT_CORE_API DMT_CPU_GPU 
+#if defined(__CUDA_ARCH__)
+    DMT_FORCEINLINE
+#else
+    DMT_FORCEINLINE inline 
+#endif 
+    Vector3f cartesianFromSpherical(float rho, float phi, float theta)
     {
         float sin_phi   = sinf(phi);
         float cos_phi   = cosf(phi);
@@ -21,7 +33,13 @@ namespace dmt {
         return Vector3f(rho * sin_phi * cos_theta, rho * sin_phi * sin_theta, rho * cos_phi);
     }
 
-    DMT_CORE_API DMT_CPU_GPU DMT_FORCEINLINE inline float sin_sqr_to_one_minus_cos(float const s_sq)
+    DMT_CORE_API DMT_CPU_GPU 
+#if defined(__CUDA_ARCH__)
+    DMT_FORCEINLINE
+#else
+    DMT_FORCEINLINE inline 
+#endif 
+    float sin_sqr_to_one_minus_cos(float const s_sq)
     {
         // Using second-order Taylor expansion at small angles for better accuracy.
         return s_sq > 0.0004f ? 1.0f - fl::safeSqrt(1.0f - s_sq) : 0.5f * s_sq;
@@ -317,17 +335,17 @@ namespace dmt::sampling {
         Vector4f ret = Vector4f::zero();
 
         // Mask for values within the valid range [360, 830)
-        glm::bvec4 valid = glm::greaterThanEqual(toGLM(lambda), glmLambdaMin()) &&
-                           glm::lessThanEqual(toGLM(lambda), glmLambdaMax());
+        glm::bvec4 valid = glm::greaterThanEqual(*toGLM(&lambda), glmLambdaMin()) &&
+                           glm::lessThanEqual(*toGLM(&lambda), glmLambdaMax());
         if (glm::any(valid)) // Check if any values are in the valid range
         {
-            glm::vec4 diff    = toGLM(lambda) - 538.f;
+            glm::vec4 diff    = *toGLM(&lambda) - 538.f;
             glm::vec4 coshVal = glm::cosh(0.0072f * diff);
             coshVal           = coshVal * coshVal;       // Square the cosh values
             glm::vec4 pdf     = 0.0039398042f / coshVal; // Calculate the PDF
 
             // Set the result only for valid elements
-            toGLM(ret) = glm::mix(toGLM(ret), pdf, valid);
+            *toGLM(&ret) = glm::mix(*toGLM(&ret), pdf, valid);
         }
 
         return ret;
@@ -336,12 +354,12 @@ namespace dmt::sampling {
     __host__ __device__ Vector4f sampleVisibleWavelengths(Vector4f u)
     {
         // Ensure the input is within [0, 1]
-        assert(glm::all(glm::greaterThanEqual(toGLM(u), glmZero()) && glm::lessThanEqual(toGLM(u), glmOne())));
+        assert(glm::all(glm::greaterThanEqual(*toGLM(&u), glmZero()) && glm::lessThanEqual(*toGLM(&u), glmOne())));
 
         // Sample wavelengths using the given formula
-        Vector4f sampled = {fromGLM(538.f - 138.888889f * glm::atanh(0.85691062f - 1.82750197f * toGLM(u)))};
+        glm::vec4 sampled = 538.f - 138.888889f * glm::atanh(0.85691062f - 1.82750197f * *toGLM(&u));
 
-        return sampled;
+        return *fromGLM(&sampled);
     }
 } // namespace dmt::sampling
 #endif

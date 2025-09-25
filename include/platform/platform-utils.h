@@ -936,13 +936,6 @@ namespace dmt {
         extern DMT_PLATFORM_API std::shared_mutex g_slk;
     } // namespace detail
 
-    template <typename T>
-    struct ArrayView
-    {
-        T*       data;
-        uint32_t length; // count of elements
-    };
-
     /**
      * Simple class akin to Python3's <a href="https://docs.python.org/3.10/library/stdtypes.html#range">`range()`</a>
      * Basically `std::views::iota`, but can also be used in Device code

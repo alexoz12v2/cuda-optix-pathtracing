@@ -6,17 +6,20 @@ set(GLAD_SRC_LIST src/gl.c)
 if (DMT_OS_WINDOWS)
   list(APPEND GLAD_HEADER_LIST include/glad/wgl.h)
   list(APPEND GLAD_SRC_LIST src/wgl.c)
-endif()
+endif ()
 
 add_library(glad STATIC)
-target_sources(glad
-  PRIVATE
-    ${GLAD_SRC_LIST}
-  PUBLIC 
-    FILE_SET glad_headers TYPE HEADERS BASE_DIRS include/
-      FILES 
-        ${GLAD_HEADER_LIST}
-)
+target_sources(
+  glad
+  PRIVATE ${GLAD_SRC_LIST}
+  PUBLIC FILE_SET
+         glad_headers
+         TYPE
+         HEADERS
+         BASE_DIRS
+         include/
+         FILES
+         ${GLAD_HEADER_LIST})
 
 install(TARGETS glad FILE_SET glad_headers)
 

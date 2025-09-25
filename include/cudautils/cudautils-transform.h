@@ -14,7 +14,7 @@ namespace dmt {
         Matrix4f mInv; // Inverse transformation matrix
 
         // Default constructor
-        DMT_CPU_GPU Transform();
+        DMT_CPU_GPU Transform() = default;
 
         // Constructor with an initial matrix
         DMT_CPU_GPU explicit Transform(Matrix4f const& matrix);
@@ -89,10 +89,12 @@ namespace dmt {
     // Transform Inline Functions
     DMT_CPU_GPU inline Transform Inverse(Transform const& t) { return Transform(t.m); }
 
-    DMT_FORCEINLINE inline DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b)
-    {
-        return a.combine(b);
-    }
+#if defined(__CUDA_ARCH__)
+    DMT_FORCEINLINE
+#else
+    DMT_FORCEINLINE inline
+#endif
+    DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b) { return a.combine(b); }
 
     class DMT_CORE_API AnimatedTransform
     {
@@ -182,36 +184,36 @@ namespace dmt {
         }
     }
 
-    __host__ __device__ Transform::Transform() : m(Matrix4f::identity()), mInv(Matrix4f::identity()) {}
     __host__ __device__ Transform::Transform(Matrix4f const& matrix) : m(matrix), mInv(inverse(matrix)) {}
 
     __host__ __device__ void Transform::translate_(Vector3f const& translation)
     {
-        alignas(16) glm::mat4 gm    = glm::translate(toGLMmat(m), toGLM(translation));
-        alignas(16) glm::mat4 gminv = glm::translate(toGLMmat(mInv), -toGLM(translation));
+        alignas(16) glm::mat4 gm    = glm::translate(*toGLMmat(&m), *toGLM(&translation));
+        alignas(16) glm::mat4 gminv = glm::translate(*toGLMmat(&mInv), -*toGLM(&translation));
 
-        m    = fromGLMmat(gm);
-        mInv = fromGLMmat(gminv);
+        m    = *fromGLMmat(&gm);
+        mInv = *fromGLMmat(&gminv);
     }
 
     // Apply scaling
     __host__ __device__ void Transform::scale_(Vector3f const& scaling)
     {
-        alignas(16) glm::mat4 gm    = glm::scale(toGLMmat(m), toGLM(scaling));
-        alignas(16) glm::mat4 gminv = glm::scale(toGLMmat(mInv), toGLM(bcast<Vector3f>(1.0f) / scaling));
+        Vector3f const        vec   = bcast<Vector3f>(1.0f) / scaling;
+        alignas(16) glm::mat4 gm    = glm::scale(*toGLMmat(&m), *toGLM(&scaling));
+        alignas(16) glm::mat4 gminv = glm::scale(*toGLMmat(&mInv), *toGLM(&vec));
 
-        m    = fromGLMmat(gm);
-        mInv = fromGLMmat(gminv);
+        m    = *fromGLMmat(&gm);
+        mInv = *fromGLMmat(&gminv);
     }
 
     // Apply rotation (angle in degrees)
     __host__ __device__ void Transform::rotate_(float angle, Vector3f const& axis)
     {
-        alignas(16) glm::mat4 gm    = glm::rotate(toGLMmat(m), glm::radians(angle), toGLM(axis));
-        alignas(16) glm::mat4 gminv = glm::rotate(toGLMmat(mInv), -glm::radians(angle), toGLM(axis));
+        alignas(16) glm::mat4 gm    = glm::rotate(*toGLMmat(&m), glm::radians(angle), *toGLM(&axis));
+        alignas(16) glm::mat4 gminv = glm::rotate(*toGLMmat(&mInv), -glm::radians(angle), *toGLM(&axis));
 
-        m    = fromGLMmat(gm);
-        mInv = fromGLMmat(gminv);
+        m    = *fromGLMmat(&gm);
+        mInv = *fromGLMmat(&gminv);
     }
 
     // Combine with another transform
@@ -325,8 +327,8 @@ namespace dmt {
         worldFromCamera[{3, 3}] = 1;
 
         // Initialize first three columns of viewing matrix
-        glm::vec3 nup     = glm::normalize(toGLM(up));
-        glm::vec3 dir     = glm::normalize(toGLM(look) - toGLM(pos));
+        glm::vec3 nup     = glm::normalize(*toGLM(&up));
+        glm::vec3 dir     = glm::normalize(*toGLM(&look) - *toGLM(&pos));
         glm::vec3 nupXdir = glm::cross(nup, dir);
         assert(glm::length2(nupXdir) > std::numeric_limits<float>::epsilon());
 
@@ -379,9 +381,10 @@ namespace dmt {
         glm::vec3 scale;
         glm::vec3 skew;
         glm::vec4 perspective;
-        glm::decompose(toGLMmat(m), scale, toGLM(outR), toGLM(outT), skew, perspective);
+        glm::decompose(*toGLMmat(&m), scale, *toGLM(&outR), *toGLM(&outT), skew, perspective);
         // decompose actually returs the conjugate quaternion
-        outR = fromGLMquat(glm::conjugate(toGLM(outR)));
+        glm::quat conj = glm::conjugate(*toGLM(&outR));
+        outR           = *fromGLMquat(&conj);
         // inglobe all the rest into a matrixc
         // Start with an identity matrix
         outS = Matrix4f::identity();
@@ -397,7 +400,7 @@ namespace dmt {
         outS[{2, 1}] = skew.z; // Skew Z by Y
 
         // Apply perspective (set the last row)
-        outS[3] = fromGLM(perspective);
+        outS[3] = *fromGLM(&perspective);
     }
 
 
@@ -510,7 +513,7 @@ namespace dmt {
 
     __host__ __device__ bool Transform::swapsHandedness() const
     {
-        glm::mat3 const linearPart{toGLMmat(m)};
+        glm::mat3 const linearPart{*toGLMmat(&m)};
         return glm::determinant(linearPart) < 0.f;
     }
 
@@ -1232,9 +1235,12 @@ namespace dmt {
     __host__ __device__ Bounds3f AnimatedTransform::boundsPointMotion(Point3f p) const
     {
         if (!isAnimated())
-            return Bounds3f(startTransform(p));
+        {
+            Point3f thepoint = startTransform(p);
+            return {thepoint, thepoint};
+        }
 
-        Bounds3f bounds(startTransform(p), endTransform(p));
+        Bounds3f bounds{startTransform(p), endTransform(p)};
         float    cosTheta = dot(m_r[0], m_r[1]);
         float    theta    = glm::acos(glm::clamp(cosTheta, -1.f, 1.f));
         for (int c = 0; c < 3; ++c)

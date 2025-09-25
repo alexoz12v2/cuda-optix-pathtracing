@@ -225,15 +225,15 @@ namespace dmt {
     {
         DMT_CPU_GPU static constexpr Tuple4<S> zero()
         {
-            return {.x = static_cast<S>(0), .y = static_cast<S>(0), .z = static_cast<S>(0), .w = static_cast<S>(0)};
+            return {static_cast<S>(0), static_cast<S>(0), static_cast<S>(0), static_cast<S>(0)};
         }
         DMT_CPU_GPU static constexpr Tuple4<S> quatIdentity()
         {
-            return {.x = static_cast<S>(1), .y = static_cast<S>(0), .z = static_cast<S>(0), .w = static_cast<S>(0)};
+            return {static_cast<S>(1), static_cast<S>(0), static_cast<S>(0), static_cast<S>(0)};
         }
         DMT_CPU_GPU static constexpr Tuple4<S> s(S s)
         {
-            return {.x = static_cast<S>(s), .y = static_cast<S>(s), .z = static_cast<S>(s)};
+            return {static_cast<S>(s), static_cast<S>(s), static_cast<S>(s)};
         }
 
         using value_type = S;
@@ -263,7 +263,6 @@ namespace dmt {
         S x, y, z, w;
     };
 
-    // clang-format off
     using Tuple2f = Tuple2<float>;
     using Tuple2i = Tuple2<int32_t>;
     using Tuple3f = Tuple3<float>;
@@ -271,26 +270,112 @@ namespace dmt {
     using Tuple4f = Tuple4<float>;
     using Tuple4i = Tuple4<int32_t>;
 
-    struct Normalized { struct normalized { }; };
+    struct Normalized
+    {
+        struct normalized
+        {
+        };
+    };
 
-    struct DMT_CORE_API Vector2i : public Tuple2i { Vector2i() = default; DMT_CPU_GPU Vector2i(Tuple2i t) : Tuple2i(t) {} DMT_CPU_GPU Vector2i(int32_t x, int32_t y) : Tuple2i{x, y} {} };
-    struct DMT_CORE_API Vector2f : public Tuple2f { Vector2f() = default; DMT_CPU_GPU Vector2f(Tuple2f t) : Tuple2f(t) {} DMT_CPU_GPU Vector2f(float x, float y) : Tuple2f{x, y} {} };
-    struct DMT_CORE_API Vector3i : public Tuple3i { Vector3i() = default; DMT_CPU_GPU Vector3i(Tuple3i t) : Tuple3i(t) {} DMT_CPU_GPU Vector3i(int32_t x, int32_t y, int32_t z) : Tuple3i{x, y, z} {} };
-    struct DMT_CORE_API Vector3f : public Tuple3f { Vector3f() = default; DMT_CPU_GPU Vector3f(Tuple3f t) : Tuple3f(t) {} DMT_CPU_GPU Vector3f(float x, float y, float z) : Tuple3f{x, y, z} {} };
-    struct DMT_CORE_API Vector4i : public Tuple4i { Vector4i() = default; DMT_CPU_GPU Vector4i(Tuple4i t) : Tuple4i(t) {} DMT_CPU_GPU Vector4i(int32_t x, int32_t y, int32_t z, int32_t w) : Tuple4i{x, y, z, w} {} };
-    struct DMT_CORE_API Vector4f : public Tuple4f { Vector4f() = default; DMT_CPU_GPU Vector4f(Tuple4f t) : Tuple4f(t) {} DMT_CPU_GPU Vector4f(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {} };
+    struct DMT_CORE_API Vector2i : public Tuple2i
+    {
+        Vector2i() = default;
+        DMT_CPU_GPU Vector2i(Tuple2i t) : Tuple2i(t) {}
+        DMT_CPU_GPU Vector2i(int32_t x, int32_t y) : Tuple2i{x, y} {}
+    };
+    struct DMT_CORE_API Vector2f : public Tuple2f
+    {
+        Vector2f() = default;
+        DMT_CPU_GPU Vector2f(Tuple2f t) : Tuple2f(t) {}
+        DMT_CPU_GPU Vector2f(float x, float y) : Tuple2f{x, y} {}
+    };
+    struct DMT_CORE_API Vector3i : public Tuple3i
+    {
+        Vector3i() = default;
+        DMT_CPU_GPU Vector3i(Tuple3i t) : Tuple3i(t) {}
+        DMT_CPU_GPU Vector3i(int32_t x, int32_t y, int32_t z) : Tuple3i{x, y, z} {}
+    };
+    struct DMT_CORE_API Vector3f : public Tuple3f
+    {
+        Vector3f() = default;
+        DMT_CPU_GPU Vector3f(Tuple3f t) : Tuple3f(t) {}
+        DMT_CPU_GPU Vector3f(float x, float y, float z) : Tuple3f{x, y, z} {}
+    };
+    struct DMT_CORE_API Vector4i : public Tuple4i
+    {
+        Vector4i() = default;
+        DMT_CPU_GPU Vector4i(Tuple4i t) : Tuple4i(t) {}
+        DMT_CPU_GPU Vector4i(int32_t x, int32_t y, int32_t z, int32_t w) : Tuple4i{x, y, z, w} {}
+    };
+    struct DMT_CORE_API Vector4f : public Tuple4f
+    {
+        Vector4f() = default;
+        DMT_CPU_GPU Vector4f(Tuple4f t) : Tuple4f(t) {}
+        DMT_CPU_GPU Vector4f(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {}
+    };
 
-    struct DMT_CORE_API Point2i : public Tuple2i { Point2i() = default; DMT_CPU_GPU Point2i(Tuple2i t) : Tuple2i(t) {} explicit DMT_CPU_GPU operator Vector2i(); DMT_CPU_GPU Point2i(int32_t x, int32_t y) : Tuple2i{x, y} {} };
-    struct DMT_CORE_API Point2f : public Tuple2f { Point2f() = default; DMT_CPU_GPU Point2f(Tuple2f t) : Tuple2f(t) {} explicit DMT_CPU_GPU operator Vector2f(); DMT_CPU_GPU Point2f(float x, float y) : Tuple2f{x, y} {} };
-    struct DMT_CORE_API Point3i : public Tuple3i { Point3i() = default; DMT_CPU_GPU Point3i(Tuple3i t) : Tuple3i(t) {} explicit DMT_CPU_GPU operator Vector3i(); DMT_CPU_GPU Point3i(int32_t x, int32_t y, int32_t z) : Tuple3i{x, y, z} {} };
-    struct DMT_CORE_API Point3f : public Tuple3f { Point3f() = default; DMT_CPU_GPU Point3f(Tuple3f t) : Tuple3f(t) {} explicit DMT_CPU_GPU operator Vector3f(); DMT_CPU_GPU Point3f(float x, float y, float z) : Tuple3f{x, y, z} {} };
-    struct DMT_CORE_API Point4i : public Tuple4i { Point4i() = default; DMT_CPU_GPU Point4i(Tuple4i t) : Tuple4i(t) {} explicit DMT_CPU_GPU operator Vector4i(); DMT_CPU_GPU Point4i(int32_t x, int32_t y, int32_t z, int32_t w) : Tuple4i{x, y, z, w} {} };
-    struct DMT_CORE_API Point4f : public Tuple4f { Point4f() = default; DMT_CPU_GPU Point4f(Tuple4f t) : Tuple4f(t) {} explicit DMT_CPU_GPU operator Vector4f(); DMT_CPU_GPU Point4f(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {} };
+#if defined(__CUDA_ARCH__)
+    __forceinline__ __device__ float3 to_float3(Vector3f v)
+    {
+        float3 res{};
+        res.x = v.x;
+        res.y = v.y;
+        res.z = v.z;
+        return res;
+    }
+#endif
+
+    struct DMT_CORE_API Point2i : public Tuple2i
+    {
+        Point2i() = default;
+        DMT_CPU_GPU          Point2i(Tuple2i t) : Tuple2i(t) {}
+        explicit DMT_CPU_GPU operator Vector2i();
+        DMT_CPU_GPU          Point2i(int32_t x, int32_t y) : Tuple2i{x, y} {}
+    };
+    struct DMT_CORE_API Point2f : public Tuple2f
+    {
+        Point2f() = default;
+        DMT_CPU_GPU          Point2f(Tuple2f t) : Tuple2f(t) {}
+        explicit DMT_CPU_GPU operator Vector2f();
+        DMT_CPU_GPU          Point2f(float x, float y) : Tuple2f{x, y} {}
+    };
+    struct DMT_CORE_API Point3i : public Tuple3i
+    {
+        Point3i() = default;
+        DMT_CPU_GPU          Point3i(Tuple3i t) : Tuple3i(t) {}
+        explicit DMT_CPU_GPU operator Vector3i();
+        DMT_CPU_GPU          Point3i(int32_t x, int32_t y, int32_t z) : Tuple3i{x, y, z} {}
+    };
+    struct DMT_CORE_API Point3f : public Tuple3f
+    {
+        Point3f() = default;
+        DMT_CPU_GPU          Point3f(Tuple3f t) : Tuple3f(t) {}
+        explicit DMT_CPU_GPU operator Vector3f();
+        DMT_CPU_GPU          Point3f(float x, float y, float z) : Tuple3f{x, y, z} {}
+    };
+    struct DMT_CORE_API Point4i : public Tuple4i
+    {
+        Point4i() = default;
+        DMT_CPU_GPU          Point4i(Tuple4i t) : Tuple4i(t) {}
+        explicit DMT_CPU_GPU operator Vector4i();
+        DMT_CPU_GPU          Point4i(int32_t x, int32_t y, int32_t z, int32_t w) : Tuple4i{x, y, z, w} {}
+    };
+    struct DMT_CORE_API Point4f : public Tuple4f
+    {
+        Point4f() = default;
+        DMT_CPU_GPU          Point4f(Tuple4f t) : Tuple4f(t) {}
+        explicit DMT_CPU_GPU operator Vector4f();
+        DMT_CPU_GPU          Point4f(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {}
+    };
 
     // https://eater.net/quaternions
     // https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
-    struct DMT_CORE_API Quaternion : public Tuple4f { Quaternion() = default; DMT_CPU_GPU Quaternion(Tuple4f t) : Tuple4f(t) {} DMT_CPU_GPU Quaternion(float x, float y, float z, float w) : Tuple4f{x, y, z, w } {}};
-    // clang-format on
+    struct DMT_CORE_API Quaternion : public Tuple4f
+    {
+        Quaternion() = default;
+        DMT_CPU_GPU Quaternion(Tuple4f t) : Tuple4f(t) {}
+        DMT_CPU_GPU Quaternion(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {}
+    };
 
     DMT_CORE_API DMT_CPU_GPU Tuple2f normalize(Tuple2f v);
     DMT_CORE_API DMT_CPU_GPU Tuple3f normalize(Tuple3f v);
@@ -1197,7 +1282,6 @@ namespace dmt {
         float    time = 0;
     };
 
-
     struct DMT_CORE_API RayDifferential : public Ray
     {
         RayDifferential() = default;
@@ -1209,6 +1293,13 @@ namespace dmt {
         bool     hasDifferentials = false;
         Point3f  rxOrigin, ryOrigin;
         Vector3f rxDirection, ryDirection;
+    };
+
+    template <typename T>
+    struct ArrayView
+    {
+        T*       data;
+        uint32_t length; // count of elements
     };
 } // namespace dmt
 
@@ -3121,15 +3212,11 @@ namespace dmt {
                 p.z <= b.pMax.z);
     }
 
-    __host__ __device__ Bounds3f makeBounds(Point3f p0, Point3f p1)
-    {
-        return {.pMin = min(p0, p1), .pMax = max(p0, p1)};
-    }
+    __host__ __device__ Bounds3f makeBounds(Point3f p0, Point3f p1) { return {min(p0, p1), max(p0, p1)}; }
 
     __host__ __device__ Bounds3f bbEmpty()
     {
-        return {.pMin = {{fl::infinity(), fl::infinity(), fl::infinity()}},
-                .pMax = {{-fl::infinity(), -fl::infinity(), -fl::infinity()}}};
+        return {{{fl::infinity(), fl::infinity(), fl::infinity()}}, {{-fl::infinity(), -fl::infinity(), -fl::infinity()}}};
     }
 
     __host__ __device__ Bounds3f bbUnion(Bounds3f const& a, Bounds3f const& b)
@@ -3162,11 +3249,10 @@ namespace dmt {
 
     __host__ __device__ Point3f Bounds3f::corner(EBoundsCorner corner) const
     {
-        using enum EBoundsCorner;
         Point3f const ret{{
-            operator[](toUnderlying(corner) & toUnderlying(eRight)).x,
-            operator[]((toUnderlying(corner) & toUnderlying(eForward)) >> 1).y,
-            operator[]((toUnderlying(corner) & toUnderlying(eTop)) >> 2).z,
+            operator[](static_cast<int32_t>(corner) & static_cast<int32_t>(EBoundsCorner::eRight)).x,
+            operator[]((static_cast<int32_t>(corner) & static_cast<int32_t>(EBoundsCorner::eForward)) >> 1).y,
+            operator[]((static_cast<int32_t>(corner) & static_cast<int32_t>(EBoundsCorner::eTop)) >> 2).z,
         }};
         return ret;
     }
@@ -3300,14 +3386,11 @@ namespace dmt {
     }
 
     // Bounds2f
-    __host__ __device__ Bounds2f makeBounds(Point2f p0, Point2f p1)
-    {
-        return {.pMin = min(p0, p1), .pMax = max(p0, p1)};
-    }
+    __host__ __device__ Bounds2f makeBounds(Point2f p0, Point2f p1) { return {min(p0, p1), max(p0, p1)}; }
 
     __host__ __device__ Bounds2f bbEmpty2()
     {
-        return {.pMin = {{fl::infinity(), fl::infinity()}}, .pMax = {{-fl::infinity(), -fl::infinity()}}};
+        return {{{fl::infinity(), fl::infinity()}}, {{-fl::infinity(), -fl::infinity()}}};
     }
 
     __host__ __device__ bool inside(Point2f p, Bounds2f const& b)
@@ -3345,10 +3428,9 @@ namespace dmt {
 
     __host__ __device__ Point2f Bounds2f::corner(EBoundsCorner2 corner) const
     {
-        using enum EBoundsCorner2;
         Point2f const ret{{
-            operator[](toUnderlying(corner) & toUnderlying(eRight)).x,
-            operator[]((toUnderlying(corner) & toUnderlying(eTop)) >> 1).y,
+            operator[](static_cast<int32_t>(corner) & static_cast<int32_t>(EBoundsCorner2::eRight)).x,
+            operator[]((static_cast<int32_t>(corner) & static_cast<int32_t>(EBoundsCorner2::eTop)) >> 1).y,
         }};
         return ret;
     }
@@ -3443,7 +3525,7 @@ namespace dmt {
                 bool converge = true;
                 for (int32_t numel = 0; numel <= idx; ++numel)
                 {
-                    Index2 i{.row = 3 - idx + numel, .col = numel};
+                    Index2 i{3 - idx + numel, numel};
                     assert(i.row > i.col);
                     float elem1 = reinterpret_cast<float*>(&R)[i.row + i.col * 4];
                     if (glm::epsilonEqual(elem1, 0.f, 1e-6f))
@@ -3735,11 +3817,11 @@ namespace dmt {
     __host__ __device__ Point3f Point3fi::midpoint() const
     {
         return {static_cast<Tuple3<float>>(
-            (*std::bit_cast<Vector3f const*>(&xLow) + *std::bit_cast<Vector3f const*>(&xHigh)) * 0.5f)};
+            (*reinterpret_cast<Vector3f const*>(&xLow) + *reinterpret_cast<Vector3f const*>(&xHigh)) * 0.5f)};
     }
     __host__ __device__ Vector3f Point3fi::width() const
     {
-        return *std::bit_cast<Point3f const*>(&xHigh) - *std::bit_cast<Point3f const*>(&xLow);
+        return *reinterpret_cast<Point3f const*>(&xHigh) - *reinterpret_cast<Point3f const*>(&xLow);
     }
     __host__ __device__ Point3fi operator+(Point3fi const& a, Point3fi const& b)
     {

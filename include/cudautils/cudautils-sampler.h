@@ -9,8 +9,8 @@ namespace dmt {
     struct GpuSamplerHandle
     {
         gpu::FilterSamplerGPU sampler;
-        float*           dConditionalCdf = nullptr;
-        float*           dMarginalCdf    = nullptr;
+        float*                dConditionalCdf = nullptr;
+        float*                dMarginalCdf    = nullptr;
 
         //static inline void freeGpuSamplerHandle(CUDADriverLibrary const* cudaApi)
         //{

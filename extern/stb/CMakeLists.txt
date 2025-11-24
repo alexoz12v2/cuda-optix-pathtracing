@@ -11,4 +11,3 @@ target_sources(
 
 add_library(stb::stb ALIAS stb)
 target_include_directories(stb INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
-install(TARGETS stb FILE_SET stb_header)

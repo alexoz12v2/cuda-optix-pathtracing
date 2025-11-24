@@ -1,4 +1,9 @@
 add_subdirectory(platform)
-add_subdirectory(cuda-wrappers)
+
+# We are removing manual CUDA Fetching. We expect the user to have CUDA 11.8 Toolkit installed
+# add_subdirectory(cuda-wrappers)
+
 add_subdirectory(core)
-add_subdirectory(application)
+
+# we are not building a GUI Application anymore
+# add_subdirectory(application)

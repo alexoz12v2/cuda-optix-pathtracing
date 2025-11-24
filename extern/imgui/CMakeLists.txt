@@ -25,11 +25,9 @@ target_sources(
 target_include_directories(
   imgui
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/backends
-  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backends>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/backends>)
+  INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 
 target_compile_definitions(imgui PUBLIC "ImDrawIdx=unsigned int")
 add_library(imgui::imgui ALIAS imgui)
-install(TARGETS imgui FILE_SET imgui_headers)

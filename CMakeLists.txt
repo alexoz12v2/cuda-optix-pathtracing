@@ -28,6 +28,7 @@ endif ()
 # ######################################################################################################################
 # Project wide Properties and C++ Global Options
 # ######################################################################################################################
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # set the project version (used for versioning and CPack)
 set(CMAKE_PROJECT_VERSION_MAJOR 1)
@@ -41,35 +42,37 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED TRUE)
 set(CMAKE_CXX_EXTENSIONS FALSE)
+# minimum CUDA Compute Capability supported: Pascal -> 51
+set(CMAKE_CUDA_ARCHITECTURES 50)
 
-macro (dmt_set_option var default type docstring)
+macro(dmt_set_option var default type docstring)
   if (NOT DEFINED ${var})
     set(${var} ${default})
   endif ()
   set(${var}
-      ${${var}}
-      CACHE ${type} ${docstring} FORCE)
-endmacro ()
+    ${${var}}
+    CACHE ${type} ${docstring} FORCE)
+endmacro()
 
 # Build Type
 dmt_set_option(CMAKE_BUILD_TYPE Debug STRING "Choose the type of build (eg Debug, Release)")
 
 # docs generation
-dmt_set_option(DMT_GENERATE_DOCS ON BOOL "Generate Docs")
+dmt_set_option(DMT_GENERATE_DOCS OFF BOOL "Generate Docs")
 
 # ######################################################################################################################
 # Other Global CMake Configuration
 # ######################################################################################################################
 
+set(CMAKE_CUDA_FLAGS_INIT "" CACHE STRING "nothing" FORCE)
+set(CMAKE_CUDA_HOST_FLAGS_INIT "" CACHE STRING "nothing" FORCE)
 project(
   DumbTracer
   VERSION 1.0.0
   DESCRIPTION "CUDA Path Tracing"
-  LANGUAGES CXX # C CUDA
 )
 
 enable_language(C)
-# enable_language(CUDA)
 
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -81,14 +84,24 @@ include(cmake/Dependencies.cmake)
 include(cmake/SetupDoxygen.cmake)
 
 dmt_define_environment()
+dmt_setup_cuda_toolkit_11_8()
+
+# Enable CUDA After including toolkit
+if (WIN32)
+  message(STATUS "Printing Include environemnt variable")
+  message(STATUS "$ENV{INCLUDE}")
+endif ()
+enable_language(CUDA)
+
+# Dependencies after CUDA setup
 dmt_setup_dependencies()
 
 # grab python executable (msut be after `dmt_define_environment`). sets variable PYTHON_EXEC
 dmt_find_python_executable()
 block()
-execute_process(COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/test_python.py COMMAND_ECHO STDOUT
-                OUTPUT_VARIABLE test_python_STDOUT)
-message(STATUS "${test_python_STDOUT}")
+  execute_process(COMMAND ${PYTHON_EXEC} ${PROJECT_SOURCE_DIR}/scripts/test_python.py COMMAND_ECHO STDOUT
+    OUTPUT_VARIABLE test_python_STDOUT)
+  message(STATUS "${test_python_STDOUT}")
 endblock()
 
 # possible TODO: make this work
@@ -141,7 +154,7 @@ add_subdirectory(src)
 add_subdirectory(examples)
 add_subdirectory(cli)
 
-dmt_set_option(DMT_ENABLE_TESTS ON BOOL "ON To turn on tests, OFF to disable them")
+dmt_set_option(DMT_ENABLE_TESTS OFF BOOL "ON To turn on tests, OFF to disable them")
 if (DMT_ENABLE_TESTS)
   enable_testing()
   add_subdirectory(test)

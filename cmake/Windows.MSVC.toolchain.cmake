@@ -70,7 +70,7 @@ endif ()
 
 option(TOOLCHAIN_UPDATE_PROGRAM_PATH "Whether the toolchain should update CMAKE_PROGRAM_PATH." ON)
 option(TOOLCHAIN_ADD_VS_NINJA_PATH
-       "Whether the toolchain should add the path to the VS Ninja to the CMAKE_SYSTEM_PROGRAM_PATH." ON)
+  "Whether the toolchain should add the path to the VS Ninja to the CMAKE_SYSTEM_PROGRAM_PATH." ON)
 
 set(UNUSED ${CMAKE_TOOLCHAIN_FILE}) # Note: only to prevent cmake unused variable warninig
 list(
@@ -155,24 +155,42 @@ set(VS_MSVC_PATH "${VS_INSTALLATION_PATH}/VC/Tools/MSVC")
 # Use 'VS_PLATFORM_TOOLSET_VERSION' to resolve 'CMAKE_VS_PLATFORM_TOOLSET_VERSION'
 #
 if (NOT VS_PLATFORM_TOOLSET_VERSION)
-  if (VS_TOOLSET_VERSION)
-    message(
-      WARNING
-        "Old versions of WindowsToolchain incorrectly used 'VS_TOOLSET_VERSION' to specify the VS toolset version. This functionality is being deprecated - please use 'VS_PLATFORM_TOOLSET_VERSION' instead."
-    )
-    set(VS_PLATFORM_TOOLSET_VERSION ${VS_TOOLSET_VERSION})
-  else ()
-    file(
-      GLOB VS_PLATFORM_TOOLSET_VERSIONS
-      RELATIVE ${VS_MSVC_PATH}
-      ${VS_MSVC_PATH}/*)
-    list(
-      SORT VS_PLATFORM_TOOLSET_VERSIONS
-      COMPARE NATURAL
-      ORDER DESCENDING)
-    list(POP_FRONT VS_PLATFORM_TOOLSET_VERSIONS VS_PLATFORM_TOOLSET_VERSION)
-    unset(VS_PLATFORM_TOOLSET_VERSIONS)
-  endif ()
+  file(
+    GLOB VS_PLATFORM_TOOLSET_VERSIONS
+    RELATIVE ${VS_MSVC_PATH}
+    ${VS_MSVC_PATH}/*)
+  list(
+    SORT VS_PLATFORM_TOOLSET_VERSIONS
+    COMPARE NATURAL
+    ORDER DESCENDING)
+
+  # Initialize chosen version
+  set(VS_PLATFORM_TOOLSET_VERSION "")
+  list(POP_FRONT VS_PLATFORM_TOOLSET_VERSIONS VS_PLATFORM_TOOLSET_VERSION)
+
+  ### # Find highest version below 14.40 (if CUDA 11.8), above if CUDA 12.6
+  ### message(STATUS "Found MSVC Versions: ${VS_PLATFORM_TOOLSET_VERSIONS}")
+  ### foreach (ver IN LISTS VS_PLATFORM_TOOLSET_VERSIONS)
+  ###   string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" _ ${ver})
+  ###   set(MAJOR "${CMAKE_MATCH_1}")
+  ###   set(MINOR "${CMAKE_MATCH_2}")
+  ###   # Only accept versions with MAJOR.MINOR < 14.40
+  ###   math(EXPR TMP_MAJOR "${MAJOR}*100 + ${MINOR}")
+  ###   if (TMP_MAJOR LESS 1440)
+  ###     set(VS_PLATFORM_TOOLSET_VERSION ${ver})
+  ###     break()
+  ###   endif ()
+  ### endforeach ()
+  ###
+  ###  # Fail if not found
+  ###  if (NOT VS_PLATFORM_TOOLSET_VERSION)
+  ###    message(FATAL_ERROR
+  ###      "Unable to find a Visual Studio installation with a MSVC compiler whose version is under 14.4.\n"
+  ###      "Recommended component from 'Visual Studio Installer': MSVC v143 - VS 2022 C++ x64/x86 build tools (v14-36-17.6)"
+  ###    )
+  ###  endif ()
+
+  message(STATUS "Selected MSVC toolset version: ${VS_PLATFORM_TOOLSET_VERSION}")
 endif ()
 
 set(CMAKE_VS_PLATFORM_TOOLSET_VERSION ${VS_PLATFORM_TOOLSET_VERSION})
@@ -186,23 +204,23 @@ set(VS_TOOLSET_PATH "${VS_INSTALLATION_PATH}/VC/Tools/MSVC/${CMAKE_VS_PLATFORM_T
 if (CMAKE_SYSTEM_PROCESSOR STREQUAL AMD64)
   set(CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE x64)
 elseif (
-  (CMAKE_SYSTEM_PROCESSOR STREQUAL ARM)
+(CMAKE_SYSTEM_PROCESSOR STREQUAL ARM)
   OR (CMAKE_SYSTEM_PROCESSOR STREQUAL ARM64)
   OR (CMAKE_SYSTEM_PROCESSOR STREQUAL X86))
   set(CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE ${CMAKE_SYSTEM_PROCESSOR})
 elseif (CMAKE_SYSTEM_PROCESSOR STREQUAL x64)
   message(
     WARNING
-      "CMAKE_SYSTEM_PROCESSOR should be 'AMD64', not 'x64'. WindowsToolchain will stop recognizing 'x64' in a future release."
+    "CMAKE_SYSTEM_PROCESSOR should be 'AMD64', not 'x64'. WindowsToolchain will stop recognizing 'x64' in a future release."
   )
   set(CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE x64)
 elseif (
-  (CMAKE_SYSTEM_PROCESSOR STREQUAL arm)
+(CMAKE_SYSTEM_PROCESSOR STREQUAL arm)
   OR (CMAKE_SYSTEM_PROCESSOR STREQUAL arm64)
   OR (CMAKE_SYSTEM_PROCESSOR STREQUAL x86))
   message(
     WARNING
-      "CMAKE_SYSTEM_PROCESSOR (${CMAKE_SYSTEM_PROCESSOR}) should be upper-case. WindowsToolchain will stop recognizing non-upper-case forms in a future release."
+    "CMAKE_SYSTEM_PROCESSOR (${CMAKE_SYSTEM_PROCESSOR}) should be upper-case. WindowsToolchain will stop recognizing non-upper-case forms in a future release."
   )
   set(CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE ${CMAKE_SYSTEM_PROCESSOR})
 else ()
@@ -210,10 +228,10 @@ else ()
 endif ()
 
 set(CMAKE_CXX_COMPILER
-    "${VS_TOOLSET_PATH}/bin/Host${CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE}/${CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE}/cl.exe"
+  "${VS_TOOLSET_PATH}/bin/Host${CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE}/${CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE}/cl.exe"
 )
 set(CMAKE_C_COMPILER
-    "${VS_TOOLSET_PATH}/bin/Host${CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE}/${CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE}/cl.exe"
+  "${VS_TOOLSET_PATH}/bin/Host${CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE}/${CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE}/cl.exe"
 )
 
 if (CMAKE_SYSTEM_PROCESSOR STREQUAL ARM)
@@ -221,7 +239,7 @@ if (CMAKE_SYSTEM_PROCESSOR STREQUAL ARM)
 elseif (CMAKE_SYSTEM_PROCESSOR STREQUAL arm)
   message(
     WARNING
-      "CMAKE_SYSTEM_PROCESSOR (${CMAKE_SYSTEM_PROCESSOR}) should be upper-case. WindowsToolchain will stop recognizing non-upper-case forms in a future release."
+    "CMAKE_SYSTEM_PROCESSOR (${CMAKE_SYSTEM_PROCESSOR}) should be upper-case. WindowsToolchain will stop recognizing non-upper-case forms in a future release."
   )
   set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} /EHsc")
 endif ()
@@ -269,7 +287,7 @@ link_directories("${VS_TOOLSET_PATH}/lib/x86/store/references")
 if (VS_EXPERIMENTAL_MODULE)
   set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} /experimental:module")
   set(CMAKE_CXX_FLAGS_INIT
-      "${CMAKE_CXX_FLAGS_INIT} /stdIfcDir \"${VS_TOOLSET_PATH}/ifc/${CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE}\"")
+    "${CMAKE_CXX_FLAGS_INIT} /stdIfcDir \"${VS_TOOLSET_PATH}/ifc/${CMAKE_VS_PLATFORM_TOOLSET_ARCHITECTURE}\"")
 endif ()
 
 # Windows Kits
@@ -300,7 +318,7 @@ endif ()
 # installed Ninja would be preferred.
 #
 if ((CMAKE_GENERATOR MATCHES "^Ninja")
-    AND (EXISTS "${VS_INSTALLATION_PATH}/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja")
-    AND (TOOLCHAIN_ADD_VS_NINJA_PATH))
+  AND (EXISTS "${VS_INSTALLATION_PATH}/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja")
+  AND (TOOLCHAIN_ADD_VS_NINJA_PATH))
   list(APPEND CMAKE_SYSTEM_PROGRAM_PATH "${VS_INSTALLATION_PATH}/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja")
 endif ()

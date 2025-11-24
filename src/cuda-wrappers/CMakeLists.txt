@@ -178,10 +178,14 @@ target_sources(
 add_dependencies(dmt-cuda-wrappers copy_cuda_dlls copy_nvrtc_dlls copy_nvidia_driver dmt-copy-cuda-dlls
                  dmt-copy-cuda-headers)
 
-string(STRIP "$ENV{CUDA_HOME}" cuda_toolkit_headers)
 if (NOT DEFINED ENV{CUDA_HOME})
-  message(FATAL_ERROR "define CUDA_HOME")
+  if (NOT DEFINED ENV{CUDA_PATH})
+    message(FATAL_ERROR "define CUDA_HOME")
+  endif()
+
+  set(ENV{CUDA_HOME} $ENV{CUDA_PATH})
 endif ()
+string(STRIP "$ENV{CUDA_HOME}" cuda_toolkit_headers)
 set(cuda_toolkit_headers "${cuda_toolkit_headers}/include")
 
 target_include_directories(

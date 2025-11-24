@@ -1,7 +1,8 @@
 include(FetchContent)
 include(FindPackageHandleStandardArgs)
 
-macro (dmt_setup_dependencies)
+# To Be called after setup CUDA
+macro(dmt_setup_dependencies)
   # TODO BETTER: fix dependencies linknig on linux if you leave the CXX flags here, I think you can remove them from the
   # target specific options
   if (DMT_OS_LINUX)
@@ -27,7 +28,6 @@ macro (dmt_setup_dependencies)
 
   # link: https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
   find_package(OpenGL REQUIRED)
-  find_package(CUDAToolkit REQUIRED)
   find_package(OptiX80 REQUIRED)
 
   find_package(FBXSdk REQUIRED)
@@ -150,4 +150,47 @@ macro (dmt_setup_dependencies)
   if (NOT TARGET gx)
     add_subdirectory(${PROJECT_SOURCE_DIR}/extern/gx)
   endif ()
-endmacro ()
+endmacro()
+
+
+# Reference: https://cmake.org/cmake/help/latest/module/FindCUDAToolkit.html
+function(dmt_setup_cuda_toolkit_11_8)
+  # we want to control search completely, hence don't use stuff from the system
+  unset(ENV{CUDA_PATH})
+  unset(CACHE{CMAKE_CUDA_COMPILER})
+  unset(CUDACXX)
+  unset(CACHE{CUDAToolkit_BIN_DIR})
+  unset(CACHE{CUDAToolkit_NVCC_EXECUTABLE})
+  set(CUDA_VERSION 12.6)
+  if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    set(CUDAToolkit_ROOT "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v${CUDA_VERSION}" CACHE PATH "CUDA Toolkit" FORCE)
+    set(CUDAToolkit_BIN_DIR "${CUDAToolkit_ROOT}\\bin" CACHE PATH "CUDA Binary Directory" FORCE)
+    set(CUDAToolkit_NVCC_EXECUTABLE "${CUDAToolkit_BIN_DIR}\\nvcc.exe" CACHE PATH "CUDA nvcc Compiler Driver" FORCE)
+  elseif (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    set(CUDAToolkit_ROOT "/usr/local/cuda-${CUDA_VERSION}" CACHE PATH "CUDA Toolkit" FORCE)
+    set(CUDAToolkit_BIN_DIR "${CUDAToolkit_ROOT}/bin" CACHE PATH "CUDA Binary Directory" FORCE)
+    set(CUDAToolkit_NVCC_EXECUTABLE "${CUDAToolkit_BIN_DIR}/nvcc" CACHE PATH "CUDA nvcc Compiler Driver" FORCE)
+  else ()
+    message(FATAL_ERROR "Unsupported OS")
+  endif ()
+  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}" CACHE FILEPATH "CUDA nvcc Compiler Driver" FORCE)
+  unset(CACHE{CMAKE_CUDA_COMPILER})
+  find_program(CMAKE_CUDA_COMPILER
+    nvcc
+    PATHS "${CUDAToolkit_BIN_DIR}"
+    NO_DEFAULT_PATH
+    REQUIRED
+  )
+  #' CUDAToolkit_ROOT)
+  find_package(CUDAToolkit ${CUDA_VERSION} REQUIRED EXACT)
+  if (NOT TARGET CUDA::cudart)
+    message(FATAL_ERROR "Couldn't find CUDA Runtime library target")
+  endif ()
+  message(STATUS "Setting CMAKE_CUDA_HOST_COMPILER: ${CMAKE_CUDA_HOST_COMPILER}")
+  set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
+  # somehow nvcc 11.8 complains about cl.exe, so skip that
+  if (CMAKE_CXX_COMPILER MATCHES "cl.exe$")
+    string(APPEND CMAKE_CUDA_FLAGS " -allow-unsupported-compiler")
+  endif ()
+  # needed MSVC v143 - VS 2022 C++ x64/x86 build tools (v14-36-17.6)
+endfunction()

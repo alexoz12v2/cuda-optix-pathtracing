@@ -4,12 +4,22 @@
 # ######################################################################################################################
 include_guard()
 
-macro (dmt_define_environment)
+
+function(dmt_disable_cuda_language_from_target target)
+  get_target_property(languages ${target} ENABLED_LANGUAGES)
+  message(STATUS "${target} ENABLED_LANGUAGES (before): ${languages}")
+  list(REMOVE_ITEM languages CUDA)
+  message(STATUS "${target} ENABLED_LANGUAGES (after):  ${languages}")
+  set_target_properties(${target} PROPERTIES ENABLED_LANGUAGES ${languages})
+endfunction()
+
+
+macro(dmt_define_environment)
   # -- detect the CPU architecture, and if different from x86_64, bail out -- while there are some CMake variables like
   # CMAKE_SYSTEM_PROCESSOR and CMAKE_HOST_SYSTEM_PROCESSOR, they are inconsistent (see docs). Therefore, use a small C
   # file to detect architecture and report it in the compilation error message, which is then extracted and processed
   set(archdetect_c_code
-      "
+    "
   #if defined(__aarch64__) || defined(__arm64) || defined(__arm64__) || defined(_M_ARM64)
       #error cmake_ARCH aarch64
   #elif defined(__arm__) || defined(__TARGET_ARCH_ARM)
@@ -191,10 +201,11 @@ macro (dmt_define_environment)
   elseif (CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     set(DMT_BUILD_TYPE "DMT_RELEASE")
   endif ()
-endmacro ()
+endmacro()
+
 
 # Unused for now
-function (dmt_get_msvc_flags out_flags)
+function(dmt_get_msvc_flags out_flags)
   set(out_flags "")
 
   # Warning flags from dmt_set_target_warnings
@@ -242,10 +253,10 @@ function (dmt_get_msvc_flags out_flags)
   endif ()
 
   return(PROPAGATE out_flags)
-endfunction ()
+endfunction()
 
 # if you need to install libraries, it's best to provide in the repo a virtual environment
-function (dmt_find_python_executable)
+function(dmt_find_python_executable)
   if (DMT_OS_WINDOWS)
     execute_process(
       COMMAND py -3.11 -c "import sys; print(sys.executable)"
@@ -256,7 +267,7 @@ function (dmt_find_python_executable)
     if (NOT PYTHON_RESULT EQUAL 0)
       message(
         FATAL_ERROR
-          "Python 3.11+ not found. Please install it with \"winget install python.python.3.11\" and ensure it's accessible via 'py -3.11'."
+        "Python 3.11+ not found. Please install it with \"winget install python.python.3.11\" and ensure it's accessible via 'py -3.11'."
       )
     endif ()
   else ()
@@ -280,9 +291,10 @@ function (dmt_find_python_executable)
     endif ()
   endif ()
   return(PROPAGATE PYTHON_EXEC)
-endfunction ()
+endfunction()
 
-function (dmt_set_linux_specific_compile_options target properties_visibility)
+
+function(dmt_set_linux_specific_compile_options target properties_visibility)
   if (DMT_OS_LINUX)
     # comment to debug linking issues (or, if you want to keep this and UBSAN if enabled, ensure to define
     # LD_LIBRARY_PATH)
@@ -291,19 +303,17 @@ function (dmt_set_linux_specific_compile_options target properties_visibility)
       if (DMT_ENABLE_SANITIZERS)
         set(UBSAN_LIB_DIR "/usr/lib/llvm-20/lib/clang/20/lib/linux")
 
-        target_compile_options(${target} PRIVATE -fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
+        target_compile_options(${target} PRIVATE
+          $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize-recover=all>
+          $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fsanitize=undefined -Xcompiler=-fno-omit-frame-pointer -Xcompiler=-fno-sanitize-recover=all>
+        )
 
-        target_link_options(
-          ${target}
-          PRIVATE
-          -fsanitize=undefined
-          -shared-libsan
-          -Wl,--no-undefined
-          -Wl,-rpath,${UBSAN_LIB_DIR} # embed runtime path into .so
-          -Wl,-rpath-link,${UBSAN_LIB_DIR} # help linker find UBSan .so at link time
+        target_link_options(${target} PRIVATE
+          $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=undefined -shared-libsan -Wl,--no-undefined -Wl,-rpath,${UBSAN_LIB_DIR} -Wl,-rpath-link,${UBSAN_LIB_DIR}>
+          $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fsanitize=undefined -Xcompiler="-shared-libsan -Wl,--no-undefined -Wl,-rpath,${UBSAN_LIB_DIR} -Wl,-rpath-link,${UBSAN_LIB_DIR}">
         )
       else ()
-        target_link_options(${target} PRIVATE -Wl,--no-undefined)
+        target_link_options(${target} PRIVATE $<$<LINK_LANGUAGE:CXX>:-Wl,--no-undefined>)
       endif ()
     endif ()
 
@@ -315,48 +325,54 @@ function (dmt_set_linux_specific_compile_options target properties_visibility)
       # faster. It doesn't follow our directories though set_target_properties(${target} PROPERTIES CXX_NO_DEPENDENCIES
       # TRUE)
 
-      target_compile_options(
-        ${target} ${properties_visibility}
-        # -stdlib=libc++
-        -nostdlib++ -nostdinc++ -isystem /usr/lib/llvm-20/include/c++/v1)
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>-nostdlib++ -nostdinc++ -isystem /usr/lib/llvm-20/include/c++/v1>
+        $<$<COMPILE_LANGUAGE:CUDA>-Xcompiler=-nostdlib++ -Xcompiler=-nostdinc++ -Xcompiler=-isystem -Xcompiler=/usr/lib/llvm-20/include/c++/v1>
+      )
 
       # target_compile_definitions(${target} ${properties_visibility} _LIBCPP_DISABLE_AVAILABILITY)
-      target_link_libraries(${target} ${properties_visibility} c++ c++abi)
+      target_link_libraries(${target} ${properties_visibility} $<$<LINK_LANGUAGE:CXX>:c++ c++abi>)
     endif ()
   endif ()
-endfunction ()
+endfunction()
 
-function (dmt_set_cpu_architecture_features target properties_visibility)
+
+function(dmt_set_cpu_architecture_features target properties_visibility)
   if (DEFINED DMT_ARCH_X86_64)
     if (DMT_COMPILER_CLANG OR DMT_COMPILER_GCC)
       # $<$<COMPILE_LANGUAGE:CXX>: ?
-      target_compile_options(${target} ${properties_visibility} -mavx -msse3 -mfma -mavx2)
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>:-mavx -msse3 -mfma -mavx2>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mavx -Xcompiler-msse3 -Xcompiler-mfma -Xcompiler-mavx2>
+      )
     elseif (DMT_COMPILER_MSVC)
-      target_compile_options(${target} ${properties_visibility} /arch:AVX2 /arch:AVX /arch:SSE4.2)
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2 /arch:AVX /arch:SSE4.2>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/arch:AVX2 -Xcompiler=/arch:AVX -Xcompiler=/arch:SSE4.2>
+      )
     endif ()
   else ()
     message(FATAL_ERROR "HELLO")
   endif ()
-endfunction ()
+endfunction()
 
-function (dmt_set_target_warnings target properties_visibility)
+
+function(dmt_set_target_warnings target properties_visibility)
   option(DMT_WARNINGS_AS_ERRORS "Treat Compiler Warnings as errors" OFF)
   if (DMT_COMPILER_MSVC)
     if (DMT_WARNINGS_AS_ERRORS)
       target_compile_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:/WX>)
     endif ()
-    target_compile_options(
-      ${target}
-      ${properties_visibility}
+    target_compile_options(${target} ${properties_visibility}
       $<$<COMPILE_LANGUAGE:CXX>:
       /w14242 # 'identifier': conversion from 'type1' to 'type1', possible loss of data
       /w14254 # 'operator': conversion from 'type1:field_bits' to 'type2:field_bits', possible loss of data
       /w14263 # 'function': member function does not override any base class virtual member function
       /w14265 # 'classname': class has virtual functions, but destructor is not virtual instances of this class may not
-              # be destructed correctly
+      # be destructed correctly
       /w14287 # 'operator': unsigned/negative constant mismatch
       /we4289 # nonstandard extension used: 'variable': loop control variable declared in the for-loop is used outside
-              # the for-loop scope
+      # the for-loop scope
       /w14296 # 'operator': expression is always 'boolean_value'
       /w14311 # 'variable': pointer truncation from 'type1' to 'type2'
       /w14545 # expression before comma evaluates to a function which is missing an argument list
@@ -393,7 +409,7 @@ function (dmt_set_target_warnings target properties_visibility)
       -Wextra # reasonable and standard
       -Wshadow # warn the user if a variable declaration shadows one from a parent context
       -Wnon-virtual-dtor # warn the user if a class with virtual functions has a non-virtual destructor. This helps
-                         # catch hard to track down memory errors
+      # catch hard to track down memory errors
       -Wcast-align # warn for potential performance problem casts
       -Wunused # warn on anything being unused
       -Woverloaded-virtual # warn if you overload (not override) a virtual function
@@ -402,7 +418,7 @@ function (dmt_set_target_warnings target properties_visibility)
       -Wdouble-promotion # warn if float is implicit promoted to double
       -Wformat=2 # warn on security issues around functions that format output (ie printf)
       -Wimplicit-fallthrough # warn when a missing break causes control flow to continue at the next case in a switch
-                             # statement
+      # statement
       -Wsuggest-override # warn when 'override' could be used on a member function overriding a virtual function
       -Wnull-dereference # warn if a null dereference is detected
       -Wold-style-cast # warn for c-style casts
@@ -423,15 +439,15 @@ function (dmt_set_target_warnings target properties_visibility)
       # -Wuseless-cast # warn if you perform a cast to the same type (disabled because it is not portable as some type
       # aliases might vary between platforms)
       $<$<VERSION_GREATER_EQUAL:${CMAKE_CXX_COMPILER_VERSION},8.1>:-Wduplicated-branches> # warn if if / else branches
-                                                                                          # have duplicated code
+      # have duplicated code
       >)
   endif ()
 
   if (DMT_COMPILER_CLANG OR DMT_COMPILER_CLANG_CL)
     target_compile_options(
       ${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>: -Wno-unknown-warning-option> # do not warn on
-                                                                                                 # GCC-specific warning
-                                                                                                 # diagnostic pragmas
+      # GCC-specific warning
+      # diagnostic pragmas
     )
   endif ()
 
@@ -441,24 +457,25 @@ function (dmt_set_target_warnings target properties_visibility)
   # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON) # default = on for shared, off for static
   set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Shared)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
+  # the commented ones are done by default
   target_compile_options(
     ${target}
     ${properties_visibility}
     $<$<COMPILE_LANGUAGE:CUDA>:
-    -dlink
-    --cudart
-    shared
-    --cudadevrt
-    static
+    # -dlink
+    # --cudart
+    # shared
+    # --cudadevrt
+    # static
     --expt-relaxed-constexpr # constexpr functions inside device code
     --extended-lambda # full C++20 lambda syntax inside device code
-    -dc
+    # -dc
     -use_fast_math
     # --relocatable-device-code true set by cuda separable compilation
     >)
-endfunction ()
+endfunction()
 
-function (dmt_set_target_optimization target properties_visibility)
+function(dmt_set_target_optimization target properties_visibility)
   if (NOT properties_visibility MATCHES "INTERFACE")
     # https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/linker-tools-warning-lnk4098?view=msvc-170
     if (DEFINED DMT_OS_WINDOWS AND DEFINED DMT_COMPILER_MSVC)
@@ -466,13 +483,13 @@ function (dmt_set_target_optimization target properties_visibility)
         # Debug Multithreaded DLL (/MDd)
         message(STATUS "(${target}) debug compilation detected on Windows MSVC. Linking to /MDd")
         target_link_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib
-                            /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrt.lib>)
+          /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrt.lib>)
         target_link_libraries(${target} ${properties_visibility} msvcrtd.lib) # Explicitly link to msvcrtd.lib
       else ()
         # Release Multithreaded DLL (/MD)
         message(STATUS "(${target}) release compilation detected on Windows MSVC. Linking to /MD")
         target_link_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib
-                            /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib>)
+          /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib>)
         target_link_libraries(${target} ${properties_visibility} msvcrt.lib) # Explicitly link to msvcrt.lib
       endif ()
     endif ()
@@ -497,7 +514,7 @@ function (dmt_set_target_optimization target properties_visibility)
         -g
         -O0>)
       target_link_options(${target} PUBLIC
-                          $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
+        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
     elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
       target_compile_options(
         ${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>: $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2>
@@ -521,53 +538,21 @@ function (dmt_set_target_optimization target properties_visibility)
         $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-Os> >)
     endif ()
   endif ()
-endfunction ()
+endfunction()
 
-function (dmt_debug_print_target_props target name)
-  get_target_property(dirs ${target} CXX_MODULE_DIRS)
-  get_target_property(sset ${target} CXX_MODULE_SET)
-  if (NOT name STREQUAL "")
-    get_target_property(sset_name ${target} "CXX_MODULE_SET_${name}")
-    get_target_property(dirs_name ${target} "CXX_MODULE_DIRS_${name}")
-  endif ()
-  get_target_property(ssets ${target} CXX_MODULE_SETS)
-  get_target_property(sstd ${target} CXX_MODULE_STD)
-  get_target_property(scan ${target} CXX_SCAN_FOR_MODULES)
-  message(STATUS "[${target}] CXX_MODULE_DIRS: ${dirs}")
-  message(STATUS "[${target}] CXX_MODULE_SET: ${sset}")
-  if (NOT name STREQUAL "")
-    message(STATUS "[${target}] CXX_MODULE_SET_${name}: ${sset_name}")
-    message(STATUS "[${target}] CXX_MODULE_DIRS_${name}: ${dirs_name}")
-  endif ()
-  message(STATUS "[${target}] CXX_MODULE_SETS: ${ssets}")
-  message(STATUS "[${target}] CXX_MODULE_STD: ${sstd}")
-  message(STATUS "[${target}] CXX_SCAN_FOR_MODULES: ${scan}")
-endfunction ()
-
-function (dmt_debug_print_exec_target_props target)
-  get_target_property(icmcd ${target} IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS)
-  get_target_property(icmcf ${target} IMPORTED_CXX_MODULES_COMPILE_FEATURES)
-  get_target_property(icmco ${target} IMPORTED_CXX_MODULES_COMPILE_OPTIONS)
-  get_target_property(icmid ${target} IMPORTED_CXX_MODULES_INCLUDE_DIRECTORIES)
-  get_target_property(icmll ${target} IMPORTED_CXX_MODULES_LINK_LIBRARIES)
-  message(STATUS "[${target}] IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS: ${icmcd}")
-  message(STATUS "[${target}] IMPORTED_CXX_MODULES_COMPILE_FEATURES: ${icmcf}")
-  message(STATUS "[${target}] IMPORTED_CXX_MODULES_COMPILE_OPTIONS: ${icmco}")
-  message(STATUS "[${target}] IMPORTED_CXX_MODULES_INCLUDE_DIRECTORIES: ${icmcd}")
-  message(STATUS "[${target}] IMPORTED_CXX_MODULES_LINK_LIBRARIES: ${icmll}")
-endfunction ()
 
 # helper function to tweak visibility of public symbols ensure public symbols are hidden by default (exported ones are
 # explicitly marked)
-function (dmt_set_public_symbols_hidden target)
+function(dmt_set_public_symbols_hidden target)
   set_target_properties(${target} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
   message(WARNING "Setting _GLIBC_USE_CXX_ABI=1, even though by default we use libc++ (llvm), and not libstdc++ (gnu)")
   if (DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
     target_compile_definitions(${target} PRIVATE _GLIBC_USE_CXX_ABI=1)
   endif ()
-endfunction ()
+endfunction()
 
-function (dmt_add_compile_definitions target properties_visibility)
+
+function(dmt_add_compile_definitions target properties_visibility)
   if (NOT properties_visibility MATCHES "INTERFACE")
     if (DMT_OS_WINDOWS)
       set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
@@ -579,10 +564,13 @@ function (dmt_add_compile_definitions target properties_visibility)
     if (WIN32)
       # Use vswhere to locate MSVC toolchain
       execute_process(
-        COMMAND vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property
-                installationPath
+        COMMAND "${VSWHERE_PATH}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property
+        installationPath
         OUTPUT_VARIABLE VS_INSTALL_PATH
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ECHO STDOUT
+        COMMAND_ERROR_IS_FATAL ANY
+      )
 
       # Typical MSVC include path looks like: <VS_INSTALL_PATH>/VC/Tools/MSVC/<version>/include
       file(GLOB MSVC_TOOLSET_DIR "${VS_INSTALL_PATH}/VC/Tools/MSVC/*")
@@ -605,16 +593,15 @@ function (dmt_add_compile_definitions target properties_visibility)
       set(CUDA_INCLUDE_REAL "$ENV{CUDA_HOME}/include")
     endif ()
 
-    target_compile_definitions(
-      ${target}
-      ${properties_visibility}
+    target_compile_definitions(${target} ${properties_visibility}
       ${DMT_OS}
-      "DMT_PROJ_PATH=\"${DMT_PROJ_PATH}\""
+      "DMT_PROJ_PATH=${PROJECT_SOURCE_DIR}"
       ${DMT_BUILD_TYPE}
       ${DMT_ARCH}
       ${DMT_COMPILER}
-      "CUDA_HOME=\"${CUDA_INCLUDE_REAL}\""
-      "DMT_CPP_INCLUDE_PATH=\"${DMT_CPP_INCLUDE_PATH}\"")
+      "CUDA_HOME=${CUDA_INCLUDE_REAL}"
+      "DMT_CPP_INCLUDE_PATH=${DMT_CPP_INCLUDE_PATH}"
+    )
 
     if (DMT_OS_WINDOWS)
       target_compile_definitions(${target} ${properties_visibility} WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
@@ -630,9 +617,10 @@ function (dmt_add_compile_definitions target properties_visibility)
   elseif (CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     target_compile_definitions(${target} ${properties_visibility} NDEBUG)
   endif ()
-endfunction ()
+endfunction()
 
-function (dmt_set_target_compiler_versions name property_visibility)
+
+function(dmt_set_target_compiler_versions name property_visibility)
   # set_target_properties(${name} PROPERTIES LINKER_LANGUAGE CXX) # this overrides CUDA's device linking step
   get_target_property(LINK_LANGUAGE ${name} LINKER_LANGUAGE)
   if (LINK_LANGUAGE STREQUAL "C")
@@ -644,13 +632,12 @@ function (dmt_set_target_compiler_versions name property_visibility)
   if (MSVC)
     target_compile_options(${name} ${property_visibility} $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>)
   endif ()
-endfunction ()
+endfunction()
 
 # usage: dmt_add_module_library(target sources...) -> sources in ARGN create a c++20 module library, with no
 # target_sources preset, just initialize the bare necessities to have a fully functioning module
-function (dmt_add_module_library name module_name)
-  cmake_parse_arguments(PARSE_ARGV 0 arg "SHARED;INTERFACE" "" "")
-  message(STATUS "Received arg: ${arg_SHARED}")
+function(dmt_add_module_library name module_name)
+  cmake_parse_arguments(PARSE_ARGV 0 arg "SHARED;INTERFACE;CUDA_ENABLED" "" "")
   # parse arguments and extract the clean target path name
   if (NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "unexpected arguments while calling dmt_add_module_library: ${THIS_ARGS_UNPARSED_ARGUMENTS}")
@@ -667,6 +654,10 @@ function (dmt_add_module_library name module_name)
     add_library(${name} INTERFACE)
   else ()
     add_library(${name})
+  endif ()
+
+  if (NOT arg_CUDA_ENABLED)
+    dmt_disable_cuda_language_from_target(${name})
   endif ()
 
   if (arg_INTERFACE)
@@ -707,24 +698,17 @@ function (dmt_add_module_library name module_name)
 
   set_target_properties(${name} PROPERTIES FOLDER "Modules")
 
-  # Possible todo: Handle Shared libraries (SFML)
+  add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_CURRENT_SOURCE_DIR}/public" "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}")
+  add_custom_target(${name}-generate-hdrs ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}")
+  add_dependencies(${name} ${name}-generate-hdrs)
 
-  # possible todo: Override PDB name/directory as 2 configurations generate debug symbols
-
-  # alessio: Shouldn't `install(TARGETS .. FILE_SET ..)` take tare of include libraries? add project include as include
-  # directory
-  if (NOT properties_visibility MATCHES "INTERFACE")
-    target_include_directories(
-      ${name}
-      INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-                $<INSTALL_INTERFACE:include> # <--- install tree include
-      PRIVATE # ${PROJECT_SOURCE_DIR}/src
-              ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src/${target_path}
-              ${PROJECT_SOURCE_DIR}/include/${target_path} ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/extern)
-  else ()
-    target_include_directories(${name} INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-                                                 $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
-  endif ()
+  target_include_directories(
+    ${name}
+    INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/public")
 
   # cmake's built-in clang-tidy doesn't seem to work with CXX_MODULES
   set_target_properties(${name} PROPERTIES CXX_CLANG_TIDY "")
@@ -732,10 +716,11 @@ function (dmt_add_module_library name module_name)
   # create alias
   add_library(${alias_name} ALIAS ${name})
   # dmt_debug_print_target_props(${name} ${module_name})
-endfunction ()
+endfunction()
+
 
 # This should be called only by the windows operating system
-function (dmt_win32_add_custom_application_manifest target)
+function(dmt_win32_add_custom_application_manifest target)
   if (NOT DEFINED DMT_COMPILER_MSVC)
     message(FATAL_ERROR "Application Manifest generation is supported only for `link.exe`")
   endif ()
@@ -758,32 +743,33 @@ function (dmt_win32_add_custom_application_manifest target)
     COMMAND set script_file="${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
     # Write the PowerShell script to the file
     COMMAND ${CMAKE_COMMAND} -E echo "Write-Host 'Dot Sourcing embedding scripts'" >
-            ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
     COMMAND ${CMAKE_COMMAND} -E echo ". ${PROJECT_SOURCE_DIR}/scripts/embed_manifest.ps1" >>
-            ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
     COMMAND ${CMAKE_COMMAND} -E echo "Write-Host 'Invoking function'" >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
     COMMAND
-      ${CMAKE_COMMAND} -E echo
-      "Invoke-Manifest-And-Embed -ExecutableFilePath '${exec_path}' -ManifestTemplateFilePath '${PROJECT_SOURCE_DIR}/res/win32-application.manifest' -ManifestTemplateParams @{version='1.0.0.0'; name='${exec_name}'; description='TEST DESCRIPTION'}"
-      >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
+    ${CMAKE_COMMAND} -E echo
+    "Invoke-Manifest-And-Embed -ExecutableFilePath '${exec_path}' -ManifestTemplateFilePath '${PROJECT_SOURCE_DIR}/res/win32-application.manifest' -ManifestTemplateParams @{version='1.0.0.0'; name='${exec_name}'; description='TEST DESCRIPTION'}"
+    >> ${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1
     # Run the generated PowerShell script
-    COMMAND pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
+    COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_BINARY_DIR}/run_manifest.ps1"
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Embed custom application manifest ${target}"
     USES_TERMINAL)
-endfunction ()
+endfunction()
 
-function (dmt_add_cli target)
+
+function(dmt_add_cli target)
   add_executable(${target})
   dmt_set_linux_specific_compile_options(${target} PRIVATE)
   dmt_set_cpu_architecture_features(${target} PRIVATE)
   set_target_properties(
     ${target}
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
-               DEBUG_POSTFIX -d
-               OUTPUT_NAME "${target}"
-               FOLDER "Examples/${v_target_name}"
-               VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+    DEBUG_POSTFIX -d
+    OUTPUT_NAME "${target}"
+    FOLDER "Examples/${v_target_name}"
+    VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
   # put the executable file in the right place set_property(TARGET ${name} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   target_link_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
   target_include_directories(${target} PRIVATE $<1:${PROJECT_BINARY_DIR}/lib>)
@@ -792,16 +778,28 @@ function (dmt_add_cli target)
   dmt_set_target_warnings(${target} PRIVATE)
   dmt_set_target_optimization(${target} PRIVATE)
   dmt_add_compile_definitions(${target} PRIVATE)
-endfunction ()
+endfunction()
+
 
 # usage: dmt_add_example creates an executable with no sources, configured and prepared to be
-function (dmt_add_example target)
+function(dmt_add_example target)
+  cmake_parse_arguments(
+    THIS_ARGS
+    "NO_GUI_WIN32" # no options
+    "" # single argument keys
+    "" # multiple arguments keys
+    ${ARGN})
   string(REGEX REPLACE "^dmt-" "" v_target_name "${target}")
   string(REGEX REPLACE "-" "_" v_target_name "${v_target_name}")
 
   if (DEFINED DMT_OS_WINDOWS)
-    add_executable(${target} WIN32)
-    set_target_properties(${target} PROPERTIES SUFFIX .exe)
+    if (NOT DEFINED THIS_ARGS_NO_GUI_WIN32)
+      add_executable(${target} WIN32)
+      set_target_properties(${target} PROPERTIES SUFFIX .exe)
+    else ()
+      add_executable(${target})
+      set_target_properties(${target} PROPERTIES SUFFIX .exe)
+    endif ()
   else ()
     add_executable(${target})
   endif ()
@@ -809,13 +807,13 @@ function (dmt_add_example target)
   set_target_properties(
     ${target}
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
-               DEBUG_POSTFIX -d
-               OUTPUT_NAME "${target}"
-               FOLDER "Examples/${v_target_name}"
-               VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+    DEBUG_POSTFIX -d
+    OUTPUT_NAME "${target}"
+    FOLDER "Examples/${v_target_name}"
+    VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
 
   # Create the target (assuming it's an executable)
-  if (DEFINED DMT_OS_WINDOWS)
+  if (DEFINED DMT_OS_WINDOWS AND NOT DEFINED THIS_ARGS_NO_GUI_WIN32)
     # use /SUBSYSTEM:WINDOWS (which doesn't allocate a console when launched by double click and detaches itself from
     # the console when launched from a `conhost` process) add the PE executable with .com extension, since command line
     # prefers it when calling a program without suffix extension this will use /SUBSYSTEM:CONSOLE
@@ -827,12 +825,12 @@ function (dmt_add_example target)
     set_target_properties(
       ${target}-launcher
       PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
-                 DEBUG_POSTFIX -d
-                 FOLDER "Examples/${v_target_name}"
-                 VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
-                 OUTPUT_NAME "${target}"
-                 PDB_NAME "${target}-launcher"
-                 SUFFIX .com)
+      DEBUG_POSTFIX -d
+      FOLDER "Examples/${v_target_name}"
+      VS_DEBUGGER_WORKING_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>
+      OUTPUT_NAME "${target}"
+      PDB_NAME "${target}-launcher"
+      SUFFIX .com)
     dmt_set_target_compiler_versions(${target}-launcher PRIVATE)
     dmt_set_target_warnings(${target}-launcher PRIVATE)
     dmt_set_target_optimization(${target}-launcher PRIVATE)
@@ -840,8 +838,10 @@ function (dmt_add_example target)
     # force build system to rebuild the actual target when launcher is built
     add_dependencies(${target}-launcher ${target})
 
-    dmt_win32_add_custom_application_manifest(${target})
     dmt_win32_add_custom_application_manifest(${target}-launcher)
+  endif ()
+  if (DEFINED DMT_OS_WINDOWS)
+    dmt_win32_add_custom_application_manifest(${target})
   endif ()
 
   # message(STATUS "${target} ARGS_PUBLIC_SOURCES ${ARGS_PUBLIC_SOURCES}") message(STATUS "${target}
@@ -860,10 +860,11 @@ function (dmt_add_example target)
   dmt_add_compile_definitions(${target} PRIVATE)
 
   # possible todo: Automatically include dependencies here
-endfunction ()
+endfunction()
+
 
 # usage: dmt_add_test target -> creates and adds a target which contains a test doesn't add any source
-function (dmt_add_test target)
+function(dmt_add_test target)
   cmake_parse_arguments(
     THIS_ARGS
     "" # no options
@@ -910,9 +911,9 @@ function (dmt_add_test target)
   catch_discover_tests(${target})
   list(APPEND ${THIS_ARGS_TARGET_LIST} ${target})
   return(PROPAGATE ${THIS_ARGS_TARGET_LIST})
-endfunction ()
+endfunction()
 
-macro (dmt_add_subdirectories)
+macro(dmt_add_subdirectories)
   set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
   # Get all subdirectories in the current source directory
@@ -930,4 +931,66 @@ macro (dmt_add_subdirectories)
       add_subdirectory(${SUBDIR})
     endif ()
   endforeach ()
-endmacro ()
+endmacro()
+
+
+# assumes src_dir and hdr_dir are absolute paths
+function(dmt_glob_sources prefix src_dir hdr_dir)
+  # collect headers and sources
+  file(GLOB_RECURSE ALL_${prefix}_FILES CONFIGURE_DEPENDS
+    # private sources
+    "${src_dir}/*.cpp"
+    "${src_dir}/*.cu"
+    # public headers
+    "${hdr_dir}/*.h"
+    "${hdr_dir}/*.cuh"
+    "${hdr_dir}/*.hpp"
+    # private headers
+    "${src_dir}/*.h"
+    "${src_dir}/*.cuh"
+    "${src_dir}/*.hpp"
+  )
+
+  # split sources into OS-Specific and generic (assumes public header are generic only)
+  set(SRC_${prefix}_FILES ${ALL_${prefix}_FILES})
+  set(HDR_${prefix}_FILES ${ALL_${prefix}_FILES})
+  set(PRIVATE_HDR_${prefix}_FILES ${ALL_${prefix}_FILES})
+  list(FILTER HDR_${prefix}_FILES EXCLUDE REGEX "${src_dir}.*")
+  list(FILTER SRC_${prefix}_FILES EXCLUDE REGEX "${hdr_dir}.*\\.(cu|cpp)$")
+  list(FILTER PRIVATE_HDR_${prefix}_FILES EXCLUDE REGEX "${src_dir}.*\\.(cuh|h|hpp)$")
+
+  # compute from src generic and os specific files
+  set(SRC_GENERIC_${prefix}_FILES ${SRC_${prefix}_FILES})
+  set(SRC_OS_${prefix}_FILES ${SRC_${prefix}_FILES})
+  set(SRC_UNUSED_${prefix}_FILES ${SRC_${prefix}_FILES})
+  set(UNUSED_PRIVATE_HDR_${prefix}_FILES ${PRIVATE_HDR_${prefix}_FILES})
+
+  list(FILTER SRC_GENERIC_${prefix}_FILES EXCLUDE REGEX "(win32|linux)\\.(cpp|cu)$")
+  list(FILTER SRC_OS_${prefix}_FILES INCLUDE REGEX "(win32|linux)\\.(cpp|cu)$")
+  list(FILTER SRC_UNUSED_${prefix}_FILES INCLUDE REGEX "(win32|linux)\\.(cpp|cu)$")
+  if (DMT_OS_WINDOWS)
+    set(inclusion_filter "win32\\.(cpp|cu)$")
+  elseif (DMT_OS_LINUX)
+    set(inclusion_filter "linux\\.(cpp|cu)$")
+  else ()
+    message(FATAL_ERROR "Unsupported OS")
+  endif ()
+  list(FILTER SRC_OS_${prefix}_FILES INCLUDE REGEX ${inclusion_filter})
+  list(FILTER SRC_UNUSED_${prefix}_FILES EXCLUDE REGEX ${inclusion_filter})
+  list(FILTER UNUSED_PRIVATE_HDR_${prefix}_FILES EXCLUDE REGEX ${inclusion_filter})
+
+  # mark unused as header only
+  set_source_files_properties(${SRC_UNUSED_${prefix}_FILES} ${PRIVATE_HDR_${prefix}_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
+  source_group("Unused" FILES ${SRC_UNUSED_${prefix}_FILES} ${UNUSED_PRIVATE_HDR_${prefix}_FILES})
+
+  # final list
+  set(SRC_${prefix}_FILES ${SRC_GENERIC_${prefix}_FILES} ${SRC_OS_${prefix}_FILES})
+  set(SRC_UNUSED_${prefix}_FILES ${SRC_UNUSED_${prefix}_FILES} ${PRIVATE_HDR_${prefix}_FILES})
+
+  message(STATUS "
+    SRC_${prefix}_FILES        = ${SRC_${prefix}_FILES}
+    HDR_${prefix}_FILES        = ${HDR_${prefix}_FILES}
+    SRC_UNUSED_${prefix}_FILES = ${SRC_UNUSED_${prefix}_FILES}
+  ")
+  return(PROPAGATE SRC_${prefix}_FILES HDR_${prefix}_FILES SRC_UNUSED_${prefix}_FILES)
+endfunction()

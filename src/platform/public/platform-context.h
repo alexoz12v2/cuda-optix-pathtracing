@@ -202,8 +202,8 @@ namespace dmt {
             }
 
 #if defined(__CUDA_ARCH__)
-            // on the GPU, take a free buffer from common.gpuLogBuffers, if not nullptr,
-            // create a record using those buffers, (each buffer contains 2 char buffers, a log record, and a bool to say whether it is being used)
+                // on the GPU, take a free buffer from common.gpuLogBuffers, if not nullptr,
+                // create a record using those buffers, (each buffer contains 2 char buffers, a log record, and a bool to say whether it is being used)
 #else
             auto record = createRecord(_fmt,
                                        _level,

@@ -560,6 +560,7 @@ function(dmt_add_compile_definitions target properties_visibility)
     else ()
       set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
     endif ()
+    set(DMT_PROJ_PATH \"${DMT_PROJ_PATH}\")
 
     if (WIN32)
       # Use vswhere to locate MSVC toolchain
@@ -595,7 +596,7 @@ function(dmt_add_compile_definitions target properties_visibility)
 
     target_compile_definitions(${target} ${properties_visibility}
       ${DMT_OS}
-      "DMT_PROJ_PATH=${PROJECT_SOURCE_DIR}"
+      "DMT_PROJ_PATH=${DMT_PROJ_PATH}"
       ${DMT_BUILD_TYPE}
       ${DMT_ARCH}
       ${DMT_COMPILER}

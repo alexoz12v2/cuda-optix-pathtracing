@@ -61,7 +61,7 @@ namespace dmt {
 
     template <typename T>
     concept VectorNormalized = Vector<T> && has_normalized<T>::value;
-    // clang-format on
+        // clang-format on
 #endif
 
 #if __cplusplus >= 202002L

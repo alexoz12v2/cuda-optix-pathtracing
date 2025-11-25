@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_MATERIAL_H
+#define DMT_CORE_PUBLIC_CORE_MATERIAL_H
 
 #include "core/core-macros.h"
 #include "core/core-bsdf.h"
@@ -123,3 +124,4 @@ namespace dmt {
         return (r << 16) | (g << 8) | b;
     }
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_MATERIAL_H

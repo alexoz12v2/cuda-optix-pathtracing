@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_UTILS_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_UTILS_H
 
 #include <bit>
 #include <charconv> // For std::from_chars
@@ -1157,3 +1158,4 @@ namespace dmt {
 
     static DMT_FORCEINLINE uint64_t RoundUpToPowerOfTwo64(uint64_t Arg) { return uint64_t(1) << CeilLogTwo64(Arg); }
 } // namespace dmt
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_UTILS_H

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_NUMBERS_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_NUMBERS_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 #include "core/cudautils/cudautils-vecmath.cuh"
@@ -101,3 +102,4 @@ namespace dmt::sampling {
     DMT_CORE_API DMT_CPU_GPU float    sampleVisibleWavelengths(float u);
     DMT_CORE_API DMT_CPU_GPU Vector4f sampleVisibleWavelengths(Vector4f u);
 } // namespace dmt::sampling
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_NUMBERS_CUH

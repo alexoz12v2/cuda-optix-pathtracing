@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_LOGGING_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_LOGGING_H
 
 #include <memory_resource>
 #include <platform/platform-macros.h>
@@ -561,3 +562,4 @@ namespace dmt {
                                                LogHandlerDeallocate _dealloc = ::dmt::os::deallocate);
 
 } // namespace dmt
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_LOGGING_H

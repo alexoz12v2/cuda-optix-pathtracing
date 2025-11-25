@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_THREADPOOL_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_THREADPOOL_H
 
 #include "platform/dmtmacros.h"
 #include "platform/platform-macros.h"
@@ -209,3 +210,4 @@ namespace dmt {
     };
 
 } // namespace dmt
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_THREADPOOL_H

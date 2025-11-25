@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_BSDF_H
+#define DMT_CORE_PUBLIC_CORE_BSDF_H
 
 #include "core/core-macros.h"
 #include "core/cudautils/cudautils-vecmath.cuh"
@@ -229,3 +230,4 @@ namespace dmt::ggx {
     /// @Warning: here wi is the incoming direction of view vector, not incoming direction of light, as used in other functions
     DMT_CORE_API RGB DMT_FASTCALL eval(BSDF const& bsdf, Vector3f wo, Vector3f wi, Vector3f ng, float* pdf);
 } // namespace dmt::ggx
+#endif // DMT_CORE_PUBLIC_CORE_BSDF_H

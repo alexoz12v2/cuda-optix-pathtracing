@@ -1,4 +1,6 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_MACRO_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_MACRO_CUH
 
 #include "platform/dmtmacros.h"
 #include "core-macros.h"
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_MACRO_CUH

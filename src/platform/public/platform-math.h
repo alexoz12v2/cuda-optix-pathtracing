@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_MATH_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_MATH_H
 #include <stdlib.h>
 #include <cassert>
 #include <random>
@@ -253,3 +254,4 @@ namespace dmt::math {
 
 
 }; // namespace dmt::math
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_MATH_H

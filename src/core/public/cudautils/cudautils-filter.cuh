@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FILTER_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FILTER_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 #include "core/cudautils/cudautils-vecmath.cuh"
@@ -112,3 +113,4 @@ namespace dmt::gpu {
     };
 
 } // namespace dmt::gpu
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FILTER_CUH

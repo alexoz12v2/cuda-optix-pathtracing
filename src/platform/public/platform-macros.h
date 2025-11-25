@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_MACROS_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_MACROS_H
 
 #include "dmtmacros.h"
 
@@ -15,3 +16,4 @@
     #define DMT_PLATFORM_API
 
 #endif
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_MACROS_H

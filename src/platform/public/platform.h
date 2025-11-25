@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_H
 
 // group 1: macros
 #include "platform/platform-macros.h"
@@ -36,3 +37,4 @@ namespace dmt {
         static inline std::pmr::memory_resource* m_resource = nullptr;
     };
 } // namespace dmt
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_H

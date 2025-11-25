@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_BVH_BUILDER_H
+#define DMT_CORE_PUBLIC_CORE_BVH_BUILDER_H
 
 #include "core/core-macros.h" // must be before cudautils
 
@@ -118,3 +119,4 @@ namespace dmt::bvh {
                                   triangle::Triisect*        outTri,
                                   std::pmr::memory_resource* temp = std::pmr::get_default_resource());
 } // namespace dmt::bvh
+#endif // DMT_CORE_PUBLIC_CORE_BVH_BUILDER_H

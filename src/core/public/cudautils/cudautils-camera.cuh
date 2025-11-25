@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_CAMERA_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_CAMERA_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 #include <core/cudautils/cudautils-spectrum.cuh>
@@ -38,3 +39,4 @@ namespace dmt {
         float&       rdz);
 
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_CAMERA_CUH

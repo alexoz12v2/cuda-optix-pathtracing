@@ -1,3 +1,6 @@
+#ifndef DMT_PLATFORM_PRIVATE_PLATFORM_MEMORY_WIN32_H
+#define DMT_PLATFORM_PRIVATE_PLATFORM_MEMORY_WIN32_H
+
 #include "platform/platform-memory.h"
 
 struct WindowsPlatformMemory
@@ -59,3 +62,4 @@ struct WindowsPlatformMemory
 };
 
 typedef WindowsPlatformMemory PlatformMemory;
+#endif // DMT_PLATFORM_PRIVATE_PLATFORM_MEMORY_WIN32_H

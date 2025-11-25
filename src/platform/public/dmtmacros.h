@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_DMTMACROS_H
+#define DMT_PLATFORM_PUBLIC_DMTMACROS_H
 
 #if defined(__NVCC__) // Test
     #define DMT_INTERFACE
@@ -107,3 +108,4 @@
 #endif
 
 #include <cstdint>
+#endif // DMT_PLATFORM_PUBLIC_DMTMACROS_H

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_TEXTURE_H
+#define DMT_CORE_PUBLIC_CORE_TEXTURE_H
 
 #include "core/core-macros.h"
 #include "core/core-math.h"
@@ -228,3 +229,4 @@ namespace dmt {
         RGB   evalRGB(TextureEvalContext const& ctx) const;
     };
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_TEXTURE_H

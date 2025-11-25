@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_CONTEXT_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_CONTEXT_H
 
 #include "dmtmacros.h"
 #include "platform/platform-macros.h"
@@ -231,3 +232,4 @@ namespace dmt {
 
     // TODO Define logging macros
 } // namespace dmt
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_CONTEXT_H

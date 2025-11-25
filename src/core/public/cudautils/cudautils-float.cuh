@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FLOAT_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FLOAT_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 
@@ -616,3 +617,4 @@ inline constexpr DMT_CPU_GPU float arg(float f)
     else
         return std::numeric_limits<float>::quiet_NaN();
 }
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FLOAT_CUH

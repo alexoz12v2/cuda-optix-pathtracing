@@ -1,3 +1,6 @@
+#ifndef DMT_CORE_PRIVATE_CUDAUTILS_CUDAUTILS_INCLUDE_GLM_CUH
+#define DMT_CORE_PRIVATE_CUDAUTILS_CUDAUTILS_INCLUDE_GLM_CUH
+
 #include "cudautils/cudautils-macro.cuh"
 
 #if defined(__CUDACC__)
@@ -346,3 +349,5 @@ namespace dmt {
 
 
 } // namespace dmt
+
+#endif // DMT_CORE_PRIVATE_CUDAUTILS_CUDAUTILS_INCLUDE_GLM_CUH

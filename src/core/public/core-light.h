@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_LIGHT_H
+#define DMT_CORE_PUBLIC_CORE_LIGHT_H
 
 #include "core/core-macros.h"
 #include "core/core-math.h"
@@ -167,3 +168,4 @@ namespace dmt {
     /// start from world space direction (eg ray escaped the scene) and grab sampled radiance and its PDF
     DMT_CORE_API RGB envLightEval(EnvLight const& light, Vector3f wi, float* pdf);
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_LIGHT_H

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 
@@ -112,3 +113,4 @@ namespace dmt {
                            IndexQueue      shadeQ,
                            IndexQueue      nextRayQ);
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH

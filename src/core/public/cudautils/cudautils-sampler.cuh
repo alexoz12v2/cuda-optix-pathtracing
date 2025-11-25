@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_SAMPLER_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_SAMPLER_CUH
 
 #include "cudautils/cudautils-filter.h"
 #include "cudautils/cudautils-macro.h"
@@ -128,3 +129,4 @@ namespace dmt {
         }
     };
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_SAMPLER_CUH

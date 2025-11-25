@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_PARSER_H
+#define DMT_CORE_PUBLIC_CORE_PARSER_H
 
 #include "core/core-macros.h"
 #include "core/core-trianglemesh.h"
@@ -44,3 +45,4 @@ namespace dmt {
         std::pmr::memory_resource* m_tmp;
     };
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_PARSER_H

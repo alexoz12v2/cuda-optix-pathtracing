@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_COLOR_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_COLOR_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 #include "core/cudautils/cudautils-vecmath.cuh"
@@ -96,3 +97,4 @@ namespace dmt {
 
 
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_COLOR_CUH

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_LIGHT_TREE_BUILDER_H
+#define DMT_CORE_PUBLIC_CORE_LIGHT_TREE_BUILDER_H
 
 #include "core/core-macros.h"
 #include "core/core-light.h"
@@ -103,3 +104,4 @@ namespace dmt {
     /// this assumes you didn't select an infinite light, therefore you pass a startPMF = 1 - infiniteLightPMF
     DMT_CORE_API float lightSelectionPMF(LightTreeBuildNode const& ltRoot, Point3f p, Vector3f n, uint32_t trail, float startPMF);
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_LIGHT_TREE_BUILDER_H

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_MATH_H
+#define DMT_CORE_PUBLIC_CORE_MATH_H
 
 #include "core/core-macros.h"
 #include "core/core-dstd.h"
@@ -242,3 +243,4 @@ namespace dmt::transforms {
     DMT_CORE_API Transform DMT_FASTCALL
         cameraFromRaster_Perspective(float focalLength, float sensorHeight, uint32_t xRes, uint32_t yRes);
 } // namespace dmt::transforms
+#endif // DMT_CORE_PUBLIC_CORE_MATH_H

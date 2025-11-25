@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_FILE_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_FILE_H
 #include "platform/platform-macros.h"
 #include "platform/platform-logging.h"
 
@@ -114,3 +115,4 @@ namespace dmt::os {
         std::pmr::memory_resource* m_resource;
     };
 } // namespace dmt::os
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_FILE_H

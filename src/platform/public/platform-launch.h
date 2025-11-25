@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_LAUNCH_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_LAUNCH_H
 
 //#if defined(DMT_OS_WINDOWS)
 //extern "C" int __stdcall wWinMain(struct HINSTANCE__*, struct HINSTANCE__*, wchar_t*, int);
@@ -42,3 +43,4 @@ int main(int argc, char* argv[])
 }
     #endif
 #endif
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_LAUNCH_H

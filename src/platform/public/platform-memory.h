@@ -4,7 +4,8 @@
  * @defgroup platform platform Module
  * @{
  */
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_H
 
 #include "dmtmacros.h"
 #include <platform/platform-macros.h>
@@ -482,3 +483,4 @@ namespace dmt {
 } // namespace dmt
 
 /** @} */
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_H

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_BVH_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_BVH_CUH
 
 #include "core/cudautils/cudautils-macro.cuh"
 #include "core/cudautils/cudautils-vecmath.cuh"
@@ -55,3 +56,4 @@ namespace dmt {
         return false;
     }
 }; // namespace dmt
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_BVH_CUH

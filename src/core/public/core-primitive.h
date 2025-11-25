@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_PRIMITIVE_H
+#define DMT_CORE_PUBLIC_CORE_PRIMITIVE_H
 
 #include "core/core-macros.h"
 #include "core/core-math.h"
@@ -171,3 +172,4 @@ namespace dmt::triangle {
     Triisect DMT_FASTCALL DMT_CORE_API
         intersect8(Ray const& ray, float tMax, float tMin, Point3f const* v0s, Point3f const* v1s, Point3f const* v2s);
 } // namespace dmt::triangle
+#endif // DMT_CORE_PUBLIC_CORE_PRIMITIVE_H

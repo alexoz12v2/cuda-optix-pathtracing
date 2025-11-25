@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_STACKALLOCATOR_H
+#define DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_STACKALLOCATOR_H
 
 #include <stdint.h>
 #include <platform/platform-macros.h>
@@ -101,3 +102,4 @@ namespace dmt {
         void*                              RecentHighWaterMark = nullptr;
     };
 } // namespace dmt
+#endif // DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_STACKALLOCATOR_H

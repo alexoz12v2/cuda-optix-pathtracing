@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_MESH_PARSER_H
+#define DMT_CORE_PUBLIC_CORE_MESH_PARSER_H
 
 #include "core/core-macros.h"
 #include "core/core-trianglemesh.h"
@@ -51,3 +52,4 @@ namespace dmt {
         FbxResources                                      m_res;
     };
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_MESH_PARSER_H

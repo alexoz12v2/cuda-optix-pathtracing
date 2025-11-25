@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_POOLS_CUH
+#define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_POOLS_CUH
 
 #include "cudautils/cudautils-macro.h"
 
@@ -37,3 +38,4 @@ namespace dmt {
     };
 
 }; // namespace dmt
+#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_POOLS_CUH

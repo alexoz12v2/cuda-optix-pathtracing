@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_TRIANGLEMESH_H
+#define DMT_CORE_PUBLIC_CORE_TRIANGLEMESH_H
 
 #include "core/core-macros.h"
 #include "core/core-math.h"
@@ -172,3 +173,4 @@ namespace dmt {
         BufferSpecification        m_cap;
     };
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_TRIANGLEMESH_H

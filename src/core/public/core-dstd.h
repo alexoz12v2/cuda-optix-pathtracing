@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_DSTD_H
+#define DMT_CORE_PUBLIC_CORE_DSTD_H
 
 #include "core/core-macros.h"
 
@@ -196,3 +197,4 @@ namespace dstd {
         }
     };
 } // namespace dstd
+#endif // DMT_CORE_PUBLIC_CORE_DSTD_H

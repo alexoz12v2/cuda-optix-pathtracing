@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_TEXTURE_CACHE_H
+#define DMT_CORE_PUBLIC_CORE_TEXTURE_CACHE_H
 
 #include "core/core-macros.h"
 #include "core/core-texture.h"
@@ -161,3 +162,4 @@ namespace dmt {
         size_t m_available;
     };
 } // namespace dmt
+#endif // DMT_CORE_PUBLIC_CORE_TEXTURE_CACHE_H

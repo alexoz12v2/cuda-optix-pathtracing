@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DMT_CORE_PUBLIC_CORE_RENDER_H
+#define DMT_CORE_PUBLIC_CORE_RENDER_H
 
 #include "core/core-macros.h"
 #include "core/core-bsdf.h"
@@ -382,3 +383,4 @@ namespace dmt::camera {
         uint32_t             samplesPerPixel);
 
 } // namespace dmt::camera
+#endif // DMT_CORE_PUBLIC_CORE_RENDER_H

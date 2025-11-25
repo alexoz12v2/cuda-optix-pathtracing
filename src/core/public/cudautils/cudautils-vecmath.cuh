@@ -82,7 +82,6 @@ namespace dmt {
 #endif
         DMT_CPU_GPU S& operator[](int32_t i)
         {
-            assert(i >= 0 && i < 2);
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S*>(this) + i);
 #else
@@ -91,7 +90,6 @@ namespace dmt {
         }
         DMT_CPU_GPU S const& operator[](int32_t i) const
         {
-            assert(i >= 0 && i < 2);
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S const*>(this) + i);
 #else
@@ -141,7 +139,6 @@ namespace dmt {
 #endif
         DMT_CPU_GPU S& operator[](int32_t i)
         {
-            assert(i >= 0 && i < 3);
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S*>(this) + i);
 #else
@@ -150,7 +147,6 @@ namespace dmt {
         }
         DMT_CPU_GPU S const& operator[](int32_t i) const
         {
-            assert(i >= 0 && i < 3);
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S const*>(this) + i);
 #else
@@ -188,7 +184,6 @@ namespace dmt {
 #endif
         DMT_CPU_GPU S& operator[](int32_t i)
         {
-            assert(i >= 0 && i < 4);
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S*>(this) + i);
 #else
@@ -197,7 +192,6 @@ namespace dmt {
         }
         DMT_CPU_GPU S const& operator[](int32_t i) const
         {
-            assert(i >= 0 && i < 4);
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S const*>(this) + i);
 #else
@@ -1024,23 +1018,14 @@ namespace dmt {
             else
                 return 1;
         }
-        DMT_CPU_GPU Point2i operator[](int i) const
-        {
-            assert(i == 0 || i == 1);
-            return (i == 0) ? pMin : pMax;
-        }
+        DMT_CPU_GPU Point2i operator[](int i) const { return (i == 0) ? pMin : pMax; }
 
-        DMT_CPU_GPU Point2i& operator[](int i)
-        {
-            assert(i == 0 || i == 1);
-            return (i == 0) ? pMin : pMax;
-        }
+        DMT_CPU_GPU Point2i& operator[](int i) { return (i == 0) ? pMin : pMax; }
 
         DMT_CPU_GPU bool operator==(Bounds2i const& b) const { return near(b.pMin, pMin) && near(b.pMax, pMax); }
 
         DMT_CPU_GPU Point2i corner(int corner) const
         {
-            assert(corner >= 0 && corner < 4);
             return Point2i{{(*this)[(corner & 1)].x, (*this)[(corner & 2) ? 1 : 0].y}};
         }
 
@@ -1397,17 +1382,9 @@ namespace dstd {
         DMT_CPU_GPU
         T const& operator*() const { return value(); }
         DMT_CPU_GPU
-        T& value()
-        {
-            assert(set);
-            return *ptr();
-        }
+        T& value() { return *ptr(); }
         DMT_CPU_GPU
-        T const& value() const
-        {
-            assert(set);
-            return *ptr();
-        }
+        T const& value() const { return *ptr(); }
 
         DMT_CPU_GPU
         void reset()
@@ -1457,7 +1434,6 @@ namespace dstd {
         InlinedVector(size_t sz, T const& v) : _size(sz)
         {
 #if !defined(__CUDA_ARCH__)
-            assert(sz <= N && "Exceeding capacity");
             for (size_t i = 0; i < sz; ++i)
                 std::construct_at(&reinterpret_cast<T*>(&_storage)[i], v);
 #else
@@ -1506,20 +1482,12 @@ namespace dstd {
 
         void push_back(T const& value)
         {
-#if !defined(__CUDA_ARCH__)
-            if (_size >= N)
-                throw std::overflow_error("InlinedVector capacity exceeded");
-#endif
             new (data() + _size) T(value);
             ++_size;
         }
 
         void push_back(T&& value)
         {
-#if !defined(__CUDA_ARCH__)
-            if (_size >= N)
-                throw std::overflow_error("InlinedVector capacity exceeded");
-#endif
             new (data() + _size) T(std::move(value));
             ++_size;
         }
@@ -1527,49 +1495,22 @@ namespace dstd {
         template <typename... Args>
         void emplace_back(Args&&... args)
         {
-#if !defined(__CUDA_ARCH__)
-            if (_size >= N)
-                throw std::overflow_error("InlinedVector capacity exceeded");
-#endif
             new (data() + _size) T(std::forward<Args>(args)...);
             ++_size;
         }
 
         void pop_back()
         {
-#if !defined(__CUDA_ARCH__)
-            if (_size == 0)
-                throw std::underflow_error("InlinedVector is empty");
-#endif
             --_size;
             data()[_size].~T();
         }
 
-        T& operator[](size_type index)
-        {
-#if !defined(__CUDA_ARCH__)
-            if (index >= _size)
-                throw std::out_of_range("InlinedVector index out of range");
-#endif
-            return data()[index];
-        }
+        T& operator[](size_type index) { return data()[index]; }
 
-        T const& operator[](size_type index) const
-        {
-#if !defined(__CUDA_ARCH__)
-            if (index >= _size)
-                throw std::out_of_range("InlinedVector index out of range");
-#endif
-            return data()[index];
-        }
+        T const& operator[](size_type index) const { return data()[index]; }
 
         void resize(size_type new_size)
         {
-#if !defined(__CUDA_ARCH__)
-            if (new_size > N)
-                throw std::overflow_error("InlinedVector resize beyond capacity");
-#endif
-
             if (new_size > _size)
             {
                 while (_size < new_size)
@@ -1584,11 +1525,6 @@ namespace dstd {
 
         void resize(size_type new_size, T const& value)
         {
-#if !defined(__CUDA_ARCH__)
-            if (new_size > N)
-                throw std::overflow_error("InlinedVector resize beyond capacity");
-#endif
-
             if (new_size > _size)
             {
                 while (_size < new_size)

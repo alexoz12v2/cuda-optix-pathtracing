@@ -11,6 +11,17 @@ target_sources(dmt-core
 
 target_compile_definitions(dmt-core PRIVATE FBXSDK_SHARED)
 
+# they add /EHsc and /MP (Windows, regardless of compiler). remove it
+foreach (t OpenEXR OpenEXRCore OpenEXRUtil Iex IlmThread nlohmann_json glm Eigen fbxsdk gx backward)
+  get_target_property(defs ${t} INTERFACE_COMPILE_OPTIONS)
+  if (NOT defs STREQUAL defs-NOTFOUND)
+    message(STATUS "${t} INTERFACE_COMPILE_OPTIONS: ${defs}")
+    list(FILTER defs EXCLUDE REGEX "(/EHsc|/MP)")
+    message(STATUS "${t} INTERFACE_COMPILE_OPTIONS: ${defs}")
+    set_target_properties(${t} PROPERTIES INTERFACE_COMPILE_OPTIONS "${defs}")
+  endif ()
+endforeach ()
+
 target_link_libraries(dmt-core
   PUBLIC gx::gx dmt-platform
   PRIVATE

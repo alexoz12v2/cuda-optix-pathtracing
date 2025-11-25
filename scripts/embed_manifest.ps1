@@ -129,7 +129,7 @@ Function Invoke-Manifest-And-Embed
 
     # Embed the manifest into the executable
     Write-Host "Embedding manifest into executable..."
-    & $MtExe -manifest $ManifestFilePath -outputresource:"$ExecutableFilePath`;`#1" -nologo
+    & $MtExePath -manifest $ManifestFilePath -outputresource:"$ExecutableFilePath`;`#1" -nologo
     if ($LASTEXITCODE -ne 0)
     {
         Write-Error "Failed to embed manifest into the executable!"

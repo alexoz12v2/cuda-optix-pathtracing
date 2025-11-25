@@ -4,16 +4,6 @@
 # ######################################################################################################################
 include_guard()
 
-
-function(dmt_disable_cuda_language_from_target target)
-  get_target_property(languages ${target} ENABLED_LANGUAGES)
-  message(STATUS "${target} ENABLED_LANGUAGES (before): ${languages}")
-  list(REMOVE_ITEM languages CUDA)
-  message(STATUS "${target} ENABLED_LANGUAGES (after):  ${languages}")
-  set_target_properties(${target} PROPERTIES ENABLED_LANGUAGES ${languages})
-endfunction()
-
-
 macro(dmt_define_environment)
   # -- detect the CPU architecture, and if different from x86_64, bail out -- while there are some CMake variables like
   # CMAKE_SYSTEM_PROCESSOR and CMAKE_HOST_SYSTEM_PROCESSOR, they are inconsistent (see docs). Therefore, use a small C
@@ -347,13 +337,17 @@ function(dmt_set_cpu_architecture_features target properties_visibility)
       )
     elseif (DMT_COMPILER_MSVC)
       target_compile_options(${target} ${properties_visibility}
-        $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2 /arch:AVX /arch:SSE4.2>
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/arch:AVX2 -Xcompiler=/arch:AVX -Xcompiler=/arch:SSE4.2>
+        $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2 /arch:AVX /arch:SSE4.2 /EHsc>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/arch:AVX2 -Xcompiler=/arch:AVX -Xcompiler=/arch:SSE4.2 -Xcompiler=/EHsc>
       )
     endif ()
   else ()
     message(FATAL_ERROR "HELLO")
   endif ()
+  set_target_properties(${target} PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+  )
 endfunction()
 
 
@@ -638,7 +632,7 @@ endfunction()
 # usage: dmt_add_module_library(target sources...) -> sources in ARGN create a c++20 module library, with no
 # target_sources preset, just initialize the bare necessities to have a fully functioning module
 function(dmt_add_module_library name module_name)
-  cmake_parse_arguments(PARSE_ARGV 0 arg "SHARED;INTERFACE;CUDA_ENABLED" "" "")
+  cmake_parse_arguments(PARSE_ARGV 0 arg "SHARED;INTERFACE" "" "")
   # parse arguments and extract the clean target path name
   if (NOT "${THIS_ARGS_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(FATAL_ERROR "unexpected arguments while calling dmt_add_module_library: ${THIS_ARGS_UNPARSED_ARGUMENTS}")
@@ -655,10 +649,6 @@ function(dmt_add_module_library name module_name)
     add_library(${name} INTERFACE)
   else ()
     add_library(${name})
-  endif ()
-
-  if (NOT arg_CUDA_ENABLED)
-    dmt_disable_cuda_language_from_target(${name})
   endif ()
 
   if (arg_INTERFACE)
@@ -728,6 +718,7 @@ endfunction()
 # This should be called only by the windows operating system
 function(dmt_win32_add_custom_application_manifest target)
   if (NOT DEFINED DMT_COMPILER_MSVC)
+    return()
     message(FATAL_ERROR "Application Manifest generation is supported only for `link.exe`")
   endif ()
   # construct the full path to the executable file

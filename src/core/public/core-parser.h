@@ -1,15 +1,15 @@
 #ifndef DMT_CORE_PUBLIC_CORE_PARSER_H
 #define DMT_CORE_PUBLIC_CORE_PARSER_H
 
-#include "core/core-macros.h"
-#include "core/core-trianglemesh.h"
-#include "core/core-dstd.h"
-#include "core/core-material.h"
-#include "core/core-mesh-parser.h"
-#include "core/core-render.h"
-#include "core/cudautils/cudautils-transform.cuh"
+#include "core-macros.h"
+#include "core-trianglemesh.h"
+#include "core-dstd.h"
+#include "core-material.h"
+#include "core-mesh-parser.h"
+#include "core-render.h"
+#include "cudautils/cudautils-transform.cuh"
 
-#include "platform/platform-utils.h"
+#include "platform-utils.h"
 
 #include <memory_resource>
 

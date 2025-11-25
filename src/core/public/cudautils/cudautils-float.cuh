@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FLOAT_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FLOAT_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-macro.cuh"
 
-#if !defined(__CUDACC__) && !defined(__CUDA_ARCH__)
+#if !defined(__CUDA_ARCH__)
     #include <algorithm>
     #include <bit>
 
@@ -439,7 +439,7 @@ namespace dmt {
 
         DMT_CPU_GPU static Half FromBits(uint16_t v) { return Half(v); }
 
-        explicit Half(float ff)
+        DMT_CPU_GPU explicit Half(float ff)
         {
 #ifdef __CUDA_ARCH__
             h = __half_as_ushort(__float2half(ff));

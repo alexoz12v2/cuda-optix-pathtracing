@@ -1,10 +1,10 @@
 #ifndef DMT_CORE_PUBLIC_CORE_MATERIAL_H
 #define DMT_CORE_PUBLIC_CORE_MATERIAL_H
 
-#include "core/core-macros.h"
-#include "core/core-bsdf.h"
-#include "core/core-texture.h"
-#include "core/core-texture-cache.h"
+#include "core-macros.h"
+#include "core-bsdf.h"
+#include "core-texture.h"
+#include "core-texture-cache.h"
 
 namespace dmt {
     struct alignas(16) SurfaceMaterial
@@ -62,8 +62,8 @@ namespace dmt {
         float multiscatterMultiplier;
 
         /// distriminator to know whether to use Oren Nayar of GGX for dielectric part of the material
-        int32_t isDiffuseOpaque   : 31;
-        int32_t useShadingNormals : 1;
+        uint32_t isDiffuseOpaque   : 31;
+        uint32_t useShadingNormals : 1;
 
         /// relative (to air) ior for dielectric (GGX)
         float ior;

@@ -1,13 +1,13 @@
 #ifndef DMT_PLATFORM_PUBLIC_PLATFORM_LOGGING_H
 #define DMT_PLATFORM_PUBLIC_PLATFORM_LOGGING_H
 
-#include <memory_resource>
-#include <platform/platform-macros.h>
-#include <platform/platform-utils.h>
+#include "platform-macros.h"
+#include "platform-utils.h"
 
 #include <array>
 #include <chrono>
 #include <concepts>
+#include <memory_resource>
 #include <format>
 #include <mutex>
 #include <source_location>
@@ -15,7 +15,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-
 #include <cassert>
 #include <cinttypes>
 #include <compare>

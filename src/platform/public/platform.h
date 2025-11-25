@@ -2,21 +2,21 @@
 #define DMT_PLATFORM_PUBLIC_PLATFORM_H
 
 // group 1: macros
-#include "platform/platform-macros.h"
+#include "platform-macros.h"
 
 // group 2: launch
-#include <platform/platform-launch.h>
+#include "platform-launch.h"
 
 // group 3: utils, logging, context (order matters)
-#include <platform/platform-utils.h>
-#include <platform/platform-logging.h>
-#include <platform/platform-context.h>
+#include "platform-utils.h"
+#include "platform-logging.h"
+#include "platform-context.h"
 
 // group 4: stuff. (order doesn't matter)
-#include <platform/platform-memory.h>
-#include <platform/platform-threadPool.h>
-#include <platform/platform-file.h>
-#include <platform/platform-memory-stackAllocator.h>
+#include "platform-memory.h"
+#include "platform-threadPool.h"
+#include "platform-file.h"
+#include "platform-memory-stackAllocator.h"
 
 namespace dmt {
     /**

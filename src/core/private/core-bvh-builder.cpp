@@ -2,6 +2,7 @@
 
 #include "core-dstd.h"
 
+#include <functional>
 #include <numeric>
 #include <cstdlib>
 

@@ -6,4 +6,4 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
 
 target_sources(dmt-test-cuda-kernel PRIVATE ${SOURCES})
 
-target_link_libraries(dmt-test-cuda-kernel PRIVATE dmt::platform stb::stb dmt::core OpenEXR::OpenEXR)
+target_link_libraries(dmt-test-cuda-kernel PRIVATE dmt::platform stb::stb dmt::core)

@@ -11,27 +11,27 @@ target_sources(dmt-core
 
 target_compile_definitions(dmt-core PRIVATE FBXSDK_SHARED)
 
-# they add /EHsc and /MP (Windows, regardless of compiler). remove it
-foreach (t OpenEXR OpenEXRCore OpenEXRUtil Iex IlmThread nlohmann_json glm Eigen fbxsdk gx backward)
-  get_target_property(defs ${t} INTERFACE_COMPILE_OPTIONS)
-  if (NOT defs STREQUAL defs-NOTFOUND)
-    message(STATUS "${t} INTERFACE_COMPILE_OPTIONS: ${defs}")
-    list(FILTER defs EXCLUDE REGEX "(/EHsc|/MP)")
-    message(STATUS "${t} INTERFACE_COMPILE_OPTIONS: ${defs}")
-    set_target_properties(${t} PROPERTIES INTERFACE_COMPILE_OPTIONS "${defs}")
+set(core_private_dependencies
+  glm
+  eigen
+  stb
+  nlohmann_json
+  FBXSDK::fbxsdk
+)
+set(core_public_dependencies
+  gx
+  dmt-platform
+)
+foreach (t ${core_private_dependencies} ${core_public_dependencies})
+  if (NOT TARGET ${t})
+    message(FATAL_ERROR "Target ${t} doesn't exist")
   endif ()
 endforeach ()
 
+# they add /EHsc and /MP (Windows, regardless of compiler). remove it
+dmt_fix_msvc_interface_compile_options("${core_private_dependencies};${core_public_dependencies}")
+
 target_link_libraries(dmt-core
-  PUBLIC gx::gx dmt-platform
-  PRIVATE
-  glm::glm
-  Eigen3::Eigen
-  stb::stb
-  nlohmann_json::nlohmann_json
-  FBXSDK::fbxsdk
-  OpenEXR::OpenEXR
-  OpenEXR::OpenEXRCore
-  OpenEXR::OpenEXRUtil
-  OpenEXR::Iex
-  OpenEXR::IlmThread)
+  PUBLIC ${core_public_dependencies} CUDA::cudart
+  PRIVATE ${core_private_dependencies})
+

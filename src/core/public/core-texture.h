@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CORE_TEXTURE_H
 #define DMT_CORE_PUBLIC_CORE_TEXTURE_H
 
-#include "core/core-macros.h"
-#include "core/core-math.h"
-#include "core/cudautils/cudautils-transform.cuh"
+#include "core-macros.h"
+#include "core-math.h"
+#include "cudautils/cudautils-transform.cuh"
 
 namespace dmt {
     struct ImageTexture
@@ -179,9 +179,9 @@ namespace dmt {
 
         int32_t     width;          /// original image x resolution (POT)
         int32_t     height;         /// original image y resolution (POT)
-        int32_t     mipLevels : 30; /// number of mip levels
-        int32_t     isRGB     : 1;  /// is the buffer RGB or grayscale
-        int32_t     isNormal  : 1;  /// is the buffer RGB or grayscale
+        uint32_t    mipLevels : 30; /// number of mip levels
+        uint32_t    isRGB     : 1;  /// is the buffer RGB or grayscale
+        uint32_t    isNormal  : 1;  /// is the buffer RGB or grayscale
         int32_t     deviceIdx;      /// if -1, then CPU resident texture, otherwise index of device (TODO later)
         TexWrapMode wrapModeX;
         TexWrapMode wrapModeY;

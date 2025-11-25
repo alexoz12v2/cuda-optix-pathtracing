@@ -1,10 +1,11 @@
 #ifndef DMT_CORE_PUBLIC_CORE_DSTD_H
 #define DMT_CORE_PUBLIC_CORE_DSTD_H
 
-#include "core/core-macros.h"
+#include "core-macros.h"
 
-#include "platform/platform-memory.h"
+#include "platform-memory.h"
 
+#include <algorithm>
 #include <type_traits>
 #include <optional>
 #include <span>

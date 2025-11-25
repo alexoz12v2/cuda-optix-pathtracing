@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CORE_LIGHT_H
 #define DMT_CORE_PUBLIC_CORE_LIGHT_H
 
-#include "core/core-macros.h"
-#include "core/core-math.h"
-#include "core/cudautils/cudautils-transform.cuh"
+#include "core-macros.h"
+#include "core-math.h"
+#include "cudautils/cudautils-transform.cuh"
 
 // Note: InfiniteImageLight are treated separately from lights in scene
 

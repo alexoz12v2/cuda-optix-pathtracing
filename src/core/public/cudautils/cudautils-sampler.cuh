@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_SAMPLER_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_SAMPLER_CUH
 
-#include "cudautils/cudautils-filter.h"
-#include "cudautils/cudautils-macro.h"
-#include "cudautils/cudautils-vecmath.h"
+#include "cudautils/cudautils-filter.cuh"
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 namespace dmt {
 

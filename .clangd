@@ -1,2 +1,7 @@
 CompileFlags:
   CompilationDatabase: cmake-build-debug-system/compile_commands.json
+FileExtensions:
+- cpp
+- h
+- cu
+- cuh

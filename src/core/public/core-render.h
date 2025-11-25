@@ -1,15 +1,15 @@
 #ifndef DMT_CORE_PUBLIC_CORE_RENDER_H
 #define DMT_CORE_PUBLIC_CORE_RENDER_H
 
-#include "core/core-macros.h"
-#include "core/core-bsdf.h"
-#include "core/core-texture.h"
-#include "core/core-texture-cache.h"
-#include "core/core-trianglemesh.h"
-#include "core/core-light.h"
+#include "core-macros.h"
+#include "core-bsdf.h"
+#include "core-texture.h"
+#include "core-texture-cache.h"
+#include "core-trianglemesh.h"
+#include "core-light.h"
 
-#include "platform/platform-memory.h"
-#include "platform/platform-threadPool.h"
+#include "platform-memory.h"
+#include "platform-threadPool.h"
 
 namespace dmt {
     struct Parameters

@@ -1,13 +1,11 @@
 #ifndef DMT_CORE_PUBLIC_CORE_PRIMITIVE_H
 #define DMT_CORE_PUBLIC_CORE_PRIMITIVE_H
 
-#include "core/core-macros.h"
-#include "core/core-math.h"
-
-#include "core/cudautils/cudautils-vecmath.cuh"
-#include "core/cudautils/cudautils-color.cuh"
-
-#include "core/core-trianglemesh.h"
+#include "core-macros.h"
+#include "core-math.h"
+#include "cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-color.cuh"
+#include "core-trianglemesh.h"
 
 
 // TODO remove

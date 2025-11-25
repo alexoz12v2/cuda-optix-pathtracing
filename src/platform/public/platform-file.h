@@ -1,7 +1,8 @@
 #ifndef DMT_PLATFORM_PUBLIC_PLATFORM_FILE_H
 #define DMT_PLATFORM_PUBLIC_PLATFORM_FILE_H
-#include "platform/platform-macros.h"
-#include "platform/platform-logging.h"
+
+#include "platform-macros.h"
+#include "platform-logging.h"
 
 #include <iterator>
 #include <utility>

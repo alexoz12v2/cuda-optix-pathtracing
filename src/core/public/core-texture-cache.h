@@ -1,11 +1,11 @@
 #ifndef DMT_CORE_PUBLIC_CORE_TEXTURE_CACHE_H
 #define DMT_CORE_PUBLIC_CORE_TEXTURE_CACHE_H
 
-#include "core/core-macros.h"
-#include "core/core-texture.h"
+#include "core-macros.h"
+#include "core-texture.h"
 
-#include "platform/dmtmacros.h"
-#include "platform/platform-memory.h"
+#include "dmtmacros.h"
+#include "platform-memory.h"
 
 #include <gx/shared_mutex.h>
 

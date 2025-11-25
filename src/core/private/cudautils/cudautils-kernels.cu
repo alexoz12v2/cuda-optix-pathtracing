@@ -1,5 +1,7 @@
 #include "cudautils/cudautils-kernels.cuh"
 
+#include "cudautils/cudautils-sampler.cuh"
+
 // GLM and Eigen
 #include "cudautils-include-glm.cuh"
 
@@ -48,9 +50,10 @@ namespace dmt {
             int py = tileStartY + ty;
 
             // RNG
-            uint32_t seed = 0x12345678u ^ (px * 9781u + py * 6271u + s * 13007u);
-            float    u1   = rand01(seed);
-            float    u2   = rand01(seed);
+            uint32_t      seed = 0x12345678u ^ (px * 9781u + py * 6271u + s * 13007u);
+            DeviceSampler sampler(px, py, s, seed);
+            float         u1 = sampler.get1D();
+            float         u2 = sampler.get1D();
 
             float3 ro, rd;
             generate_camera_ray(cam, px, py, u1, u2, ro, rd);
@@ -67,29 +70,29 @@ namespace dmt {
             rayPool.dy[rayIdx]   = rd.y;
             rayPool.dz[rayIdx]   = rd.z;
             rayPool.tmin[rayIdx] = 0.0f;
-            rayPool.tmax[rayIdx] = INF_F;
+            rayPool.tmax[rayIdx] = __int_as_float(0x7f800000);
 
             rayPool.beta_r[rayIdx]    = 1.f;
             rayPool.beta_g[rayIdx]    = 1.f;
             rayPool.beta_b[rayIdx]    = 1.f;
-            rayPool.lastPdf[rayIdx]   = 1.f;
+            rayPool.bsdfPdf[rayIdx]   = 1.f;
             rayPool.depth[rayIdx]     = 0;
-            rayPool.pixX[rayIdx]      = px;
-            rayPool.pixY[rayIdx]      = py;
+            rayPool.pixel_x[rayIdx]   = px;
+            rayPool.pixel_y[rayIdx]   = py;
             rayPool.sampleIdx[rayIdx] = s;
-            rayPool.rng0[rayIdx]      = seed ^ 0xa5a5a5a5u;
-            rayPool.rng1[rayIdx]      = seed ^ 0x3c3c3c3cu;
+            rayPool.rngState0[rayIdx] = seed ^ 0xa5a5a5a5u;
+            rayPool.rngState1[rayIdx] = seed ^ 0x3c3c3c3cu;
 
             // Enqueue
             warp_enqueue(rayQ, true, rayIdx);
         }
     }
 
+#if 0
     __global__ void trace_kernel_warp(Ray const* __restrict__ rays,
                                       int numRays,
                                       BVHWiVeCluster const* __restrict__ nodes,
                                       int                   nodeCount,
-                                      GpuHaltonOwenSampler* samplers,
                                       HitOut* __restrict__ hitOut)
     {
         int warpId = (blockDim.x * blockIdx.x + threadIdx.x) / warpSize;
@@ -360,5 +363,5 @@ namespace dmt {
             warp_enqueue(nextRayQ, true, rayIdx);
         }
     }
-
+#endif
 } // namespace dmt

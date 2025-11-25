@@ -1,6 +1,7 @@
 #include "core-light.h"
 
-#include "platform/platform-context.h"
+#include "platform-context.h"
+#include "cudautils/cudautils-numbers.cuh"
 
 // TODO remove
 #include <iostream>

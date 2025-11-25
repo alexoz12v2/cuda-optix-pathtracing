@@ -87,40 +87,6 @@ macro(dmt_setup_dependencies)
     FetchContent_MakeAvailable(Eigen)
   endif ()
 
-  if (NOT TARGET glfw)
-    FetchContent_Declare(
-      glfw
-      GIT_REPOSITORY https://github.com/glfw/glfw.git
-      GIT_TAG 3.3.4
-      GIT_SHALLOW ON)
-    if (DMT_OS_LINUX)
-      set(GLFW_BUILD_WAYLAND ${GLFW_BUILD_WAYLAND})
-      message(STATUS "before make available: GLFW_BUILD_WAYLAND ${GLFW_BUILD_WAYLAND}")
-    endif ()
-    FetchContent_MakeAvailable(glfw)
-  endif ()
-
-  if (NOT TARGET Imath::Imath)
-    FetchContent_Declare(
-      Imath
-      GIT_REPOSITORY https://github.com/AcademySoftwareFoundation/Imath.git
-      GIT_TAG v3.1.12 # or a later release
-      GIT_SHALLOW ON)
-    FetchContent_MakeAvailable(Imath)
-  endif ()
-
-  if (NOT TARGET OpenEXR::OpenEXR)
-    set(OPENEXR_INSTALL OFF)
-    set(OPENEXR_INSTALL_TOOLS OFF)
-    FetchContent_Declare(
-      OpenEXR
-      GIT_REPOSITORY https://github.com/AcademySoftwareFoundation/openexr.git
-      GIT_TAG v3.3.2 # or a later release
-      GIT_SHALLOW ON)
-    FetchContent_MakeAvailable(OpenEXR)
-    set_target_properties(OpenEXR PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
-  endif ()
-
   if (NOT TARGET nlohmann_json::nlohmann_json)
     FetchContent_Declare(
       nlohmann_json

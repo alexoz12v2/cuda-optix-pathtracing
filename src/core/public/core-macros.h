@@ -1,7 +1,7 @@
 #ifndef DMT_CORE_PUBLIC_CORE_MACROS_H
 #define DMT_CORE_PUBLIC_CORE_MACROS_H
 
-#include "platform/dmtmacros.h"
+#include "dmtmacros.h"
 
 #if defined(DMT_CORE_SHARED)
 

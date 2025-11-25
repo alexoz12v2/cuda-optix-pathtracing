@@ -1,7 +1,7 @@
 #ifndef DMT_PLATFORM_PRIVATE_PLATFORM_MEMORY_WIN32_H
 #define DMT_PLATFORM_PRIVATE_PLATFORM_MEMORY_WIN32_H
 
-#include "platform/platform-memory.h"
+#include "platform-memory.h"
 
 struct WindowsPlatformMemory
 {

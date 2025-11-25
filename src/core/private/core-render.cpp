@@ -6,15 +6,11 @@
 #include "core-material.h"
 #include "core-texture.h"
 
-// write image dependencies
-#include <ImfRgbaFile.h>
-#include <ImfArray.h>
-
 #define STBI_WINDOWS_UTF8
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
-#include "platform/platform-context.h"
+#include "platform-context.h"
 
 // TODO remove
 //#define DMT_SINGLE_THREAD

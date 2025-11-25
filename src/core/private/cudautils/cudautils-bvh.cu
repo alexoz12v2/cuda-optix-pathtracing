@@ -1,4 +1,6 @@
-#include "cudautils/cudautils-bvh.h"
+#include "cudautils/cudautils-bvh.cuh"
+
+#include "cudautils/cudautils-vecmath.cuh"
 
 namespace dmt {
     __forceinline__ __device__ float dot3(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }

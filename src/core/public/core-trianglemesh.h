@@ -1,12 +1,12 @@
 #ifndef DMT_CORE_PUBLIC_CORE_TRIANGLEMESH_H
 #define DMT_CORE_PUBLIC_CORE_TRIANGLEMESH_H
 
-#include "core/core-macros.h"
-#include "core/core-math.h"
-#include "core/core-material.h"
-#include "core/core-light.h"
+#include "core-macros.h"
+#include "core-math.h"
+#include "core-material.h"
+#include "core-light.h"
 
-#include "platform/platform-memory.h"
+#include "platform-memory.h"
 
 namespace dmt {
     struct DMT_CORE_API VertexIndex

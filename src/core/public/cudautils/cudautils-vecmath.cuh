@@ -1,8 +1,10 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_VECMATH_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_VECMATH_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
-#include "core/cudautils/cudautils-float.cuh"
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-float.cuh"
+
+#include <cuda_runtime.h>
 
 namespace dmt {
     // Vector Types ---------------------------------------------------------------------------------------------------
@@ -252,16 +254,15 @@ namespace dmt {
         DMT_CPU_GPU Vector4f(float x, float y, float z, float w) : Tuple4f{x, y, z, w} {}
     };
 
-#if defined(__CUDA_ARCH__)
-    __forceinline__ __device__ float3 to_float3(Vector3f v)
-    {
-        float3 res{};
-        res.x = v.x;
-        res.y = v.y;
-        res.z = v.z;
-        return res;
-    }
-#endif
+    // clang-format off
+    __forceinline__ __host__ __device__ float2 to_float2(Tuple2f v) { float2 res{}; res.x = v.x; res.y = v.y; return res; }
+    __forceinline__ __host__ __device__ float3 to_float3(Tuple3f v) { float3 res{}; res.x = v.x; res.y = v.y; res.z = v.z; return res; }
+    __forceinline__ __host__ __device__ float4 to_float4(Tuple4f v) { float4 res{}; res.x = v.x; res.y = v.y; res.z = v.z; res.w = v.w; return res; }
+
+    __forceinline__ __host__ __device__ int2 to_int2(Tuple2i v) { int2 res{}; res.x = v.x; res.y = v.y; return res; }
+    __forceinline__ __host__ __device__ int3 to_int3(Tuple3i v) { int3 res{}; res.x = v.x; res.y = v.y; res.z = v.z; return res; }
+    __forceinline__ __host__ __device__ int4 to_int4(Tuple4i v) { int4 res{}; res.x = v.x; res.y = v.y; res.z = v.z; res.w = v.w; return res; }
+    // clang-format on
 
     struct DMT_CORE_API Point2i : public Tuple2i
     {
@@ -1230,7 +1231,66 @@ namespace dmt {
         T*       data;
         uint32_t length; // count of elements
     };
+
 } // namespace dmt
+
+// CUDA vector types helpers
+// clang-format off
+struct bool2 { bool x, y; };
+struct bool3 { bool x, y, z; };
+struct bool4 { bool x, y, z, w; };
+// clang-format on
+
+// clang-format off
+inline __host__ __device__ bool2 operator>=(float2 a, float2 b) { return {a.x >= b.x, a.y >= b.y}; }
+inline __host__ __device__ bool2 operator<=(float2 a, float2 b) { return {a.x <= b.x, a.y <= b.y}; }
+inline __host__ __device__ bool3 operator>=(float3 a, float3 b) { return {a.x >= b.x, a.y >= b.y, a.z >= b.z}; }
+inline __host__ __device__ bool3 operator<=(float3 a, float3 b) { return {a.x <= b.x, a.y <= b.y, a.z <= b.z}; }
+inline __host__ __device__ bool4 operator>=(float4 a, float4 b) { return {a.x >= b.x, a.y >= b.y, a.z >= b.z, a.w >= b.w}; }
+inline __host__ __device__ bool4 operator<=(float4 a, float4 b) { return {a.x <= b.x, a.y <= b.y, a.z <= b.z, a.w <= b.w}; }
+
+inline __host__ __device__ bool2 operator>=(float2 a, float b) { return {a.x >= b, a.y >= b}; }
+inline __host__ __device__ bool2 operator<=(float2 a, float b) { return {a.x <= b, a.y <= b}; }
+inline __host__ __device__ bool3 operator>=(float3 a, float b) { return {a.x >= b, a.y >= b, a.z >= b}; }
+inline __host__ __device__ bool3 operator<=(float3 a, float b) { return {a.x <= b, a.y <= b, a.z <= b}; }
+inline __host__ __device__ bool4 operator>=(float4 a, float b) { return {a.x >= b, a.y >= b, a.z >= b, a.w >= b}; }
+inline __host__ __device__ bool4 operator<=(float4 a, float b) { return {a.x <= b, a.y <= b, a.z <= b, a.w <= b}; }
+
+inline __host__ __device__ bool2 operator>=(int2 a, int2 b) { return {a.x >= b.x, a.y >= b.y}; }
+inline __host__ __device__ bool2 operator<=(int2 a, int2 b) { return {a.x <= b.x, a.y <= b.y}; }
+inline __host__ __device__ bool3 operator>=(int3 a, int3 b) { return {a.x >= b.x, a.y >= b.y, a.z >= b.z}; }
+inline __host__ __device__ bool3 operator<=(int3 a, int3 b) { return {a.x <= b.x, a.y <= b.y, a.z <= b.z}; }
+inline __host__ __device__ bool4 operator>=(int4 a, int4 b) { return {a.x >= b.x, a.y >= b.y, a.z >= b.z, a.w >= b.w}; }
+inline __host__ __device__ bool4 operator<=(int4 a, int4 b) { return {a.x <= b.x, a.y <= b.y, a.z <= b.z, a.w <= b.w}; }
+
+inline __host__ __device__ bool2 operator>=(int2 a, int b) { return {a.x >= b, a.y >= b}; }
+inline __host__ __device__ bool2 operator<=(int2 a, int b) { return {a.x <= b, a.y <= b}; }
+inline __host__ __device__ bool3 operator>=(int3 a, int b) { return {a.x >= b, a.y >= b, a.z >= b}; }
+inline __host__ __device__ bool3 operator<=(int3 a, int b) { return {a.x <= b, a.y <= b, a.z <= b}; }
+inline __host__ __device__ bool4 operator>=(int4 a, int b) { return {a.x >= b, a.y >= b, a.z >= b, a.w >= b}; }
+inline __host__ __device__ bool4 operator<=(int4 a, int b) { return {a.x <= b, a.y <= b, a.z <= b, a.w <= b}; }
+
+inline __host__ __device__ bool cuTypes_any(bool2 v) { return v.x || v.y; }
+inline __host__ __device__ bool cuTypes_any(bool3 v) { return v.x || v.y || v.z; }
+inline __host__ __device__ bool cuTypes_any(bool4 v) { return v.x || v.y || v.z || v.w; }
+
+inline __host__ __device__ bool cuTypes_all(bool2 v) { return v.x && v.y; }
+inline __host__ __device__ bool cuTypes_all(bool3 v) { return v.x && v.y && v.z; }
+inline __host__ __device__ bool cuTypes_all(bool4 v) { return v.x && v.y && v.z && v.w; }
+
+__host__ __device__ inline bool2 operator!(bool2 a) { return { !a.x, !a.y }; }
+__host__ __device__ inline bool3 operator!(bool3 a) { return { !a.x, !a.y, !a.z }; }
+__host__ __device__ inline bool4 operator!(bool4 a) { return { !a.x, !a.y, !a.z, !a.w }; }
+
+__host__ __device__ inline bool2 operator&&(bool2 a, bool2 b) { return { a.x && b.x, a.y && b.y }; }
+__host__ __device__ inline bool3 operator&&(bool3 a, bool3 b) { return { a.x && b.x, a.y && b.y, a.z && b.z }; }
+__host__ __device__ inline bool4 operator&&(bool4 a, bool4 b) { return { a.x && b.x, a.y && b.y, a.z && b.z, a.w && b.w }; }
+
+__host__ __device__ inline bool2 operator||(bool2 a, bool2 b) { return { a.x || b.x, a.y || b.y }; }
+__host__ __device__ inline bool3 operator||(bool3 a, bool3 b) { return { a.x || b.x, a.y || b.y, a.z || b.z }; }
+__host__ __device__ inline bool4 operator||(bool4 a, bool4 b) { return { a.x || b.x, a.y || b.y, a.z || b.z, a.w || b.w }; }
+// clang-format on
+
 
 namespace dstd {
     // TODO Move somewhere else

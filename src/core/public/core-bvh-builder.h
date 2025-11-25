@@ -1,12 +1,12 @@
 #ifndef DMT_CORE_PUBLIC_CORE_BVH_BUILDER_H
 #define DMT_CORE_PUBLIC_CORE_BVH_BUILDER_H
 
-#include "core/core-macros.h" // must be before cudautils
+#include "core-macros.h"
 
-#include "core/core-trianglemesh.h"
-#include "core/core-primitive.h"
+#include "core-trianglemesh.h"
+#include "core-primitive.h"
 
-#include "platform/platform-memory.h"
+#include "platform-memory.h"
 
 #include <span>
 #include <vector>

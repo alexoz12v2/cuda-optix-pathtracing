@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CORE_BSDF_H
 #define DMT_CORE_PUBLIC_CORE_BSDF_H
 
-#include "core/core-macros.h"
-#include "core/cudautils/cudautils-vecmath.cuh"
-#include "core/cudautils/cudautils-color.cuh"
+#include "core-macros.h"
+#include "cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-color.cuh"
 
 /**
  * Important Note: Each relative IOR specifies insideIOR / outsideIOR, where the "outside" is defined by the normal direction

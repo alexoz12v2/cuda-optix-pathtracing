@@ -9,7 +9,7 @@ target_sources(
   ${HDR_platform_FILES}
   PRIVATE
   ${SRC_platform_FILES} ${SRC_UNUSED_platform_FILES})
-
+dmt_fix_msvc_interface_compile_options(backward)
 target_link_libraries(dmt-platform PRIVATE
   $<$<BOOL:${DMT_OS_LINUX}>:rt pthread>
   $<$<BOOL:${DMT_OS_WINDOWS}>:kernel32.dll advapi32.dll>

@@ -1,5 +1,9 @@
 #include "core-texture.h"
+
 #include "core-texture-cache.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace dmt {
     struct Byte3
@@ -71,6 +75,7 @@ namespace dmt {
             case ByteGray: [[fallthrough]];
             case Count: return 1;
         }
+        return 1;
     }
 
     template <typename T>
@@ -837,7 +842,7 @@ namespace dmt {
 
         // for EWA
         float lambda = lodRes.lod_minor; // tends to preserve more detail; EWA addresses aliasing anisotropically
-        int   ilod   = std::clamp(int(std::floor(lambda)), 0, mipLevels - 1);
+        int   ilod   = std::clamp<int>(int(std::floor(lambda)), 0, mipLevels - 1);
         float t      = lambda - ilod;
 
         // for trilinear filtering use lodRes.lod_major

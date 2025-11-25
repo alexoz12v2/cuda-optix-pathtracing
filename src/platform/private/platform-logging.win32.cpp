@@ -310,8 +310,9 @@ namespace dmt {
                           uint32_t                    _wNormBytes,
                           std::source_location const& _srcLoc)
     {
+#define STRING(...) #__VA_ARGS__
         // filename
-        static uint32_t const srcLocFileOffset = strlen(DMT_PROJ_PATH);
+        static uint32_t const srcLocFileOffset = strlen(STRING(DMT_PROJ_PATH));
         strncpy(_midBuf, _srcLoc.file_name() + srcLocFileOffset, _midBytes);
         _midBuf[_midBytes - 1]   = '\0';
         uint32_t len             = strlen(_midBuf);

@@ -1515,7 +1515,10 @@ namespace dmt {
     static glm::bvec2 operator>=(Point2i a, Point2i b) { return {a.x >= b.x, a.y >= b.y}; }
     static glm::bvec2 operator<=(Point2i a, Point2i b) { return {a.x <= b.x, a.y <= b.y}; }
 
-    __host__ __device__ bool inside(Point2i p, Bounds2i b) { return glm::all(p >= b.pMin && p <= b.pMax); }
+    __host__ __device__ bool inside(Point2i p, Bounds2i b)
+    {
+        return cuTypes_all(to_int2(p) >= to_int2(b.pMin) && to_int2(p) <= to_int2(b.pMax));
+    }
 
     __host__ __device__ void Bounds2i::boundingSphere(Point2i* c, float* rad) const
     {
@@ -1781,7 +1784,10 @@ namespace dmt {
     {
         glm::vec4 w{p.x, p.y, p.z, 1.f};
         w = *toGLMmat(&m) * w;
-        w /= w.w;
+        w.x /= w.w;
+        w.y /= w.w;
+        w.z /= w.w;
+        w.w = 1.f;
         return {{w.x, w.y, w.z}};
     }
 

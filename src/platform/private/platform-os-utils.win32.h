@@ -1,7 +1,7 @@
 #ifndef DMT_PLATFORM_PRIVATE_PLATFORM_OS_UTILS_WIN32_H
 #define DMT_PLATFORM_PRIVATE_PLATFORM_OS_UTILS_WIN32_H
 
-#include "platform/platform-macros.h"
+#include "platform-macros.h"
 
 #include <memory>
 #include <utility> // std::min

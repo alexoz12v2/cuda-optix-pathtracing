@@ -3,6 +3,12 @@
 // GLM and Eigen
 #include "cudautils-include-glm.cuh"
 
+#include <cuda_runtime.h>
+
+#if !defined(__CUDA_ARCH__)
+    #include <limits>
+#endif
+
 namespace dmt::fl {
     __host__ __device__ float abs(float x)
     {
@@ -154,8 +160,13 @@ namespace dmt {
     __host__ __device__ Intervalf operator/(Intervalf a, Intervalf b)
     {
         // if divisor interval contains zero → full real line
+#ifdef __CUDA_ARCH__
         if (b.low < 0.f && b.high > 0.f)
-            return {-__builtin_inff(), __builtin_inff()};
+            return {-__int_as_float(0x7f800000), __int_as_float(0x7f800000)};
+#else
+        if (b.low < 0.f && b.high > 0.f)
+            return {-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()};
+#endif
 
         float lq0 = fl::divRoundDown(a.low, b.low);
         float lq1 = fl::divRoundDown(a.high, b.low);

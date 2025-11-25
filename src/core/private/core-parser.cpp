@@ -1,6 +1,5 @@
 #include "core-parser.h"
 
-#include "ImfRgba.h"
 #include "core-light.h"
 #include "core-math.h"
 #include "core-render.h"
@@ -9,7 +8,7 @@
 #include "cudautils/cudautils-transform.cuh"
 #include "cudautils/cudautils-vecmath.cuh"
 #include "platform-memory.h"
-#include "platform/platform-context.h"
+#include "platform-context.h"
 
 // json parsing
 #include <algorithm>
@@ -20,9 +19,6 @@
 // image parsing
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
-
-#include <ImfRgbaFile.h>
-#include <ImfArray.h>
 
 // C++ standard
 #include <fstream>
@@ -194,40 +190,6 @@ namespace dmt::parse_helpers {
             }
             stbi_image_free(data);
         }
-        else if (pathExt.ends_with("exr"))
-        {
-            try
-            {
-                Imf::RgbaInputFile file(pathStr.c_str());
-                Imath::Box2i       dw = file.dataWindow();
-                xRes                  = dw.max.x - dw.min.x + 1;
-                yRes                  = dw.max.y - dw.min.y + 1;
-
-                Imf::Array2D<Imf::Rgba> pixels;
-                pixels.resizeErase(yRes, xRes);
-                file.setFrameBuffer(&pixels[0][0] - dw.min.x - dw.min.y * xRes, 1, xRes);
-                file.readPixels(dw.min.y, dw.max.y);
-
-                result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
-                if (!result)
-                    return nullptr;
-
-                for (int y = 0; y < yRes; ++y)
-                {
-                    for (int x = 0; x < xRes; ++x)
-                    {
-                        Imf::Rgba const& px  = pixels[y][x];
-                        int              idx = y * xRes + x;
-                        result[idx].r        = (float)px.r;
-                        result[idx].g        = (float)px.g;
-                        result[idx].b        = (float)px.b;
-                    }
-                }
-            } catch (...)
-            {
-                return nullptr;
-            }
-        }
         else if (pathExt.ends_with("hdr"))
         {
             float* data = stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
@@ -267,26 +229,6 @@ namespace dmt::parse_helpers {
         return result;
     }
 
-    static std::string_view writeOpenEXRChannel(Imf::RgbaChannels channels)
-    {
-        using enum Imf::RgbaChannels;
-        switch (channels)
-        {
-            case WRITE_R: return "(OpenEXR) Red";
-            case WRITE_G: return "(OpenEXR) Green";
-            case WRITE_B: return "(OpenEXR) Blue";
-            case WRITE_A: return "(OpenEXR) Alpha";
-            case WRITE_Y: return "(OpenEXR) Luminance, for black-and-white images, or in combination with chroma";
-            case WRITE_C:
-                return "(OpenEXR) Chroma (two subsampled channels, RY and BY, supported only for scanline-based files)";
-            case WRITE_RGB: return "(OpenEXR) Red, green, blue";
-            case WRITE_RGBA: return "(OpenEXR) Red, green, blue, alpha";
-            case WRITE_YC: return "(OpenEXR) Luminance, chroma";
-            case WRITE_YA: return "(OpenEXR) Luminance, alpha";
-            case WRITE_YCA: return "(OpenEXR) Luminance, chroma, alpha";
-        }
-    }
-
     static TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out)
     {
         using enum TempTexObjResult;
@@ -323,101 +265,6 @@ namespace dmt::parse_helpers {
                 ctx.error("  texture channels: {}", std::make_tuple(channels));
                 ctx.error("  texture expected: {}", std::make_tuple(isRGB ? 3 : 1));
                 return eNumChannelsIncorrect;
-            }
-        }
-        else if (pathExt.ends_with("exr"))
-        {
-            // OpenEXR format, half16 per channel
-            try
-            {
-                Imf::RgbaInputFile file(pathStr.c_str());
-                Imath::Box2i       dw = file.dataWindow();
-
-                if (file.channels() != (isRGB ? Imf::RgbaChannels::WRITE_RGB : Imf::RgbaChannels::WRITE_Y))
-                {
-                    Context ctx;
-                    ctx.error("  texture channels: {}", std::make_tuple(writeOpenEXRChannel(file.channels())));
-                    ctx.error("  texture expected: {}",
-                              std::make_tuple(writeOpenEXRChannel(
-                                  isRGB ? Imf::RgbaChannels::WRITE_RGB : Imf::RgbaChannels::WRITE_Y)));
-                    return eNumChannelsIncorrect;
-                }
-
-                if (file.pixelAspectRatio() != 1.f)
-                {
-                    Context ctx;
-                    ctx.warn("  texture EXR pixel aspect ratio different than 1", {});
-                }
-
-                if (file.lineOrder() != Imf::LineOrder::INCREASING_Y)
-                {
-                    Context ctx;
-                    ctx.warn("  texture EXR line order differnet than increasing Y", {});
-                }
-
-                if (file.parts() > 1)
-                {
-                    Context ctx;
-                    ctx.error("  OpenEXR: No support for multi-view/multi-part EXR files", {});
-                    return eFormatNotSupported;
-                }
-
-                if (file.header().hasType() && file.header().type() != "scanlineimage")
-                {
-                    Context ctx;
-                    ctx.error("  OpenEXR: Expected type '{}', but got '{}'",
-                              std::make_tuple("scanlineimage", file.header().type()));
-                    return eFormatNotSupported;
-                }
-
-                xRes = dw.max.x - dw.min.x + 1;
-                yRes = dw.max.y - dw.min.y + 1;
-
-                // Allocate OpenEXR storage
-                Imf::Array2D<Imf::Rgba> pixels;
-                pixels.resizeErase(yRes, xRes);
-
-                file.setFrameBuffer(&pixels[0][0] - dw.min.x - dw.min.y * xRes, 1, xRes);
-                file.readPixels(dw.min.y, dw.max.y);
-
-                if (isRGB)
-                {
-                    format    = TexFormat::HalfRGB;
-                    half* buf = (half*)malloc(sizeof(half) * xRes * yRes * 3);
-                    if (!buf)
-                        throw std::runtime_error("what");
-                    for (int y = 0; y < yRes; ++y)
-                    {
-                        for (int x = 0; x < xRes; ++x)
-                        {
-                            Imf::Rgba const& px         = pixels[y][x];
-                            buf[(y * xRes + x) * 3 + 0] = px.r;
-                            buf[(y * xRes + x) * 3 + 1] = px.g;
-                            buf[(y * xRes + x) * 3 + 2] = px.b;
-                        }
-                    }
-                    data = buf;
-                }
-                else
-                {
-                    format    = TexFormat::HalfGray;
-                    half* buf = (half*)malloc(sizeof(half) * xRes * yRes);
-                    if (!buf)
-                        throw std::runtime_error("what");
-                    for (int y = 0; y < yRes; ++y)
-                    {
-                        for (int x = 0; x < xRes; ++x)
-                        {
-                            Imf::Rgba const& px = pixels[y][x];
-                            assert((px.b == 0 && px.g == 0 && (px.a == 1 || px.a == 0)) || (px.r == px.g && px.g == px.b));
-                            buf[y * xRes + x] = px.r;
-                        }
-                    }
-                    data = buf;
-                }
-            } catch (std::exception const& e)
-            {
-                return eFailLoad;
             }
         }
         else if (pathExt.ends_with("hdr"))

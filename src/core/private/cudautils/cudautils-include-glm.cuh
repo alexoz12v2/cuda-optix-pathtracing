@@ -25,7 +25,7 @@
 #include <glm/gtx/matrix_decompose.hpp> // glm::decompose
 #include <glm/gtx/norm.hpp>             // glm::length2
 
-#if !defined(__CUDACC__) && !defined(__CUDA_ARCH__)
+#if !defined(__CUDA_ARCH__)
     #include <Eigen/Dense>
 #endif
 #if defined(__CUDACC__)
@@ -39,7 +39,8 @@
     #include <bit>
 #endif
 
-#include "cudautils/cudautils-float.h"
+#include "cudautils/cudautils-float.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 #include <array>
 

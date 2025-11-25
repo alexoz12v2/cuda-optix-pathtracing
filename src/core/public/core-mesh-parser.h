@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CORE_MESH_PARSER_H
 #define DMT_CORE_PUBLIC_CORE_MESH_PARSER_H
 
-#include "core/core-macros.h"
-#include "core/core-trianglemesh.h"
-#include "core/cudautils/cudautils-transform.cuh"
+#include "core-macros.h"
+#include "core-trianglemesh.h"
+#include "cudautils/cudautils-transform.cuh"
 
 
 namespace dmt {

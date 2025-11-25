@@ -1,9 +1,9 @@
 #define DMT_ENTRY_POINT
 #define DMT_WINDOWS_CLI
-#include "platform/platform.h"
+#include "platform.h"
 
-#include "core/core-render.h"
-#include "core/core-parser.h"
+#include "core-render.h"
+#include "core-parser.h"
 
 #include "CLIManager.h"
 

@@ -1,8 +1,8 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_BVH_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_BVH_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
-#include "core/cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 namespace dmt {
 

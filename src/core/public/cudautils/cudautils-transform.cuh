@@ -1,8 +1,8 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_TRANSFORM_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_TRANSFORM_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
-#include "core/cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 namespace dmt {
     // Transform, AnimatedTransform, CameraTransform ------------------------------------------------------------------
@@ -13,7 +13,7 @@ namespace dmt {
         Matrix4f mInv; // Inverse transformation matrix
 
         // Default constructor
-        DMT_CPU_GPU Transform() = default;
+        Transform() = default;
 
         // Constructor with an initial matrix
         DMT_CPU_GPU explicit Transform(Matrix4f const& matrix);

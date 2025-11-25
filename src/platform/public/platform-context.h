@@ -2,9 +2,9 @@
 #define DMT_PLATFORM_PUBLIC_PLATFORM_CONTEXT_H
 
 #include "dmtmacros.h"
-#include "platform/platform-macros.h"
-#include "platform/platform-utils.h"
-#include "platform/platform-logging.h"
+#include "platform-macros.h"
+#include "platform-utils.h"
+#include "platform-logging.h"
 
 namespace dmt {
     /**

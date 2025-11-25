@@ -1,6 +1,6 @@
 #include "core-math.h"
 
-#include "platform/platform-memory.h"
+#include "platform-memory.h"
 
 namespace dmt::arch {
     float hmin_ps(__m128 v)

@@ -554,7 +554,6 @@ function(dmt_add_compile_definitions target properties_visibility)
     else ()
       set(DMT_PROJ_PATH ${PROJECT_SOURCE_DIR})
     endif ()
-    set(DMT_PROJ_PATH \"${DMT_PROJ_PATH}\")
 
     if (WIN32)
       # Use vswhere to locate MSVC toolchain
@@ -694,17 +693,9 @@ function(dmt_add_module_library name module_name)
 
   set_target_properties(${name} PROPERTIES FOLDER "Modules")
 
-  add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/include"
-    COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_CURRENT_SOURCE_DIR}/public" "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}")
-  add_custom_target(${name}-generate-hdrs ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}")
-  add_dependencies(${name} ${name}-generate-hdrs)
-
   target_include_directories(
     ${name}
-    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/include"
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/public")
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public")
 
   # cmake's built-in clang-tidy doesn't seem to work with CXX_MODULES
   set_target_properties(${name} PROPERTIES CXX_CLANG_TIDY "")
@@ -990,4 +981,34 @@ function(dmt_glob_sources prefix src_dir hdr_dir)
     SRC_UNUSED_${prefix}_FILES = ${SRC_UNUSED_${prefix}_FILES}
   ")
   return(PROPAGATE SRC_${prefix}_FILES HDR_${prefix}_FILES SRC_UNUSED_${prefix}_FILES)
+endfunction()
+
+
+function(dmt_fix_msvc_interface_compile_options list)
+  cmake_parse_arguments(THIS_ARGS "READ_ONLY" "" "" ${ARGN})
+  foreach (t ${list})
+    get_target_property(defs ${t} INTERFACE_COMPILE_OPTIONS)
+    if (NOT defs STREQUAL defs-NOTFOUND)
+      message(STATUS "${t} INTERFACE_COMPILE_OPTIONS: ${defs}")
+      if (NOT THIS_ARGS_READ_ONLY)
+        list(FILTER defs EXCLUDE REGEX "(/EHsc|/MP)")
+        message(STATUS "${t} INTERFACE_COMPILE_OPTIONS (after filter): ${defs}")
+        set_target_properties(${t} PROPERTIES INTERFACE_COMPILE_OPTIONS "${defs}")
+        get_target_property(defs ${t} INTERFACE_COMPILE_OPTIONS)
+        message(STATUS "${t} INTERFACE_COMPILE_OPTIONS (after set): ${defs}")
+      endif ()
+    endif ()
+
+    # check features too
+    # *cxx_std_17 implies /EHsc for MSVC sometimes).*
+    get_target_property(defs ${t} INTERFACE_COMPILE_FEATURES)
+    if (NOT defs STREQUAL defs-NOTFOUND)
+      message(STATUS "${t} INTERFACE_COMPILE_FEATURES: ${defs}")
+      list(FILTER defs EXCLUDE REGEX "(cxx_std_11|cxx_std_17|cxx_std_20)")
+      message(STATUS "${t} INTERFACE_COMPILE_FEATURES (after filter): ${defs}")
+      set_target_properties(${t} PROPERTIES INTERFACE_COMPILE_FEATURES "${defs}")
+      get_target_property(defs ${t} INTERFACE_COMPILE_FEATURES)
+      message(STATUS "${t} INTERFACE_COMPILE_FEATURES (after set): ${defs}")
+    endif ()
+  endforeach ()
 endfunction()

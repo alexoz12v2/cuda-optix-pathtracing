@@ -1,6 +1,8 @@
 #ifndef DMT_PLATFORM_PUBLIC_PLATFORM_UTILS_H
 #define DMT_PLATFORM_PUBLIC_PLATFORM_UTILS_H
 
+#include "platform-macros.h"
+
 #include <bit>
 #include <charconv> // For std::from_chars
 #include <concepts>
@@ -18,8 +20,6 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
-
-#include "platform/platform-macros.h"
 
 namespace dmt::os {
     DMT_PLATFORM_API uint32_t processId();

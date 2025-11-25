@@ -1,11 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_CAMERA_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_CAMERA_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
-#include <core/cudautils/cudautils-spectrum.cuh>
-#include <core/cudautils/cudautils-transform.cuh>
-#include <core/cudautils/cudautils-vecmath.cuh>
-#include <core/cudautils/cudautils-film.cuh>
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-transform.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 namespace dmt {
     struct DeviceCamera
@@ -25,18 +23,7 @@ namespace dmt {
         int      height = 128;
     };
 
-    DMT_GPU void generate_camera_ray(
-        DeviceCamera cam,
-        int          px,
-        int          py,
-        float        u1,
-        float        u2,
-        float&       rox,
-        float&       roy,
-        float&       roz,
-        float&       rdx,
-        float&       rdy,
-        float&       rdz);
+    DMT_GPU void generate_camera_ray(DeviceCamera cam, int px, int py, float u1, float u2, float3& ro, float3& rd);
 
 } // namespace dmt
 #endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_CAMERA_CUH

@@ -8,9 +8,8 @@
 #define DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_H
 
 #include "dmtmacros.h"
-#include <platform/platform-macros.h>
-
-#include <platform/platform-logging.h>
+#include "platform-macros.h"
+#include "platform-logging.h"
 
 #include <array>
 #include <bit>

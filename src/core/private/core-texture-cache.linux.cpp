@@ -1,6 +1,6 @@
 #include "core-texture-cache.h"
 
-#include "platform/platform-utils.h"
+#include "platform-utils.h"
 
 #include <iostream>
 #include <memory_resource>

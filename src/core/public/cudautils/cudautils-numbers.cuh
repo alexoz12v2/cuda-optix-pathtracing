@@ -1,30 +1,18 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_NUMBERS_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_NUMBERS_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
-#include "core/cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 // u = random uniformly distributed fp32 number between 0 and 1
 namespace dmt {
-    DMT_CORE_API DMT_CPU_GPU
-#if defined(__CUDA_ARCH__)
-        DMT_FORCEINLINE
-#else
-        DMT_FORCEINLINE inline
-#endif
-            Point2f cartesianFromPolar(float rho, float phi)
+    DMT_CORE_API DMT_CPU_GPU inline Point2f cartesianFromPolar(float rho, float phi)
     {
         return {rho * cosf(phi), rho * sinf(phi)};
     }
 
     // using elevation angle as theta
-    DMT_CORE_API DMT_CPU_GPU
-#if defined(__CUDA_ARCH__)
-        DMT_FORCEINLINE
-#else
-        DMT_FORCEINLINE inline
-#endif
-            Vector3f cartesianFromSpherical(float rho, float phi, float theta)
+    DMT_CORE_API DMT_CPU_GPU inline Vector3f cartesianFromSpherical(float rho, float phi, float theta)
     {
         float sin_phi   = sinf(phi);
         float cos_phi   = cosf(phi);
@@ -34,13 +22,7 @@ namespace dmt {
         return Vector3f(rho * sin_phi * cos_theta, rho * sin_phi * sin_theta, rho * cos_phi);
     }
 
-    DMT_CORE_API DMT_CPU_GPU
-#if defined(__CUDA_ARCH__)
-        DMT_FORCEINLINE
-#else
-        DMT_FORCEINLINE inline
-#endif
-        float sin_sqr_to_one_minus_cos(float const s_sq)
+    DMT_CORE_API DMT_CPU_GPU inline float sin_sqr_to_one_minus_cos(float const s_sq)
     {
         // Using second-order Taylor expansion at small angles for better accuracy.
         return s_sq > 0.0004f ? 1.0f - fl::safeSqrt(1.0f - s_sq) : 0.5f * s_sq;

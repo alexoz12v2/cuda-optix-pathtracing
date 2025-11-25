@@ -1,11 +1,10 @@
 #ifndef DMT_PLATFORM_PUBLIC_PLATFORM_THREADPOOL_H
 #define DMT_PLATFORM_PUBLIC_PLATFORM_THREADPOOL_H
 
-#include "platform/dmtmacros.h"
-#include "platform/platform-macros.h"
-#include "platform/platform-memory.h"
+#include "dmtmacros.h"
+#include "platform-macros.h"
+#include "platform-memory.h"
 
-// Keep in sync with .cppm
 #include <array>
 #include <atomic>
 #include <condition_variable>

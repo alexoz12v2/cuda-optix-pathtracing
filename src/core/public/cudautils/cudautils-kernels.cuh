@@ -1,7 +1,13 @@
 #ifndef DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH
 #define DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH
 
-#include "core/cudautils/cudautils-macro.cuh"
+#include "core-bvh-builder.h"
+
+#include "cudautils/cudautils-macro.cuh"
+#include "cudautils/cudautils-camera.cuh"
+#include "cudautils/cudautils-pools.cuh"
+#include "cudautils/cudautils-filter.cuh"
+#include "cudautils/cudautils-bvh.cuh"
 
 #include <cstdint>
 
@@ -44,6 +50,9 @@ namespace dmt {
     // and rely on warp size being a multiple of 32.
     // ===================================================
     __global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY, int tileW, int tileH, int spp, RayPool rayPool, IndexQueue rayQ);
+
+    // TODO
+#if 0
     /*
      * trace_kernel_warp
      *
@@ -88,14 +97,13 @@ namespace dmt {
     __global__ void trace_kernel_warp(Ray const* __restrict__ rays,
                                       int numRays,
                                       BVHWiVeCluster const* __restrict__ nodes,
-                                      int                   nodeCount,
-                                      GpuHaltonOwenSampler* samplers,
+                                      int nodeCount,
                                       HitOut* __restrict__ hitOut);
 
     // ===================================================
     // Kernel 2: Intersect ? miss adds env to film; hit ? HitPool + ShadeQ
     // ===================================================
-    __global__ void kIntersect(DeviceBVH    bvh,
+    __global__ void kIntersect(BVHWiVeCluster const* __restrict__ bvh,
                                DeviceLights lights,
                                FilmSOA      film,
                                RayPool      rays,
@@ -103,7 +111,7 @@ namespace dmt {
                                IndexQueue   inRayQ,
                                IndexQueue   shadeQ);
 
-    __global__ void kShade(DeviceBVH       bvh,
+    __global__ void kShade(BVHWiVeCluster const* __restrict__ bvh,
                            DeviceLights    lights,
                            DeviceMaterials mats,
                            FilmSOA         film,
@@ -112,5 +120,6 @@ namespace dmt {
                            int             maxDepth,
                            IndexQueue      shadeQ,
                            IndexQueue      nextRayQ);
+#endif
 } // namespace dmt
 #endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH

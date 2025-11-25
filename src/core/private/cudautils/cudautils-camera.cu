@@ -1,18 +1,7 @@
 #include "cudautils/cudautils-camera.cuh"
 
 namespace dmt {
-    DMT_GPU void generate_camera_ray(
-        DeviceCamera cam,
-        int          px,
-        int          py,
-        float        u1,
-        float        u2,
-        float&       rox,
-        float&       roy,
-        float&       roz,
-        float&       rdx,
-        float&       rdy,
-        float&       rdz)
+    DMT_GPU void generate_camera_ray(DeviceCamera cam, int px, int py, float u1, float u2, float3& ro, float3& rd)
     {
         // Basic pinhole: raster->NDC jitter
         float    fx  = (px + u1) / float(cam.width);
@@ -21,10 +10,10 @@ namespace dmt {
 
         // Assume renderFromCam encodes a canonical camera at origin looking -Z; adapt to your transforms.
         // For now: simple camera at origin:
-        rox = roy = roz = 0.f;
+        ro.x = ro.y = ro.z = 0.f;
 
-        rdx = ndc.x;
-        rdy = ndc.y;
-        rdz = -1.f;
+        rd.x = ndc.x;
+        rd.y = ndc.y;
+        rd.z = -1.f;
     }
 } // namespace dmt

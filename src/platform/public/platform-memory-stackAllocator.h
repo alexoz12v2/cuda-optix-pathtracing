@@ -1,9 +1,10 @@
 #ifndef DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_STACKALLOCATOR_H
 #define DMT_PLATFORM_PUBLIC_PLATFORM_MEMORY_STACKALLOCATOR_H
 
-#include <stdint.h>
-#include <platform/platform-macros.h>
-#include <platform/platform-memory.h>
+#include "platform-macros.h"
+#include "platform-memory.h"
+
+#include <cstdint>
 
 namespace dmt {
 

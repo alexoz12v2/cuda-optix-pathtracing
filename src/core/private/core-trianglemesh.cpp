@@ -1,5 +1,5 @@
 #include "core-trianglemesh.h"
-#include "core/cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 
 #include <numeric>
 

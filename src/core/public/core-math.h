@@ -1,18 +1,13 @@
 #ifndef DMT_CORE_PUBLIC_CORE_MATH_H
 #define DMT_CORE_PUBLIC_CORE_MATH_H
 
-#include "core/core-macros.h"
-#include "core/core-dstd.h"
-#include "core/cudautils/cudautils-vecmath.cuh"
-#include "core/cudautils/cudautils-transform.cuh"
-#include "core/cudautils/cudautils-color.cuh"
+#include "core-macros.h"
+#include "core-dstd.h"
+#include "cudautils/cudautils-vecmath.cuh"
+#include "cudautils/cudautils-transform.cuh"
+#include "cudautils/cudautils-color.cuh"
 
-#include "platform/platform-memory.h"
-
-#if !defined(DMT_ARCH_X86_64)
-    #error "Support only for AVX2 capable x86_64 CPU"
-#endif
-
+#include "platform-memory.h"
 
 #if !defined(DMT_ARCH_X86_64)
     #error "Support only for AVX2 capable x86_64 CPU"

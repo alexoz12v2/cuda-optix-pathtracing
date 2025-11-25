@@ -1,9 +1,9 @@
 #ifndef DMT_CORE_PUBLIC_CORE_LIGHT_TREE_BUILDER_H
 #define DMT_CORE_PUBLIC_CORE_LIGHT_TREE_BUILDER_H
 
-#include "core/core-macros.h"
-#include "core/core-light.h"
-#include "core/cudautils/cudautils-transform.cuh"
+#include "core-macros.h"
+#include "core-light.h"
+#include "cudautils/cudautils-transform.cuh"
 
 /// this file applies paper <https://fpsunflower.github.io/ckulla/data/many-lights-hpg2018.pdf>
 

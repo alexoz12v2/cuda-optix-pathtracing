@@ -1,7 +1,8 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "cudautils/cudautils.h"
+#include "core/cudautils/cudautils-vecmath.cuh"
+#include "core/cudautils/cudautils-color.cuh"
 
 /**
  * Important Note: Each relative IOR specifies insideIOR / outsideIOR, where the "outside" is defined by the normal direction

@@ -1,7 +1,7 @@
 #include "core-bsdf.h"
 
 #include "core-math.h"
-#include "cudautils/cudautils-float.h"
+#include "core/cudautils/cudautils-float.cuh"
 
 // TODO remove
 #if 1

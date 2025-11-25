@@ -1,9 +1,8 @@
 #pragma once
 
-#include "dmtmacros.h"
-#include <platform/platform-macros.h>
-
-#include <platform/platform-memory.h>
+#include "platform/dmtmacros.h"
+#include "platform/platform-macros.h"
+#include "platform/platform-memory.h"
 
 // Keep in sync with .cppm
 #include <array>
@@ -36,8 +35,7 @@ namespace dmt::os {
             void*      data;
         };
 
-        DMT_FORCEINLINE inline Thread(ThreadFunc                 func,
-                                      std::pmr::memory_resource* resource = std::pmr::get_default_resource()) :
+        inline Thread(ThreadFunc func, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) :
         m_internal(reinterpret_cast<Thread::Internal*>(resource->allocate(sizeof(Thread::Internal)))),
         m_resource(resource)
         {

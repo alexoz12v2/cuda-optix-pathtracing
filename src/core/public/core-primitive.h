@@ -3,8 +3,8 @@
 #include "core/core-macros.h"
 #include "core/core-math.h"
 
-#include "cudautils/cudautils-vecmath.h"
-#include "cudautils/cudautils-color.h"
+#include "core/cudautils/cudautils-vecmath.cuh"
+#include "core/cudautils/cudautils-color.cuh"
 
 #include "core/core-trianglemesh.h"
 

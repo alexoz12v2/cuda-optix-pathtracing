@@ -3,13 +3,14 @@
 #include "core/core-macros.h"
 #include "core/core-texture.h"
 
-#include "dmtmacros.h"
+#include "platform/dmtmacros.h"
 #include "platform/platform-memory.h"
 
 #include <gx/shared_mutex.h>
 
 #include <list>
 #include <memory_resource>
+#include <unordered_map>
 
 // mipc file description
 // - header
@@ -36,7 +37,7 @@ namespace dmt::mipc {
 } // namespace dmt::mipc
 
 namespace dmt {
-    DMT_FORCEINLINE inline uint32_t mipBytes(int32_t width, int32_t height, int32_t level, TexFormat texFormat)
+    inline uint32_t mipBytes(int32_t width, int32_t height, int32_t level, TexFormat texFormat)
     {
         uint32_t const pixelBytes = bytesPerPixel(texFormat);
         while (level > 0)
@@ -51,14 +52,14 @@ namespace dmt {
         return static_cast<uint32_t>(bytes);
     }
 
-    DMT_FORCEINLINE inline uint64_t baseKeyFromPath(os::Path const& path)
+    inline uint64_t baseKeyFromPath(os::Path const& path)
     {
         thread_local char                   buffer[1024];
         std::pmr::monotonic_buffer_resource scratch{buffer, 1024}; // default upstream on purpose, avoid crash
         return hashCRC64(path.toUnderlying(&scratch));
     }
 
-    DMT_FORCEINLINE inline uint64_t baseKeyFromPath(std::string_view path) { return hashCRC64(path); }
+    inline uint64_t baseKeyFromPath(std::string_view path) { return hashCRC64(path); }
 
     /// - its static method creates, from the `ImageTexturev2` object, a temporary file which will be deleted
     ///   upon process termination. Such a file stores a header of metadata about the uncompressed image, such as
@@ -97,7 +98,7 @@ namespace dmt {
                                           size_t*    inOutOffset,
                                           TexFormat* outFormat) const;
 
-        [[nodiscard]] DMT_FORCEINLINE inline size_t sectorSize() const { return m_sectorSize; }
+        [[nodiscard]] inline size_t sectorSize() const { return m_sectorSize; }
 
     private:
         /// associate the file key to its file descriptor/HANDLE

@@ -1,8 +1,8 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "cudautils/cudautils.h"
 #include "core/core-light.h"
+#include "core/cudautils/cudautils-transform.cuh"
 
 /// this file applies paper <https://fpsunflower.github.io/ckulla/data/many-lights-hpg2018.pdf>
 

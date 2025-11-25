@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dmtmacros.h"
+#include "platform/dmtmacros.h"
 
 #if defined(DMT_CORE_SHARED)
 

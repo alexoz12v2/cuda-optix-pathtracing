@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/cudautils/cudautils-macro.cuh"
-
+#include "core/cudautils/cudautils-float.cuh"
 
 namespace dmt {
     // Vector Types ---------------------------------------------------------------------------------------------------

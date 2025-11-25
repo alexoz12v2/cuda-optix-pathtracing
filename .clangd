@@ -1,3 +1,2 @@
 CompileFlags:
-  CompilationDatabase: build/Debug-Linux/compile_commands.json
-  Add: [-Iinclude, -Ibuild/Debug-Linux/src/cuda-wrappers]
+  CompilationDatabase: cmake-build-debug-system/compile_commands.json

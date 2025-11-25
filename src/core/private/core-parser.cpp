@@ -6,8 +6,8 @@
 #include "core-render.h"
 #include "core-texture.h"
 #include "core-trianglemesh.h"
-#include "cudautils-transform.h"
-#include "cudautils-vecmath.h"
+#include "cudautils/cudautils-transform.cuh"
+#include "cudautils/cudautils-vecmath.cuh"
 #include "platform-memory.h"
 #include "platform/platform-context.h"
 

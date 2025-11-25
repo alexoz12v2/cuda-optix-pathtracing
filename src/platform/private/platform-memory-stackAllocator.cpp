@@ -1,6 +1,6 @@
-#include <platform/platform-memory-stackAllocator.h>
-#include <platform/platform-memory.h>
-#include <platform/platform-utils.h>
+#include "platform-memory-stackAllocator.h"
+#include "platform-memory.h"
+#include "platform-utils.h"
 
 namespace dmt {
 

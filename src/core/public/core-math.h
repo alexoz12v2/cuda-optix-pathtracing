@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "cudautils/cudautils.h"
 #include "core/core-dstd.h"
+#include "core/cudautils/cudautils-vecmath.cuh"
+#include "core/cudautils/cudautils-transform.cuh"
+#include "core/cudautils/cudautils-color.cuh"
 
 #include "platform/platform-memory.h"
 
@@ -82,7 +84,7 @@ namespace dmt {
     DMT_CORE_API Matrix4f  matrixFromAffine(float const affineTransform[12]);
     DMT_CORE_API Transform transformFromAffine(float const affineTransform[12]);
 
-    DMT_FORCEINLINE DMT_CORE_API inline void coordinateSystemFallback(Vector3f const& n, Vector3f* t, Vector3f* b)
+    DMT_CORE_API inline void coordinateSystemFallback(Vector3f const& n, Vector3f* t, Vector3f* b)
     {
         if (fabsf(n.x) > fabsf(n.z))
             *t = Vector3f(-n.y, n.x, 0.f);
@@ -102,16 +104,14 @@ namespace dmt {
     DMT_CORE_API int32_t sampleDiscrete(float const* weights, uint32_t weightCount, float u, float* pmf, float* uRemapped);
 
     /// @{
-    DMT_CORE_API uint32_t                        decodeMorton2D(uint32_t morton);
-    DMT_CORE_API uint32_t                        encodeMorton2D(uint32_t x, uint32_t y);
-    DMT_CORE_API DMT_FORCEINLINE inline uint32_t decodeMortonX(uint32_t morton) { return decodeMorton2D(morton); }
-    DMT_CORE_API DMT_FORCEINLINE inline uint32_t decodeMortonY(uint32_t morton) { return decodeMorton2D(morton >> 1); }
+    DMT_CORE_API uint32_t        decodeMorton2D(uint32_t morton);
+    DMT_CORE_API uint32_t        encodeMorton2D(uint32_t x, uint32_t y);
+    DMT_CORE_API inline uint32_t decodeMortonX(uint32_t morton) { return decodeMorton2D(morton); }
+    DMT_CORE_API inline uint32_t decodeMortonY(uint32_t morton) { return decodeMorton2D(morton >> 1); }
     /// @}
 
     // TODO move elsewhere?
-    DMT_FORCEINLINE inline void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource,
-                                                            unsigned char*                       ptr,
-                                                            uint32_t                             bytes)
+    inline void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
     {
         // https://developercommunity.visualstudio.com/t/monotonic_buffer_resourcerelease-does/10624172
         auto* upstream = resource.upstream_resource();
@@ -146,17 +146,14 @@ namespace dmt {
 
         float DMT_CORE_API sample(float u, float* pdf = nullptr, int32_t* offset = nullptr) const;
 
-        DMT_FORCEINLINE inline std::span<float const> absFunc() const { return {m_buffer.get(), m_funcCount}; }
-        DMT_FORCEINLINE inline std::span<float const> CDF() const
-        {
-            return {m_buffer.get() + m_funcCount, m_funcCount};
-        }
-        DMT_FORCEINLINE inline std::span<float const> absFunc() { return {m_buffer.get(), m_funcCount}; }
-        DMT_FORCEINLINE inline std::span<float const> CDF() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+        inline std::span<float const> absFunc() const { return {m_buffer.get(), m_funcCount}; }
+        inline std::span<float const> CDF() const { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+        inline std::span<float const> absFunc() { return {m_buffer.get(), m_funcCount}; }
+        inline std::span<float const> CDF() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
 
     private:
-        DMT_FORCEINLINE inline std::span<float> absFunc_() { return {m_buffer.get(), m_funcCount}; }
-        DMT_FORCEINLINE inline std::span<float> CDF_() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
+        inline std::span<float> absFunc_() { return {m_buffer.get(), m_funcCount}; }
+        inline std::span<float> CDF_() { return {m_buffer.get() + m_funcCount, m_funcCount}; }
 
     private:
         UniqueRef<float[]> m_buffer;    // first half abs(func), second half CDF

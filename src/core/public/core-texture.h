@@ -1,8 +1,8 @@
 #pragma once
 
 #include "core/core-macros.h"
-#include "cudautils/cudautils.h"
 #include "core/core-math.h"
+#include "core/cudautils/cudautils-transform.cuh"
 
 namespace dmt {
     struct ImageTexture

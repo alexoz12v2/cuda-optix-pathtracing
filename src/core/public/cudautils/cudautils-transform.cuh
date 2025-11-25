@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/cudautils/cudautils-macro.cuh"
-#include "core/cudautils/cudautils-enums.cuh"
 #include "core/cudautils/cudautils-vecmath.cuh"
 
 namespace dmt {
@@ -88,12 +87,7 @@ namespace dmt {
     // Transform Inline Functions
     DMT_CPU_GPU inline Transform Inverse(Transform const& t) { return Transform(t.m); }
 
-#if defined(__CUDA_ARCH__)
-    DMT_FORCEINLINE
-#else
-    DMT_FORCEINLINE inline
-#endif
-    DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b) { return a.combine(b); }
+    inline DMT_CPU_GPU Transform operator*(Transform const& a, Transform const& b) { return a.combine(b); }
 
     class DMT_CORE_API AnimatedTransform
     {
@@ -108,7 +102,6 @@ namespace dmt {
         DMT_CPU_GPU Vector3f operator()(Vector3f vpn, float time) const;
         DMT_CPU_GPU Point3f  operator()(Point3f vpn, float time) const;
         DMT_CPU_GPU Normal3f operator()(Normal3f vpn, float time) const;
-
 
         // ray encapsulates time
         DMT_CPU_GPU Ray             operator()(Ray const& ray, float* optInOut_tMax = nullptr) const;

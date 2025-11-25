@@ -691,9 +691,14 @@ function(dmt_add_module_library name module_name)
 
     set_target_properties(${name} PROPERTIES EXPORT_NAME dmt::${target_path})
 
-    set_target_properties(${name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
-    set_target_properties(${name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/lib>)
-    set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<1:${PROJECT_BINARY_DIR}/bin>)
+    set_target_properties(${name} PROPERTIES
+      ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${PROJECT_BINARY_DIR}/lib"
+      ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${PROJECT_BINARY_DIR}/lib"
+      LIBRARY_OUTPUT_DIRECTORY_DEBUG "${PROJECT_BINARY_DIR}/lib"
+      LIBRARY_OUTPUT_DIRECTORY_RELEASE "${PROJECT_BINARY_DIR}/lib"
+      RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_BINARY_DIR}/bin"
+      RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_BINARY_DIR}/bin"
+    )
   endif ()
 
   set_target_properties(${name} PROPERTIES FOLDER "Modules")
@@ -707,7 +712,7 @@ function(dmt_add_module_library name module_name)
 
   target_include_directories(
     ${name}
-    INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/include/${module_name}"
+    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/public")
 
   # cmake's built-in clang-tidy doesn't seem to work with CXX_MODULES
@@ -957,7 +962,7 @@ function(dmt_glob_sources prefix src_dir hdr_dir)
   set(PRIVATE_HDR_${prefix}_FILES ${ALL_${prefix}_FILES})
   list(FILTER HDR_${prefix}_FILES EXCLUDE REGEX "${src_dir}.*")
   list(FILTER SRC_${prefix}_FILES EXCLUDE REGEX "${hdr_dir}.*\\.(cu|cpp)$")
-  list(FILTER PRIVATE_HDR_${prefix}_FILES EXCLUDE REGEX "${src_dir}.*\\.(cuh|h|hpp)$")
+  list(FILTER PRIVATE_HDR_${prefix}_FILES INCLUDE REGEX "${src_dir}.*\\.(cuh|h|hpp)$")
 
   # compute from src generic and os specific files
   set(SRC_GENERIC_${prefix}_FILES ${SRC_${prefix}_FILES})

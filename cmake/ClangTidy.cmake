@@ -27,19 +27,5 @@ else ()
   message(FATAL_ERROR "clang-tidy version ${CMAKE_MATCH_1} is too low")
 endif ()
 
-# find run-clang-tidy script and run it with python
-if (NOT RUN_CLANG_TIDY)
-  set(hints "")
-  if (DMT_OS_WINDOWS)
-    list(APPEND hints "C:\\Program Files\\LLVM\\bin" "$ENV{USERPROFILE}")
-  endif ()
-  find_package(Python 3 REQUIRED)
-  find_program(RUN_CLANG_TIDY run-clang-tidy)
-endif ()
-
-# vroom vroom
-message(STATUS "Executing run-clang-tidy on folder ${PROJECT_BINARY_DIR}, files ${FORMAT_SOURCES}")
-# execute_process(COMMAND ${Python_EXECUTABLE} ${RUN_CLANG_TIDY} -clang-tidy-binary ${CLANG_TIDY_EXECUTABLE} -quiet
-# -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -p ${PROJECT_BINARY_DIR} RESULT_VARIABLE EXIT_CODE)
 set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_EXECUTABLE}; -quiet; -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy; -p
   ${PROJECT_BINARY_DIR};)

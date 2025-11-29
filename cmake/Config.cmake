@@ -925,18 +925,25 @@ endmacro()
 # assumes src_dir and hdr_dir are absolute paths
 function(dmt_glob_sources prefix src_dir hdr_dir)
   # collect headers and sources
-  file(GLOB_RECURSE ALL_${prefix}_FILES CONFIGURE_DEPENDS
+  set(glob_list
     # private sources
     "${src_dir}/*.cpp"
     "${src_dir}/*.cu"
-    # public headers
-    "${hdr_dir}/*.h"
-    "${hdr_dir}/*.cuh"
-    "${hdr_dir}/*.hpp"
     # private headers
     "${src_dir}/*.h"
     "${src_dir}/*.cuh"
     "${src_dir}/*.hpp"
+  )
+  if (hdr_dir AND IS_DIRECTORY "${hdr_dir}")
+    list(APPEND glob_list
+      # public headers
+      "${hdr_dir}/*.h"
+      "${hdr_dir}/*.cuh"
+      "${hdr_dir}/*.hpp"
+    )
+  endif ()
+  file(GLOB_RECURSE ALL_${prefix}_FILES CONFIGURE_DEPENDS
+    ${glob_list}
   )
 
   # split sources into OS-Specific and generic (assumes public header are generic only)
@@ -944,7 +951,9 @@ function(dmt_glob_sources prefix src_dir hdr_dir)
   set(HDR_${prefix}_FILES ${ALL_${prefix}_FILES})
   set(PRIVATE_HDR_${prefix}_FILES ${ALL_${prefix}_FILES})
   list(FILTER HDR_${prefix}_FILES EXCLUDE REGEX "${src_dir}.*")
-  list(FILTER SRC_${prefix}_FILES EXCLUDE REGEX "${hdr_dir}.*\\.(cu|cpp)$")
+  if (hdr_dir AND IS_DIRECTORY "${hdr_dir}")
+    list(FILTER SRC_${prefix}_FILES EXCLUDE REGEX "${hdr_dir}.*\\.(cu|cpp)$")
+  endif ()
   list(FILTER PRIVATE_HDR_${prefix}_FILES INCLUDE REGEX "${src_dir}.*\\.(cuh|h|hpp)$")
 
   # compute from src generic and os specific files

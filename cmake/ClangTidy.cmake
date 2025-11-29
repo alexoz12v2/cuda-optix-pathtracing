@@ -1,6 +1,12 @@
 # From SFML's Repo
 if (NOT EXISTS ${CLANG_TIDY_EXECUTABLE})
-  find_program(CLANG_TIDY_EXEC_TEMP ${CLANG_TIDY_EXECUTABLE})
+  set(hints "")
+  if (DMT_OS_WINDOWS)
+    list(APPEND hints "C:\\Program Files\\LLVM\\bin" "$ENV{USERPROFILE}")
+  endif ()
+  find_program(CLANG_TIDY_EXEC_TEMP ${CLANG_TIDY_EXECUTABLE}
+    HINTS ${hints}
+  )
   if (CLANG_TIDY_EXEC_TEMP)
     set(CLANG_TIDY_EXECUTABLE ${CLANG_TIDY_EXEC_TEMP})
     unset(CLANG_TIDY_EXEC_TEMP)
@@ -22,12 +28,13 @@ else ()
 endif ()
 
 # find run-clang-tidy script and run it with python
-find_package(Python 3 REQUIRED)
-find_program(RUN_CLANG_TIDY run-clang-tidy)
-
-# if not found on PATH, explode
 if (NOT RUN_CLANG_TIDY)
-  message(FATAL_ERROR "Failed to fidn run-clang-tidy script")
+  set(hints "")
+  if (DMT_OS_WINDOWS)
+    list(APPEND hints "C:\\Program Files\\LLVM\\bin" "$ENV{USERPROFILE}")
+  endif ()
+  find_package(Python 3 REQUIRED)
+  find_program(RUN_CLANG_TIDY run-clang-tidy)
 endif ()
 
 # vroom vroom
@@ -35,7 +42,4 @@ message(STATUS "Executing run-clang-tidy on folder ${PROJECT_BINARY_DIR}, files 
 # execute_process(COMMAND ${Python_EXECUTABLE} ${RUN_CLANG_TIDY} -clang-tidy-binary ${CLANG_TIDY_EXECUTABLE} -quiet
 # -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -p ${PROJECT_BINARY_DIR} RESULT_VARIABLE EXIT_CODE)
 set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_EXECUTABLE}; -quiet; -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy; -p
-                         ${PROJECT_BINARY_DIR};)
-
-# TODO better
-set(CMAKE_CXX_CLANG_TIDY "")
+  ${PROJECT_BINARY_DIR};)

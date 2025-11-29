@@ -1,6 +1,12 @@
 # From SFML's Repo
 if (NOT EXISTS ${CLANG_FORMAT_EXECUTABLE})
-  find_program(CLANG_FORMAT_EXEC_TEMP ${CLANG_FORMAT_EXECUTABLE})
+  set(hints "")
+  if (DMT_OS_WINDOWS)
+    list(APPEND hints "C:\\Program Files\\LLVM\\bin" "$ENV{USERPROFILE}")
+  endif ()
+  find_program(CLANG_FORMAT_EXEC_TEMP ${CLANG_FORMAT_EXECUTABLE}
+    HINTS ${hints}
+  )
   if (CLANG_FORMAT_EXEC_TEMP)
     set(CLANG_FORMAT_EXECUTABLE ${CLANG_FORMAT_EXEC_TEMP})
     unset(CLANG_FORMAT_EXEC_TEMP)

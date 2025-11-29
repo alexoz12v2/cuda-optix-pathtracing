@@ -54,11 +54,13 @@ macro(dmt_set_option var default type docstring)
     CACHE ${type} ${docstring} FORCE)
 endmacro()
 
-# Build Type
-dmt_set_option(CMAKE_BUILD_TYPE Debug STRING "Choose the type of build (eg Debug, Release)")
+# Build Type -> Ignored on multi config generators, so removed
+# dmt_set_option(CMAKE_BUILD_TYPE Debug STRING "Choose the type of build (eg Debug, Release)")
 
 # docs generation
 dmt_set_option(DMT_GENERATE_DOCS OFF BOOL "Generate Docs")
+
+dmt_set_option(DMT_GENERATE_TRAINING OFF BOOL "Generate Training Targets")
 
 # ######################################################################################################################
 # Other Global CMake Configuration
@@ -84,7 +86,9 @@ include(cmake/Dependencies.cmake)
 include(cmake/SetupDoxygen.cmake)
 
 dmt_define_environment()
-dmt_setup_cuda_toolkit_11_8()
+
+include("${CMAKE_SOURCE_DIR}/cmake/CUDA.toolchain.cmake")
+dmt_setup_cuda_toolkit_12_6()
 
 # Enable CUDA After including toolkit
 if (WIN32)
@@ -179,3 +183,7 @@ foreach (lang CXX CUDA)
   set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO "" CACHE STRING "nothing" FORCE)
   set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO_INIT "" CACHE STRING "nothing" FORCE)
 endforeach ()
+
+if (DMT_GENERATE_TRAINING)
+  add_subdirectory(training)
+endif ()

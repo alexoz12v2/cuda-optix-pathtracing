@@ -1,37 +1,46 @@
 # cuda-optix-pathtracing
 
-Implementing a simple path tracer in C++ CUDA using OptiX
+Implementing a simple path tracer in C++ CUDA
 
-- CUDA Toolkit Version used: 11.8
+(Despite the name, we are not using OptiX anymore)
+
+- CUDA Toolkit Version used: 12.6
 - Operating Systems Supported: Windows, Linux (tested Ubuntu 24.04)
 
-## Install [TEV Display server](github.com/Tom94/tev) and play around with `pbrt`
+## Windows Setup
 
-`pbrt` uses `tev` to display its image during rendering (as an alternative to `glfw`). If both `tev` and `pbrt` are on the path, then you can execute (Powershell)
+- Download Visual Studio 2022 and make sure to have the MSVC v143 (`Microsoft.VisualStudio.Component.VC.Tools.x86.x64`)
+  at least version `14.42.34433` installed. 
+- Download CUDA GPU Computing Toolkit 12.6 and install it in its default path
+- Download the Windows SDK 10 (Expected Version: `10.0.22621.0`)
+- Install ninja, either from Visual Studio or standalone (With `winget`)
+- Install cmake, either bundled from your IDE or from `winget`. Used Version: minimum `4.1.0`
+- Install OptiX 8.0 (not used but still required in the build)
+- Install FBX SDK 2020.3.7 (default location)
 
-- windows
+If you want to use a IDE which expects an environment properly setup, open a powershell version and use the provided
+scripts to setup the environment properly
 
-    ```powershell
-    Start-Process -FilePath "tev" -ArgumentList "--hostname","127.0.0.1:14158"
-    ```
+Example
 
-- linux
-
-    '''sh
-    tev --hostname 127.0.0.1:14158 &
-    ```
-
-Once you have a `tev` server up and running,
-
-```sh
-# (GPU version)
-pbrt --gpu --log-level verbose --display-server 127.0.0.1:14158 .\villa-daylight.pbrt
-# (CPU version)
-pbrt --wavefront --log-level verbose --display-server 127.0.0.1:14158 .\villa-daylight.pbrt
+```powershell
+& "Y:\cuda-optix-pathtracing\scripts\resetenv.ps1"| &"Y:\cuda-optix-pathtracing\scripts\applyenv.ps1"
+& "C:\Program Files\JetBrains\CLion 2025.2.3\bin\clion64.exe"
 ```
 
-Alternatively, `pbrt` can also display to a native, `glfw` based window with the `--interactive` option.
-(one of `--interactive` and `--display-server <addr:port>` can be used, not both). It's laggy so I don't reccomend it.
+Command to properly configure the cmake build project with the MSVC toolchain
+
+```shell
+cmake "-DCMAKE_BUILD_TYPE=Debug" "-DCMAKE_MAKE_PROGRAM=/path/to/ninja.exe" \
+  "-DCMAKE_C_COMPILER=path/to/cl.exe" -G Ninja "-DCMAKE_BUILD_TYPE=Debug" \
+  "-DCMAKE_TOOLCHAIN_FILE=cmake/Windows.MSVC.toolchain.cmake" "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" \
+  -S "proj/dir" -B "your/binary/dir"
+```
+
+Note that the compiler variable is not strictly necessary since the toolchain file should take care of prepping cache
+variables.
+
+WARNING: `scripts\resetenv.ps1` and `cmake\Windows.MSVC.toolchain.cmake` should be kept in sync
 
 ## Linux setup
 

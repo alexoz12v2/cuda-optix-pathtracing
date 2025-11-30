@@ -135,6 +135,7 @@ namespace dmt::parse_helpers {
 #elif defined(DMT_OS_WINDOWS)
         if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
 #else
+    #error "Error allocate aligned RGB"
 #endif
             return nullptr;
         return reinterpret_cast<RGB*>(ptr);
@@ -238,9 +239,9 @@ namespace dmt::parse_helpers {
         std::pmr::string           pathStr = path.toUnderlying();
         std::pmr::memory_resource* mem     = std::pmr::get_default_resource();
 
-        int         xRes = 0, yRes = 0, channels = isRGB ? 3 : 1;
-        void const* data = nullptr;
-        TexFormat   format;
+        int       xRes = 0, yRes = 0, channels = isRGB ? 3 : 1;
+        void*     data = nullptr;
+        TexFormat format;
 
         std::string pathExt;
         if (pathStr.find_last_of('.') == std::pmr::string::npos)
@@ -287,6 +288,10 @@ namespace dmt::parse_helpers {
         }
 
         *out = makeRGBMipmappedTexture(data, xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, format, mem);
+        if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg") || pathExt.ends_with("hdr"))
+        {
+            stbi_image_free(data);
+        }
         return eOk;
     }
 
@@ -302,14 +307,16 @@ namespace dmt::parse_helpers {
                   std::back_inserter(pathExt));
 
         std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
-        if (pathExt.ends_with("png") || pathExt.ends_with("hdr") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
-        {
-            stbi_image_free(in.data);
-        }
-        else if (pathExt.ends_with("exr"))
-        {
-            free(in.data);
-        }
+
+#if defined(DMT_OS_LINUX)
+        //if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
+        free(in.data);
+#elif defined(DMT_OS_WINDOWS)
+        //if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
+        _aligned_free(in.data);
+#else
+    #error "Error"
+#endif
     }
 
     static ExtractVec3fResult extractVec3f(json const& vec, Vector3f* out)

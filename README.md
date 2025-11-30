@@ -13,7 +13,7 @@ Implementing a simple path tracer in C++ CUDA
   at least version `14.42.34433` installed. 
 - Download CUDA GPU Computing Toolkit 12.6 and install it in its default path
 - Download the Windows SDK 10 (Expected Version: `10.0.22621.0`)
-- Install ninja, either from Visual Studio or standalone (With `winget`)
+- Install ninja, either from Visual Studio or standalone (With `winget`) (at least version 1.11)
 - Install cmake, either bundled from your IDE or from `winget`. Used Version: minimum `4.1.0`
 - Install OptiX 8.0 (not used but still required in the build)
 - Install FBX SDK 2020.3.7 (default location)
@@ -56,21 +56,21 @@ So, when all repositories are properly setup (LLVM: <https://apt.llvm.org/>, kit
 sudo apt-get install cmake clang clang-format clang-tidy lldb lld doxygen graphviz ninja-build patchelf
 ```
 
-### Install the clang++ 20 compiler
+### Install the clang++ 18 compiler
 
 This is the maximum version supported by nvcc 13
 
 ```sh
-wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
+wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 18
 # verify with 
-clang++-20 --version
+clang++-18 --version
 # this is the compiler in CMakePresets.json for Debug-Linux
 ```
 
 We need to make sure that it associates itself with the correct headers (C++20 headers), hence try the command
 
 ```sh
-clang++-20 -v -E -stdlib=libc++ -x c++ /dev/null
+clang++-18 -v -E -stdlib=libc++ -x c++ /dev/null
 # look for found candidates ...
 ```
 
@@ -79,7 +79,7 @@ from llvm, which can be installed on a debian like distribution with
 
 ```sh
 sudo apt-get update # make sure to have the LLVM apt repository
-sudo apt install libc++-20-dev libc++abi-20-dev -y
+sudo apt install libc++-18-dev libc++abi-18-dev -y
 ```
 
 ### Install NVIDIA drivers and CUDA Toolkit
@@ -110,7 +110,7 @@ Then you might want to check the CUDA libraries, like the CUDA runtime (`libcuda
 The typical installation path for CUDA is `/usr/local/cuda`, which is a symlink to `/usr/local/cuda-xx-x` (version).
 If absent, follow <https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#package-manager-installation> (network repository installation)
 
-- In particular, install the `runfile (local)` for CUDA Toolkit 11.8 (without installing drivers `--no-drm`)
+- In particular, install the `runfile (local)` for CUDA Toolkit 12.6 (without installing drivers `--no-drm`)
 
 Therefore finally reboot the system and perform the post installment actions <https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#post-installation-actions>
 
@@ -189,15 +189,20 @@ At the start of every terminal session
 source scripts/setup_env.sh --optix-dir ~/optix/optix8.0/ --autodesk-fbx-sdk-dir ~/autodesk-fbx-sdk/2020.3.7 # example
 ```
 
-Then everytime (add `--fresh` to cleanup previus `cmake` runs)
-
-```sh
-cmake .. --preset Debug-Linux -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DGLFW_BUILD_WAYLAND=ON -DCMAKE_CUDA_COMPILER=$CUDA_HOME/bin/nvcc
-```
-
 ### Ninja Requirements
 
 We require `ninja` with version >= 1.11 (C++20 module support)
+
+### Linux CMake configure command line 
+
+```shell
+# within the environment
+cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/path/to/ninja -DCMAKE_C_COMPILER=/usr/bin/clang-18 \ 
+  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
+  -CMAKE_CUDA_HOST_COMPILER=/usr/bin/clang++-18 \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+  -G Ninja -S /this/dir -B /your/binary/dir
+```
 
 ## Linux deal with corrupted coverage files
 

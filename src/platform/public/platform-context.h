@@ -42,8 +42,8 @@ namespace dmt {
 
     public:
         static constexpr uint32_t maxHandlers          = 4;
-        static constexpr uint32_t logBufferNumBytes    = 2048;
-        static constexpr uint32_t argLogBufferNumBytes = 1024;
+        static constexpr uint32_t logBufferNumBytes    = 4096;
+        static constexpr uint32_t argLogBufferNumBytes = 4096;
         struct DMT_PLATFORM_API Common
         {
             // 8 byte aligned
@@ -60,9 +60,6 @@ namespace dmt {
         };
 
         Common common;
-        // implicit padding to make next address 8 byte aligned
-        // followed by platform specific data
-        alignas(std::max_align_t) unsigned char platformSpecific[4096 - sizeof(Common)]{};
     };
     static_assert(std::is_standard_layout_v<ContextImpl>);
 

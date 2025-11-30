@@ -315,10 +315,10 @@ function(dmt_set_linux_specific_compile_options target properties_visibility)
       # faster. It doesn't follow our directories though set_target_properties(${target} PROPERTIES CXX_NO_DEPENDENCIES
       # TRUE)
 
-      target_compile_options(${target} ${properties_visibility}
-        $<$<COMPILE_LANGUAGE:CXX>-nostdlib++ -nostdinc++ -isystem /usr/lib/llvm-20/include/c++/v1>
-        $<$<COMPILE_LANGUAGE:CUDA>-Xcompiler=-nostdlib++ -Xcompiler=-nostdinc++ -Xcompiler=-isystem -Xcompiler=/usr/lib/llvm-20/include/c++/v1>
-      )
+      # target_compile_options(${target} ${properties_visibility}
+      #   $<$<COMPILE_LANGUAGE:CXX>-nostdlib++ -nostdinc++ -isystem /usr/lib/llvm-20/include/c++/v1>
+      #   $<$<COMPILE_LANGUAGE:CUDA>-Xcompiler=-nostdlib++ -Xcompiler=-nostdinc++ -Xcompiler=-isystem -Xcompiler=/usr/lib/llvm-20/include/c++/v1>
+      # )
 
       # target_compile_definitions(${target} ${properties_visibility} _LIBCPP_DISABLE_AVAILABILITY)
       target_link_libraries(${target} ${properties_visibility} $<$<LINK_LANGUAGE:CXX>:c++ c++abi>)
@@ -333,7 +333,7 @@ function(dmt_set_cpu_architecture_features target properties_visibility)
       # $<$<COMPILE_LANGUAGE:CXX>: ?
       target_compile_options(${target} ${properties_visibility}
         $<$<COMPILE_LANGUAGE:CXX>:-mavx -msse3 -mfma -mavx2>
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mavx -Xcompiler-msse3 -Xcompiler-mfma -Xcompiler-mavx2>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mavx -Xcompiler=-msse3 -Xcompiler=-mfma -Xcompiler=-mavx2>
       )
     elseif (DMT_COMPILER_MSVC)
       target_compile_options(${target} ${properties_visibility}
@@ -570,14 +570,22 @@ function(dmt_add_compile_definitions target properties_visibility)
       file(GLOB MSVC_TOOLSET_DIR "${VS_INSTALL_PATH}/VC/Tools/MSVC/*")
       list(SORT MSVC_TOOLSET_DIR)
       list(GET MSVC_TOOLSET_DIR -1 MSVC_TOOLSET_DIR) # take latest
-      set(DMT_CPP_INCLUDE_PATH "${MSVC_TOOLSET_DIR}/include")
 
-    elseif (UNIX)
-      # Assume LLVM libc++
-      set(DMT_CPP_INCLUDE_PATH "/usr/lib/llvm-20/include/c++/v1")
+    elseif (UNIX AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -E -x c++ - -v
+        INPUT_FILE /dev/null
+        ERROR_VARIABLE COMPILER_INFO
+        OUTPUT_QUIET
+      )
+      string(REGEX MATCHALL "^[ \t]+/[^ \n]+" INCLUDE_DIRS "${COMPILER_INFO}")
+      string(REGEX MATCHALL "/[^ \n]+" INCLUDE_DIRS "${INCLUDE_BLOCK}")
+      message(STATUS "Compiler include dirs:")
+      foreach(dir ${INCLUDE_DIRS})
+        message(STATUS "  ${dir}")
+      endforeach()
     endif ()
 
-    message(STATUS "C++ include path: ${DMT_CPP_INCLUDE_PATH}")
     if (DEFINED DMT_OS_LINUX)
       execute_process(
         COMMAND readlink -f "$ENV{CUDA_HOME}/include"
@@ -594,7 +602,6 @@ function(dmt_add_compile_definitions target properties_visibility)
       ${DMT_ARCH}
       ${DMT_COMPILER}
       "CUDA_HOME=${CUDA_INCLUDE_REAL}"
-      "DMT_CPP_INCLUDE_PATH=${DMT_CPP_INCLUDE_PATH}"
     )
 
     if (DMT_OS_WINDOWS)

@@ -75,6 +75,7 @@ manage_ld_library_path() {
 OPTIX_ARG=""
 FBX_ARG=""
 PRE_TURING=0
+CUDA_VERSION="12.6"
 while [ $# -gt 0 ]; do
     case "$1" in
         --optix-dir)
@@ -87,6 +88,9 @@ while [ $# -gt 0 ]; do
             ;;
         --pre-turing)
             PRE_TURING=1
+            ;;
+        --cuda-version)
+            CUDA_VERSION="$1"
             ;;
         *)
             echo "Warning: Unknown argument: $1"
@@ -102,11 +106,11 @@ DRIVER_CUDA=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}') # eg. "12.9"
 CUDA_BASE="/usr/local"
 
 if [ $PRE_TURING -eq 1 ]; then
-    if [ -d "${CUDA_BASE}/cuda-11.8" ]; then
-        echo "Using CUDA 11.8 due to --pre-turing flag"
-        CUDA_DIR="${CUDA_BASE}/cuda-11.8"
+    if [ -d "${CUDA_BASE}/cuda-${CUDA_VERSION}" ]; then
+        echo "Using CUDA ${CUDA_VERSION} due to --pre-turing flag"
+        CUDA_DIR="${CUDA_BASE}/cuda-${CUDA_VERSION}"
     else
-        echo "Warning: --pre-turing requested but ${CUDA_BASE}/cuda-11.8 not found"
+        echo "Warning: --pre-turing requested but ${CUDA_BASE}/cuda-${CUDA_VERSION} not found"
         CUDA_DIR="" # fall back to normal logic below
     fi
 fi

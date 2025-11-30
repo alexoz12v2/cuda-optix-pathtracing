@@ -298,7 +298,7 @@ namespace dmt::fl {
 #if defined(__CUDA_ARCH__)
         return ::asin(::min(::max(x, -1.f), 1.f));
 #else
-        return std::asinf(std::clamp(x, -1.f, 1.f));
+        return ::asinf(std::clamp(x, -1.f, 1.f));
 #endif
     }
 
@@ -307,7 +307,7 @@ namespace dmt::fl {
 #if defined(__CUDA_ARCH__)
         return ::asin(::min(::max(x, 0.f), 1.f));
 #else
-        return std::acosf(std::clamp(x, 0.f, 1.f));
+        return ::acosf(std::clamp(x, 0.f, 1.f));
 #endif
     }
 
@@ -325,7 +325,7 @@ namespace dmt::fl {
 #if defined(__CUDA_ARCH__)
         return ::atan2(y, x);
 #else
-        return std::atan2f(y, x);
+        return ::atan2f(y, x);
 #endif
     }
 

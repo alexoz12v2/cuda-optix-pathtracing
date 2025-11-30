@@ -172,12 +172,12 @@ namespace dmt::color {
     {
         auto [h, s, v] = hsv;
 
-        h = std::fmodf(h, 1.0f);
+        h = ::fmodf(h, 1.0f);
         if (h < 0.0f)
             h += 1.0f;
 
         float c = v * s;
-        float x = c * (1 - std::fabs(std::fmodf(h * 6.0f, 2.0f) - 1));
+        float x = c * (1 - std::fabs(::fmodf(h * 6.0f, 2.0f) - 1));
         float m = v - c;
 
         float r1, g1, b1;
@@ -208,7 +208,7 @@ namespace dmt::color {
         if (fl::nearZero(chroma))
             hue = 0.f;
         else if (value == rgb.r)
-            hue = _60Deg * std::fmodf((rgb.g - rgb.b) * invChroma, 6.f);
+            hue = _60Deg * ::fmodf((rgb.g - rgb.b) * invChroma, 6.f);
         else if (value == rgb.g)
             hue = _60Deg * (rgb.b - rgb.r) * invChroma + 2.f;
         else // value == rgb.b

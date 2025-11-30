@@ -5,6 +5,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <span>
+#include <vector>
 
 namespace dmt {
 

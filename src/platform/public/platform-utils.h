@@ -3,6 +3,7 @@
 
 #include "platform-macros.h"
 
+#include <atomic>
 #include <bit>
 #include <charconv> // For std::from_chars
 #include <concepts>

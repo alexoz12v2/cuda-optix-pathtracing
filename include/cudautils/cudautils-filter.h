@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cudautils/cudautils-macro.h"
+#include "cudautils/cudautils-vecmath.h"
 
 #if 0
 struct DeviceFilter

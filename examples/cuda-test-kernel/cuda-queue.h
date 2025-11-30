@@ -1,6 +1,9 @@
 #pragma once
 
+#include "cuda-wrappers/cuda-wrappers-cuda-driver.h"
+#include "cudautils/cudautils-vecmath.h"
 #include "dmtmacros.h"
+#include <utility>
 
 #if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
     #include "platform/platform-context.h"
@@ -10,7 +13,6 @@
 
     #include <vector>
     #include <cstddef>
-    #include <type_traits>
 
 namespace dmt {
     template <typename... Ts>
@@ -416,6 +418,8 @@ namespace dmt {
             ((std::get<I>(out) = buffer<I>()[slot]), ...);
         }
 
+        using TupleType = std::tuple<Ts...>;
+
         bool peekHost(int index, std::tuple<Ts...>* out)
         {
             if (index < 0 || index >= count)
@@ -510,10 +514,70 @@ namespace dmt {
 
     struct RaygenPayload
     {
-        // ox, oy, oz
-        // dx, dy, dz
-        // sample weight
+        // ox, oy, oz, dx, dy, dz, sample weight
         ManagedMultiQueue<float, float, float, float, float, float, float>* mmq;
+
+        // ---------- convenience accessors ----------
+        // Note: buffer indices assume the same order as the ManagedMultiQueue template args
+
+#if defined(__CUDA_ARCH__)
+        __forceinline__ __device__ float&       ox(int slot) { return mmq->template buffer<0>()[slot]; }
+        __forceinline__ __device__ float const& ox(int slot) const { return mmq->template buffer<0>()[slot]; }
+
+        __forceinline__ __device__ float&       oy(int slot) { return mmq->template buffer<1>()[slot]; }
+        __forceinline__ __device__ float const& oy(int slot) const { return mmq->template buffer<1>()[slot]; }
+
+        __forceinline__ __device__ float&       oz(int slot) { return mmq->template buffer<2>()[slot]; }
+        __forceinline__ __device__ float const& oz(int slot) const { return mmq->template buffer<2>()[slot]; }
+
+        __forceinline__ __device__ float&       dx(int slot) { return mmq->template buffer<3>()[slot]; }
+        __forceinline__ __device__ float const& dx(int slot) const { return mmq->template buffer<3>()[slot]; }
+
+        __forceinline__ __device__ float&       dy(int slot) { return mmq->template buffer<4>()[slot]; }
+        __forceinline__ __device__ float const& dy(int slot) const { return mmq->template buffer<4>()[slot]; }
+
+        __forceinline__ __device__ float&       dz(int slot) { return mmq->template buffer<5>()[slot]; }
+        __forceinline__ __device__ float const& dz(int slot) const { return mmq->template buffer<5>()[slot]; }
+
+        __forceinline__ __device__ float&       sampleWeight(int slot) { return mmq->template buffer<6>()[slot]; }
+        __forceinline__ __device__ float const& sampleWeight(int slot) const { return mmq->template buffer<6>()[slot]; }
+
+        // optional: helper to read the full ray into user-provided refs/struct (no copies of mmq internals)
+        template <typename RayOut>
+        __forceinline__ __device__ void loadRay(int slot, RayOut& out) const
+        {
+            out.ox = ox(slot);
+            out.oy = oy(slot);
+            out.oz = oz(slot);
+            out.dx = dx(slot);
+            out.dy = dy(slot);
+            out.dz = dz(slot);
+            out.w  = sampleWeight(slot);
+        }
+
+        // optional: helper to store a ray (written by the caller). If multiple threads can
+        // write the same slot you must use atomics or synchronization outside these helpers.
+        template <typename RayIn>
+        __forceinline__ __device__ void storeRay(int slot, RayIn const& in)
+        {
+            ox(slot)           = in.ox;
+            oy(slot)           = in.oy;
+            oz(slot)           = in.oz;
+            dx(slot)           = in.dx;
+            dy(slot)           = in.dy;
+            dz(slot)           = in.dz;
+            sampleWeight(slot) = in.w;
+        }
+#else
+        [[nodiscard]] std::pair<Ray, float> peekAt(int32_t i) const
+        {
+            std::remove_cvref_t<decltype(*mmq)>::TupleType t;
+            mmq->peekHost(i, &t);
+            return std::make_pair(Ray{{std::get<0>(t), std::get<1>(t), std::get<2>(t)},
+                                      {std::get<3>(t), std::get<4>(t), std::get<5>(t)}},
+                                  std::get<6>(t));
+        }
+#endif
     };
 
     struct RaygenParams

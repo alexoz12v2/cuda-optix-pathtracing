@@ -185,6 +185,8 @@ namespace dmt::filtering {
     public:
         static constexpr int32_t NumSamplesPerAxisPerDomainUnit = 32;
 
+        [[nodiscard]] PiecewiseConstant2D const& getDistrib() const { return m_distrib; }
+
     private:
         template <Filter T>
         static dstd::Array2D<float> evaluateFunction(T const& filter, Bounds2f domain, std::pmr::memory_resource* memory)
@@ -262,6 +264,8 @@ namespace dmt::filtering {
         DMT_FORCEINLINE float        b() const { return m_b; }
         DMT_FORCEINLINE float        c() const { return m_c; }
         DMT_FORCEINLINE FilterSample sample(Point2f u) const { return m_sampler.sample(u); }
+
+        [[nodiscard]] PiecewiseConstant2D const& getDistrib() const { return m_sampler.getDistrib(); }
 
         DMT_FORCEINLINE float evaluate(Point2f p) const
         {

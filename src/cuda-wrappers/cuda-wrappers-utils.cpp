@@ -3,7 +3,7 @@
 #include "platform/platform-context.h"
 
 namespace dmt {
-    [[nodiscard]] bool cudaDriverCall(CUDADriverLibrary const* cudaApi, CUresult result)
+    bool cudaDriverCall(CUDADriverLibrary const* cudaApi, CUresult result)
     {
         if (result == ::CUDA_SUCCESS)
             return true;

@@ -8,7 +8,7 @@ namespace dmt {
      * Checks the `CUresult` of a CUDA Driver API operation, and, if different than `::CUDA_SUCCESS`,
      * @note This is supposed to be used in CUDA calls whose failure is fatal
      */
-    [[nodiscard]] DMT_CUDA_WRAPPERS_API bool cudaDriverCall(CUDADriverLibrary const* cudaApi, CUresult result);
+    DMT_CUDA_WRAPPERS_API bool cudaDriverCall(CUDADriverLibrary const* cudaApi, CUresult result);
 
     /**
      * This function (and similiar for all loaded dlls) should be populated with more

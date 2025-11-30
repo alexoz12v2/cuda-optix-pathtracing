@@ -26,11 +26,4 @@ namespace dmt {
                                        NVRTCLibrary*                   nvrtcApi,
                                        std::string_view                kernelFileName,
                                        std::vector<char const*> const& nvccOpts);
-    GpuSamplerHandle        uploadFilterDistrib(CUDADriverLibrary*         cudaApi,
-                                                PiecewiseConstant2D const& cpuDistrib,
-                                                filtering::Mitchell const& cpuFilter);
-    PiecewiseConstant2D     precalculateMitchellDistrib(filtering::Mitchell const& filter,
-                                                        int                        Nx,
-                                                        int                        Ny,
-                                                        std::pmr::memory_resource* mem = std::pmr::get_default_resource());
 } // namespace dmt

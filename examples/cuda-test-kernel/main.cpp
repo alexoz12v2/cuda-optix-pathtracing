@@ -1,5 +1,6 @@
 #include "cuda-test.h"
 #include <array>
+#include <type_traits>
 #define DMT_ENTRY_POINT
 #define DMT_WINDOWS_CLI
 #include "platform/platform.h"
@@ -14,6 +15,7 @@
 
 #include "cuda-queue.h"
 #include "cuda-test.h"
+#include "raygen-utils.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -139,282 +141,321 @@ int32_t guardedMain()
         nvccOpts.push_back(j.includeOpt0.c_str());
         nvccOpts.push_back(j.includeOpt1.c_str());
 
-        std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
 
-
-        CUmodule   mod  = nullptr;
-        CUfunction func = nullptr;
-
-
-#if 0
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleLoadData(&mod, saxpyPTX.get()));
-#else
         // TODO: remove when debug symbols are not needed anymore
         std::array<CUjit_option, 3> opts = {CU_JIT_GENERATE_DEBUG_INFO, CU_JIT_GENERATE_LINE_INFO, CU_JIT_LOG_VERBOSE};
         std::array<void*, 3>        vals = {(void*)1, (void*)1, (void*)1};
-        dmt::cudaDriverCall(j.cudaApi.get(),
-                            j.cudaApi->cuModuleLoadDataEx(&mod,
-                                                          saxpyPTX.get(),
-                                                          static_cast<uint32_t>(opts.size()),
-                                                          opts.data(),
-                                                          vals.data()));
-#endif
 
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&func, mod, "saxpy_grid_stride"));
-
-        // Example: launch parameters
-        int    n = 1024;
-        float  a = 2.0f;
-        float* d_x; // device pointer to x
-        float* d_y; // device pointer to y
-
-        // Allocate device memory (example)
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_x, n * sizeof(float)));
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_y, n * sizeof(float)));
-
-        // Kernel launch parameters
-        uint32_t threadsPerBlock = 256;
-        uint32_t blocksPerGrid   = (n + threadsPerBlock - 1) / threadsPerBlock;
-
-        // Arguments array
-        void* kernelArgs[] = {&n, &a, &d_x, &d_y};
-
-        // Launch the kernel
-        CUresult res = j.cudaApi->cuLaunchKernel(func,
-                                                 blocksPerGrid,
-                                                 1,
-                                                 1, // grid dimensions
-                                                 threadsPerBlock,
-                                                 1,
-                                                 1, // block dimensions
-                                                 0, // shared memory
-                                                 0, // stream
-                                                 kernelArgs,
-                                                 nullptr // extra (deprecated)
-        );
-        if (res != CUDA_SUCCESS)
+        // Testing saxpy
         {
-            char const* err = nullptr;
-            j.cudaApi->cuGetErrorString(res, &err);
-            ctx.error("Error cuLaunchKernel saxpy: {}", std::make_tuple(std::string_view(err)));
-        }
-
-// Wait for completion
-#if defined(DMT_OS_LINUX)
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize());
-#elif defined(DMT_OS_WINDOWS)
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize(j.cuCtx));
-#else
-    #error "unsupported OS"
-#endif
-
-        // Clean up
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_x));
-        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_y));
-
-        // testing queues
-        ctx.log("--- Testing Queues ---", {});
-        size_t queueBytes  = 0;
-        size_t queueBytes1 = 0;
-        auto*  queue       = dmt::ManagedQueue<int>::allocateManaged(*j.cudaApi, 256, queueBytes);
-        auto*  queue1      = dmt::ManagedQueue<int>::allocateManaged(*j.cudaApi, 256, queueBytes1);
-        if (!queue || !queue1)
-        {
-            ctx.error("Error allocating queue", {});
-        }
-        else
-        {
-            ctx.log("Allocated Queue in __managed__ memory with attach to host strategy", {});
-            for (int i = 0; i < queue->capacity; ++i)
-                queue->pushHost(i);
-
-            CUfunction kqueueDouble = nullptr;
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kqueueDouble, mod, "kqueueDouble"));
-            CUstream stream;
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamCreate(&stream, CU_STREAM_DEFAULT));
-            // attach __managed__ memory to stream
-
+            CUmodule                mod      = nullptr;
+            CUfunction              func     = nullptr;
+            std::unique_ptr<char[]> saxpyPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "saxpy.cu", nvccOpts);
             dmt::cudaDriverCall(j.cudaApi.get(),
-                                j.cudaApi->cuStreamAttachMemAsync(stream,
-                                                                  std::bit_cast<CUdeviceptr>(queue),
-                                                                  queueBytes,
-                                                                  CU_MEM_ATTACH_SINGLE));
-            dmt::cudaDriverCall(j.cudaApi.get(),
-                                j.cudaApi->cuStreamAttachMemAsync(stream,
-                                                                  std::bit_cast<CUdeviceptr>(queue1),
-                                                                  queueBytes1,
-                                                                  CU_MEM_ATTACH_SINGLE));
-
-            CUmemLocation memLoc;
-            memLoc.type = CU_MEM_LOCATION_TYPE_DEVICE;
-            memLoc.id   = 1;
-
-            // optional: prefetch
-            // TODO:: check the getAttribute to verify the compatibilty with the concurrent managed access
-            // int concurrentManagedAccess = 0;
-            //cuDeviceGetAttribute(&concurrentManagedAccess,
-            //             CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
-            //             dev);
-            //dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes >> 3, memLoc, 0, stream));
-            //dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes1 >> 3, memLoc, 0, stream));
-
-            // launch
-            void* kArgs[] = {&queue, &queue1};
-            dmt::cudaDriverCall(j.cudaApi.get(),
-                                j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
-
-
-            if (int peek = 0; queue1->peekHost(10, &peek))
-                ctx.log("Peeking element 10: {}", std::make_tuple(peek));
-
-            int         element = 0;
-            std::string log;
-            while (queue1->popHost(&element))
-            {
-                log += std::to_string(element);
-                log += ", ";
-            }
-
-
-            if (log.size() >= 2)
-            {
-                log.pop_back();
-                log.pop_back();
-            }
-
-            ctx.log("Queue Elements: [ ", {});
-            // Break the log into chunks of 256 characters
-            size_t const chunkSize = 256;
-            for (size_t i = 0; i < log.size(); i += chunkSize)
-            {
-                std::string_view chunk(log.data() + i, std::min(chunkSize, log.size() - i));
-                ctx.log("{}", std::make_tuple(chunk));
-            }
-            ctx.log(" ]", {});
-            dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue);
-            dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue1);
-            queue = nullptr, queue1 = nullptr;
-
-            // --------------------------- Test Managed Multi Queue ------------------------------------------------
-            ctx.log("--------------------------- Test Managed Multi Queue -------------------------------------------", {});
-
-            // allocate queues
-            size_t mmqbytes = 0;
-            auto*  mmq      = dmt::ManagedMultiQueue<double, int>::allocateManaged(*j.cudaApi, 256, mmqbytes);
-            auto*  mmq1     = dmt::ManagedMultiQueue<double, int>::allocateManaged(*j.cudaApi, 256, mmqbytes);
-            if (!mmq || !mmq1)
-            {
-                ctx.error("Couldn't allocate managed queues", {});
-            }
-            else
-            {
-                // fill first queue
-                for (uint32_t i = 0; i < 256; ++i)
-                    mmq->pushHost(std::make_tuple(static_cast<double>(i) / 2, i));
-
-                for (int i = 0; i < mmq->count; ++i)
-                {
-                    if (std::tuple<double, int> res; mmq->peekHost(i, &res))
-                        ctx.log("Peeking MMQ Element {}: {} {}", std::make_tuple(i, std::get<0>(res), std::get<1>(res)));
-                }
-
-                // attach to stream
-                dmt::cudaDriverCall(j.cudaApi.get(),
-                                    j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(mmq), 0, CU_MEM_ATTACH_SINGLE));
-                dmt::cudaDriverCall(j.cudaApi.get(),
-                                    j.cudaApi->cuStreamAttachMemAsync(stream, std::bit_cast<CUdeviceptr>(mmq1), 0, CU_MEM_ATTACH_SINGLE));
-
-                // launch kernel
-                CUfunction kmmqDouble = nullptr;
-                dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
-                void* kargs[] = {&mmq, &mmq1};
-                dmt::cudaDriverCall(j.cudaApi.get(),
-                                    j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kargs, nullptr));
-
-                // synchronize and check result
-                dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
-
-                ctx.log("----------------------------------------------------------------------", {});
-                ctx.log("Size of MMQ: {}", std::make_tuple(mmq->count));
-                ctx.log("Size of MMQ1: {}", std::make_tuple(mmq1->count));
-
-                std::tuple<double, int> res;
-                std::string             resLog;
-                while (mmq1->popHost(&res))
-                    resLog += "( " + std::to_string(std::get<0>(res)) + " " + std::to_string(std::get<1>(res)) + " ), ";
-
-                if (resLog.size() >= 2)
-                {
-                    resLog.pop_back();
-                    resLog.pop_back();
-                }
-
-                size_t const chunkSize = 256;
-                size_t const num       = dmt::ceilDiv<size_t>(resLog.size(), 256);
-                ctx.log("MMQ: [", {});
-                for (size_t i = 0; i < resLog.size(); i += chunkSize)
-                {
-                    std::string_view view{resLog.data() + i, std::min(chunkSize, log.size() - i)};
-                    ctx.log("{}", std::make_tuple(view));
-                }
-                ctx.log("]", {});
-
-                dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq);
-                dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq1);
-            }
-
-            //------------------------Test Raygen----------------------
-            path                              = dmt::os::Path::executableDir() / "shaders" / "raygen.cu";
-            std::unique_ptr<char[]> raygenPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "raygen.cu", nvccOpts);
-            //-----------------------Sampler----------------------------
-            //Fill
-            dmt::filtering::Mitchell filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f};
-            int                      nx         = 256;
-            int                      ny         = 256;
-            dmt::PiecewiseConstant2D cpuDistrib = dmt::precalculateMitchellDistrib(filter, nx, ny);
-
-            dmt::GpuSamplerHandle samplerHandle = dmt::uploadFilterDistrib(j.cudaApi.get(), cpuDistrib, filter);
-
-            // launch kernel
-            CUfunction kmmqDouble = nullptr;
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
-            void* kargs[] = {&mmq, &mmq1};
-            dmt::cudaDriverCall(j.cudaApi.get(),
-                                j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kargs, nullptr));
-
-            // synchronize and check result
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
-            CUmodule raygenMod = 0;
-            dmt::cudaDriverCall(j.cudaApi.get(),
-                                j.cudaApi->cuModuleLoadDataEx(&raygenMod,
-                                                              raygenPTX.get(),
+                                j.cudaApi->cuModuleLoadDataEx(&mod,
+                                                              saxpyPTX.get(),
                                                               static_cast<uint32_t>(opts.size()),
                                                               opts.data(),
                                                               vals.data()));
 
-            CUfunction kraygen;
-            j.cudaApi->cuModuleGetFunction(&kraygen, raygenMod, "kraygen");
-            CUdeviceptr ptr;
-            size_t      numByte;
-            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_cameraFromRaster");
-            static_assert(std::is_standard_layout_v<dmt::Transform>);
-            dmt::Transform transfCR{dmt::Matrix4f::identity()};
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfCR, numByte));
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&func, mod, "saxpy_grid_stride"));
 
-            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_renderFromCamera");
-            dmt::Transform transfRC{dmt::Matrix4f::identity()};
-            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfRC, numByte));
+            // Example: launch parameters
+            int    n = 1024;
+            float  a = 2.0f;
+            float* d_x; // device pointer to x
+            float* d_y; // device pointer to y
 
-            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_filter");
-            dmt::gpu::FilterSamplerGPU gpufilter{};
-            // clean up
-            j.cudaApi->cuStreamDestroy(stream);
-            j.cudaApi->cuModuleUnload(raygenMod);
+            // Allocate device memory (example)
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_x, n * sizeof(float)));
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemAlloc((CUdeviceptr*)&d_y, n * sizeof(float)));
+
+            // Kernel launch parameters
+            uint32_t threadsPerBlock = 256;
+            uint32_t blocksPerGrid   = (n + threadsPerBlock - 1) / threadsPerBlock;
+
+            // Arguments array
+            void* kernelArgs[] = {&n, &a, &d_x, &d_y};
+
+            // Launch the kernel
+            CUresult res = j.cudaApi->cuLaunchKernel(func,
+                                                     blocksPerGrid,
+                                                     1,
+                                                     1, // grid dimensions
+                                                     threadsPerBlock,
+                                                     1,
+                                                     1, // block dimensions
+                                                     0, // shared memory
+                                                     0, // stream
+                                                     kernelArgs,
+                                                     nullptr // extra (deprecated)
+            );
+            if (res != CUDA_SUCCESS)
+            {
+                char const* err = nullptr;
+                j.cudaApi->cuGetErrorString(res, &err);
+                ctx.error("Error cuLaunchKernel saxpy: {}", std::make_tuple(std::string_view(err)));
+            }
+
+// Wait for completion
+#if defined(DMT_OS_LINUX)
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize());
+#elif defined(DMT_OS_WINDOWS)
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuCtxSynchronize(j.cuCtx));
+#else
+    #error "unsupported OS"
+#endif
+
+            // Clean up
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_x));
+            dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemFree((CUdeviceptr)d_y));
+        }
+
+        CUstream stream{};
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamCreate(&stream, CU_STREAM_DEFAULT));
+
+        // testing queues
+        {
+            ctx.log("--- Testing Queues ---", {});
+            size_t queueBytes  = 0;
+            size_t queueBytes1 = 0;
+            auto*  queue       = dmt::ManagedQueue<int>::allocateManaged(*j.cudaApi, 256, queueBytes);
+            auto*  queue1      = dmt::ManagedQueue<int>::allocateManaged(*j.cudaApi, 256, queueBytes1);
+            if (!queue || !queue1)
+            {
+                ctx.error("Error allocating queue", {});
+            }
+            else
+            {
+                ctx.log("Allocated Queue in __managed__ memory with attach to host strategy", {});
+                for (int i = 0; i < queue->capacity; ++i)
+                    queue->pushHost(i);
+
+                std::unique_ptr<char[]> mmqPTX = dmt::compilePTX(dmt::os::Path::executableDir() / "shaders" /
+                                                                     "cuda-kernel.cu",
+                                                                 j.nvrtcApi.get(),
+                                                                 "cuda-kernel.generated.cu",
+                                                                 nvccOpts);
+
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuModuleLoadDataEx(&mod,
+                                                                  mmqPTX.get(),
+                                                                  static_cast<uint32_t>(opts.size()),
+                                                                  opts.data(),
+                                                                  vals.data()));
+
+                CUfunction kqueueDouble = nullptr;
+                dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kqueueDouble, mod, "kqueueDouble"));
+                // attach __managed__ memory to stream
+
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                                      std::bit_cast<CUdeviceptr>(queue),
+                                                                      queueBytes,
+                                                                      CU_MEM_ATTACH_SINGLE));
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                                      std::bit_cast<CUdeviceptr>(queue1),
+                                                                      queueBytes1,
+                                                                      CU_MEM_ATTACH_SINGLE));
+
+                CUmemLocation memLoc;
+                memLoc.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                memLoc.id   = 1;
+
+                // optional: prefetch
+                // TODO:: check the getAttribute to verify the compatibilty with the concurrent managed access
+                // int concurrentManagedAccess = 0;
+                //cuDeviceGetAttribute(&concurrentManagedAccess,
+                //             CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+                //             dev);
+                //dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes >> 3, memLoc, 0, stream));
+                //dmt::cudaDriverCall(j.cudaApi.get(),j.cudaApi->cuMemPrefetchAsync(std::bit_cast<CUdeviceptr>(queue), queueBytes1 >> 3, memLoc, 0, stream));
+
+                // launch
+                void* kArgs[] = {&queue, &queue1};
+                dmt::cudaDriverCall(j.cudaApi.get(),
+                                    j.cudaApi->cuLaunchKernel(kqueueDouble, 1, 1, 1, 256, 1, 1, 0, stream, kArgs, nullptr));
+                dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
+
+
+                if (int peek = 0; queue1->peekHost(10, &peek))
+                    ctx.log("Peeking element 10: {}", std::make_tuple(peek));
+
+                int         element = 0;
+                std::string log;
+                while (queue1->popHost(&element))
+                {
+                    log += std::to_string(element);
+                    log += ", ";
+                }
+
+
+                if (log.size() >= 2)
+                {
+                    log.pop_back();
+                    log.pop_back();
+                }
+
+                ctx.log("Queue Elements: [ ", {});
+                // Break the log into chunks of 256 characters
+                size_t const chunkSize = 256;
+                for (size_t i = 0; i < log.size(); i += chunkSize)
+                {
+                    std::string_view chunk(log.data() + i, std::min(chunkSize, log.size() - i));
+                    ctx.log("{}", std::make_tuple(chunk));
+                }
+                ctx.log(" ]", {});
+                dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue);
+                dmt::ManagedQueue<int>::freeManaged(*j.cudaApi, queue1);
+                queue = nullptr, queue1 = nullptr;
+
+                // --------------------------- Test Managed Multi Queue ------------------------------------------------
+                ctx.log(
+                    "--------------------------- Test Managed Multi Queue -------------------------------------------",
+                    {});
+
+                // allocate queues
+                size_t mmqbytes = 0;
+                auto*  mmq      = dmt::ManagedMultiQueue<double, int>::allocateManaged(*j.cudaApi, 256, mmqbytes);
+                auto*  mmq1     = dmt::ManagedMultiQueue<double, int>::allocateManaged(*j.cudaApi, 256, mmqbytes);
+                if (!mmq || !mmq1)
+                {
+                    ctx.error("Couldn't allocate managed queues", {});
+                }
+                else
+                {
+                    // fill first queue
+                    for (uint32_t i = 0; i < 256; ++i)
+                        mmq->pushHost(std::make_tuple(static_cast<double>(i) / 2, i));
+
+                    for (int i = 0; i < mmq->count; ++i)
+                    {
+                        if (std::tuple<double, int> res; mmq->peekHost(i, &res))
+                            ctx.log("Peeking MMQ Element {}: {} {}",
+                                    std::make_tuple(i, std::get<0>(res), std::get<1>(res)));
+                    }
+
+                    // attach to stream
+                    dmt::cudaDriverCall(j.cudaApi.get(),
+                                        j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                                          std::bit_cast<CUdeviceptr>(mmq),
+                                                                          0,
+                                                                          CU_MEM_ATTACH_SINGLE));
+                    dmt::cudaDriverCall(j.cudaApi.get(),
+                                        j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                                          std::bit_cast<CUdeviceptr>(mmq1),
+                                                                          0,
+                                                                          CU_MEM_ATTACH_SINGLE));
+
+                    // launch kernel
+                    CUfunction kmmqDouble = nullptr;
+                    dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kmmqDouble, mod, "kmmqDouble"));
+                    void* kargs[] = {&mmq, &mmq1};
+                    dmt::cudaDriverCall(j.cudaApi.get(),
+                                        j.cudaApi->cuLaunchKernel(kmmqDouble, 1, 1, 1, 256, 1, 1, 0, stream, kargs, nullptr));
+
+                    // synchronize and check result
+                    dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
+
+                    ctx.log("----------------------------------------------------------------------", {});
+                    ctx.log("Size of MMQ: {}", std::make_tuple(mmq->count));
+                    ctx.log("Size of MMQ1: {}", std::make_tuple(mmq1->count));
+
+                    std::tuple<double, int> res;
+                    std::string             resLog;
+                    while (mmq1->popHost(&res))
+                        resLog += "( " + std::to_string(std::get<0>(res)) + " " + std::to_string(std::get<1>(res)) +
+                                  " ), ";
+
+                    if (resLog.size() >= 2)
+                    {
+                        resLog.pop_back();
+                        resLog.pop_back();
+                    }
+
+                    size_t const chunkSize = 256;
+                    size_t const num       = dmt::ceilDiv<size_t>(resLog.size(), 256);
+                    ctx.log("MMQ: [", {});
+                    for (size_t i = 0; i < resLog.size(); i += chunkSize)
+                    {
+                        std::string_view view{resLog.data() + i, std::min(chunkSize, log.size() - i)};
+                        ctx.log("{}", std::make_tuple(view));
+                    }
+                    ctx.log("]", {});
+
+                    dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq);
+                    dmt::ManagedMultiQueue<double, int>::freeManaged(*j.cudaApi, mmq1);
+                }
+            }
+        }
+
+        //------------------------Test Raygen----------------------
+        path                                      = dmt::os::Path::executableDir() / "shaders" / "raygen.cu";
+        std::unique_ptr<char[]>         raygenPTX = dmt::compilePTX(path, j.nvrtcApi.get(), "raygen.cu", nvccOpts);
+        dmt::filtering::Mitchell        filter{{{2.f, 2.f}}, 1.f / 3.f, 1.f / 3.f};
+        dmt::PiecewiseConstant2D const& cpuDistrib = filter.getDistrib();
+
+        CUmodule raygenMod = 0;
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuModuleLoadDataEx(&raygenMod,
+                                                          raygenPTX.get(),
+                                                          static_cast<uint32_t>(opts.size()),
+                                                          opts.data(),
+                                                          vals.data()));
+
+        CUfunction kraygen{};
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetFunction(&kraygen, raygenMod, "kraygen"));
+        CUdeviceptr ptr{};
+        size_t      numByte{};
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_cameraFromRaster"));
+        static_assert(std::is_standard_layout_v<dmt::Transform>);
+        dmt::Transform transfCR{dmt::Matrix4f::identity()};
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfCR, numByte));
+
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_renderFromCamera"));
+        dmt::Transform transfRC{dmt::Matrix4f::identity()};
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuMemcpyHtoD(ptr, &transfRC, numByte));
+
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleGetGlobal(&ptr, &numByte, raygenMod, "d_filter"));
+        dmt::GpuSamplerHandle samplerHandle = dmt::uploadCpuDistrib(cpuDistrib, filter, j.cudaApi.get());
+        assert(numByte == sizeof(dmt::gpu::FilterSamplerGPU));
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuMemcpyHtoD(ptr, &samplerHandle.sampler, sizeof(dmt::gpu::FilterSamplerGPU)));
+
+        dmt::RaygenParams raygenParams{};
+        using RaygenT               = std::remove_cvref_t<std::remove_pointer_t<decltype(raygenParams.rayPayload.mmq)>>;
+        raygenParams.rayPayload.mmq = RaygenT::allocateManaged(*j.cudaApi, 256, numByte);
+        void* kraygenParams[]       = {&raygenParams};
+
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuStreamAttachMemAsync(stream,
+                                                              std::bit_cast<CUdeviceptr>(raygenParams.rayPayload.mmq),
+                                                              0,
+                                                              CU_MEM_ATTACH_SINGLE));
+        dmt::cudaDriverCall(j.cudaApi.get(),
+                            j.cudaApi->cuLaunchKernel(kraygen, 1, 1, 1, 32, 1, 1, 0, stream, kraygenParams, nullptr));
+        bool resultOk = dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamSynchronize(stream));
+
+        // testing
+        if (resultOk)
+        {
+            ctx.log("Everything worked!", {});
+            for (int32_t i = 0; i < 32; ++i)
+            {
+                auto const [ray, filterWeight] = raygenParams.rayPayload.peekAt(i);
+                ctx.log("  ox: {}, oy: {}, oz: {}, dx: {}, dy: {}, dz: {}, fw: {}",
+                        std::make_tuple(ray.o.x, ray.o.y, ray.o.z, ray.d.x, ray.d.y, ray.d.z, filterWeight));
+            }
         }
 
         // clean up
-        j.cudaApi->cuModuleUnload(mod);
+        RaygenT::freeManaged(*j.cudaApi, raygenParams.rayPayload.mmq);
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuStreamDestroy(stream));
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleUnload(raygenMod));
+        dmt::cudaDriverCall(j.cudaApi.get(), j.cudaApi->cuModuleUnload(mod));
     }
 
     return 0;

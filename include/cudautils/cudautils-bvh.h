@@ -91,7 +91,7 @@ namespace dmt {
         float invDet = 1.0f / det;
 
         float3 tvec{r.o.x - v0.x, r.o.y - v0.y, r.o.z - v0.z};
-        float  u    = dot3(tvec, p) * invDet;
+        float  u = dot3(tvec, p) * invDet;
         if (u < 0.0f || u > 1.0f)
             return false;
 

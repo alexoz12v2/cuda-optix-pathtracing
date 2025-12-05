@@ -127,7 +127,7 @@ namespace dmt {
             if (*src == L':' && *(src + 1) == L'\\')
             {
                 // Copy up to and including the backslash
-                std::wcsncpy(dst, src_start, (src - src_start) + 2);
+                wcsncpy_s(dst, MAX_PATH, src_start, (src - src_start) + 2);
                 dst[(src - src_start) + 2] = L'\0'; // Null-terminate the destination string
                 return true;
             }
@@ -139,7 +139,7 @@ namespace dmt {
                 if (backslashCount == 3)
                 {
                     // Copy up to and including the third backslash
-                    std::wcsncpy(dst, src_start, (src - src_start) + 1);
+                    wcsncpy_s(dst, MAX_PATH, src_start, (src - src_start) + 1);
                     dst[(src - src_start) + 1] = L'\0'; // Null-terminate the destination string
                     return true;
                 }
@@ -167,10 +167,10 @@ namespace dmt {
         {
         }
 
-        bool write(void const* data, size_t bytes)
+        bool write(void const* data, size_t const bytes)
         {
-            unsigned char const* src     = reinterpret_cast<unsigned char const*>(data);
-            size_t               written = 0;
+            auto const src     = static_cast<unsigned char const*>(data);
+            size_t     written = 0;
 
             while (written < bytes)
             {
@@ -189,7 +189,7 @@ namespace dmt {
             return true;
         }
 
-        bool flush(bool padToSector = true)
+        bool flush(bool const padToSector = true)
         {
             if (m_offset == 0)
                 return true; // nothing to flush
@@ -201,7 +201,6 @@ namespace dmt {
             if (writeSize > m_bufferSize)
             {
                 assert(false); // should never happen
-                return false;
             }
 
             if (writeSize > m_offset)
@@ -413,30 +412,25 @@ namespace dmt {
 
             return mipOffsetUnaligned - offsetAligned;
         }
-        else
-        {
-            // move file pointer to sector-aligned offset
-            LARGE_INTEGER offsetAligned{};
-            offsetAligned.QuadPart = static_cast<LONGLONG>(*inOutOffset);
-            assert(*inOutBytes > 0);
 
-            if (!SetFilePointerEx(hFile, offsetAligned, nullptr, FILE_BEGIN) ||
-                !ReadFile(hFile, outBuffer, *inOutBytes, &bytesRead, nullptr))
-                return -1;
+        // move file pointer to sector-aligned offset
+        LARGE_INTEGER offsetAligned{};
+        offsetAligned.QuadPart = static_cast<LONGLONG>(*inOutOffset);
+        assert(*inOutBytes > 0);
 
-            // optionally, you could return the relative "start of actual data" inside buffer
-            // but your caller already knows offset difference = actualOffset - alignedOffset
+        if (!SetFilePointerEx(hFile, offsetAligned, nullptr, FILE_BEGIN) ||
+            !ReadFile(hFile, outBuffer, *inOutBytes, &bytesRead, nullptr))
+            return -1;
 
-            return 0;
-        }
+        // optionally, you could return the relative "start of actual data" inside buffer
+        // but your caller already knows offset difference = actualOffset - alignedOffset
+
+        return 0;
     }
 
-    MipCacheFile::~MipCacheFile() noexcept
+    void MipCacheFile::cleanEntry(uintptr_t fd)
     {
-        for (auto const& [key, value] : m_keyfdmap)
-        {
-            HANDLE hFile = std::bit_cast<HANDLE>(value);
-            CloseHandle(hFile);
-        }
+        auto const hFile = std::bit_cast<HANDLE>(fd);
+        CloseHandle(hFile);
     }
 } // namespace dmt

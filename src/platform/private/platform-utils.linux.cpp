@@ -323,7 +323,7 @@ namespace dmt::os {
         return Path{resource, buffer, static_cast<uint32_t>(len + 1), static_cast<uint32_t>(len)};
     }
 
-    Path Path::fromString(std::string_view str, std::pmr::memory_resource* resource)
+    Path Path::fromString(std::string_view str, bool shouldExist, std::pmr::memory_resource* resource)
     {
         if (!resource)
             resource = std::pmr::get_default_resource();
@@ -367,10 +367,15 @@ namespace dmt::os {
 
         normalizePath(buffer);
 
-        if (exists(buffer))
-            return Path{resource, buffer, PATH_MAX, static_cast<uint32_t>(len + 1)};
+        if (shouldExist)
+        {
+            if (exists(buffer))
+                return Path{resource, buffer, PATH_MAX, static_cast<uint32_t>(len + 1)};
 
-        return invalid(resource);
+            return invalid(resource);
+        }
+
+        return Path{resource, buffer, PATH_MAX, static_cast<uint32_t>(len + 1)};
     }
 
     std::pmr::string Path::toUnderlying(std::pmr::memory_resource* resource) const

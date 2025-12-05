@@ -48,7 +48,7 @@
       "radiant-intensity": [ 1, 1, 1 ]
     }
   ],
-  "envlight": "veranda_polyhaven_1k.exr",
+  "envlight": "veranda_polyhaven_1k.png",
   "transforms": [
     {
       "name": "position-obj",

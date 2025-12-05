@@ -24,6 +24,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace dmt {
 
@@ -133,7 +134,7 @@ namespace dmt::parse_helpers {
 #if defined(DMT_OS_LINUX)
         if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
 #elif defined(DMT_OS_WINDOWS)
-        if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
+        if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))); !ptr)
 #else
     #error "Error allocate aligned RGB"
 #endif
@@ -404,7 +405,7 @@ namespace dmt::parse_helpers {
         return true;
     }
 
-    static bool parseTexture(Parser& parser, ParserState& state, json const& texture, Renderer* rend)
+    static bool parseTexture(Parser& parser, ParserState& state, json const& texture, MipCacheFile* texCacheFiles)
     {
         Context ctx;
 
@@ -480,12 +481,12 @@ namespace dmt::parse_helpers {
         state.texturesPath[texName].xRes = static_cast<uint32_t>(imgTex.width);
         state.texturesPath[texName].yRes = static_cast<uint32_t>(imgTex.height);
 
-        rend->texCache.MipcFiles.createCacheFile(baseKeyFromPath(texPath), imgTex);
+        texCacheFiles->createCacheFile(baseKeyFromPath(texPath), imgTex);
         freeTempTexObj(texPath, imgTex);
         return true;
     }
 
-    static bool parseMaterial(Parser& parser, ParserState& state, json const& material, Renderer* rend)
+    static bool parseMaterial(Parser& parser, ParserState& state, json const& material, Scene* scene)
     {
         Context         ctx;
         SurfaceMaterial mat{};
@@ -777,8 +778,9 @@ namespace dmt::parse_helpers {
                 mat.transmittanceTint = {1, 1, 1};
                 if (ggxDielectric.is_object())
                 {
-                    static std::unordered_set<std::string> const allowedKeys{"reflectance-tint", "transmittance-tint"};
-                    if (!hasOnlyAllowedkeys(ggxDielectric, allowedKeys))
+                    static std::unordered_set<std::string> const allowedKeysGGX{"reflectance-tint",
+                                                                                "transmittance-tint"};
+                    if (!hasOnlyAllowedkeys(ggxDielectric, allowedKeysGGX))
                     {
                         ctx.error("material: Unrecognized key inside 'ggx-dielectric'", {});
                         return false;
@@ -839,9 +841,9 @@ namespace dmt::parse_helpers {
             return false;
         }
 
-        rend->scene.materials.push_back(mat);
-        auto const& [it, wasInserted] = state.materials.try_emplace(name,
-                                                                    static_cast<uint32_t>(rend->scene.materials.size() - 1));
+        scene->materials.push_back(mat);
+        auto const& [it,
+                     wasInserted] = state.materials.try_emplace(name, static_cast<uint32_t>(scene->materials.size() - 1));
 
         return wasInserted;
     }
@@ -1134,8 +1136,14 @@ namespace dmt::parse_helpers {
                     radiantIntensity = RGB::fromVec(tmp);
                 }
 
+#if defined(DMT_DEBUG) && defined(DMT_OS_WINDOWS)
+                Light const pointLight        = makePointLight(Transform{}, radiantIntensity);
+                auto const& [it, wasInserted] = //
+                    state.lights.try_emplace(name, pointLight);
+#else
                 auto const& [it, wasInserted] = //
                     state.lights.try_emplace(name, makePointLight(Transform{}, radiantIntensity));
+#endif
                 if (!wasInserted)
                     return false;
             }
@@ -1191,10 +1199,18 @@ namespace dmt::parse_helpers {
                     falloffPercentage = fl::clamp(light["falloff-percentage"], 1.f, 80.f);
                 }
 
-                float const cosTheta0         = cosf(coneAngle * (1.f - falloffPercentage / 100.f) * fl::pi() / 180.f);
-                float const cosThetae         = cosf(coneAngle * fl::pi() / 180.f);
+                float const cosTheta0 = cosf(coneAngle * (1.f - falloffPercentage / 100.f) * fl::pi() / 180.f);
+                float const cosThetae = cosf(coneAngle * fl::pi() / 180.f);
+#if defined(DMT_DEBUG) && defined(DMT_OS_WINDOWS)
+                Light const spotLight = makeSpotLight(Transform{}, radiantIntensity, cosTheta0, cosThetae);
+                if (spotLight.lightFromRender.hasNaN())
+                    __debugbreak();
+                auto const& [it, wasInserted] = //
+                    state.lights.try_emplace(name, spotLight);
+#else
                 auto const& [it, wasInserted] = //
                     state.lights.try_emplace(name, makeSpotLight(Transform{}, radiantIntensity, cosTheta0, cosThetae));
+#endif
                 if (!wasInserted)
                     return false;
             }
@@ -1212,7 +1228,7 @@ namespace dmt::parse_helpers {
         return true;
     }
 
-    static bool envlight(Parser& parser, ParserState& state, json const& envLight, Renderer* renderer)
+    static bool envlight(Parser& parser, ParserState& state, json const& envLight, Scene* Scene, UniqueRef<EnvLight>& outEnvLight)
     {
         Context ctx;
         if (!envLight.is_string())
@@ -1241,8 +1257,8 @@ namespace dmt::parse_helpers {
             ctx.error("failed to load image at path '{}'", std::make_tuple(envPath.toUnderlying()));
             return false;
         }
-        renderer->params.envLight = makeUniqueRef<EnvLight>(renderer->scene.memory(), image, xRes, yRes, quat, scale);
-        if (!renderer->params.envLight)
+        outEnvLight = makeUniqueRef<EnvLight>(Scene->memory(), image, xRes, yRes, quat, scale);
+        if (!outEnvLight)
         {
             ctx.error("failed to load image at path '{}'", std::make_tuple(envPath.toUnderlying()));
             return false;
@@ -1251,7 +1267,7 @@ namespace dmt::parse_helpers {
         return true;
     }
 
-    static bool object(Parser& parser, ParserState& state, json const& object, Renderer* rend, MeshFbxParser& meshParser)
+    static bool object(Parser& parser, ParserState& state, json const& object, Scene* scene, MeshFbxParser& meshParser)
     {
         Context ctx;
 
@@ -1305,8 +1321,8 @@ namespace dmt::parse_helpers {
             }
             std::string const type = object["type"];
 
-            rend->scene.geometry.emplace_back(makeUniqueRef<TriangleMesh>(rend->scene.memory()));
-            TriangleMesh& mesh = *rend->scene.geometry.back();
+            scene->geometry.emplace_back(makeUniqueRef<TriangleMesh>(scene->memory()));
+            TriangleMesh& mesh = *scene->geometry.back();
             if (type == "fbx" || type == "FBX")
             {
                 allowedKeys.insert("path");
@@ -1403,13 +1419,12 @@ namespace dmt::parse_helpers {
             return false;
         }
 
-        auto const& [it, wasInserted] = //
-            state.objects.try_emplace(name, static_cast<uint32_t>(rend->scene.geometry.size() - 1));
+        auto const& [it, wasInserted] = state.objects.try_emplace(name, static_cast<uint32_t>(scene->geometry.size() - 1));
 
         return wasInserted;
     }
 
-    static bool parseWorldTranform(Parser& parse, ParserState& state, json const& worldObj, Renderer* rend)
+    static bool parseWorldTranform(Parser& parse, ParserState& state, json const& worldObj, Scene* scene)
     {
 
         //existing key,
@@ -1419,7 +1434,7 @@ namespace dmt::parse_helpers {
             if (state.transforms.contains(key))
             {
                 state.stackTrasforms.push_back(state.transforms[key]);
-                if (!parse_helpers::parseWorldTranform(parse, state, value, rend))
+                if (!parse_helpers::parseWorldTranform(parse, state, value, scene))
                     return false;
                 state.stackTrasforms.pop_back();
             }
@@ -1446,11 +1461,11 @@ namespace dmt::parse_helpers {
                     if (!state.objects.contains(static_cast<std::string>(obj)))
                         return false;
 
-                    rend->scene.instances.emplace_back(makeUniqueRef<Instance>(rend->scene.memory()));
-                    auto& instance   = *rend->scene.instances.back();
+                    scene->instances.emplace_back(makeUniqueRef<Instance>(scene->memory()));
+                    auto& instance   = *scene->instances.back();
                     instance.meshIdx = state.objects[static_cast<std::string>(obj)];
                     extractAffineTransform(currTransform.m, instance.affineTransform);
-                    instance.bounds = rend->scene.geometry[instance.meshIdx]->transformedBounds(currTransform);
+                    instance.bounds = scene->geometry[instance.meshIdx]->transformedBounds(currTransform);
                 }
             }
 
@@ -1460,7 +1475,7 @@ namespace dmt::parse_helpers {
 
                 if (!value.is_array())
                 {
-                    //insert error message
+                    // TODO insert error message
                     return false;
                 }
 
@@ -1470,7 +1485,7 @@ namespace dmt::parse_helpers {
                         return false;
                     if (!state.lights.contains(light))
                     {
-                        //insert error message
+                        // TODO insert error message
                         return false;
                     }
 
@@ -1478,14 +1493,14 @@ namespace dmt::parse_helpers {
                     if (tmpLight.type == dmt::LightType::ePoint)
                     {
 
-                        rend->scene.lights.push_back(dmt::makePointLight(currTransform,
-                                                                         tmpLight.strength,
-                                                                         tmpLight.data.point.radius,
-                                                                         tmpLight.data.point.evalFac));
+                        scene->lights.push_back(dmt::makePointLight(currTransform,
+                                                                    tmpLight.strength,
+                                                                    tmpLight.data.point.radius,
+                                                                    tmpLight.data.point.evalFac));
                     }
                     else if (tmpLight.type == dmt::LightType::eSpot)
                     {
-                        rend->scene.lights.push_back(
+                        scene->lights.push_back(
                             dmt::makeSpotLight(currTransform,
                                                tmpLight.strength,
                                                tmpLight.data.spot.cosHalfSpotAngle,
@@ -1504,14 +1519,9 @@ namespace dmt::parse_helpers {
 } // namespace dmt::parse_helpers
 
 namespace dmt {
-    Parser::Parser(os::Path const& path, Renderer* renderer, std::pmr::memory_resource* mem) :
-    m_renderer{renderer},
-    m_path{path},
-    m_tmp(mem)
-    {
-    }
+    Parser::Parser(os::Path path, std::pmr::memory_resource* mem) : m_path{std::move(path)}, m_tmp(mem) {}
 
-    bool Parser::parse()
+    bool Parser::parse(ParsedObject& outObject)
     {
         using json = nlohmann::json;
         Context ctx;
@@ -1527,16 +1537,10 @@ namespace dmt {
         if (!f)
             return false;
 
+        // clang-format off
         static std::unordered_set<std::string> const
-            allowedKeys{"camera",
-                        "film",
-                        "textures",
-                        "materials",
-                        "objects",
-                        "lights",
-                        "envlight",
-                        "transforms",
-                        "world"};
+            allowedKeys{"camera", "film", "textures", "materials", "objects", "lights", "envlight", "transforms", "world"};
+        // clang-format on
 
         try
         {
@@ -1547,11 +1551,11 @@ namespace dmt {
             ParserState state;
 
             // parse camera object
-            if (!parse_helpers::parseCamera(*this, data["camera"], &m_renderer->params))
+            if (!parse_helpers::parseCamera(*this, data["camera"], &outObject.params))
                 throw nullptr;
 
             // parse film object
-            if (!parse_helpers::parseFilm(*this, data["film"], &m_renderer->params))
+            if (!parse_helpers::parseFilm(*this, data["film"], &outObject.params))
                 throw nullptr;
 
             // parse texture array
@@ -1560,7 +1564,7 @@ namespace dmt {
 
             for (json const& texture : data["textures"])
             {
-                if (!parse_helpers::parseTexture(*this, state, texture, m_renderer))
+                if (!parse_helpers::parseTexture(*this, state, texture, &outObject.texCacheFiles))
                     throw nullptr;
             }
 
@@ -1570,7 +1574,7 @@ namespace dmt {
 
             for (json const& material : data["materials"])
             {
-                if (!parse_helpers::parseMaterial(*this, state, material, m_renderer))
+                if (!parse_helpers::parseMaterial(*this, state, material, &outObject.scene))
                     throw nullptr;
             }
 
@@ -1580,7 +1584,7 @@ namespace dmt {
 
             for (json const& object : data["objects"])
             {
-                if (!parse_helpers::object(*this, state, object, m_renderer, m_fbxParser))
+                if (!parse_helpers::object(*this, state, object, &outObject.scene, m_fbxParser))
                     throw nullptr;
             }
             //parse ligths
@@ -1594,7 +1598,7 @@ namespace dmt {
                     throw nullptr;
             }
             // parse envlight
-            if (!parse_helpers::envlight(*this, state, data["envlight"], m_renderer))
+            if (!parse_helpers::envlight(*this, state, data["envlight"], &outObject.scene, outObject.params.envLight))
                 throw nullptr;
 
             // parse transforms array
@@ -1615,7 +1619,7 @@ namespace dmt {
                 if (state.transforms.contains(key))
                 {
                     state.stackTrasforms.push_back(state.transforms[key]);
-                    if (!parse_helpers::parseWorldTranform(*this, state, value, m_renderer))
+                    if (!parse_helpers::parseWorldTranform(*this, state, value, &outObject.scene))
                     {
                         throw std::runtime_error("Error to parse world");
                     }
@@ -1626,8 +1630,7 @@ namespace dmt {
         {
             try
             {
-                auto excPtr = std::current_exception();
-                if (excPtr)
+                if (auto const excPtr = std::current_exception())
                     std::rethrow_exception(excPtr);
             } catch (std::exception const& e)
             {

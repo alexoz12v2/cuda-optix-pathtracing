@@ -11,6 +11,8 @@
 
 #include <list>
 #include <memory_resource>
+#include <ranges>
+#include <concepts>
 #include <unordered_map>
 
 // mipc file description
@@ -75,12 +77,37 @@ namespace dmt {
     {
     public:
         explicit DMT_CORE_API MipCacheFile(std::pmr::memory_resource* mapMemory = std::pmr::get_default_resource());
-        MipCacheFile(MipCacheFile const&)                = delete;
-        MipCacheFile(MipCacheFile&&) noexcept            = delete;
-        MipCacheFile& operator=(MipCacheFile const&)     = delete;
-        MipCacheFile& operator=(MipCacheFile&&) noexcept = delete;
+        MipCacheFile(MipCacheFile const&) = delete;
+        MipCacheFile(MipCacheFile&& other) noexcept :
+        m_keyfdmap(std::move(other.m_keyfdmap)),
+        m_sectorSize(other.m_sectorSize)
+        {
+            other.m_keyfdmap.clear();
+        }
+        MipCacheFile& operator=(MipCacheFile const& other) = delete;
+        MipCacheFile& operator=(MipCacheFile&& other) noexcept
+        {
+            assert(other.m_sectorSize == m_sectorSize);
+            if (this != &other)
+            {
+                // clean all from this object
+                for (auto const& value : m_keyfdmap | std::views::values)
+                {
+                    cleanEntry(value);
+                }
+                m_keyfdmap = std::move(other.m_keyfdmap);
+                other.m_keyfdmap.clear();
+            }
+            return *this;
+        }
         /// closes all handles in the m_keyfdmap, which means deletes all files
-        DMT_CORE_API ~MipCacheFile() noexcept;
+        DMT_CORE_API ~MipCacheFile() noexcept
+        {
+            for (auto const& value : m_keyfdmap | std::views::values)
+            {
+                cleanEntry(value);
+            }
+        }
 
         // TODO add overload which takes the cache directory
         bool DMT_CORE_API createCacheFile(uint64_t baseKey, ImageTexturev2 const& tex);
@@ -102,11 +129,13 @@ namespace dmt {
         [[nodiscard]] inline size_t sectorSize() const { return m_sectorSize; }
 
     private:
+        static void cleanEntry(uintptr_t fd);
+
         /// associate the file key to its file descriptor/HANDLE
         std::pmr::unordered_map<uint64_t, uintptr_t> m_keyfdmap;
         size_t                                       m_sectorSize;
     };
-    static_assert(alignof(MipCacheFile) == 8);
+    static_assert(alignof(MipCacheFile) == 8 && std::movable<MipCacheFile>);
 
     /// LRU cache which maintains
     /// - a hash table which associates {file path, mip level} -> address of allocated buffer,
@@ -121,7 +150,8 @@ namespace dmt {
     class TextureCache
     {
     public:
-        DMT_CORE_API TextureCache(size_t                     cacheSize = 1ull << 30, // 1 GB
+        DMT_CORE_API TextureCache(MipCacheFile&&             _MipcFiles,
+                                  size_t                     cacheSize = 1ull << 30, // 1 GB
                                   std::pmr::memory_resource* cacheMem  = std::pmr::get_default_resource(),
                                   std::pmr::memory_resource* listMem   = std::pmr::get_default_resource());
 
@@ -138,11 +168,10 @@ namespace dmt {
     public:
         DMT_CORE_API void const* getOrInsert(uint64_t baseKey, int32_t mipLevel, uint32_t& outBytes, TexFormat& outTexFormat);
 
-    public:
+    private:
         /// only one thread, the one parsing the scene before kicking jobs onto workers, should interact with this
         MipCacheFile MipcFiles;
 
-    private:
         /// store associations {path, miplevel} -> pointer to buffer inside texMemory
         /// the key is composed with hashCRC64(path) someBitwiseOp mipLevel
         std::pmr::unordered_map<uint64_t, Entry> m_cache;

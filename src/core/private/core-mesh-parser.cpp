@@ -473,7 +473,7 @@ namespace dmt {
     {
         auto* mng = reinterpret_cast<FbxManager*>(m_res.manager);
 
-        os::Path const fbxDirectory = os::Path::fromString(fileName);
+        os::Path const fbxDirectory = os::Path::fromString(fileName, true);
         if (!fbxDirectory.isValid() || !fbxDirectory.isFile())
             return false;
 
@@ -483,7 +483,7 @@ namespace dmt {
         FbxScene*   pScene    = FbxScene::Create(mng, sceneName.c_str());
 
         FbxImporter* fbxImporter = FbxImporter::Create(mng, sceneName.c_str());
-        if (!fbxImporter->Initialize(fileName, -1, reinterpret_cast<FbxIOSettings*>(m_res.settings)))
+        if (!fbxImporter->Initialize(fileName, -1, static_cast<FbxIOSettings*>(m_res.settings)))
             return false;
         if (!fbxImporter->Import(pScene))
         {
@@ -519,7 +519,8 @@ namespace dmt {
             if (child->GetNodeAttribute()->GetAttributeType() != FbxNodeAttribute::eMesh)
                 continue;
 
-            auto* mesh = dynamic_cast<FbxMesh*>(child->GetNodeAttribute());
+            // auto* mesh = dynamic_cast<FbxMesh*>(child->GetNodeAttribute());
+            FbxMesh* mesh = child->GetMesh();
             if (!mesh)
                 continue;
 

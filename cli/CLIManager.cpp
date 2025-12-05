@@ -28,7 +28,12 @@ namespace dmt {
           .description = " Measure and report the execution times of key rendering operations.",
           .requiresVal = false,
           .defaultVal  = "",
-          .allowedVals = {}}};
+          .allowedVals = {}},
+         {
+             .names       = {"--out", "-o"},
+             .description = "Output File Path",
+             .requiresVal = true,
+         }};
 
     bool ArgParser::parse(std::span<std::string_view> argv)
     {
@@ -158,7 +163,7 @@ namespace dmt {
         return true;
     }
 
-    void ArgParser::printHelp(std::string_view progName) const
+    void ArgParser::printHelp(std::string_view progName)
     {
         Context            ctx;
         std::ostringstream str;

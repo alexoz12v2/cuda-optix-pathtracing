@@ -18,7 +18,8 @@ namespace dmt {
         std::vector<std::string> allowedVals;
     };
 
-    enum class OptionEnum {
+    enum class OptionEnum
+    {
         eNotPresent = 0,
         eRequiredNotPresent,
         eValue,
@@ -26,9 +27,10 @@ namespace dmt {
         Count
     };
 
-    struct OptionResult {
+    struct OptionResult
+    {
         std::string value;
-        OptionEnum result;
+        OptionEnum  result;
     };
 
     //-device cpu/gpu
@@ -40,16 +42,18 @@ namespace dmt {
     public:
         ArgParser() = default;
 
-        OptionResult getOption(std::string const& name, bool required = false, std::string const* defaultValue = nullptr) const;
+        [[nodiscard]] OptionResult getOption(std::string const& name,
+                                             bool               required     = false,
+                                             std::string const* defaultValue = nullptr) const;
 
-        bool hasFlag(std::string const& name) const;
+        [[nodiscard]] bool hasFlag(std::string const& name) const;
 
-        std::vector<std::string_view> const& getPositionals() const;
+        [[nodiscard]] std::vector<std::string_view> const& getPositionals() const;
 
-        void printHelp(std::string_view progName) const;
+        static void printHelp(std::string_view progName);
 
-        bool parse(std::span<std::string_view> argv);
-        
+        [[nodiscard]] bool parse(std::span<std::string_view> argv);
+
 
     private:
         std::unordered_map<std::string_view, std::string> m_options;

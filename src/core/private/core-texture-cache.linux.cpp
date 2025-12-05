@@ -217,7 +217,7 @@ namespace dmt {
         int const fd = open(tempMIPCDirectory.c_str(), O_RDWR | O_CREAT | O_DIRECT | O_EXCL, S_IRUSR | S_IWUSR);
         if (fd < 0)
             return false;
-        // delete directory entry immediately. The fill will live until this file descriptor remains open
+// delete directory entry immediately. The fill will live until this file descriptor remains open
 #if !defined(DMT_MIPC_UNLINK_AT_DESTRUCTION)
         unlink(tempMIPCDirectory.c_str());
 #endif
@@ -342,31 +342,28 @@ namespace dmt {
         }
     }
 
-    MipCacheFile::~MipCacheFile() noexcept
+    void MipCacheFile::cleanEntry(uintptr_t value)
     {
-        for (auto const& [key, value] : m_keyfdmap)
-        {
 #if defined(DMT_MIPC_UNLINK_AT_DESTRUCTION)
-            // Construct the /proc/self/fd/<fd> path
-            std::ostringstream oss;
-            oss << "/proc/self/fd/" << value;
-            std::string fdPath = oss.str();
+        // Construct the /proc/self/fd/<fd> path
+        std::ostringstream oss;
+        oss << "/proc/self/fd/" << value;
+        std::string fdPath = oss.str();
 
-            // Resolve the symlink to the actual file path
-            char    realPath[PATH_MAX + 1] = {0};
-            ssize_t len                    = readlink(fdPath.c_str(), realPath, sizeof(realPath) - 1);
-            if (len != -1)
-            {
-                realPath[len] = '\0'; // Null-terminate
-                unlink(realPath);     // Remove the file
-            }
-            else
-            {
-                // Optional: log or ignore the error
-                perror("readlink failed");
-            }
-#endif
-            close(static_cast<int>(value));
+        // Resolve the symlink to the actual file path
+        char    realPath[PATH_MAX + 1] = {0};
+        ssize_t len                    = readlink(fdPath.c_str(), realPath, sizeof(realPath) - 1);
+        if (len != -1)
+        {
+            realPath[len] = '\0'; // Null-terminate
+            unlink(realPath);     // Remove the file
         }
+        else
+        {
+            // Optional: log or ignore the error
+            perror("readlink failed");
+        }
+#endif
+        close(static_cast<int>(value));
     }
 } // namespace dmt

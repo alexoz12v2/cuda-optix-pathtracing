@@ -269,7 +269,7 @@ namespace dmt::os {
         return Path{resource, exePath, capacity, static_cast<uint32_t>(len * sizeof(wchar_t))};
     }
 
-    Path Path::fromString(std::string_view str, std::pmr::memory_resource* resource)
+    Path Path::fromString(std::string_view str, bool shouldExist, std::pmr::memory_resource* resource)
     {
         if (!resource)
             resource = std::pmr::get_default_resource();
@@ -277,39 +277,117 @@ namespace dmt::os {
         if (str.empty())
             return invalid(resource);
 
-        // UTF8 -> UTF16
-        int wideLen = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
+        // -----------------------
+        //  UTF-8 → UTF-16
+        // -----------------------
+        int wideLen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), (int)str.size(), nullptr, 0);
         if (wideLen <= 0)
             return invalid(resource);
 
-        // allocate buffer + long path prefix
-        static constexpr uint32_t longPrefixLen = 4; // in wchar_ts
-        size_t const              bufferChars   = wideLen + longPrefixLen + 1;
-        size_t const              capacity      = std::max<size_t>(MAX_PATH << 1, bufferChars * sizeof(wchar_t));
-        wchar_t*                  buffer        = reinterpret_cast<wchar_t*>(resource->allocate(capacity));
-        if (!buffer)
+        std::pmr::wstring wpath(resource);
+        wpath.resize(wideLen);
+
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), (int)str.size(), wpath.data(), wideLen);
+
+        // -----------------------
+        //  Normalize slashes
+        // -----------------------
+        for (wchar_t& c : wpath)
+            if (c == L'/')
+                c = L'\\';
+
+        // -----------------------
+        //  Resolve relative path
+        // -----------------------
+        DWORD needed = GetFullPathNameW(wpath.c_str(), 0, nullptr, nullptr);
+        if (needed == 0)
             return invalid(resource);
 
-        // prepend long path prefix
-        std::memcpy(buffer, L"\\\\?\\", longPrefixLen * sizeof(wchar_t));
-        MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), buffer + longPrefixLen, wideLen);
-        buffer[longPrefixLen + wideLen] = L'\0';
-
-        // ---- normalize using PathCchCanonicalize ----
-        std::unique_ptr<wchar_t[]> normBuffer(new wchar_t[capacity / sizeof(wchar_t)]);
-        if (SUCCEEDED(PathCchCanonicalize(normBuffer.get(), capacity / sizeof(wchar_t), buffer)))
+        std::pmr::wstring full(resource);
+        full.resize(needed);
         {
-            std::wcsncpy(buffer, normBuffer.get(), capacity / sizeof(wchar_t));
-            buffer[capacity / sizeof(wchar_t) - 1] = L'\0';
+            std::pmr::wstring canFull(resource);
+            // try a stupid heuristic to not fail due to insufficient buffer
+            canFull.resize(std::max<size_t>(needed + 64, MAX_PATH));
+
+            if (!GetFullPathNameW(wpath.c_str(), needed, canFull.data(), nullptr))
+                return invalid(resource);
+
+            // -----------------------
+            //  Canonicalize
+            // -----------------------
+            // need to remove trailing dots, so don't use the add prefix feature
+            HRESULT hr = PathCchCanonicalizeEx(full.data(), full.size(), canFull.c_str(), PATHCCH_ALLOW_LONG_PATHS);
+            while (hr == E_OUTOFMEMORY)
+            {
+                canFull.resize(2 * canFull.size());
+                hr = PathCchCanonicalizeEx(full.data(), full.size(), canFull.c_str(), PATHCCH_ALLOW_LONG_PATHS);
+            }
+            if (FAILED(hr))
+                return invalid(resource);
+
+            canFull.resize(wcsnlen(canFull.data(), canFull.size()));
+
+            full = std::move(canFull);
         }
 
-        if (PathFileExistsW(buffer))
-            return Path{resource,
-                        buffer,
-                        static_cast<uint32_t>(capacity),
-                        static_cast<uint32_t>((wcslen(buffer) + 1) * sizeof(wchar_t))};
+        // -----------------------
+        //  Add extended prefix if needed
+        // -----------------------
+        uint32_t const capacity = sizeof(wchar_t) * (full.size() + 5);
+        auto*          ntpath   = static_cast<wchar_t*>(resource->allocate(capacity));
+        uint32_t       cursor   = 0;
 
-        return invalid(resource);
+        bool const isUNC = full.size() >= 2 && full[0] == '\\' && full[1] == '\\';
+
+        if (full.size() >= MAX_PATH)
+        {
+            if (isUNC)
+            {
+                constexpr std::wstring_view longPref = L"\\\\?\\UNC";
+                memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, longPref.data(), longPref.size() * sizeof(wchar_t));
+                cursor += longPref.size() * sizeof(wchar_t);
+                // remove one backslash: \\server → \server
+                std::pmr::wstring slashed = full.substr(1);
+                memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, slashed.data(), slashed.size() * sizeof(wchar_t));
+                cursor += slashed.size() * sizeof(wchar_t);
+            }
+            else
+            {
+                constexpr std::wstring_view longPref = L"\\\\?\\";
+                memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, longPref.data(), longPref.size() * sizeof(wchar_t));
+                cursor += longPref.size() * sizeof(wchar_t);
+                memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, full.data(), full.size() * sizeof(wchar_t));
+                cursor += full.size() * sizeof(wchar_t);
+            }
+        }
+        else
+        {
+#ifdef DMT_NO_LONG_PATHS
+            memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, full.data(), full.size() * sizeof(wchar_t));
+            cursor += full.size() * sizeof(wchar_t);
+#else
+            constexpr std::wstring_view longPref = L"\\\\?\\";
+            memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, longPref.data(), longPref.size() * sizeof(wchar_t));
+            cursor += longPref.size() * sizeof(wchar_t);
+            memcpy(reinterpret_cast<uint8_t*>(ntpath) + cursor, full.data(), full.size() * sizeof(wchar_t));
+            cursor += full.size() * sizeof(wchar_t);
+#endif
+        }
+        ntpath[cursor >> 1] = L'\0';
+
+        // -----------------------
+        //  Check existence (optional)
+        // -----------------------
+        if (shouldExist)
+        {
+            DWORD attr = GetFileAttributesW(ntpath);
+            if (attr == INVALID_FILE_ATTRIBUTES)
+                return invalid(resource);
+        }
+
+        // successfully created
+        return Path{resource, ntpath, capacity, cursor};
     }
 
     std::pmr::string Path::toUnderlying(std::pmr::memory_resource* resource) const
@@ -461,14 +539,20 @@ namespace dmt::os {
                 path[i]    = L'\0';               // Null-terminate
                 m_dataSize = i * sizeof(wchar_t); // Update byte size
                 m_isDir    = true;
-                return;
+                break;
             }
         }
+        // check for existance
+        DWORD attr = GetFileAttributesW(path);
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+            m_valid = true;
     }
 
     // Returns a new Path object without the last component
     Path Path::parent() const
     {
+        if (!m_data)
+            return invalid(m_resource);
         Path copy(*this); // Use copy constructor
         copy.parent_();   // Modify copy
         return copy;      // Return modified copy
@@ -545,6 +629,8 @@ namespace dmt::os {
     // Returns a new Path object with an appended component
     Path Path::operator/(char const* pathComponent) const
     {
+        if (!m_data)
+            return invalid(m_resource);
         Path copy(*this);
         copy /= pathComponent;
         return copy;

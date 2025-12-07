@@ -51,6 +51,7 @@ namespace dmt {
     // ===================================================
     __global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY, int tileW, int tileH, int spp, RayPool rayPool, IndexQueue rayQ);
 
+    __global__ void megakernel();
     // TODO
 #if 0
     /*

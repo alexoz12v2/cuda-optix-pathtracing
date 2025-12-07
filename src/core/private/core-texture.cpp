@@ -110,6 +110,7 @@ namespace dmt {
         *dpdy = sppScale * apctx.cameraFromRender.applyInverse(downZFromCamera.applyInverse(py - pDownZ));
     }
 
+#if 0
     UVDifferentials duv_From_dp_dxy(UVDifferentialsContext const& uvctx)
     {
         UVDifferentials ret{};
@@ -142,6 +143,153 @@ namespace dmt {
 
         return ret;
     }
+#else
+    UVDifferentials duv_From_dp_dxy(UVDifferentialsContext const& uvctx)
+    {
+        UVDifferentials ret{};
+
+        // Local aliases for readability
+        auto const& dpdx = uvctx.dpdx;
+        auto const& dpdy = uvctx.dpdy;
+        auto        dpdu = uvctx.dpdu; // make mutable copy for possible fallback
+        auto        dpdv = uvctx.dpdv;
+
+        // Small constants
+        constexpr float EPS_DET     = 1e-12f; // threshold for determinant singularity
+        constexpr float REG_SCALE   = 1e-6f;  // regularization scale relative to ATA diag
+        constexpr float PERTURB_FAC = 1e-6f;  // factor for perturbing dpdy if dpdx==dpdy
+        constexpr float MAX_DERIV   = 1e8f;
+
+        // If dpdx and dpdy are identical (or very close), perturb dpdy slightly so we keep a usable differential
+        // (this prevents exact collapse of x/y derivatives)
+        Vector3f rdpdy = dpdy;
+        if (normL2(dpdx - dpdy) < 1e-12f * fmaxf(1.0f, normL2(dpdx)))
+        {
+            // try to compute a reasonable orthogonal direction to perturb along:
+            Vector3f n    = cross(dpdu, dpdv);
+            float    nlen = normL2(n);
+            if (nlen < 1e-12f)
+            {
+                // UV basis degenerate; try alternative normals
+                n    = cross(dpdu, dpdx);
+                nlen = normL2(n);
+                if (nlen < 1e-12f)
+                {
+                    n    = cross(dpdv, dpdx);
+                    nlen = normL2(n);
+                }
+            }
+            if (nlen < 1e-12f)
+            {
+                // Last resort: pick a world-space axis
+                n    = {0.0f, 0.0f, 1.0f};
+                nlen = 1.0f;
+            }
+            Vector3f perp = normalize(n);
+            // scale perturbation by magnitude of dpdx so small differentials still get something tiny
+            float scale = PERTURB_FAC * fmaxf(1.0f, normL2(dpdx));
+            rdpdy       = dpdy + perp * scale;
+        }
+
+        // ATA components (2x2 symmetric)
+        float const ata00 = dot(dpdu, dpdu);
+        float const ata01 = dot(dpdu, dpdv);
+        float const ata11 = dot(dpdv, dpdv);
+
+        // Right-hand sides: A^T * b for dpdx and rdpdy
+        float const atb0x = dot(dpdu, dpdx);
+        float const atb1x = dot(dpdv, dpdx);
+        float const atb0y = dot(dpdu, rdpdy);
+        float const atb1y = dot(dpdv, rdpdy);
+
+        // Compute (regularized) determinant and inverse
+        float det = ata00 * ata11 - ata01 * ata01;
+
+        float dudx = 0.0f;
+        float dvdx = 0.0f;
+        float dudy = 0.0f;
+        float dvdy = 0.0f;
+
+        if (!fl::isinf(det) && fabs(det) > EPS_DET)
+        {
+            // Well-conditioned: direct inverse
+            float invDet = 1.0f / det;
+
+            dudx = fl::FMA(ata11, atb0x, -ata01 * atb1x) * invDet;
+            dvdx = fl::FMA(ata00, atb1x, -ata01 * atb0x) * invDet;
+            dudy = fl::FMA(ata11, atb0y, -ata01 * atb1y) * invDet;
+            dvdy = fl::FMA(ata00, atb1y, -ata01 * atb0y) * invDet;
+        }
+        else
+        {
+            // Ill-conditioned or singular: use Tikhonov regularization (ridge) to form a stable pseudo-inverse
+            // (A^T A + lambda I)^{-1} A^T b
+            float lambda = REG_SCALE * fmaxf(1.0f, fmaxf(ata00, ata11));
+            float r00    = ata00 + lambda;
+            float r11    = ata11 + lambda;
+            float r01    = ata01;
+
+            float rdet = r00 * r11 - r01 * r01;
+
+            if (!fl::isinf(rdet) && fabs(rdet) > 0.0f)
+            {
+                float invRdet = 1.0f / rdet;
+
+                // compute inverse of (A^T A + lambda I) times A^T b
+                dudx = fl::FMA(r11, atb0x, -r01 * atb1x) * invRdet;
+                dvdx = fl::FMA(r00, atb1x, -r01 * atb0x) * invRdet;
+                dudy = fl::FMA(r11, atb0y, -r01 * atb1y) * invRdet;
+                dvdy = fl::FMA(r00, atb1y, -r01 * atb0y) * invRdet;
+            }
+            else
+            {
+                // As a last resort, fall back to geometric gradient approach:
+                // estimate gradient directions for u and v via cross-normal relationships.
+                Vector3f normal = cross(dpdu, dpdv);
+                float    nlen   = normL2(normal);
+                if (nlen < 1e-12f)
+                {
+                    // still degenerate: try alternatives
+                    normal = cross(dpdu, dpdx);
+                    nlen   = normL2(normal);
+                    if (nlen < 1e-12f)
+                    {
+                        normal = cross(dpdv, dpdx);
+                        nlen   = normL2(normal);
+                    }
+                }
+                if (nlen < 1e-12f)
+                {
+                    normal = {0.0f, 0.0f, 1.0f}; // final fallback
+                }
+                else
+                {
+                    normal = normalize(normal);
+                }
+
+                // Build approximate object-space gradients for u and v.
+                // These are not exact inverses but are stable and useful for MIP selection.
+                Vector3f grad_u = normalize(cross(normal, dpdv));
+                Vector3f grad_v = normalize(cross(dpdu, normal));
+
+                // project dpdx/rdpdy onto these approximate gradients
+                dudx = dot(grad_u, dpdx);
+                dvdx = dot(grad_v, dpdx);
+                dudy = dot(grad_u, rdpdy);
+                dvdy = dot(grad_v, rdpdy);
+            }
+        }
+
+        // Clamp and sanitize
+        ret.dudx = !fl::isinf(dudx) ? fl::clamp(dudx, -MAX_DERIV, MAX_DERIV) : 0.f;
+        ret.dvdx = !fl::isinf(dvdx) ? fl::clamp(dvdx, -MAX_DERIV, MAX_DERIV) : 0.f;
+        ret.dudy = !fl::isinf(dudy) ? fl::clamp(dudy, -MAX_DERIV, MAX_DERIV) : 0.f;
+        ret.dvdy = !fl::isinf(dvdy) ? fl::clamp(dvdy, -MAX_DERIV, MAX_DERIV) : 0.f;
+
+        return ret;
+    }
+
+#endif
 
     // -- Checker Texture --
     float CheckerTexture::evalFloat(TextureEvalContext const& ctx) const
@@ -543,20 +691,36 @@ namespace dmt {
         return result;
     }
 
-    // TODO __constant__ memory for GPU
-    static auto makeEwaWeightLUT(float alpha = 2.0f)
-    {
-        std::array<float, EWA_LUT_SIZE> lut{};
-        for (uint32_t i = 0; i < EWA_LUT_SIZE; ++i)
-        {
-            float t = float(i) / float(EWA_LUT_SIZE - 1); // normalized [0,1]
-            lut[i]  = std::exp(-alpha * t);
-        }
-        return lut;
-    }
-
-    // computed when DLL is brought up to memory
-    std::array<float, EWA_LUT_SIZE> EwaWeightLUT = makeEwaWeightLUT(2.f);
+    // clang-format off
+    static std::array<float, EWA_LUT_SIZE> const EwaWeightLUT = {
+    // MIPMap EWA Lookup Table Values
+    0.864664733f, 0.849040031f, 0.83365953f, 0.818519294f, 0.80361563f,
+    0.788944781f, 0.774503231f, 0.760287285f, 0.746293485f, 0.732518315f,
+    0.718958378f, 0.705610275f, 0.692470789f, 0.679536581f, 0.666804492f,
+    0.654271305f, 0.641933978f, 0.629789352f, 0.617834508f, 0.606066525f,
+    0.594482362f, 0.583079159f, 0.571854174f, 0.560804546f, 0.549927592f,
+    0.539220572f, 0.528680861f, 0.518305838f, 0.50809288f, 0.498039544f,
+    0.488143265f, 0.478401601f, 0.468812168f, 0.45937258f, 0.450080454f,
+    0.440933526f, 0.431929469f, 0.423066139f, 0.414341331f, 0.405752778f,
+    0.397298455f, 0.388976216f, 0.380784035f, 0.372719884f, 0.364781618f,
+    0.356967449f, 0.34927541f, 0.341703475f, 0.334249914f, 0.32691282f,
+    0.319690347f, 0.312580705f, 0.305582166f, 0.298692942f, 0.291911423f,
+    0.285235822f, 0.278664529f, 0.272195935f, 0.265828371f, 0.259560347f,
+    0.253390193f, 0.247316495f, 0.241337672f, 0.235452279f, 0.229658857f,
+    0.223955944f, 0.21834214f, 0.212816045f, 0.207376286f, 0.202021524f,
+    0.196750447f, 0.191561714f, 0.186454013f, 0.181426153f, 0.176476851f,
+    0.171604887f, 0.166809067f, 0.162088141f, 0.157441005f, 0.152866468f,
+    0.148363426f, 0.143930718f, 0.139567271f, 0.135272011f, 0.131043866f,
+    0.126881793f, 0.122784719f, 0.11875169f, 0.114781633f, 0.11087364f,
+    0.107026696f, 0.103239879f, 0.0995122194f, 0.0958427936f, 0.0922307223f,
+    0.0886750817f, 0.0851749927f, 0.0817295909f, 0.0783380121f, 0.0749994367f,
+    0.0717130303f, 0.0684779733f, 0.0652934611f, 0.0621587038f, 0.0590728968f,
+    0.0560353249f, 0.0530452281f, 0.0501018465f, 0.0472044498f, 0.0443523228f,
+    0.0415447652f, 0.0387810767f, 0.0360605568f, 0.0333825648f, 0.0307464004f,
+    0.0281514227f, 0.0255970061f, 0.0230824798f, 0.0206072628f, 0.0181707144f,
+    0.0157722086f, 0.013411209f, 0.0110870898f, 0.0087992847f, 0.0065472275f,
+    0.00433036685f, 0.0021481365f, 0.f };
+    // clang-format on
 
     // ctx.dUV contains dudx, dudy, dvdx, dvdy
     // texWidth/texHeight are base-level resolution (not mip-resolved)
@@ -639,97 +803,75 @@ namespace dmt {
         using enum TexFormat;
 
         // Scale derivatives to mip level texel space
-        Vector2f dst0 = {dst0_in.x * p.levelRes.x, dst0_in.y * p.levelRes.y};
-        Vector2f dst1 = {dst1_in.x * p.levelRes.x, dst1_in.y * p.levelRes.y};
-#if defined(DMT_SAFETY_FIRST_EWA)
-        float constexpr MinDeriv = 1e-4f;
+        Vector2f               dst0     = {dst0_in.x * p.levelRes.x, dst0_in.y * p.levelRes.y};
+        Vector2f               dst1     = {dst1_in.x * p.levelRes.x, dst1_in.y * p.levelRes.y};
+        static constexpr float MinDeriv = 1e-4f;
+#if defined(DMT_OS_WINDOWS) && defined(DMT_DEBUG)
         if (std::abs(dst0.x) < MinDeriv && std::abs(dst0.y) < MinDeriv && std::abs(dst1.x) < MinDeriv &&
             std::abs(dst1.y) < MinDeriv)
-        {
-            // fallback to nearest
-            return sampleMortonTexel(int(std::floor(st_in.x * p.levelRes.x)),
-                                     int(std::floor(st_in.y * p.levelRes.y)),
-                                     p.levelRes,
-                                     p.wrapX,
-                                     p.wrapY,
-                                     p.texFormat,
-                                     p.isNormal,
-                                     p.mortonLevelBuffer);
-        }
+            __debugbreak();
 #endif
 
         // Map st to texel space (centered at -0.5)
-        float sx = st_in.x * float(p.levelRes.x) - 0.5f;
-        float sy = st_in.y * float(p.levelRes.y) - 0.5f;
+        int const sx = st_in.x * static_cast<float>(p.levelRes.x) - 0.5f;
+        int const sy = st_in.y * static_cast<float>(p.levelRes.y) - 0.5f;
 
         // Ellipse coefficients (PBRT style)
-        float A = dst0.y * dst0.y + dst1.y * dst1.y;
+        float A = dst0.y * dst0.y + dst1.y * dst1.y + 1;
         float B = -2.0f * (dst0.x * dst0.y + dst1.x * dst1.y);
-        float C = dst0.x * dst0.x + dst1.x * dst1.x;
+        float C = dst0.x * dst0.x + dst1.x * dst1.x + 1;
 
         // Normalize
         float const det = (A * C - 0.25f * B * B);
+#if defined(DMT_OS_WINDOWS) || defined(DMT_DEBUG)
         if (det <= 1e-12f)
-        {
-            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
-                                     int(std::floor(sy + 0.5f)),
-                                     p.levelRes,
-                                     p.wrapX,
-                                     p.wrapY,
-                                     p.texFormat,
-                                     p.isNormal,
-                                     p.mortonLevelBuffer);
-        }
-        float invF = 1.0f / det;
+            __debugbreak();
+#endif
+        float const invF = 1.0f / det;
         A *= invF;
         B *= invF;
         C *= invF;
 
-        // Add 1 for pixel reconstruction filter
-        A += 1.0f;
-        C += 1.0f;
-
         // Bounding box
-
-#if defined(DMT_SAFETY_FIRST_EWA)
         float const detBB = A * C - 0.25f * B * B;
-        if (detBB <= 0.0f)
-        {
-            return sampleMortonTexel(int(std::floor(sx + 0.5f)),
-                                     int(std::floor(sy + 0.5f)),
-                                     p.levelRes,
-                                     p.wrapX,
-                                     p.wrapY,
-                                     p.texFormat,
-                                     p.isNormal,
-                                     p.mortonLevelBuffer);
-        }
+#if defined(DMT_OS_WINDOWS) || defined(DMT_DEBUG)
+        if (detBB <= 1e-12f)
+            __debugbreak();
 #endif
-        float invDet  = 1.0f / (A * C - 0.25f * B * B);
-        float uRadius = std::sqrt(C * invDet);
-        float vRadius = std::sqrt(A * invDet);
+        float const invDet  = 1.0f / detBB;
+        float const uRadius = fl::safeSqrt(C * invDet);
+        float const vRadius = fl::safeSqrt(A * invDet);
 
-        int s0 = int(std::ceil(sx - uRadius));
-        int s1 = int(std::floor(sx + uRadius));
-        int t0 = int(std::ceil(sy - vRadius));
-        int t1 = int(std::floor(sy + vRadius));
+        int const s0 = static_cast<int>(ceilf(sx - uRadius));
+        int const s1 = static_cast<int>(floorf(sx + uRadius));
+        int const t0 = static_cast<int>(ceilf(sy - vRadius));
+        int const t1 = static_cast<int>(floorf(sy + vRadius));
+        // TODO: Remove. Assumes max texture coord is 2
+#if defined(DMT_OS_WINDOWS) || defined(DMT_DEBUG)
+        if (s0 > p.levelRes.x * 2 || s1 > p.levelRes.x * 2)
+            __debugbreak();
+        if (t0 > p.levelRes.y * 2 || t1 > p.levelRes.y * 2)
+            __debugbreak();
+#endif
 
         RGB   sum{};
         float sumW = 0.0f;
 
         for (int t = t0; t <= t1; ++t)
         {
-            float tt = float(t) - sy;
+            float const tt = static_cast<float>(t) - sy;
             for (int s = s0; s <= s1; ++s)
             {
-                float ss = float(s) - sx;
-                float r2 = A * ss * ss + B * ss * tt + C * tt * tt;
+                float const ss = static_cast<float>(s) - sx;
+                float const r2 = A * ss * ss + B * ss * tt + C * tt * tt;
+#if defined(DMT_OS_WINDOWS) || defined(DMT_DEBUG)
+                if (r2 < 0)
+                    __debugbreak();
+#endif
 
                 if (r2 < 1.0f)
                 {
-                    float r2c = std::clamp(r2, 0.0f, 0.999999f);
-                    int   idx = int(r2c * float(EWA_LUT_SIZE - 1));
-                    idx       = std::min(std::max(idx, 0), int(EWA_LUT_SIZE - 1));
+                    int const idx = fminf(r2 * EWA_LUT_SIZE, EWA_LUT_SIZE - 1);
 
                     float w = EwaWeightLUT[idx];
                     RGB texel = sampleMortonTexel(s, t, p.levelRes, p.wrapX, p.wrapY, p.texFormat, p.isNormal, p.mortonLevelBuffer);

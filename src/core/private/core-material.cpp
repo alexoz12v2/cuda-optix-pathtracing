@@ -86,7 +86,8 @@ namespace dmt {
     {
         // sample normal
         Normal3f ns;
-
+        Vector3f nMap;
+        RGB nMapSampled;
         if (material.useShadingNormals)
         {
             ns = normFromOcta(material.normalvalue);
@@ -94,11 +95,11 @@ namespace dmt {
             {
                 int width  = static_cast<int>(material.normalWidth);
                 int height = static_cast<int>(material.normalHeight);
-                Vector3f nMap = 2.f * sampleMippedTexture(texCtx, cache, material.normalkey, width, height, true).asVec() -
-                                Vector3f::s(1.f);
+                nMapSampled = sampleMippedTexture(texCtx, cache, material.normalkey, width, height, true);
+                nMap       = 2.f * nMapSampled.asVec() - Vector3f::s(1.f);
                 Frame const frame = Frame::fromZ(ng);
-                nMap              = frame.fromLocal(nMap);
-                if (dotSelf(nMap) != 0)
+                ns                = frame.fromLocal(nMap);
+                if (dotSelf(ns) != 0)
                     ns = normalize(nMap);
                 else
                     ns = ng;

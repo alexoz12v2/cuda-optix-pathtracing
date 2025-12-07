@@ -127,7 +127,7 @@ namespace dmt {
             if (*src == L':' && *(src + 1) == L'\\')
             {
                 // Copy up to and including the backslash
-                wcsncpy_s(dst, MAX_PATH, src_start, (src - src_start) + 2);
+                memcpy(dst, src_start, ((src - src_start) + 2) * sizeof(wchar_t));
                 dst[(src - src_start) + 2] = L'\0'; // Null-terminate the destination string
                 return true;
             }
@@ -139,7 +139,7 @@ namespace dmt {
                 if (backslashCount == 3)
                 {
                     // Copy up to and including the third backslash
-                    wcsncpy_s(dst, MAX_PATH, src_start, (src - src_start) + 1);
+                    memcpy(dst, src_start, ((src - src_start) + 1) * sizeof(wchar_t));
                     dst[(src - src_start) + 1] = L'\0'; // Null-terminate the destination string
                     return true;
                 }

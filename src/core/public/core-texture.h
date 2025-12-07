@@ -144,7 +144,7 @@ namespace dmt {
 
     // -- Image Texture --
     inline constexpr int32_t EWA_LUT_SIZE = 128;
-    extern DMT_CORE_API std::array<float, EWA_LUT_SIZE> EwaWeightLUT;
+    extern DMT_CORE_API std::array<float, EWA_LUT_SIZE> const EwaWeightLUT;
 
     enum class TexFormat : uint8_t
     {

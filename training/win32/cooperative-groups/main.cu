@@ -4,14 +4,23 @@
 // Windows Stuff
 #include "Windows.h"
 #include "ShlObj.h"
+#include "Objbase.h"
 
 // cuda stuff
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
 
-#define ANSI_RED "\033[31m"
-#define ANSI_YLW "\033[93m"
-#define ANSI_RST "\033[0m"
+// our stuff
+#include "the-macros.h"
+#include "example.h"
+
+using namespace dmt;
+
+/// ## About CUDA Runtime and Context Management
+/// A [Context](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#context)
+/// is the CUDA Equivalent of a process. All resources and modules allocated for the process are associated to a
+/// context.
+/// An Implicit Context will be created for each device called Primary Context whenever you call `cudaInitDevice`
 
 int wmain()
 {
@@ -28,4 +37,11 @@ int wmain()
 
     // - Print some colored stuff
     std::cout << ANSI_RED "Hello Beautiful World" ANSI_RST << std::endl;
+
+    // initialize COM Apartment for this process
+    HRESULT const res = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (!SUCCEEDED(res))
+        win32::printResultAndExitProcess(res);
+
+    _1basics::printCudaCapableDevices();
 }

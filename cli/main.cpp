@@ -92,14 +92,21 @@ namespace /*static*/ {
 
             component = (end == std::string_view::npos) ? path.substr(start) : path.substr(start, end - start);
 
-            // Skip empty components caused by leading/duplicate slashes
-            // ("/usr/bin", "//server/share", etc.)
-            if (!component.empty())
+            if (start == 0 && component.size() == 2 && component[1] == ':')
             {
-                if (!isValidPathComponent(component, false))
+                if (!std::isalpha(component[0]))
                     return false;
             }
-
+            else
+            {
+                // Skip empty components caused by leading/duplicate slashes
+                // ("/usr/bin", "//server/share", etc.)
+                if (!component.empty())
+                {
+                    if (!isValidPathComponent(component, false))
+                        return false;
+                }
+            }
             if (end == std::string_view::npos)
                 break;
 

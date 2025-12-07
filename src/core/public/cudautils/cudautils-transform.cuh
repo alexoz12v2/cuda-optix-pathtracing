@@ -12,8 +12,8 @@ namespace dmt {
         Matrix4f m;    // Transformation matrix
         Matrix4f mInv; // Inverse transformation matrix
 
-        // Default constructor
-        Transform() = default;
+        // Default constructor to Identity Matrix
+        DMT_CPU_GPU Transform();
 
         // Constructor with an initial matrix
         DMT_CPU_GPU explicit Transform(Matrix4f const& matrix);
@@ -80,6 +80,9 @@ namespace dmt {
         DMT_CPU_GPU RayDifferential operator()(RayDifferential const& ray, float* optInOut_tMax) const;
 
         DMT_CPU_GPU bool swapsHandedness() const;
+
+        // useful for debugging
+        DMT_CPU_GPU bool hasNaN() const;
     };
 
     // Transform Function Declarations

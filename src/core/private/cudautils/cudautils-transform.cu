@@ -18,6 +18,8 @@ namespace dmt {
         }
     }
 
+    __host__ __device__ Transform::Transform() : m{Matrix4f::identity()}, mInv{Matrix4f::identity()} {}
+
     __host__ __device__ Transform::Transform(Matrix4f const& matrix) : m(matrix), mInv(inverse(matrix)) {}
 
     __host__ __device__ void Transform::translate_(Vector3f const& translation)
@@ -351,6 +353,15 @@ namespace dmt {
         return glm::determinant(linearPart) < 0.f;
     }
 
+    __host__ __device__ bool Transform::hasNaN() const
+    {
+        for (float const f : m.m)
+        {
+            if (fl::isNaN(f))
+                return true;
+        }
+        return false;
+    }
 
     DMT_CPU_GPU Transform Translate(Vector3f delta)
     {

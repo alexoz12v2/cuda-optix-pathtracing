@@ -85,7 +85,14 @@ $paths = @(
     "C:\Windows\System32\WindowsPowerShell\v1.0\",
     "C:\Windows\System32\",
     "C:\Windows\System\",
-    "C:\Windows\"
+    "C:\Windows\";
+    Join-Path $Env:Userprofile "AppData\Local\Microsoft\WindowsApps";
+    Join-Path $Env:Userprofile "AppData\Local\Microsoft\WinGet\Links";
+    Join-Path $Env:Userprofile ".dotnet\tools";
+    Join-Path $env:ProgramFiles "CMake\bin";
+    Join-Path $env:ProgramFiles "dotnet";
+    Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer";
+    Join-Path $env:ProgramFiles "Git\cmd"
 )
 
 # Deduplicate paths while preserving order

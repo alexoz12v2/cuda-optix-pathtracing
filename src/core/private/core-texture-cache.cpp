@@ -4,8 +4,11 @@
 #include <memory_resource>
 
 namespace dmt {
-    TextureCache::TextureCache(size_t cacheSize, std::pmr::memory_resource* cacheMem, std::pmr::memory_resource* listMem) :
-    MipcFiles{cacheMem},
+    TextureCache::TextureCache(MipCacheFile&&             _MipcFiles,
+                               size_t                     cacheSize,
+                               std::pmr::memory_resource* cacheMem,
+                               std::pmr::memory_resource* listMem) :
+    MipcFiles{std::move(_MipcFiles)},
     m_cache{cacheMem},
     m_lruKeyList{listMem},
 #if defined(DMT_USE_SYNC_ALLOCATOR)

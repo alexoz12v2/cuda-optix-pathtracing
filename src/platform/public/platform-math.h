@@ -90,7 +90,7 @@ namespace dmt::math {
         }
         //note: The functions drand48() return nonnegative, double-precision,
         //floating-point values, uniformly distributed over the interval [0.0,1.0).
-        double a = sqrt(-2 * log(drand48()));
+        double a = std::sqrt(-2 * std::log(drand48()));
         double b = 6.283185307179586476925286766559 * drand48();
         cn       = sin(b) * a;
         cached   = true;

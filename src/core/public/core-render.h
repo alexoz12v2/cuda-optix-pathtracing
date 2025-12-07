@@ -7,51 +7,36 @@
 #include "core-texture-cache.h"
 #include "core-trianglemesh.h"
 #include "core-light.h"
+#include "core-types.h"
 
 #include "platform-memory.h"
 #include "platform-threadPool.h"
 
 namespace dmt {
-    struct Parameters
-    {
-        float               focalLength     = 20.f;
-        float               sensorSize      = 36.f;
-        Vector3f            cameraDirection = {0, 1, 0};
-        Vector3f            cameraPosition  = {0, 0, 0};
-        Point2i             filmResolution  = {128, 128};
-        int32_t             samplesPerPixel = 1;
-        int32_t             maxDepth        = 5;
-        UniqueRef<EnvLight> envLight        = nullptr;
-    };
-
     class Renderer
     {
     public:
-        DMT_CORE_API Renderer(size_t tmpSize = 4096);
+        DMT_CORE_API Renderer(Parameters&& params, Scene&& scene, MipCacheFile&& texCacheFiles, size_t tmpSize = 4096);
         Renderer(Renderer const&)                = delete;
         Renderer(Renderer&&) noexcept            = delete;
         Renderer& operator=(Renderer const&)     = delete;
         Renderer& operator=(Renderer&&) noexcept = delete;
         DMT_CORE_API ~Renderer() noexcept;
 
-    public:
         /// once started, public members shouldn't be changed anymore
         DMT_CORE_API void startRenderThread();
-
-    public:
-        Aligned16MemoryResource heapAligned;
-
-        // read only stuff for workers and render thread
-        Scene        scene;
-        Parameters   params;
-        TextureCache texCache;
 
     private:
         std::pmr::monotonic_buffer_resource tmpMem();
 
         void resetBigTmp();
 
-    private:
+        // read only stuff for workers and render thread
+        Scene      scene;
+        Parameters params;
+
+        TextureCache texCache;
+
         // small local temp memory
         unsigned char m_smallBuffer[256];
 
@@ -264,16 +249,16 @@ namespace dmt::filtering {
         DMT_FORCEINLINE float        c() const { return m_c; }
         DMT_FORCEINLINE FilterSample sample(Point2f u) const { return m_sampler.sample(u); }
 
-        DMT_FORCEINLINE float evaluate(Point2f p) const
+        [[nodiscard]] DMT_FORCEINLINE float evaluate(Point2f p) const
         {
             return mitchell1D(2 * p.x / m_radius.x, m_b, m_c) * mitchell1D(2 * p.y / m_radius.y, m_b, m_c);
         }
 
         // domain, for the x axis and y axis, in which the filter is != 0 starting from 0 (low pass filter)
-        DMT_FORCEINLINE Vector2f radius() const { return m_radius; }
+        [[nodiscard]] DMT_FORCEINLINE Vector2f radius() const { return m_radius; }
 
         // 2D integral of the filter
-        DMT_FORCEINLINE float integral() const { return m_radius.x * m_radius.y / 4; }
+        [[nodiscard]] DMT_FORCEINLINE float integral() const { return m_radius.x * m_radius.y / 4; }
 
     private:
         static inline float mitchell1D(float x, float b, float c)
@@ -324,12 +309,12 @@ namespace dmt::film {
             std::memset(m_pixels.get(), 0, sizeof(Pixel) * res.x * res.y);
         }
 
-        // TODO switch to EXR
         DMT_CORE_API void writeImage(os::Path const&            imagePath,
+                                     float                      gamma,
                                      std::pmr::memory_resource* temp = std::pmr::get_default_resource());
         DMT_CORE_API void addSample(Point2i pixel, RGB sample, float weight);
 
-        DMT_FORCEINLINE Point2i resolution() const { return m_resolution; }
+        [[nodiscard]] DMT_FORCEINLINE Point2i resolution() const { return m_resolution; }
 
     private:
         UniqueRef<Pixel[]> m_pixels;

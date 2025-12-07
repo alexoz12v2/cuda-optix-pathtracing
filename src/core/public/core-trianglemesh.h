@@ -8,6 +8,8 @@
 
 #include "platform-memory.h"
 
+#include <concepts>
+
 namespace dmt {
     struct DMT_CORE_API VertexIndex
     {
@@ -113,6 +115,7 @@ namespace dmt {
     private:
         std::pmr::memory_resource* m_memory;
     };
+    static_assert(std::movable<Scene>);
 
     struct DMT_CORE_API GeoOffsets
     {

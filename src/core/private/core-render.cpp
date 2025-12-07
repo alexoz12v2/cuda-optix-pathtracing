@@ -12,6 +12,10 @@
 
 #include "platform-context.h"
 
+#include <string>
+#include <vector>
+#include <string_view>
+
 // TODO remove
 //#define DMT_SINGLE_THREAD
 #define DMT_DBG_PIXEL
@@ -576,8 +580,7 @@ namespace dmt::render_thread {
 
             Point2i startPix{static_cast<int>(tileX * TileWidth), static_cast<int>(tileY * TileHeight)};
 
-            Point2i tileSize{static_cast<int>(std::min<int>(TileWidth, Width - startPix.x)),
-                             static_cast<int>(std::min<int>(TileHeight, Height - startPix.y))};
+            Point2i tileSize{std::min<int>(TileWidth, Width - startPix.x), std::min<int>(TileHeight, Height - startPix.y)};
 
             jobData[job].StartPixel         = startPix;
             jobData[job].tileResolution     = tileSize;
@@ -604,14 +607,16 @@ namespace dmt::render_thread {
 
         ctx.log("[RT] Finished everything", {});
 
-        // TODO better
-        film.writeImage(os::Path::executableDir() / "render.png");
+        film.writeImage(rtData->params->imagePath, rtData->params->gamma);
     }
 } // namespace dmt::render_thread
 
 namespace dmt {
-    Renderer::Renderer(size_t tmpSize) :
-    scene{&heapAligned},
+    Renderer::Renderer(Parameters&& params, Scene&& scene, MipCacheFile&& texCacheFiles, size_t tmpSize) :
+    scene{std::move(scene)},
+    params(std::move(params)),
+    texCache(std::move(texCacheFiles)),
+    m_smallBuffer{},
     m_bigBuffer{makeUniqueRef<unsigned char[]>(std::pmr::get_default_resource(), tmpSize)},
     m_bigBufferSize{tmpSize},
     m_bigTmpMem{m_bigBuffer.get(), m_bigBufferSize},
@@ -996,30 +1001,40 @@ namespace dmt::camera {
 } // namespace dmt::camera
 
 namespace dmt::film {
-    void RGBFilm::writeImage(os::Path const& imagePath, std::pmr::memory_resource* temp)
+    static bool ends_with_icase(std::string_view str, std::string_view ending)
     {
-        int const   width     = m_resolution.x;
-        int const   height    = m_resolution.y;
-        int const   numPixels = width * height;
-        int const   channels  = 3; // RGB
-        float const gamma     = 1.0f / 2.2f;
+        if (ending.size() > str.size())
+            return false;
+
+        return std::equal(ending.rbegin(), ending.rend(), str.rbegin(), [](char a, char b) {
+            return std::tolower(a) == std::tolower(b);
+        });
+    }
+
+    void RGBFilm::writeImage(os::Path const& imagePath, float gamma, std::pmr::memory_resource* temp)
+    {
+        static constexpr int Channels = 3; // RGB
+
+        int const width     = m_resolution.x;
+        int const height    = m_resolution.y;
+        int const numPixels = width * height;
 
         // Allocate float RGB buffer for HDR
-        UniqueRef<float[]> image = makeUniqueRef<float[]>(temp, static_cast<size_t>(numPixels) * channels);
+        UniqueRef<float[]> image = makeUniqueRef<float[]>(temp, static_cast<size_t>(numPixels) * Channels);
 
         for (int y = 0; y < height; ++y)
         {
             for (int x = 0; x < width; ++x)
             {
-                int const    idx = x + width * y;
-                Pixel const& px  = m_pixels[idx];
+                int const idx                   = x + width * y;
+                auto const& [rgbSum, weightSum] = m_pixels[idx];
 
-                float const scale = px.weightSum > 0 ? 1.0f / px.weightSum : 0.0f;
+                float const scale = weightSum > 0 ? 1.0f / weightSum : 0.0f;
 
                 // Apply gamma correction (optional – HDR viewers may expect linear values)
-                auto const r = static_cast<float>(px.rgbSum[0] * scale); // std::pow(float(px.rgbSum[0] * scale), gamma);
-                auto const g = static_cast<float>(px.rgbSum[1] * scale); // std::pow(float(px.rgbSum[1] * scale), gamma);
-                auto const b = static_cast<float>(px.rgbSum[2] * scale); // std::pow(float(px.rgbSum[2] * scale), gamma);
+                auto const r = static_cast<float>(std::pow(rgbSum[0] * scale, gamma));
+                auto const g = static_cast<float>(std::pow(rgbSum[1] * scale, gamma));
+                auto const b = static_cast<float>(std::pow(rgbSum[2] * scale, gamma));
 
                 image[static_cast<size_t>(idx) * 3 + 0] = std::isfinite(r) ? r : 0.0f;
                 image[static_cast<size_t>(idx) * 3 + 1] = std::isfinite(g) ? g : 0.0f;
@@ -1028,7 +1043,10 @@ namespace dmt::film {
         }
 
         // Write Radiance HDR file
-        stbi_write_hdr(imagePath.toUnderlying(temp).c_str(), width, height, channels, image.get());
+        std::pmr::string strPath = imagePath.toUnderlying(temp);
+        if (!ends_with_icase(strPath, ".hdr"))
+            strPath += ".hdr";
+        stbi_write_hdr(strPath.c_str(), width, height, Channels, image.get());
     }
 
     void RGBFilm::addSample(Point2i pixel, RGB sample, float weight)

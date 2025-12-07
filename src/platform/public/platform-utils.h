@@ -77,7 +77,7 @@ namespace dmt::os {
                          std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
         static Path executableDir(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-        static Path fromString(std::string_view str, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+        static Path fromString(std::string_view str, bool shouldExist, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
         FileStat stat() const;
 

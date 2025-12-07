@@ -384,9 +384,7 @@ namespace dmt {
     // TODO SOA
     struct DMT_CORE_API Intervalf
     {
-        struct DMT_CORE_API SOA
-        {
-        };
+        struct DMT_CORE_API SOA{};
 
     public:
         Intervalf() = default;

@@ -519,7 +519,8 @@ namespace dmt {
             if (child->GetNodeAttribute()->GetAttributeType() != FbxNodeAttribute::eMesh)
                 continue;
 
-            auto* mesh = dynamic_cast<FbxMesh*>(child->GetNodeAttribute());
+            //auto* mesh = dynamic_cast<FbxMesh*>(child->GetNodeAttribute());
+            FbxMesh* mesh = child->GetMesh();
             if (!mesh)
                 continue;
 

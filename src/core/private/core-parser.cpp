@@ -133,7 +133,7 @@ namespace dmt::parse_helpers {
 #if defined(DMT_OS_LINUX)
         if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
 #elif defined(DMT_OS_WINDOWS)
-        if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
+        if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))); !ptr)
 #else
     #error "Error allocate aligned RGB"
 #endif

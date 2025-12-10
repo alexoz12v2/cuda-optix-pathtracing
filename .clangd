@@ -1,7 +1,17 @@
+If:
+  PathMatch: .*\.(cu|cuh|h|cpp)$
 CompileFlags:
-  CompilationDatabase: cmake-build-debug-system/compile_commands.json
-FileExtensions:
-- cpp
-- h
-- cu
-- cuh
+  CompilationDatabase: cmake-build-debug-system
+  Add:
+    - "-ferror-limit=0"
+
+---
+
+If:
+  PathMatch: .*\.(cu|cuh)$
+CompileFlags:
+  Compiler: "C:\\PROGRA~1\\NVIDIA~2\\CUDA\\v12.6\\bin\\nvcc.exe"
+  Add:
+    - "-isystem \"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\include\""
+    - "-D__CUDACC__"
+    - "-D__NVCC__"

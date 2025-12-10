@@ -1,7 +1,7 @@
 #ifndef DMT_PLATFORM_PUBLIC_DMTMACROS_H
 #define DMT_PLATFORM_PUBLIC_DMTMACROS_H
 
-#if defined(__NVCC__) // Test
+#if defined(__CUDACC__) // Test
     #define DMT_INTERFACE
 #elif defined(DMT_COMPILER_MSVC)
     #define DMT_INTERFACE __declspec(novtable)
@@ -9,7 +9,7 @@
     #define DMT_INTERFACE
 #endif
 
-#if defined(__NVCC__)
+#if defined(__CUDACC__)
     #define DMT_RESTRICT __restrict__
 #elif defined(DMT_COMPILER_MSVC)
     #define DMT_RESTRICT __restrict
@@ -20,7 +20,7 @@
 #endif
 // TODO reg, interface dll
 
-#if defined(__NVCC__)
+#if defined(__CUDACC__)
     #define DMT_CPU     __host__
     #define DMT_CPU_GPU __host__ __device__
     #define DMT_GPU     __device__
@@ -32,13 +32,13 @@
     #define DMT_GPU
 #endif
 
-#if defined(DMT_NEEDS_MODULE) && !defined(__NVCC__)
+#if defined(DMT_NEEDS_MODULE) && !defined(__CUDACC__)
     #define DMT_MODULE_EXPORT export
 #else
     #define DMT_MODULE_EXPORT
 #endif
 
-#if !defined(__NVCC__) && !defined(__CUDA_ARCH__)
+#if !defined(__CUDACC__) && !defined(__CUDA_ARCH__)
     #if defined(DMT_OS_WINDOWS) || defined(DMT_COMPILER_MSVC)
         #define DMT_API_IMPORT __declspec(dllimport)
         #define DMT_API_EXPORT __declspec(dllexport)
@@ -51,7 +51,7 @@
     #define DMT_API_EXPORT
 #endif
 
-#if defined(__NVCC__)
+#if defined(__CUDACC__)
     #define DMT_FORCEINLINE __forceinline__
 #elif defined(DMT_COMPILER_MSVC)
     #define DMT_FORCEINLINE __forceinline
@@ -59,7 +59,7 @@
     #define DMT_FORCEINLINE __attribute__((always_inline))
 #endif
 
-#if defined(__NVCC__) || defined(DMT_DEBUG)
+#if defined(__CUDACC__) || defined(DMT_DEBUG)
     // CUDA NVCC doesn't support alternate calling conventions; default to nothing.
     #define DMT_FASTCALL
 
@@ -96,7 +96,7 @@
 
 // Visual Studio doesn't seem to pick up that .cu files (tagged with Item Type CUDA C++)
 // should understand CUDA syntax
-#if !defined(__NVCC__)
+#if !defined(__CUDACC__)
     #define __host__
     #define __device__
     #define __global__
@@ -107,5 +107,4 @@
     #endif
 #endif
 
-#include <cstdint>
 #endif // DMT_PLATFORM_PUBLIC_DMTMACROS_H

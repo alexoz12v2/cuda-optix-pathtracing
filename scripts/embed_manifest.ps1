@@ -145,5 +145,5 @@ Function Invoke-Manifest-And-Embed
     {
         Write-Host $ManifestContent
     }
-    return 0
+    return 0 | Out-Null
 }

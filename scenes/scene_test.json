@@ -2,7 +2,11 @@
   "camera": {
     "focalLength": 20,
     "sensorSize": 36,
-    "direction": [ 0, 1, -0.5 ],
+    "direction": [
+      0,
+      1,
+      -0.5
+    ],
     "max-depth": 12
   },
   "film": {
@@ -12,19 +16,19 @@
   },
   "textures": [
     {
-        "name": "chippedPaintDiffuse",
-        "type": "diffuse",
-        "path": "./res/textures/chippedPaint/Paint_Chipped_4K_albedo.png"   
+      "name": "chippedPaintDiffuse",
+      "type": "diffuse",
+      "path": "./res/textures/chippedPaint/Paint_Chipped_1K_albedo.png"
     },
     {
-        "name": "chippedPaintNormal",
-        "type": "normal",
-        "path": "./res/textures/chippedPaint/Paint_Chipped_4K_normal.png"   
+      "name": "chippedPaintNormal",
+      "type": "normal",
+      "path": "./res/textures/chippedPaint/Paint_Chipped_1K_normal.png"
     },
     {
-        "name": "chippedPaintRoughness",
-        "type": "roughness",
-        "path": "./res/textures/chippedPaint/Paint_Chipped_4K_roughness.png"   
+      "name": "chippedPaintRoughness",
+      "type": "roughness",
+      "path": "./res/textures/chippedPaint/Paint_Chipped_1K_roughness.png"
     }
   ],
   "materials": [
@@ -37,8 +41,16 @@
       "ior": 1.4,
       "ggx-anisotropy": 0,
       "ggx-dielectric": {
-        "reflectance-tint": [ 0.8, 0.8, 0.8 ],
-        "transmittance-tint": [ 0.1, 0.1, 0.1 ]
+        "reflectance-tint": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "transmittance-tint": [
+          0.1,
+          0.1,
+          0.1
+        ]
       }
     }
   ],
@@ -56,45 +68,71 @@
       "type": "spot",
       "cone-angle": 60,
       "falloff-percentage": 12,
-      "radiant-intensity": [ 1.3, 1.3, 1.3 ]
+      "radiant-intensity": [
+        1.3,
+        1.3,
+        1.3
+      ]
     },
-
     {
       "name": "point-light",
       "type": "point",
-      "radiant-intensity": [ 1, 1, 1 ]
+      "radiant-intensity": [
+        1,
+        1,
+        1
+      ]
     }
   ],
   "envlight": "./res/envLight/autumn_field_puresky_4k.png",
-
   "transforms": [
     {
       "name": "position-obj",
       "srt": {
-        "translation-vector": [ 0, 2, -1 ]
+        "translation-vector": [
+          0,
+          2,
+          -1
+        ]
       }
     },
     {
       "name": "position-light",
       "srt": {
-        "translation-vector": [ -1, 2.1, 0 ],
-        "rotate-axis": [0.005, 0, 1],
+        "translation-vector": [
+          -1,
+          2.1,
+          0
+        ],
+        "rotate-axis": [
+          0.005,
+          0,
+          1
+        ],
         "rotate-degrees": 120
       }
     },
     {
       "name": "pos-point-light",
       "srt": {
-        "translation-vector": [ -1, 2.1, 0 ]
+        "translation-vector": [
+          -1,
+          2.1,
+          0
+        ]
       }
     }
   ],
   "world": {
     "position-obj": {
-      "instances": ["Teapot"]
+      "instances": [
+        "Teapot"
+      ]
     },
     "pos-point-light": {
-      "lights": ["point-light"]
+      "lights": [
+        "point-light"
+      ]
     }
   }
 }

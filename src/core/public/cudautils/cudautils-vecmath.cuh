@@ -8,7 +8,6 @@
 
 namespace dmt {
     // Vector Types ---------------------------------------------------------------------------------------------------
-#if __cplusplus >= 202002L
     // clang-format off
     template <typename T>
     concept Vector2 = requires(T t) {
@@ -63,26 +62,16 @@ namespace dmt {
 
     template <typename T>
     concept VectorNormalized = Vector<T> && has_normalized<T>::value;
-        // clang-format on
-#endif
-
-#if __cplusplus >= 202002L
+    // clang-format on
     template <Scalar S>
-#else
-    template <typename S>
-#endif
     struct Tuple2
     {
         DMT_CPU_GPU static constexpr Tuple2<S> zero() { return {.x = static_cast<S>(0), .y = static_cast<S>(0)}; }
         DMT_CPU_GPU static constexpr Tuple2<S> s(S s) { return {.x = static_cast<S>(s), .y = static_cast<S>(s)}; }
 
         using value_type = S;
-#if __cplusplus >= 202002L
         static consteval int32_t numComponents() { return 2; }
-#else
-        static constexpr int32_t numComponents() { return 2; }
-#endif
-        DMT_CPU_GPU S& operator[](int32_t i)
+        DMT_CPU_GPU S&           operator[](int32_t i)
         {
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S*>(this) + i);
@@ -101,11 +90,7 @@ namespace dmt {
         S x, y;
     };
 
-#if __cplusplus >= 202002L
     template <Scalar S>
-#else
-    template <typename S>
-#endif
     struct Tuple3
     {
         DMT_CPU_GPU static constexpr Tuple3<S> zero()
@@ -134,12 +119,8 @@ namespace dmt {
         }
 
         using value_type = S;
-#if __cplusplus >= 202002L
         static consteval int32_t numComponents() { return 3; }
-#else
-        static constexpr int32_t numComponents() { return 3; }
-#endif
-        DMT_CPU_GPU S& operator[](int32_t i)
+        DMT_CPU_GPU S&           operator[](int32_t i)
         {
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S*>(this) + i);
@@ -158,11 +139,7 @@ namespace dmt {
         S x, y, z;
     };
 
-#if __cplusplus >= 202002L
     template <Scalar S>
-#else
-    template <typename S>
-#endif
     struct Tuple4
     {
         DMT_CPU_GPU static constexpr Tuple4<S> zero()
@@ -179,12 +156,8 @@ namespace dmt {
         }
 
         using value_type = S;
-#if __cplusplus >= 202002L
         static consteval int32_t numComponents() { return 4; }
-#else
-        static constexpr int32_t numComponents() { return 4; }
-#endif
-        DMT_CPU_GPU S& operator[](int32_t i)
+        DMT_CPU_GPU S&           operator[](int32_t i)
         {
 #if defined(__CUDA_ARCH__)
             return *(reinterpret_cast<S*>(this) + i);
@@ -397,6 +370,70 @@ namespace dmt {
     };
     // TODO compressed normal, half floats
 
+    // Vector Types: Useful Stuff
+    template <Vector T, typename F>
+        requires std::is_invocable_r_v<typename T::value_type, F, typename T::value_type>
+    inline DMT_CORE_API DMT_CPU_GPU T map(T vec, F&& mapFunc)
+    {
+        T result = vec;
+        result.x = mapFunc(result.x);
+        result.y = mapFunc(result.y);
+        result.z = mapFunc(result.z);
+        return result;
+    }
+
+    // Vector Types: Broadcast operations -----------------------------------------------------------------------------
+    template <Vector T>
+    inline DMT_CORE_API DMT_CPU_GPU T operator+(T vec, typename T::value_type scalar)
+    {
+        T result = vec;
+        result.x += scalar;
+        result.y += scalar;
+        if constexpr (Vector3<T>)
+            result.z += scalar;
+        if constexpr (Vector4<T>)
+            result.w += scalar;
+        return result;
+    }
+
+    template <Vector T>
+    inline DMT_CORE_API DMT_CPU_GPU T operator+(typename T::value_type scalar, T vec)
+    {
+        T result = vec;
+        result.x += scalar;
+        result.y += scalar;
+        if constexpr (Vector3<T>)
+            result.z += scalar;
+        if constexpr (Vector4<T>)
+            result.w += scalar;
+        return result;
+    }
+
+    template <Vector T>
+    inline DMT_CORE_API DMT_CPU_GPU T operator-(T vec, typename T::value_type scalar)
+    {
+        T result = vec;
+        result.x -= scalar;
+        result.y -= scalar;
+        if constexpr (Vector3<T>)
+            result.z -= scalar;
+        if constexpr (Vector4<T>)
+            result.w -= scalar;
+        return result;
+    }
+
+    template <Vector T>
+    inline DMT_CORE_API DMT_CPU_GPU T operator-(typename T::value_type scalar, T vec)
+    {
+        T result = vec;
+        result.x -= scalar;
+        result.y -= scalar;
+        if constexpr (Vector3<T>)
+            result.z -= scalar;
+        if constexpr (Vector4<T>)
+            result.w -= scalar;
+        return result;
+    }
 
     // Vector Types: Fundamental Operations ---------------------------------------------------------------------------
     DMT_CORE_API DMT_CPU_GPU bool operator==(Point2i a, Point2i b);

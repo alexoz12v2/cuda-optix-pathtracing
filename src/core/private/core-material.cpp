@@ -3,8 +3,9 @@
 #include "cudautils/cudautils-vecmath.cuh"
 #include "platform-utils.h"
 
-namespace dmt {
-    static int32_t mipLevelsFromResolution(int32_t xRes, int32_t yRes)
+namespace /*static*/ {
+    using namespace dmt;
+    int32_t mipLevelsFromResolution(int32_t xRes, int32_t yRes)
     {
         int levels = 0;
         int w = xRes, h = yRes;
@@ -17,12 +18,7 @@ namespace dmt {
         return levels;
     }
 
-    static RGB sampleMippedTexture(TextureEvalContext const& ctx,
-                                   TextureCache&             texCache,
-                                   uint64_t                  key,
-                                   int32_t                   width,
-                                   int32_t                   height,
-                                   bool                      normal)
+    RGB sampleMippedTexture(TextureEvalContext const& ctx, TextureCache& texCache, uint64_t key, int32_t width, int32_t height, bool normal)
     {
         // TODO; here we are assuming that uv are equal to texture coordinates. In a more general scenario, we would
         // compute a mapping function to generate texture coordinates form the `TextureEvalContext`. Assume s = u, t = v
@@ -38,7 +34,7 @@ namespace dmt {
         float const    longerLen  = normL2(dst0);
         assert(shorterLen != 0 && "you should implement a trilinear filtering fallback");
 
-        if (float den = shorterLen * MaxAnisotropy; den < longerLen)
+        if (float den = shorterLen * maxAnisotropy; den < longerLen)
         {
             float const scale = longerLen / den;
             dst1 *= scale;
@@ -51,30 +47,43 @@ namespace dmt {
         int32_t const mipLevels = mipLevelsFromResolution(width, height);
 
         // for EWA
-        float lambda = lodRes.lod_minor; // tends to preserve more detail; EWA addresses aliasing anisotropically
-        int   ilod   = std::clamp(int(std::floor(lambda)), 0, mipLevels - 1);
-        float t      = lambda - ilod;
+        float const lambda = lodRes.lod_minor; // tends to preserve more detail; EWA addresses aliasing anisotropically
+        int const   ilod   = std::clamp(static_cast<int>(std::floor(lambda)), 0, mipLevels - 1);
+        float const t      = lambda - ilod;
 
-        Point2i levelResLod0 = {std::max(1, width >> ilod), std::max(1, height >> ilod)};
-        Point2i levelResLod1 = {std::max(1, width >> (ilod + 1)), std::max(1, height >> (ilod + 1))};
+        Point2i const levelResLod0 = {std::max(1, width >> ilod), std::max(1, height >> ilod)};
+        Point2i const levelResLod1 = {std::max(1, width >> (ilod + 1)), std::max(1, height >> (ilod + 1))};
 
         uint32_t    bytesLod0 = 0;
         uint32_t    bytesLod1 = 0;
         TexFormat   texFormat{};
-        auto const* mortonLevelBufferLod0 = reinterpret_cast<unsigned char const*>(
+        auto const* mortonLevelBufferLod0 = static_cast<unsigned char const*>(
             texCache.getOrInsert(key, ilod, bytesLod0, texFormat));
-        auto const* mortonLevelBufferLod1 = reinterpret_cast<unsigned char const*>(
+        auto const* mortonLevelBufferLod1 = static_cast<unsigned char const*>(
             texCache.getOrInsert(key, ilod + 1, bytesLod1, texFormat));
         assert(mortonLevelBufferLod0 && mortonLevelBufferLod1);
         assert(isAligned(mortonLevelBufferLod0, alignPerPixel(texFormat)));
         assert(isAligned(mortonLevelBufferLod1, alignPerPixel(texFormat)));
 
         // TODO handle wrap mode
-        EWAParams paramsLod0{mortonLevelBufferLod0, levelResLod0, TexWrapMode::eMirror, TexWrapMode::eMirror, texFormat, normal};
-        EWAParams paramsLod1{mortonLevelBufferLod1, levelResLod1, TexWrapMode::eMirror, TexWrapMode::eMirror, texFormat, normal};
+        EWAParams const paramsLod0{.mortonLevelBuffer = mortonLevelBufferLod0,
+                                   .levelRes          = levelResLod0,
+                                   .wrapX             = TexWrapMode::eMirror,
+                                   .wrapY             = TexWrapMode::eMirror,
+                                   .texFormat         = texFormat,
+                                   .isNormal          = normal};
+        EWAParams const paramsLod1{.mortonLevelBuffer = mortonLevelBufferLod1,
+                                   .levelRes          = levelResLod1,
+                                   .wrapX             = TexWrapMode::eMirror,
+                                   .wrapY             = TexWrapMode::eMirror,
+                                   .texFormat         = texFormat,
+                                   .isNormal          = normal};
 
         return lerp(EWAFormula(paramsLod0, st, dst0, dst1), EWAFormula(paramsLod1, st, dst0, dst1), t);
     }
+} // namespace
+
+namespace dmt {
 
     BSDFSample materialSample(SurfaceMaterial const&    material,
                               TextureCache&             cache,
@@ -116,8 +125,8 @@ namespace dmt {
         float metallic = material.metallicvalue;
         if (material.texMatMap & SurfaceMaterial::MetallicMask)
         {
-            int w = static_cast<int>(material.metallicWidth), h = static_cast<int>(material.metallicHeight);
-            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, w, h, false).r;
+            int width = static_cast<int>(material.metallicWidth), h = static_cast<int>(material.metallicHeight);
+            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, width, h, false).r;
         }
 
         // sample roughness

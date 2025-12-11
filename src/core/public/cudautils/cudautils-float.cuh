@@ -361,6 +361,14 @@ namespace dmt::fl {
     DMT_CORE_API DMT_CPU_GPU float pythag(float a, float b);
 
     DMT_CPU_GPU inline float safeacos(float v) { return clamp(acosf(v), -1, 1); }
+
+    inline __host__ __device__ float quantize(float v, int bits = 10)
+    {
+        int maxVal = (1 << bits) - 1;
+        int q      = static_cast<int>(v * maxVal + 0.5f);
+        return static_cast<float>(q) / maxVal;
+    }
+
 } // namespace dmt::fl
 
 namespace dmt {
@@ -384,9 +392,7 @@ namespace dmt {
     // TODO SOA
     struct DMT_CORE_API Intervalf
     {
-        struct DMT_CORE_API SOA
-        {
-        };
+        struct DMT_CORE_API SOA{};
 
     public:
         Intervalf() = default;
@@ -617,4 +623,15 @@ inline constexpr DMT_CPU_GPU float arg(float f)
     else
         return std::numeric_limits<float>::quiet_NaN();
 }
+
+namespace dmt {
+
+    /// @{
+    DMT_CORE_API __host__ __device__ uint32_t decodeMorton2D(uint32_t morton);
+    DMT_CORE_API __host__ __device__ uint32_t encodeMorton2D(uint32_t x, uint32_t y);
+    DMT_CORE_API inline uint32_t              decodeMortonX(uint32_t morton) { return decodeMorton2D(morton); }
+    DMT_CORE_API inline uint32_t              decodeMortonY(uint32_t morton) { return decodeMorton2D(morton >> 1); }
+    /// @}
+
+} // namespace dmt
 #endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_FLOAT_CUH

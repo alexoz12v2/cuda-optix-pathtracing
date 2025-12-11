@@ -48,48 +48,10 @@ namespace dmt {
     };
 } // namespace dmt
 
-namespace dmt::dict {
-    using namespace std::string_view_literals;
-    // Objects
-    SText camera = "camera"sv;
-    SText film   = "film"sv;
-    SText world  = "world"sv;
-    // Array
-    SText textures   = "textures"sv;
-    SText materials  = "materials"sv;
-    SText objects    = "objects"sv;
-    SText transforms = "transforms"sv;
-    // String
-    SText envlight = "envlight"sv;
-} // namespace dmt::dict
-
 namespace dmt::parse_helpers {
     using json = nlohmann::json;
 
-    enum class ExtractVec3fResult
-    {
-        eOk = 0,
-        eNotArray,
-        eIncorrectSize,
-        eInvalidType0,
-        eInvalidType1,
-        eInvalidType2,
-
-        eCount
-    };
-
-    enum class TempTexObjResult
-    {
-        eOk = 0,
-        eNotExists,
-        eFormatNotSupported,
-        eFailLoad,
-        eNumChannelsIncorrect,
-
-        eCount
-    };
-
-    static std::string_view tempTexObjResultToString(TempTexObjResult result)
+    std::string_view tempTexObjResultToString(TempTexObjResult result)
     {
         switch (result)
         {
@@ -127,7 +89,7 @@ namespace dmt::parse_helpers {
         return true;
     }
 
-    inline RGB* allocAlignedRGB(size_t count)
+    static inline RGB* allocAlignedRGB(size_t count)
     {
         void* ptr = nullptr;
         // allocate with 16-byte alignment
@@ -139,43 +101,75 @@ namespace dmt::parse_helpers {
     #error "Error allocate aligned RGB"
 #endif
             return nullptr;
-        return reinterpret_cast<RGB*>(ptr);
+        return static_cast<RGB*>(ptr);
     }
 
-    static RGB* loadImageAsRGB(os::Path const& path, int& outWidth, int& outHeight)
+    // ------------------------------------------------------------
+    // Internal common loader (not exposed externally)
+    // ------------------------------------------------------------
+    namespace {
+        enum class LoadedType
+        {
+            Byte,
+            Float
+        };
+
+        // Loads PNG/JPG as unsigned char*, HDR as float*.
+        // Returns nullptr on failure.
+        void* loadImageCore(std::string const& pathStr, std::string const& pathExt, int& xRes, int& yRes, int& channels, LoadedType& outType)
+        {
+            if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
+            {
+                outType = LoadedType::Byte;
+                return stbi_load(pathStr.c_str(), &xRes, &yRes, &channels, 0);
+            }
+            if (pathExt.ends_with("hdr"))
+            {
+                outType = LoadedType::Float;
+                return stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
+            }
+            return nullptr;
+        }
+
+        std::string extractExtension(std::string const& pathStr)
+        {
+            std::string pathExt;
+            auto const  pos = pathStr.find_last_of('.');
+            if (pos == std::string::npos)
+                return pathExt;
+            std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pos), pathStr.end(), std::back_inserter(pathExt));
+            std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
+            return pathExt;
+        }
+    } // namespace
+
+
+    RGB* loadImageAsRGB(os::Path const& path, int& outWidth, int& outHeight)
     {
         if (!path.isValid() || !path.isFile())
             return nullptr;
 
-        std::pmr::string pathStr = path.toUnderlying();
-        std::string      pathExt;
-        if (pathStr.find_last_of('.') == std::pmr::string::npos)
+        auto const        pathStr = std::string(path.toUnderlying());
+        std::string const pathExt = extractExtension(pathStr);
+        if (pathExt.empty())
             return nullptr;
-        std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pathStr.find_last_of('.')),
-                  pathStr.end(),
-                  std::back_inserter(pathExt));
 
-        std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
+        int        xRes = 0, yRes = 0, channels = 0;
+        LoadedType type;
+        void*      raw = loadImageCore(pathStr, pathExt, xRes, yRes, channels, type);
+        if (!raw)
+            return nullptr;
 
-        int  xRes     = 0;
-        int  yRes     = 0;
-        int  channels = 0;
-        RGB* result   = nullptr;
-
-        if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
+        RGB* result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
+        if (!result)
         {
-            // Decode 8-bit LDR with stb_image
-            unsigned char* data = stbi_load(pathStr.c_str(), &xRes, &yRes, &channels, 0);
-            if (!data)
-                return nullptr;
+            stbi_image_free(raw);
+            return nullptr;
+        }
 
-            result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
-            if (!result)
-            {
-                stbi_image_free(data);
-                return nullptr;
-            }
-
+        if (type == LoadedType::Byte)
+        {
+            auto const* data = static_cast<unsigned char*>(raw);
             for (int i = 0; i < xRes * yRes; ++i)
             {
                 if (channels >= 3)
@@ -186,25 +180,14 @@ namespace dmt::parse_helpers {
                 }
                 else
                 {
-                    float g     = data[i * channels + 0] / 255.0f;
+                    float const g = data[i * channels + 0] / 255.0f;
                     result[i].r = result[i].g = result[i].b = g;
                 }
             }
-            stbi_image_free(data);
         }
-        else if (pathExt.ends_with("hdr"))
+        else // Float HDR
         {
-            float* data = stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
-            if (!data)
-                return nullptr;
-
-            result = allocAlignedRGB(sizeof(RGB) * xRes * yRes);
-            if (!result)
-            {
-                stbi_image_free(data);
-                return nullptr;
-            }
-
+            auto const* data = static_cast<float*>(raw);
             for (int i = 0; i < xRes * yRes; ++i)
             {
                 if (channels >= 3)
@@ -215,105 +198,65 @@ namespace dmt::parse_helpers {
                 }
                 else
                 {
-                    float g     = data[i * channels + 0];
+                    float const g = data[i * channels + 0];
                     result[i].r = result[i].g = result[i].b = g;
                 }
             }
-            stbi_image_free(data);
-        }
-        else
-        {
-            return nullptr; // unsupported
         }
 
+        stbi_image_free(raw);
         outWidth  = xRes;
         outHeight = yRes;
         return result;
     }
 
-    static TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out)
+    TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out)
     {
         using enum TempTexObjResult;
         if (!path.isValid() || !path.isFile())
             return eNotExists;
 
-        std::pmr::string           pathStr = path.toUnderlying();
-        std::pmr::memory_resource* mem     = std::pmr::get_default_resource();
-
-        int       xRes = 0, yRes = 0, channels = isRGB ? 3 : 1;
-        void*     data = nullptr;
-        TexFormat format;
-
-        std::string pathExt;
-        if (pathStr.find_last_of('.') == std::pmr::string::npos)
+        auto const        pathStr = std::string(path.toUnderlying());
+        std::string const pathExt = extractExtension(pathStr);
+        if (pathExt.empty())
             return eNotExists;
 
-        std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pathStr.find_last_of('.')),
-                  pathStr.end(),
-                  std::back_inserter(pathExt));
+        int        xRes = 0, yRes = 0, channels = isRGB ? 3 : 1;
+        LoadedType type;
+        void*      raw = loadImageCore(pathStr, pathExt, xRes, yRes, channels, type);
+        if (!raw)
+            return eFailLoad;
 
-        std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
-
-        if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg"))
+        // Validate channel count
+        if (channels != (isRGB ? 3 : 1))
         {
-            // PNG file, no header parsing, 8 bppc only
-            format = isRGB ? TexFormat::ByteRGB : TexFormat::ByteGray;
-            data   = stbi_load(pathStr.c_str(), &xRes, &yRes, &channels, 0);
-            if (!data)
-                return eFailLoad;
-            if (channels != (isRGB ? 3 : 1))
-            {
-                Context ctx;
-                ctx.error("  texture channels: {}", std::make_tuple(channels));
-                ctx.error("  texture expected: {}", std::make_tuple(isRGB ? 3 : 1));
-                return eNumChannelsIncorrect;
-            }
-        }
-        else if (pathExt.ends_with("hdr"))
-        {
-            // Radiance RGBE pixel format through stb_image, which expands it into float32
-            format = isRGB ? TexFormat::FloatRGB : TexFormat::FloatGray;
-            data   = stbi_loadf(pathStr.c_str(), &xRes, &yRes, &channels, 0);
-            if (!data)
-                return eFailLoad;
-            if (channels != (isRGB ? 3 : 1))
-            {
-                Context ctx;
-                ctx.error("  texture channels: {}", std::make_tuple(channels));
-                return eNumChannelsIncorrect;
-            }
-        }
-        else
-        {
-            return eFormatNotSupported;
+            Context ctx;
+            ctx.error("  texture channels: {}", std::make_tuple(channels));
+            ctx.error("  texture expected: {}", std::make_tuple(isRGB ? 3 : 1));
+            stbi_image_free(raw);
+            return eNumChannelsIncorrect;
         }
 
-        *out = makeRGBMipmappedTexture(data, xRes, yRes, TexWrapMode::eClamp, TexWrapMode::eClamp, format, mem);
-        if (pathExt.ends_with("png") || pathExt.ends_with("jpg") || pathExt.ends_with("jpeg") || pathExt.ends_with("hdr"))
-        {
-            stbi_image_free(data);
-        }
+        TexFormat const format = (type == LoadedType::Byte) ? (isRGB ? TexFormat::ByteRGB : TexFormat::ByteGray)
+                                                            : (isRGB ? TexFormat::FloatRGB : TexFormat::FloatGray);
+
+        *out = makeRGBMipmappedTexture(raw,
+                                       xRes,
+                                       yRes,
+                                       TexWrapMode::eClamp,
+                                       TexWrapMode::eClamp,
+                                       format,
+                                       std::pmr::get_default_resource());
+
+        stbi_image_free(raw);
         return eOk;
     }
 
-    static void freeTempTexObj(os::Path const& path, ImageTexturev2& in)
+    void freeTempTexObj(ImageTexturev2& in)
     {
-        std::pmr::string pathStr = path.toUnderlying();
-        std::string      pathExt;
-        if (pathStr.find_last_of('.') == std::pmr::string::npos)
-            return;
-
-        std::copy(pathStr.begin() + static_cast<ptrdiff_t>(pathStr.find_last_of('.')),
-                  pathStr.end(),
-                  std::back_inserter(pathExt));
-
-        std::ranges::transform(pathExt, pathExt.begin(), [](char c) { return std::tolower(c); });
-
 #if defined(DMT_OS_LINUX)
-        //if (posix_memalign(&ptr, std::max<size_t>(alignof(RGB), alignof(EnvLight)), sizeof(RGB) * count) != 0)
         free(in.data);
 #elif defined(DMT_OS_WINDOWS)
-        //if (ptr = _aligned_malloc(sizeof(RGB) * count, std::max<size_t>(alignof(RGB), alignof(EnvLight))))
         _aligned_free(in.data);
 #else
     #error "Error"
@@ -482,7 +425,7 @@ namespace dmt::parse_helpers {
         state.texturesPath[texName].yRes = static_cast<uint32_t>(imgTex.height);
 
         texCacheFiles->createCacheFile(baseKeyFromPath(texPath), imgTex);
-        freeTempTexObj(texPath, imgTex);
+        freeTempTexObj(imgTex);
         return true;
     }
 

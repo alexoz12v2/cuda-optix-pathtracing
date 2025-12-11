@@ -7,8 +7,7 @@
 // don't seem to use SSE2
 
 namespace dmt {
-// Vector Types: Static Assertions --------------------------------------------------------------------------------
-#if __cplusplus >= 202002L
+    // Vector Types: Static Assertions --------------------------------------------------------------------------------
     static_assert(VectorNormalized<Normal2f>);
     static_assert(VectorNormalized<Normal3f>);
     static_assert(VectorScalable<Vector2i>);
@@ -23,7 +22,6 @@ namespace dmt {
     static_assert(VectorScalable<Point3f>);
     static_assert(VectorScalable<Point4i>);
     static_assert(VectorScalable<Point4f>);
-#endif
 
     // Vector Types: Basic Operations ---------------------------------------------------------------------------------
     __host__ __device__ bool operator==(Point2i a, Point2i b) { return a.x == b.x && a.y == b.y; }

@@ -42,4 +42,36 @@ namespace dmt {
         std::pmr::memory_resource* m_tmp;
     };
 } // namespace dmt
+
+namespace dmt::parse_helpers {
+
+    enum class ExtractVec3fResult
+    {
+        eOk = 0,
+        eNotArray,
+        eIncorrectSize,
+        eInvalidType0,
+        eInvalidType1,
+        eInvalidType2,
+
+        eCount
+    };
+
+    enum class TempTexObjResult
+    {
+        eOk = 0,
+        eNotExists,
+        eFormatNotSupported,
+        eFailLoad,
+        eNumChannelsIncorrect,
+
+        eCount
+    };
+
+    DMT_CORE_API RGB*             loadImageAsRGB(os::Path const& path, int& outWidth, int& outHeight);
+    DMT_CORE_API TempTexObjResult tempTexObj(os::Path const& path, bool isRGB, ImageTexturev2* out);
+    DMT_CORE_API std::string_view tempTexObjResultToString(TempTexObjResult result);
+    DMT_CORE_API void             freeTempTexObj(ImageTexturev2& in);
+} // namespace dmt::parse_helpers
+
 #endif // DMT_CORE_PUBLIC_CORE_PARSER_H

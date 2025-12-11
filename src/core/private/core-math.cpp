@@ -415,35 +415,6 @@ namespace dmt {
         return offset;
     }
 
-    uint32_t decodeMorton2D(uint32_t morton)
-    {
-        uint32_t x = morton;
-        x &= 0x55555555; // mask out even bits
-        x = (x | (x >> 1)) & 0x33333333;
-        x = (x | (x >> 2)) & 0x0F0F0F0F;
-        x = (x | (x >> 4)) & 0x00FF00FF;
-        x = (x | (x >> 8)) & 0x0000FFFF;
-        return x;
-    }
-
-    uint32_t encodeMorton2D(uint32_t x, uint32_t y)
-    {
-        constexpr auto part1by1 = [](uint32_t n) -> uint32_t {
-            n &= 0x0000ffff;
-            n = (n | (n << 8)) & 0x00FF00FF;
-            n = (n | (n << 4)) & 0x0F0F0F0F;
-            n = (n | (n << 2)) & 0x33333333;
-            n = (n | (n << 1)) & 0x55555555;
-            return n;
-        };
-
-        // space the bits in x and y and or them
-        // x = _ 0 _ 1 _ 1 _ 1
-        // y = 1 _ 0 _ 0 _ 1 _
-        // m = 1 0 0 1 0 1 1 1
-        return (part1by1(y) << 1) | part1by1(x);
-    }
-
     PiecewiseConstant1D::PiecewiseConstant1D(std::span<float const> func, float min, float max, std::pmr::memory_resource* memory) :
     m_buffer{makeUniqueRef<float[]>(memory, func.size() << 1)},
     m_funcCount(static_cast<decltype(m_funcCount)>(func.size())),

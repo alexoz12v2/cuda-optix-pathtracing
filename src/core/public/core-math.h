@@ -99,13 +99,6 @@ namespace dmt {
     /// How is it remapped: The offset between the 2 bounding CDF values is in itself still a random number, which can be remapped in the 0,1 range
     DMT_CORE_API int32_t sampleDiscrete(float const* weights, uint32_t weightCount, float u, float* pmf, float* uRemapped);
 
-    /// @{
-    DMT_CORE_API uint32_t        decodeMorton2D(uint32_t morton);
-    DMT_CORE_API uint32_t        encodeMorton2D(uint32_t x, uint32_t y);
-    DMT_CORE_API inline uint32_t decodeMortonX(uint32_t morton) { return decodeMorton2D(morton); }
-    DMT_CORE_API inline uint32_t decodeMortonY(uint32_t morton) { return decodeMorton2D(morton >> 1); }
-    /// @}
-
     // TODO move elsewhere?
     inline void resetMonotonicBufferPointer(std::pmr::monotonic_buffer_resource& resource, unsigned char* ptr, uint32_t bytes)
     {

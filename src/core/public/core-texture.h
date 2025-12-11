@@ -4,6 +4,11 @@
 #include "core-macros.h"
 #include "core-math.h"
 #include "cudautils/cudautils-transform.cuh"
+#include "cudautils/cudautils-color.cuh"
+
+#ifdef __CUDA_ARCH__
+    #include <cuda_fp16.h>
+#endif
 
 namespace dmt {
     struct ImageTexture
@@ -14,14 +19,14 @@ namespace dmt {
 
     struct ApproxDifferentialsContext
     {
-        Point3f   p;                   /// intersection point
-        Vector3f  n;                   /// normal from intersection point
-        Transform cameraFromRender;    /// transform from render space to camera space
-        Vector3f  minPosDifferentialX; /// minimum offset in position for a ray differential along the X axis
-        Vector3f  minPosDifferentialY; /// minimum offset in position for a ray differential along the Y axis
-        Vector3f  minDirDifferentialX; /// minimum offset in direction for a ray differential along the X axis
-        Vector3f  minDirDifferentialY; /// minimum offset in direction for a ray differential along the Y axis
-        uint32_t samplesPerPixel; /// used to compute a clamped scale factor for differentials max(rsqrt(samplesPerPixel), 1/8)
+        Point3f   p{};                   /// intersection point
+        Vector3f  n{};                   /// normal from intersection point
+        Transform cameraFromRender;      /// transform from render space to camera space
+        Vector3f  minPosDifferentialX{}; /// minimum offset in position for a ray differential along the X axis
+        Vector3f  minPosDifferentialY{}; /// minimum offset in position for a ray differential along the Y axis
+        Vector3f  minDirDifferentialX{}; /// minimum offset in direction for a ray differential along the X axis
+        Vector3f  minDirDifferentialY{}; /// minimum offset in direction for a ray differential along the Y axis
+        uint32_t samplesPerPixel{}; /// used to compute a clamped scale factor for differentials max(rsqrt(samplesPerPixel), 1/8)
     };
 
     struct LODResult
@@ -175,6 +180,9 @@ namespace dmt {
         float evalFloat(TextureEvalContext const& ctx) const;
         RGB   evalRGB(TextureEvalContext const& ctx) const;
 
+        // if the texture is float, it just broadcasts to all components
+        RGB at(int32_t s, int32_t t, int32_t level) const;
+
         void* data; /// mipmapped image data, stored in morton order
 
         int32_t     width;          /// original image x resolution (POT)
@@ -189,7 +197,108 @@ namespace dmt {
     };
 
     // ---- Image Texture Utils ----
-    inline constexpr float MaxAnisotropy = 8.f;
+    inline constexpr float maxAnisotropy = 8.f;
+    // ---------- Helpers ----------
+
+    template <typename T>
+    inline __host__ __device__ float toFloat(T value);
+
+    template <>
+    inline __host__ __device__ float toFloat(uint8_t value)
+    {
+        return value / 255.0f;
+    }
+
+    template <>
+    inline __host__ __device__ float toFloat(Half value)
+    {
+        return static_cast<float>(value);
+    }
+
+    template <>
+    inline __host__ __device__ float toFloat(float value)
+    {
+        return value;
+    }
+
+    // Remap RGB normal in native type
+    template <typename T>
+    inline __host__ __device__ RGB remapNormal(T const& value)
+    {
+        RGB result = {};
+
+        if constexpr (std::is_same_v<T, Byte3>)
+        {
+            // Byte3: x/y -> [-1,1], z -> [0,1]
+            result.r = static_cast<float>(value.r) / 255.0f * 2.0f - 1.0f;
+            result.g = static_cast<float>(value.g) / 255.0f * 2.0f - 1.0f;
+            result.b = static_cast<float>(value.b) / 255.0f; // leave z in [0,1]
+        }
+        else if constexpr (std::is_same_v<T, Half3>)
+        {
+            // Half3: x/y -> [-1,1], z -> [0,1] (Half assumed to be [0,1])
+            result.r = static_cast<float>(value.r) * 2.0f - 1.0f;
+            result.g = static_cast<float>(value.g) * 2.0f - 1.0f;
+            result.b = static_cast<float>(value.b); // leave z
+        }
+        else if constexpr (std::is_same_v<T, RGB>)
+        {
+            // RGB float already [0,1], remap x/y if needed
+            result.r = value.r * 2.0f - 1.0f;
+            result.g = value.g * 2.0f - 1.0f;
+            result.b = value.b; // leave z
+        }
+        else
+        {
+            static_assert(sizeof(T) == 0, "remapNormal not implemented for this type");
+        }
+
+        return result;
+    }
+
+    // ---------- Texel readers ----------
+
+    // Gray single-channel
+    template <typename T>
+    inline __host__ __device__ RGB readGray(T const* buffer, uint32_t idx)
+    {
+        float f = toFloat(buffer[idx]);
+        return {f, f, f};
+    }
+
+    // RGB
+    template <typename T>
+    inline __host__ __device__ RGB readRGB(T const* buffer, uint32_t idx, bool isNormalMap);
+
+    // Specializations for RGB structs
+    template <>
+    inline __host__ __device__ RGB readRGB(RGB const* buffer, uint32_t idx, bool)
+    {
+        return buffer[idx];
+    }
+
+    template <typename T>
+        requires std::is_same_v<T, Byte3> || std::is_same_v<T, Half3>
+    inline __host__ __device__ RGB readRGB(T const* buffer, uint32_t idx, bool isNormalMap)
+    {
+        T   h      = buffer[idx];
+        RGB result = static_cast<RGB>(h);
+        if (isNormalMap)
+        {
+            result = remapNormal(h);
+        }
+        return result;
+    }
+
+    DMT_CORE_API __host__ __device__ RGB sampleMortonTexel(
+        int         s,
+        int         t,
+        Point2i     levelRes,
+        TexWrapMode wrapX,
+        TexWrapMode wrapY,
+        TexFormat   format,
+        bool        isNormalMap,
+        void const* mortonLevelBuffer);
 
     DMT_CORE_API uint32_t bytesPerPixel(TexFormat texFormat);
     DMT_CORE_API size_t   alignPerPixel(TexFormat tex);

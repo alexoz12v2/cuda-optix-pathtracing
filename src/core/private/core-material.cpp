@@ -18,13 +18,89 @@ namespace /*static*/ {
         return levels;
     }
 
-    RGB sampleMippedTexture(TextureEvalContext const& ctx, TextureCache& texCache, uint64_t key, int32_t width, int32_t height, bool normal)
+    static RGB sampleBilinearTexel(
+        Point2f              st,
+        Point2i              res,
+        TexWrapMode          wrapX,
+        TexWrapMode          wrapY,
+        TexFormat            texFormat,
+        bool                 isNormal,
+        unsigned char const* mortonLevelBuffer)
+    {
+        // Map to texel space (same convention as EWA)
+        float x = st.x * res.x - 0.5f;
+        float y = st.y * res.y - 0.5f;
+
+        int x0 = int(floor(x));
+        int y0 = int(floor(y));
+        int x1 = x0 + 1;
+        int y1 = y0 + 1;
+
+        float tx = x - x0;
+        float ty = y - y0;
+
+        RGB c00 = sampleMortonTexel(x0, y0, res, wrapX, wrapY, texFormat, false, mortonLevelBuffer);
+        RGB c10 = sampleMortonTexel(x1, y0, res, wrapX, wrapY, texFormat, false, mortonLevelBuffer);
+        RGB c01 = sampleMortonTexel(x0, y1, res, wrapX, wrapY, texFormat, false, mortonLevelBuffer);
+        RGB c11 = sampleMortonTexel(x1, y1, res, wrapX, wrapY, texFormat, false, mortonLevelBuffer);
+
+        RGB cx0 = lerp(c00, c10, tx);
+        RGB cx1 = lerp(c01, c11, tx);
+        RGB c   = lerp(cx0, cx1, ty);
+
+        if (isNormal)
+        {
+            c.r = c.r * 2.0f - 1.0f;
+            c.g = c.g * 2.0f - 1.0f;
+        }
+
+        return c;
+    }
+
+    static RGB sampleTrilinear(
+        Point2f       st,
+        int           width,
+        int           height,
+        int           mipLevels,
+        float         lod,
+        TexWrapMode   wrapX,
+        TexWrapMode   wrapY,
+        TexFormat&    texFormat,
+        bool          isNormal,
+        TextureCache& texCache,
+        uint64_t      key)
+    {
+        int   ilod = clamp(int(floor(lod)), 0, mipLevels - 1);
+        float t    = lod - ilod;
+
+        Point2i res0 = {std::max(1, width >> ilod), std::max(1, height >> ilod)};
+        Point2i res1 = {std::max(1, width >> (ilod + 1)), std::max(1, height >> (ilod + 1))};
+
+        uint32_t bytes0 = 0, bytes1 = 0;
+
+        auto* buf0 = static_cast<unsigned char const*>(texCache.getOrInsert(key, ilod, bytes0, texFormat));
+        auto* buf1 = static_cast<unsigned char const*>(texCache.getOrInsert(key, ilod + 1, bytes1, texFormat));
+
+        RGB c0 = sampleBilinearTexel(st, res0, wrapX, wrapY, texFormat, isNormal, buf0);
+        RGB c1 = sampleBilinearTexel(st, res1, wrapX, wrapY, texFormat, isNormal, buf1);
+
+        return lerp(c0, c1, t);
+    }
+
+    RGB sampleMippedTexture(TextureEvalContext const& ctx,
+                            TextureCache&             texCache,
+                            uint64_t                  key,
+                            int32_t                   width,
+                            int32_t                   height,
+                            bool                      normal,
+                            TexFormat&                outTexFormat)
     {
         // TODO; here we are assuming that uv are equal to texture coordinates. In a more general scenario, we would
         // compute a mapping function to generate texture coordinates form the `TextureEvalContext`. Assume s = u, t = v
-        Vector2f const dstdx = Vector2f{ctx.dUV.dudx, ctx.dUV.dvdx};
-        Vector2f const dstdy = Vector2f{ctx.dUV.dudy, ctx.dUV.dvdy};
-        Point2f const  st    = ctx.uv;
+        Vector2f const dstdx     = Vector2f{ctx.dUV.dudx, ctx.dUV.dvdx};
+        Vector2f const dstdy     = Vector2f{ctx.dUV.dudy, ctx.dUV.dvdy};
+        Point2f const  st        = ctx.uv;
+        int32_t const  mipLevels = mipLevelsFromResolution(width, height);
 
         // choose ellipse axes and clamp them if necessary
         bool const     dxLonger   = dotSelf(dstdx) > dotSelf(dstdy);
@@ -32,7 +108,30 @@ namespace /*static*/ {
         Vector2f       dst1       = dxLonger ? dstdy : dstdx;
         float          shorterLen = normL2(dst1);
         float const    longerLen  = normL2(dst0);
-        assert(shorterLen != 0 && "you should implement a trilinear filtering fallback");
+
+        // TODO Better temporary fix
+        bool const validDiffs = fl::nearZero(ctx.dUV.dudx) || fl::nearZero(ctx.dUV.dudy) ||
+                                fl::nearZero(ctx.dUV.dvdx) || fl::nearZero(ctx.dUV.dvdy);
+        if (!validDiffs)
+        {
+            // compute 1 scalar LOD with *Isotropic Footprint Estimation*
+            float const dud = fmaxf(fl::abs(ctx.dUV.dudx), fl::abs(ctx.dUV.dudy));
+            float const dvd = fmaxf(fl::abs(ctx.dUV.dvdx), fl::abs(ctx.dUV.dvdy));
+
+            float const rho = fmaxf(dud * width, dvd * height);
+            float const lod = fmaxf(log2(fmaxf(rho, 1e-8f)), 0);
+            return sampleTrilinear(ctx.uv,
+                                   width,
+                                   height,
+                                   mipLevels,
+                                   lod,
+                                   TexWrapMode::eMirror,
+                                   TexWrapMode::eMirror,
+                                   outTexFormat,
+                                   normal,
+                                   texCache,
+                                   key);
+        }
 
         if (float den = shorterLen * maxAnisotropy; den < longerLen)
         {
@@ -40,11 +139,29 @@ namespace /*static*/ {
             dst1 *= scale;
             shorterLen *= scale;
         }
-        assert(shorterLen != 0 && "you should implement a trilinear filtering fallback");
+        if (shorterLen ==0 )
+        {
+            // compute 1 scalar LOD with *Isotropic Footprint Estimation*
+            float const dud = fmaxf(fl::abs(ctx.dUV.dudx), fl::abs(ctx.dUV.dudy));
+            float const dvd = fmaxf(fl::abs(ctx.dUV.dvdx), fl::abs(ctx.dUV.dvdy));
+
+            float const rho = fmaxf(dud * width, dvd * height);
+            float const lod = fmaxf(log2(fmaxf(rho, 1e-8f)), 0);
+            return sampleTrilinear(ctx.uv,
+                                   width,
+                                   height,
+                                   mipLevels,
+                                   lod,
+                                   TexWrapMode::eMirror,
+                                   TexWrapMode::eMirror,
+                                   outTexFormat,
+                                   normal,
+                                   texCache,
+                                   key);
+        }
 
         // choose 2 level of details and perform 2 EWA filtering lookup
         auto const lodRes = computeTextureLOD_from_dudv(ctx.dUV.dudx, ctx.dUV.dudy, ctx.dUV.dvdx, ctx.dUV.dvdy, width, height);
-        int32_t const mipLevels = mipLevelsFromResolution(width, height);
 
         // for EWA
         float const lambda = lodRes.lod_minor; // tends to preserve more detail; EWA addresses aliasing anisotropically
@@ -54,31 +171,29 @@ namespace /*static*/ {
         Point2i const levelResLod0 = {std::max(1, width >> ilod), std::max(1, height >> ilod)};
         Point2i const levelResLod1 = {std::max(1, width >> (ilod + 1)), std::max(1, height >> (ilod + 1))};
 
-        uint32_t    bytesLod0 = 0;
-        uint32_t    bytesLod1 = 0;
-        TexFormat   texFormat{};
+        uint32_t    bytesLod0             = 0;
+        uint32_t    bytesLod1             = 0;
         auto const* mortonLevelBufferLod0 = static_cast<unsigned char const*>(
-            texCache.getOrInsert(key, ilod, bytesLod0, texFormat));
+            texCache.getOrInsert(key, ilod, bytesLod0, outTexFormat));
         auto const* mortonLevelBufferLod1 = static_cast<unsigned char const*>(
-            texCache.getOrInsert(key, ilod + 1, bytesLod1, texFormat));
+            texCache.getOrInsert(key, ilod + 1, bytesLod1, outTexFormat));
         assert(mortonLevelBufferLod0 && mortonLevelBufferLod1);
-        assert(isAligned(mortonLevelBufferLod0, alignPerPixel(texFormat)));
-        assert(isAligned(mortonLevelBufferLod1, alignPerPixel(texFormat)));
+        assert(isAligned(mortonLevelBufferLod0, alignPerPixel(outTexFormat)));
+        assert(isAligned(mortonLevelBufferLod1, alignPerPixel(outTexFormat)));
 
         // TODO handle wrap mode
         EWAParams const paramsLod0{.mortonLevelBuffer = mortonLevelBufferLod0,
                                    .levelRes          = levelResLod0,
                                    .wrapX             = TexWrapMode::eMirror,
                                    .wrapY             = TexWrapMode::eMirror,
-                                   .texFormat         = texFormat,
+                                   .texFormat         = outTexFormat,
                                    .isNormal          = normal};
         EWAParams const paramsLod1{.mortonLevelBuffer = mortonLevelBufferLod1,
                                    .levelRes          = levelResLod1,
                                    .wrapX             = TexWrapMode::eMirror,
                                    .wrapY             = TexWrapMode::eMirror,
-                                   .texFormat         = texFormat,
+                                   .texFormat         = outTexFormat,
                                    .isNormal          = normal};
-
         return lerp(EWAFormula(paramsLod0, st, dst0, dst1), EWAFormula(paramsLod1, st, dst0, dst1), t);
     }
 } // namespace
@@ -94,27 +209,27 @@ namespace dmt {
                               float                     uc)
     {
         // sample normal
-        Normal3f ns;
-        Vector3f nMap;
-        RGB      nMapSampled;
+        Normal3f  ns;
+        Vector3f  nMap;
+        RGB       nMapSampled;
+        TexFormat texFormat{};
         if (material.useShadingNormals)
         {
             ns = normFromOcta(material.normalvalue);
             if (material.texMatMap & SurfaceMaterial::NormalMask)
             {
-                int width         = static_cast<int>(material.normalWidth);
-                int height        = static_cast<int>(material.normalHeight);
-                nMapSampled       = sampleMippedTexture(texCtx, cache, material.normalkey, width, height, true);
-                nMap              = 2.f * nMapSampled.asVec() - Vector3f::s(1.f);
+                int width   = static_cast<int>(material.normalWidth);
+                int height  = static_cast<int>(material.normalHeight);
+                nMapSampled = sampleMippedTexture(texCtx, cache, material.normalkey, width, height, true, texFormat);
+                nMap        = nMapSampled.asVec();
+                if (texFormat != TexFormat::FloatRGB)
+                    nMap = normalize(map(nMap, [](float const x) { return fl::quantize(x); }));
                 Frame const frame = Frame::fromZ(ng);
-                ns                = frame.fromLocal(nMap);
-                if (dotSelf(ns) != 0)
-                    ns = normalize(nMap);
-                else
-                    ns = ng;
+                ns                = safeNormalizeFallback(frame.fromLocal(nMap), ng);
 #if defined(DMT_NORMAL_MAP_D3D_STYLE)
                 nMap.y = -nMap.y;
 #endif
+                // if normal and image not 32 bit, then quantize and normalize the sampled result
                 assert(fl::abs(dotSelf(ns) - 1.f) < 1e-5f);
             }
         }
@@ -126,7 +241,7 @@ namespace dmt {
         if (material.texMatMap & SurfaceMaterial::MetallicMask)
         {
             int width = static_cast<int>(material.metallicWidth), h = static_cast<int>(material.metallicHeight);
-            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, width, h, false).r;
+            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, width, h, false, texFormat).r;
         }
 
         // sample roughness
@@ -134,7 +249,7 @@ namespace dmt {
         if (material.texMatMap & SurfaceMaterial::RoughnessMask)
         {
             int w = static_cast<int>(material.roughnessWidth), h = static_cast<int>(material.roughnessHeight);
-            roughness = sampleMippedTexture(texCtx, cache, material.roughnesskey, w, h, false).r;
+            roughness = sampleMippedTexture(texCtx, cache, material.roughnesskey, w, h, false, texFormat).r;
         }
 
         // sample diffuse (TODO colorspace?)
@@ -142,7 +257,7 @@ namespace dmt {
         if (material.texMatMap & SurfaceMaterial::DiffuseMask)
         {
             int w = static_cast<int>(material.diffuseWidth), h = static_cast<int>(material.diffuseHeight);
-            diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false);
+            diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false, texFormat);
         }
 
         if (dot(ng, w) < 0) // TODO maybe flip sign bit
@@ -203,16 +318,20 @@ namespace dmt {
                           Vector3f                  ng)
     {
         // --- Step 1: Evaluate shading normal ---
-        Normal3f ns;
+        Normal3f  ns;
+        TexFormat texFormat{};
 
         if (material.useShadingNormals)
         {
             ns = normFromOcta(material.normalvalue);
             if (material.texMatMap & SurfaceMaterial::NormalMask)
             {
-                int w = static_cast<int>(material.normalWidth), h = static_cast<int>(material.normalHeight);
-                ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
-                ns = safeNormalizeFallback(ns, ng);
+                int      w = static_cast<int>(material.normalWidth), h = static_cast<int>(material.normalHeight);
+                Vector3f nMap = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true, texFormat).asVec();
+                if (texFormat != TexFormat::FloatRGB)
+                    nMap = normalize(map(nMap, [](float const x) { return fl::quantize(x); }));
+                Frame const frame = Frame::fromZ(ng);
+                ns                = safeNormalizeFallback(frame.fromLocal(nMap), ng);
             }
         }
         else
@@ -223,21 +342,21 @@ namespace dmt {
         if (material.texMatMap & SurfaceMaterial::MetallicMask)
         {
             int w = static_cast<int>(material.metallicWidth), h = static_cast<int>(material.metallicHeight);
-            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, w, h, false).r;
+            metallic = sampleMippedTexture(texCtx, cache, material.metallickey, w, h, false, texFormat).r;
         }
 
         float roughness = material.roughnessvalue;
         if (material.texMatMap & SurfaceMaterial::RoughnessMask)
         {
             int w = static_cast<int>(material.roughnessWidth), h = static_cast<int>(material.roughnessHeight);
-            roughness = sampleMippedTexture(texCtx, cache, material.roughnesskey, w, h, false).r;
+            roughness = sampleMippedTexture(texCtx, cache, material.roughnesskey, w, h, false, texFormat).r;
         }
 
         RGB diffuse = rgbFromByte3(material.diffusevalue);
         if (material.texMatMap & SurfaceMaterial::DiffuseMask)
         {
             int w = static_cast<int>(material.diffuseWidth), h = static_cast<int>(material.diffuseHeight);
-            diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false);
+            diffuse = sampleMippedTexture(texCtx, cache, material.diffusekey, w, h, false, texFormat);
         }
 
         if (dot(ng, wo) < 0) // TODO maybe flip sign bit
@@ -319,13 +438,17 @@ namespace dmt {
         // If there�s a normal map, sample it
         if (material.texMatMap & SurfaceMaterial::NormalMask)
         {
-            int w = static_cast<int>(material.normalWidth);
-            int h = static_cast<int>(material.normalHeight);
+            int const w = static_cast<int>(material.normalWidth);
+            int const h = static_cast<int>(material.normalHeight);
 
-            ns = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true).asVec();
+            TexFormat format{};
+            Vector3f  nMap = sampleMippedTexture(texCtx, cache, material.normalkey, w, h, true, format).asVec();
+            if (format != TexFormat::FloatRGB)
+                nMap = normalize(map(nMap, [](float const x) { return fl::quantize(x, 4); }));
+            Frame const tangentFrame = Frame::fromZ(ng);
 
             // Ensure normalized, fallback to ng if something degenerate
-            ns = safeNormalizeFallback(ns, ng);
+            ns = safeNormalizeFallback(tangentFrame.fromLocal(nMap), ng);
         }
 
         return ns;

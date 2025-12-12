@@ -291,6 +291,13 @@ namespace dmt::job {
                             texCtx.uv   = uv;
                             texCtx.dUV  = duv_From_dp_dxy(uvCtx);
 
+                            // TODO remove: temporary fix before refactor
+                            bool const degenerate = normL2(cross(dpdx, dpdy)) < 1e-6f || depth > 1;
+                            if (degenerate)
+                            {
+                                texCtx.dUV = {};
+                            }
+
                             Normal3f const ns = xform(materialShadingNormal(mat, *data.texCache, texCtx, ngObj));
 
                             // 5. (Maybe) BSDF regularization

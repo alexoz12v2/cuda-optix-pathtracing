@@ -1200,6 +1200,30 @@ namespace dmt {
         gramSchmidt(frame.zAxis.asVec(), &frame.xAxis.asVec(), &frame.yAxis.asVec());
         return frame;
     }
+    __host__ __device__ Frame Frame::fromXZ(Vector3f x, Vector3f z)
+    {
+        // Normalize x first
+        Vector3f X = normalize(x);
+
+        // Remove the component of z along x
+        Vector3f Z = z - dot(z, X) * X;
+
+        // Handle near-parallel case
+        if (dotSelf(Z) < 1e-8f)
+        {
+            // Pick an arbitrary vector not parallel to X
+            Vector3f tmp = (fabs(X.x) < 0.9f) ? Vector3f(1, 0, 0) : Vector3f(0, 1, 0);
+            Z            = cross(X, tmp);
+        }
+
+        Z = normalize(Z);
+
+        // Y completes the right-handed basis
+        Vector3f Y = cross(Z, X);
+
+        return {X, Y, Z};
+    }
+
     __host__ __device__ Vector3f Frame::toLocal(Vector3f v) const
     {
         return {{dot(v, xAxis), dot(v, yAxis), dot(v, zAxis)}};

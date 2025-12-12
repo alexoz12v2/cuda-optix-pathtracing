@@ -412,7 +412,7 @@ namespace dmt::parse_helpers {
                                           &imgTex);
         if (res != TempTexObjResult::eOk)
         {
-            ctx.error("Error loading texture '{}'", std::make_tuple(texName));
+            ctx.error("Error loading texture '{}' ('{}')", std::make_tuple(texName, state.texturesPath[texName].texPath));
             ctx.error("{}", std::make_tuple(tempTexObjResultToString(res)));
             if (res == TempTexObjResult::eNumChannelsIncorrect)
             {

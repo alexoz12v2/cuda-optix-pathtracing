@@ -163,6 +163,8 @@ namespace dmt {
 
         // Compute (regularized) determinant and inverse
         float det = ata00 * ata11 - ata01 * ata01;
+        if (fl::abs(det) < 1e-8f) // TODO Better temporary fix
+            return {};
 
         float dudx = 0.0f;
         float dvdx = 0.0f;

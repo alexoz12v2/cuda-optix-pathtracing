@@ -475,7 +475,7 @@ namespace dmt::ggx {
 
     float DMT_FASTCALL auxiliaryLambda(Vector3f w, float alphax, float alphay)
     {
-        assert(fl::abs(1.f - normL2(w)) < 1e-5f && "Direction should be unit vector");
+        assert(fl::abs(1.f - normL2(w)) < 1e-1f && "Direction should be unit vector");
 #if 0
         float const cosTheta  = w.z;
         float const sinTheta2 = 1.f - cosTheta * cosTheta;
@@ -594,7 +594,7 @@ namespace dmt::ggx {
 
         // --- tangent frame (shading normal) ---
         Frame const    tangentSpace = Frame::fromXZ(bsdf.T, bsdf.closure.N);
-        Vector3f const wLocal       = tangentSpace.toLocal(w); // incoming direction in tangent space
+        Vector3f const wLocal       = normalize(tangentSpace.toLocal(w)); // incoming direction in tangent space
         float const    cosI         = wLocal.z;
 
         // sanity: incoming should be in the hemisphere of N

@@ -5,34 +5,13 @@
 #include "core-trianglemesh.h"
 #include "cudautils/cudautils-transform.cuh"
 
+// std library
+#include <memory>
+#include <string>
+#include <unordered_map>
 
 namespace dmt {
-    struct FbxResources
-    {
-        void* manager  = nullptr;
-        void* settings = nullptr;
-    };
-
-    class DMT_CORE_API FbxDeleterResources
-    {
-    public:
-        void operator()(void* raw) const;
-    };
-
-#if 0
-    struct Settings
-    {
-        int32_t importMaterial        : 1;
-        int32_t importTexture         : 1;
-        int32_t importLink            : 1;
-        int32_t importShape           : 1;
-        int32_t importGobo            : 1;
-        int32_t importAnimation       : 1;
-        int32_t importGlobal_settings : 1;
-        int32_t importNormal          : 1;
-    };
-#endif
-
+    class MeshFbxParserImpl;
     class DMT_CORE_API MeshFbxParser
     {
 
@@ -40,16 +19,10 @@ namespace dmt {
         MeshFbxParser();
         ~MeshFbxParser();
 
-        bool        ImportFBX(char const* fileName, TriangleMesh* outMesh);
-        char const* GetMeshName();
+        bool ImportFBX(char const* fileName, TriangleMesh* outMesh) const;
 
     private:
-        void InitFbxManager();
-
-        std::pmr::string                                  m_fileName;
-        std::pmr::string                                  m_meshName;
-        std::pmr::unordered_map<char const*, char const*> m_ChannelsTexPath;
-        FbxResources                                      m_res;
+        std::unique_ptr<MeshFbxParserImpl> m_pimpl = nullptr;
     };
 } // namespace dmt
 #endif // DMT_CORE_PUBLIC_CORE_MESH_PARSER_H

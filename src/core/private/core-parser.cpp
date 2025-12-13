@@ -1148,8 +1148,7 @@ namespace dmt::parse_helpers {
                 Light const spotLight = makeSpotLight(Transform{}, radiantIntensity, cosTheta0, cosThetae);
                 if (spotLight.lightFromRender.hasNaN())
                     __debugbreak();
-                auto const& [it, wasInserted] = //
-                    state.lights.try_emplace(name, spotLight);
+                auto const& [it, wasInserted] = state.lights.try_emplace(name, spotLight);
 #else
                 auto const& [it, wasInserted] = //
                     state.lights.try_emplace(name, makeSpotLight(Transform{}, radiantIntensity, cosTheta0, cosThetae));

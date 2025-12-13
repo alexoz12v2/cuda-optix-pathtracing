@@ -356,7 +356,7 @@ namespace dmt {
         DMT_CPU_GPU static Frame fromXY(Normal3f x, Normal3f y);
         DMT_CPU_GPU static Frame fromZ(Normal3f z);
 
-        DMT_CPU_GPU static Frame fromXZ(Vector3f x, Vector3f z);
+        DMT_CPU_GPU static Frame        fromXZ(Vector3f x, Vector3f z);
         DMT_CPU_GPU static inline Frame fromXY(Vector3f x, Vector3f y) { return fromXY(normalFrom(x), normalFrom(y)); }
         DMT_CPU_GPU static inline Frame fromZ(Vector3f z) { return fromZ(normalFrom(z)); }
 

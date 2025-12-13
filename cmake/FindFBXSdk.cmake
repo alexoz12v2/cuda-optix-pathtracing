@@ -10,7 +10,7 @@ message("Looking for FBX SDK")
 # Helper function: copy one runtime (Debug/Release) Arguments: runtime_var - CMake variable name (not value) holding
 # path to runtime dest_dir    - bin or lib config      - "Release" or "Debug"
 # ---------------------------------------------
-function (fbxsdk_copy_runtime runtime_var dest_dir config)
+function(fbxsdk_copy_runtime runtime_var dest_dir config)
   set(_src "${${runtime_var}}")
   if (NOT EXISTS "${_src}")
     message(FATAL_ERROR "Runtime ${runtime_var} not found at ${_src}")
@@ -43,12 +43,12 @@ function (fbxsdk_copy_runtime runtime_var dest_dir config)
   if (_copy_result EQUAL 0)
     # Reassign variable to new copied path
     set(${runtime_var}
-        "${_dst}"
-        CACHE FILEPATH "FBXSDK runtime (${config})" FORCE)
+      "${_dst}"
+      CACHE FILEPATH "FBXSDK runtime (${config})" FORCE)
   else ()
     message(FATAL_ERROR "Failed to copy ${runtime_var} from ${_src} to ${_dst}")
   endif ()
-endfunction ()
+endfunction()
 
 if (DMT_OS_WINDOWS)
   set(_fbxsdk_vstudio_version "vs2022")
@@ -130,9 +130,9 @@ if (DMT_OS_WINDOWS)
     PATH_SUFFIXES ${_fbxsdk_libdir_debug})
 
   if (FBXSDK_INCLUDE_DIR
-      AND FBXSDK_LIBRARY
-      AND FBXSDK_LIBRARY_DEBUG
-      AND FBXSDK_RUNTIME)
+    AND FBXSDK_LIBRARY
+    AND FBXSDK_LIBRARY_DEBUG
+    AND FBXSDK_RUNTIME)
     set(FBXSDK_FOUND YES)
   else ()
     set(FBXSDK_FOUND NO)
@@ -147,24 +147,24 @@ if (DMT_OS_WINDOWS)
     set_target_properties(
       FBXSDK::fbxsdk
       PROPERTIES IMPORTED_IMPLIB_RELEASE "${FBXSDK_LIBRARY}"
-                 IMPORTED_IMPLIB_DEBUG "${FBXSDK_LIBRARY_DEBUG}"
-                 IMPORTED_LOCATION_RELEASE "${FBXSDK_RUNTIME}"
-                 IMPORTED_LOCATION_DEBUG "${FBXSDK_RUNTIME_DEBUG}"
-                 INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}")
+      IMPORTED_IMPLIB_DEBUG "${FBXSDK_LIBRARY_DEBUG}"
+      IMPORTED_LOCATION_RELEASE "${FBXSDK_RUNTIME}"
+      IMPORTED_LOCATION_DEBUG "${FBXSDK_RUNTIME_DEBUG}"
+      INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}")
 
     target_link_libraries(
       FBXSDK::fbxsdk
       INTERFACE
-        "$<$<CONFIG:Release>:${FBXSDK_ALEMBIC_LIBRARY};${FBXSDK_LIBXML2_LIBRARY};${FBXSDK_ZLIB_LIBRARY}>"
-        "$<$<CONFIG:Debug>:${FBXSDK_ALEMBIC_LIBRARY_DEBUG};${FBXSDK_LIBXML2_LIBRARY_DEBUG};${FBXSDK_ZLIB_LIBRARY_DEBUG}>"
+      "$<$<CONFIG:Release>:${FBXSDK_ALEMBIC_LIBRARY};${FBXSDK_LIBXML2_LIBRARY};${FBXSDK_ZLIB_LIBRARY}>"
+      "$<$<CONFIG:Debug>:${FBXSDK_ALEMBIC_LIBRARY_DEBUG};${FBXSDK_LIBXML2_LIBRARY_DEBUG};${FBXSDK_ZLIB_LIBRARY_DEBUG}>"
     )
 
     set_target_properties(
       FBXSDK::fbxsdk
       PROPERTIES MAP_IMPORTED_CONFIG_DEBUG Debug
-                 MAP_IMPORTED_CONFIG_RELEASE Release
-                 MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
-                 MAP_IMPORTED_CONFIG_MINSIZEREL Release)
+      MAP_IMPORTED_CONFIG_RELEASE Release
+      MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+      MAP_IMPORTED_CONFIG_MINSIZEREL Release)
     message(STATUS "FBX SDK imported target created (Windows): FBXSDK::fbxsdk")
   endif ()
 
@@ -217,8 +217,8 @@ elseif (DMT_OS_LINUX)
     PATH_SUFFIXES ${_fbxsdk_libdir_debug})
 
   if (FBXSDK_INCLUDE_DIR
-      AND FBXSDK_LIBRARY
-      AND FBXSDK_RUNTIME)
+    AND FBXSDK_LIBRARY
+    AND FBXSDK_RUNTIME)
     set(FBXSDK_FOUND YES)
   else ()
     set(FBXSDK_FOUND NO)
@@ -233,19 +233,19 @@ elseif (DMT_OS_LINUX)
     set_target_properties(
       FBXSDK::fbxsdk
       PROPERTIES IMPORTED_LOCATION_RELEASE "${FBXSDK_RUNTIME}"
-                 IMPORTED_LOCATION_DEBUG "${FBXSDK_RUNTIME_DEBUG}"
-                 INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}")
+      IMPORTED_LOCATION_DEBUG "${FBXSDK_RUNTIME_DEBUG}"
+      INTERFACE_INCLUDE_DIRECTORIES "${FBXSDK_INCLUDE_DIR}")
 
     target_link_libraries(
       FBXSDK::fbxsdk INTERFACE "$<$<CONFIG:Release>:${FBXSDK_RUNTIME};${FBXSDK_ALEMBIC_LIBRARY}>"
-                               "$<$<CONFIG:Debug>:${FBXSDK_RUNTIME_DEBUG};${FBXSDK_ALEMBIC_LIBRARY_DEBUG}>")
+      "$<$<CONFIG:Debug>:${FBXSDK_RUNTIME_DEBUG};${FBXSDK_ALEMBIC_LIBRARY_DEBUG}>")
 
     set_target_properties(
       FBXSDK::fbxsdk
       PROPERTIES MAP_IMPORTED_CONFIG_DEBUG Debug
-                 MAP_IMPORTED_CONFIG_RELEASE Release
-                 MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
-                 MAP_IMPORTED_CONFIG_MINSIZEREL Release)
+      MAP_IMPORTED_CONFIG_RELEASE Release
+      MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+      MAP_IMPORTED_CONFIG_MINSIZEREL Release)
     message(STATUS "FBX SDK imported target created (Linux): FBXSDK::fbxsdk")
   endif ()
 else ()

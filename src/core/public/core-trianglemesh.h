@@ -49,9 +49,9 @@ namespace dmt {
         DMT_CORE_API TriangleMesh& addIndexedTriangle(VertexIndex i0, VertexIndex i1, VertexIndex i2, int32_t matIdx);
 
         DMT_CORE_API Point3f     getPosition(size_t idx) const;
-        DMT_CORE_API uint32_t    getPositionSize();
+        DMT_CORE_API uint32_t    getPositionSize() const;
         DMT_CORE_API Normal3f    getNormal(size_t idx) const;
-        uint32_t                 getNormalSize();
+        uint32_t                 getNormalSize() const;
         DMT_CORE_API Point2f     getUV(size_t idx) const;
         DMT_CORE_API IndexedTri  getIndexedTri(size_t idx) const;
         DMT_CORE_API IndexedTri& getIndexedTriRef(size_t idx);

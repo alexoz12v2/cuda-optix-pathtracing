@@ -1,683 +1,676 @@
 #include "core-mesh-parser.h"
 
+// our stuff
 #include "platform-context.h"
 
+// external
 #include "fbxsdk.h"
+
+// std
 #include <string>
+#include <memory>
+#include <vector>
+#include <memory_resource>
+#include <unordered_set>
+#include <unordered_map>
 
-namespace dmt {
-
-    // Instantiate FBX SDK memory management object-> FbxManager
-    //import a contents of an FBX file -> FbxIOSettings, FbxImporter, FbxScene
-    //
-    //Scene graph organization
-    //
-    //traverse hierarchy FbxScene, FbxNode, FbxNodeAttribute
-    // elements information -> FbxNode, FbxNodeAttribute, FbxString
-    //
-    // FbxScene -> abstracts the scene graph, and it is organized as a hierarchy
-    // of nodes
-    // FbxNode -> abstracts the nodes of scene graph, anc contains the data of the
-    // elements of the scene, the properties are described by FbxNodeAttribute
-    //
-    // The Global scene settings node contains the scene's
-    // axis system, system units, ambient lighting, and time setting.
-    // These information are accessable with FbxScene::GetGlobalSettings()
-    //
-    // The FbxAnimEvaluator node evaluates the animated geometric transformations
-    // of each node in the scene at a specific time.
-    // Accessible by FbxScene::GetEvaluator()
-    //
-    // Fbx Nodes
-    //
-    // Nodes are primarily used to specify the position, rotation and scale of scene
-    // elements within a scene.
-    //
-    // To get the root node of the hirarchy:
-    // FbxScene::GetRootNode()
-    //
-    // To traversed the hierarchy use:
-    // FbxNode::GetChild()
-    // FbxNode::GetParent()
-    // FbxNode::GetChildCount()
-    //
-    // Nodes are organized in a hierarchy such that the position, rotation and
-    // scale of a node is described in relation to its parent's coordinate system.
-    //
-    // The order in which the rotation and scaling transforms are applied to a parent and its
-    // children is specified by the node's inherit type
-    // The possible values are:
-    //     - eInheritRrSs : Scaling of parent is applied in the child world after the local child rotation.
-    //     - eInheritRSrs : Scaling of parent is applied in the parent world.
-    //     - eInheritRrs  : Scaling of parent does not affect the scaling of children.
-    //
-    // Get transformation inherit type:
-    // void GetTransformationInheritType(FbxTransform::EInheritType& pInheritType) const;
-    //
-    //
-    // FbxNodeAttribute: objects thate are present in a scene. Like: FbxMesh, FbxLight or FbxCamera
-    //
-    // More than one node attribute can be bound to a single node.
-    // Similarly, one node attribute can be bound to multiple nodes (instancing).
-    //
-    // Transformation data
-    //
-    // This data is represented as a set of FbxPropertyT objects, accessible via
-    // FbxNode::LclTranslation, FbxNode::LclRotation, FbxNode::LclScaling.
-    //
-    // Ex:
-    // FbxDouble3 translation = lNode->LclTranslation.Get();
-    // FbxDouble3 rotation = lNode->LclRotation.Get();
-    // FbxDouble3 scaling = lNode->LclScaling.Get();
-    //
-    // The transformations can be affect to FbxLimits and FbxConstraint, I think for animations.
-    //
-    // A node's global and local transformation matrices can be respectively obtained
-    // by calling FbxNode::EvaluateGlobalTransform() and FbxNode::EvaluateLocalTransform():
-    //
-    // Meshes
-    // FbxMesh -> abstracts the mesh information, like the vertices. A single instance
-    // of FbxMesh can be bound to multiple instances of FbxNode. Scene geometry
-    // uses the concept of layers and layers elements to define normal, material
-    // texture maps.
-    //
-    // Meshes-Vertex
-    //
-    // The "Control points" are the per-face vertices.
-    // The system used by FBX is right handed, Y-up axis system
-    // FbxGeometry is the parent class of FbxMesh
-    // the point are defined with FbxVector4, ex: FbxVector4 vertex0(-50, 0, 50);
-    // Get the ControlPoints that are defined in a FbxMesh object:
-    // FbxVector4* lControlPoints = lMesh->GetControlPoints(); lControlPoints is a vector.
-    // Note that a scene axis conversion does not affect the vertex values of a mesh.
-    //
-    // Polygon Management
-    //
-    // Begins the process of adding a polygon to the mesh:
-    //
-    // void BeginPolygon(int pMaterial=-1, int pTexture=-1, int pGroup=-1, bool pLegacy=true);
-    //
-    // End writing a polygon, it should be called after adding one polygon:
-    // void EndPolygon();
-    //
-    // Add a polygon vertex to the current polygon.
-    // void AddPolygon(int pIndex, int pTextureUVIndex = -1);
-    // param pIndex Index in the table of the control points.
-    // param pTextureUVIndex Index of texture UV coordinates to assign to this polygon if texture UV mapping type is \e eByPolygonVertex. Otherwise it must be \c -1.
-    // remark After adding all the polygons of the mesh, call function "BuildMeshEdgeArray" to generate edge data for the mesh. */
-    //
-    //
-    // To get the number of polygons in the mesh.
-    // inline int GetPolygonCount() const { return mPolygons.GetCount(); }
-    //
-    // Get the number of polygon vertices in a polygon.
-    // inline int GetPolygonSize(int pPolygonIndex) const
-    //
-    // Get the current group ID of the specified polygon.
-    // int GetPolygonGroup(int pPolygonIndex) const;
-    //
-    // Get a polygon vertex (i.e: an index to a control point).
-    // inline int GetPolygonVertex(int pPolygonIndex, int pPositionInPolygon) const
-    //
-    // Get the normal associated with the specified polygon vertex.
-    // bool GetPolygonVertexNormal(int pPolyIndex, int pVertexIndex, FbxVector4& pNormal) const;
-    //
-    // Get the normals associated with the mesh for every polygon vertex.
-    // GetPolygonVertexNormals(FbxArray<FbxVector4>& pNormals) const;
-    //
-    // Get the UV associated with the specified polygon vertex.
-    // bool GetPolygonVertexUV(int pPolyIndex, int pVertexIndex, const char* pUVSetName, FbxVector2& pUV, bool& pUnmapped) const;
-    //
-    // Get the UVs associated with the mesh for every polygon vertex.
-    // bool GetPolygonVertexUVs(const char* pUVSetName, FbxArray<FbxVector2>& pUVs, FbxArray<int>* pUnmappedUVId = NULL) const;
-    //
-    // Get the array of polygon vertices (i.e: indices to the control points).
-    // int* GetPolygonVertices() const;
-    //
-    //
-    // Gets the number of polygon vertices in the mesh.
-    // inline int GetPolygonVertexCount() const { return mPolygonVertices.Size();
-    //
-    // Gets the start index into the array returned by GetPolygonVertices() for the given polygon.
-    // int GetPolygonVertexIndex(int pPolygonIndex) const;
-    //
-    // To access polygon information
-    // int lStartIndex = mesh.GetPolygonVertexIndex(3);
-    // if( lStartIndex == -1 ) return;
-    // int* lVertices = mesh.GetPolygonVertices()[lStartIndex];
-    // int lCount = mesh.GetPolygonSize(3);
-    // for( int i = 0; i < lCount; ++i )
-    // {
-    //     int vertexID = lVertices[i];
-    //	}
-    //
-    //
-    // Mesh->UV info
-    //
-    // Get the number of texture UV coordinates.
-    // int GetTextureUVCount(FbxLayerElement::EType pTypeIdentifier=FbxLayerElement::eTextureDiffuse);
-    // param pTypeIdentifier The texture channel the UV refers to.
-    //
-    // Get the number of layer containing at least one channel UVMap.
-    // int GetUVLayerCount() const;
-    // return 0 if no UV maps have been defined.
-    //
-    //
-    // Fills an array describing, for the given layer, which texture channel have UVs associated to it.
-    // FbxArray<FbxLayerElement::EType> GetAllChannelUV(int pLayer);
-    //
-    // Get a texture UV index associated with a polygon vertex (i.e: an index to a control point).
-    // int GetTextureUVIndex(int pPolygonIndex, int pPositionInPolygon, FbxLayerElement::EType pTypeIdentifier=FbxLayerElement::eTextureDiffuse);
-    //
-    // Meshes-Normals
-    //
-    // FbxLayerElementNormal contains the information about the normal vectors
-    // of a mesh.
-    // These can be mapped in a different ways:
-    //
-    // control point (FbxLayerElement::eByControlPoint),
-    // by polygon vertex (FbxLayerElement::eByPolygonVertex),
-    // by polygon (FbxLayerElement::eByPolygon),
-    // by edge (FbxLayerElement::eByEdge), or one mapping coordinate for the whole
-    // surface (FbxLayerElement::eAllSame).
-    //
-    // The array of normal vectors can be referenced by the array of control points in
-    // different RecferceMode assigend in FbxLayerElement::SetReferenceMode(). These are:
-    //
-    // FbxLayerElement::eDirect : This indicates that the mapping information for the
-    // n'th element is found in the n'th place of FbxLayerElementTemplate::mDirectArray
-    //
-    // FbxLayerElement::eIndex (FBX v5.0) : it is equal to eIndexToDirect
-    //
-    // FbxLayerElement::eIndexToDirect : This indicates that each element of
-    // FbxLayerElementTemplate::mIndexArray contains an index referring to an element
-    // in FbxLayerElementTemplate::mDirectArray.
-    //
-    // To obtain the reference mode used use the GetReferenceMode()
-    //
-    // EReferenceMode GetReferenceMode() const { return mReferenceMode; }
-    //
-    // Layer
-    //
-    // For get a layer that can define the normal vectors information:
-    //
-    // FbxLayer lLayer = lMesh->GetLayer(0);
-    //
-    // To get the layer information about the normal use the:
-    //
-    // const FbxLayerElementNormal* GetNormals() const;
-    //
-    // So get the Mapping Mode.
-    // EMappingMode GetMappingMode() const { return mMappingMode; }
-    //
-    // So to access in the layer array use:
-    // lLayerElementNormal->GetDirectArray()
-    //
-    // Get the value in the array:
-    //
-    // inline T  GetAt(int pIndex) const
-    // Returns the specified item's value.
-    // param pIndex               Index of the item
-    // return                     The value of the specified item
-    // remarks                    If the index is invalid, pItem is set to zero.
-    //
-    //
-    // Instancing
-    //
-    // We can have multiple instances of the same FbxNode node through a instancing.
-    // this technique is realized creating a new Fbx object that point to a FbxNode node base:
-    //
-    // Give a scene and the mesh base
-    // create a FbxNode
-    // FbxNode* lNode = FbxNode::Create(pScene,pName);
-    // set the node attribute
-    // lNode->SetNodeAttribute(pFirstCube);
-    //
-    //  So this can do for each scene element.
-    //
-    // Materials
-    //
-    // FbxSurfaceMaterial
-    //
-    // Contains material settings
-    //
-    // FbxSurfaceLambert
-    //
-    // Ambient color property.
-    // Ambient
-    //
-    // Emissive color property.
-    // Emissive
-    //
-    // Diffuse color property.
-    // Diffuse
-    //
-    // NormalMap property. This property can be used to specify the distortion of the surface
-    // normals and create the illusion of a bumpy surface.
-    // NormalMap
-    //
-    // Transparent color property.
-    // TransparentColor
-    //
-    // Reflection color property. This property is used to
-    // implement reflection mapping.
-    // Reflection
-    //
-    //
-    // Reflection factor property. This property is used to
-    // attenuate the reflection color.
-    // ReflectionFactor
-    //
-    // To create the material:
-    //
-    // FbxString lMaterialName = "toto";
-    // lMaterial = FbxSurfacePhong::Create(pScene, lMaterialName.Buffer());
-    //
-    // To get the material ex:
-    //
-    // lMaterial = lNode->GetSrcObject<FbxSurfacePhong>(0);
-    //
-    //  To assign a material to a polygon pass the material index to the BeginPolygon function:
-    //  lMesh->BeginPolygon(0); // Material index
-    //
-    //
-    // Textures
-    //
-    // FbxTexture
-    //
-    // Is the base class for the textures and describes image mapping on top of geometry.
-    //
-    // Importan attributes:
-    // Type description
-    //
-    // Alpha: EAlphaSource GetAlphaSource() const;
-    // This property handles the default alpha value for textures.
-    //
-    // CurrentMappingType: EMappingType GetMappingType() const;
-    // eUV: Apply texture to the model according to UVs.
-    // eBumpNormalMap: Bump map: Texture contains two direction vectors, that are used to convey relief in a texture.
-    //
-    // WrapModeU: GetWrapModeU()
-    // This property handles the texture wrap modes in U. Default value is eRepeat.
-    //
-    //
-    // WrapModeV: GetWrapModeV()
-    // This property handles the texture wrap modes in V.  Default value is eRepeat.
-    //
-    // enum EWrapMode: eRepeat, eClamp
-    //
-    // UVSwap: bool GetSwapUV() const;
-    // This property handles the swap UV flag.
-    // If swap UV flag is enabled, the texture's width and height are swapped.
-    // Default value is false.
-    //
-    // PremultiplyAlpha: bool GetPremultiplyAlpha() const;
-    // This property handles the PremultiplyAlpha flag. If PremultiplyAlpha flag is true,
-    // the R, G, and B components you store have already been multiplied in with the alpha.
-    // �Default value is true.
-
-    // Texture positioning
-    //
-    // Translation: GetTranslationU() GetTranslationV() GetDefaultT(FbxVector4& pR)
-    // This property handles the default translation vector.
-    // Rotation:
-    // This property handles the default rotation vector.
-    //
-    // Scaling: SetScale(double pU,double pV); GetScaleV(), GetScaleU() const; GetDefaultS(FbxVector4& pR)
-    // This property handles the default scale vector.
-    //
-    // RotationPivot: GetRotationU(), GetRotationV(), GetRotationW()  GetDefaultR(FbxVector4& pR)
-    // This property handles the rotation pivot vector.
-    //
-    // ScalingPivot;
-    // This property handles the scaling pivot vector.
-    // UV set to use.
-    // This property handles the use of UV sets.
-    // Default value is "default".
-    //
-    //
-    //
-    // Referencing media
-    //
-    // When a binary FBX file containing embedded media is imported the media will be extracted from
-    // the file and copied into a subdirectory. By default, this subdirectory will be created at
-    // the location of the FBX file with the same name as the file, with the extension .fbm.
-    //
-    // FbxFileTexture
-    //
-    // Represents any texture loaded from a file. To apply a texture to
-    // geometry, first connect the geometry to a FbxSurfaceMaterial object
-    // (e.g. FbxSurfaceLambert) and then connect one of its properties (e.g. Diffuse) to
-    // the FbxFileTexture object.
-    //
-    // The teture need to be connected to a property on the material. So you need to
-    // find the material of the FbxNode associated to the mesh node.
-    //
-    // To get the relative texture file path:
-    //
-    // const char* GetRelativeFileName() const;
-    // return             The relative texture file path.
-    // remarks            An empty string is returned
-    // if FbxFileTexture::SetRelativeFileName() has not been called before.
-    //
-    // To get the materia use:
-    //
-    // EMaterialUse GetMaterialUse() const;
-    // Returns the material use.
-    // return How the texture uses model material.
-    //
-    // EMaterialUse values:
-    //
-    //  eModelMaterial,		//! Texture uses model material.
-    //  eDefaultMaterial	//! Texture does not use model material.
-    //
-    // FbxLayerElementUV
-    //
-    // To create the texture layers in the mesh:
-    //
-    // FbxMesh::CreateElementUV()
-    //
-    //
-    // There are created a number of texture layers in the mesh equal to the number
-    // of used material channel like diffuse, ambient and emissive.
-    //
-    // FxbGeometryElementUV -> define the mapping the texture's UV coordinates to each
-    // of the polygon's vertices.
-    //
-    // FbxgeometryBase
-    //
-    // Is used to manage the control points, normals, binormals and tangents of
-    // the geometries.
-    //
-    // To get the geometry's UV element.
-    // FbxGeometryElementUV* GetElementUV(int pIndex = 0, FbxLayerElement::EType pTypeIdentifier=FbxLayerElement::eUnknown);
-    //
-    // param pIndex           The UV geometry element index.
-    // param pTypeIdentifier  The texture channel the UVIndex refers to.
-    // return                 A pointer to the geometry element or \c NULL if \e pIndex is out of range.
-    // remarks                If e pTypeIdentifier is not specified, the function will return the geometry
-    // element regardless of its texture type.
-    //
-    //
-    // To get the shading mode:
-    //
-    // EShadingMode GetShadingMode() const
-    // return The currently set shading mode.
-    //
-    // It is usefull to find the type of shading of the node and if are the defined texture
-    // for a node
-    //
-    // enum EShadingMode:
-    // eHardShading,
-    // eWireFrame,
-    // eFlatShading,
-    // eLightShading,
-    // eTextureShading,
-    // eFullShading
-    //
-    // World space
-    // right x pos
-    // Up z pos
-    // forward y
-    //
-    //camera space -> sys DirectX
-    //
-    //
-    //
-    // To see:
-    //
-    // FbxLayerElementBinormal
-    //
-    //
-    //TriangleMesh
-
-    static void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const*, char const*>& chTex);
-    static void GetTextureName(FbxProperty const&                                 property,
-                               std::pmr::unordered_map<char const*, char const*>& chTex,
-                               uint32_t                                           texIdx);
-
-    void FbxDeleterResources::operator()(void* raw) const
+namespace dmt::detail {
+    template <typename T>
+        requires std::is_base_of_v<FbxObject, T>
+    struct FbxObjectDestroyer
     {
-
-        auto* resources = reinterpret_cast<FbxResources*>(raw);
-
-        if (resources->settings)
+        void operator()(T* settings) const
         {
-            reinterpret_cast<FbxIOSettings*>(resources->settings)->Destroy();
-        }
-        if (resources->manager)
-        {
-            reinterpret_cast<FbxManager*>(resources->settings)->Destroy();
+            if (settings)
+                settings->Destroy(true);
         }
     };
+    template <typename T>
+    using Handle = std::unique_ptr<T, detail::FbxObjectDestroyer<T>>;
 
-    MeshFbxParser::MeshFbxParser()
+    namespace {
+        template <typename T, typename... Args>
+        Handle<T> makeFbxHandle(Args&&... args)
+        {
+            return std::unique_ptr<T, FbxObjectDestroyer<T>>(std::forward<Args>(args)..., FbxObjectDestroyer<T>());
+        }
+
+        void printFileFormatAndVersion(Context& ctx, FbxIOPluginRegistry const* registry, FbxImporter* importer)
+        {
+            char const* description = registry->GetReaderFormatDescription(importer->GetFileFormat());
+            char const* extension   = registry->GetReaderFormatExtension(importer->GetFileFormat());
+            std::string msg         = "Mesh Importer Successfully Initialized. Detected File Format:\n\t";
+            msg += description;
+            msg += "(extension: ";
+            msg += extension;
+            msg += ")";
+            if (_strcmpi("fbx", extension) == 0)
+            {
+                int fileMajor = 0, fileMinor = 0, fileRevision = 0;
+                importer->GetFileVersion(fileMajor, fileMinor, fileRevision);
+                msg += " FBX Version: " + std::to_string(fileMajor) + '.' + std::to_string(fileMinor) + '.' +
+                       std::to_string(fileRevision);
+            }
+            ctx.trace("{}", std::make_tuple(msg));
+        }
+
+        std::string stringFromSystemUnit(FbxSystemUnit const& unit)
+        {
+            if (unit == FbxSystemUnit::cm)
+                return "cm";
+            if (unit == FbxSystemUnit::m)
+                return "m";
+            if (unit == FbxSystemUnit::Foot)
+                return "foot";
+            if (unit == FbxSystemUnit::dm)
+                return "dm";
+            if (unit == FbxSystemUnit::mm)
+                return "mm";
+            if (unit == FbxSystemUnit::Inch)
+                return "inch";
+            if (unit == FbxSystemUnit::km)
+                return "km";
+            if (unit == FbxSystemUnit::Yard)
+                return "Yard";
+            return "(Custom System Unit)";
+        }
+
+        std::string stringFromUpAxis(int upAxis)
+        {
+            switch (upAxis)
+            {
+                case 0: return "X";
+                case 1: return "Y";
+                case 2: return "Z";
+                default: return "(Unknown Axis, uses default \"Yl\")";
+            }
+        }
+
+        std::string stringFromAxisSystem(FbxAxisSystem const& axisSystem)
+        {
+            std::string result = "(AxisSystem) { \n\t(Axes) Up: ";
+
+            int   upSign              = 0;
+            int   frontSign           = 0;
+            char  availableAxes[3][2] = {{1, 2}, {0, 2}, {0, 1}};
+            char* axes                = nullptr;
+
+            FbxAxisSystem::EUpVector const    up         = axisSystem.GetUpVector(upSign);
+            FbxAxisSystem::EFrontVector const front      = axisSystem.GetFrontVector(frontSign);
+            FbxAxisSystem::ECoordSystem const handedness = axisSystem.GetCoorSystem();
+
+            result += (upSign < 0 ? '-' : '+');
+            switch (up)
+            { // clang-format off
+                case FbxAxisSystem::eXAxis: axes = availableAxes[0]; result += 'X'; break;
+                case FbxAxisSystem::eYAxis: axes = availableAxes[1]; result += 'Y'; break;
+                case FbxAxisSystem::eZAxis: axes = availableAxes[2]; result += 'Z'; break;
+            } // clang-format on
+            assert(axes);
+            bool const rightHanded = handedness == FbxAxisSystem::ECoordSystem::eRightHanded;
+            bool const parityEven  = front == FbxAxisSystem::eParityEven;
+
+            result += ", Front: ";
+            result += (frontSign < 0 ? '-' : '+');
+            char const frontAxis = axes[parityEven ? 0 : 1];
+            char const sideAxis  = axes[parityEven ? 1 : 0];
+
+            result += (frontAxis == 0 ? 'X' : (frontAxis == 1 ? 'Y' : 'Z'));
+            result += ", Side: ";
+
+            int const sideSign = upSign * frontSign * (rightHanded ? +1 : -1) * (parityEven ? +1 : -1);
+            result += (sideSign < 0 ? '-' : '+');
+            result += "XYZ"[sideAxis];
+
+            result += "\n\t(Params) ...TODO }";
+
+            return result;
+        }
+
+        void printSceneObjects(Context& ctx, FbxScene* scene)
+        {
+            std::string fbxStatistics = "Printing FBX Statistics for scene '";
+            fbxStatistics += scene->GetName();
+
+            fbxStatistics += "\n\tFBX Objects:          ";
+            fbxStatistics += scene->GetSrcObjectCount(); // number of children in hierarchy
+            fbxStatistics += "\n\t  of which Nodes:     " + std::to_string(scene->GetSrcObjectCount<FbxNode>());
+            fbxStatistics += "\n\t  of which Meshes:    " + std::to_string(scene->GetSrcObjectCount<FbxMesh>());
+            fbxStatistics += "\n\t  of which Materials: " + std::to_string(scene->GetSrcObjectCount<FbxSurfaceMaterial>());
+            fbxStatistics += "\n\t  we don't care about Evaluators, FbxCamera, FbxLight, ...";
+
+            FbxGlobalSettings& settings = scene->GetGlobalSettings();
+            fbxStatistics += "\nRelevant Global Settings: (actual/original)";
+            fbxStatistics += "\n\tSystem Unit:      " + stringFromSystemUnit(settings.GetSystemUnit()) + '/' +
+                             stringFromSystemUnit(settings.GetOriginalSystemUnit());
+            fbxStatistics += "\n\tOriginal Up Axis: " + stringFromUpAxis(settings.GetOriginalUpAxis());
+            fbxStatistics += "\n\tCurrent Axis System: ";
+            fbxStatistics += stringFromAxisSystem(settings.GetAxisSystem());
+
+            ctx.trace("{}", std::make_tuple(fbxStatistics));
+        }
+
+        void throwUnsupportedMappingMode(FbxLayerElement::EMappingMode                            mappingMode,
+                                         std::unordered_set<FbxLayerElement::EMappingMode> const& supported,
+                                         char const*                                              layerName)
+        {
+            constexpr auto stringFromMappingMode = [](FbxLayerElement::EMappingMode mm) -> std::string {
+                switch (mm)
+                {
+                    case FbxLayerElement::eNone: return "eNone";
+                    case FbxLayerElement::eByControlPoint: return "eByControlPoint";
+                    case FbxLayerElement::eByPolygonVertex: return "eByPolygonVertex";
+                    case FbxLayerElement::eByPolygon: return "eByPolygon";
+                    case FbxLayerElement::eByEdge: return "eByEdge";
+                    case FbxLayerElement::eAllSame: return "eAllSame";
+                    default: return "";
+                }
+            };
+            std::string message = "Unsupported mapping mode for";
+            message += layerName;
+            message += " Layer Element: " + stringFromMappingMode(mappingMode);
+            if (supported.size())
+            {
+                message += " (must be one of ";
+                for (auto const mp : supported)
+                    message += stringFromMappingMode(mp) + ", ";
+                message.resize(message.size() - 2);
+                message += ").";
+            }
+            throw std::runtime_error(message);
+        }
+
+        std::unordered_map<int, std::vector<int>> createControlPointToPolygonIndexMapping(FbxMesh const* mesh)
+        {
+            std::unordered_map<int, std::vector<int>> mapping;
+
+            int const* polygonVertices = mesh->GetPolygonVertices();
+            int const  polygonCount    = mesh->GetPolygonCount();
+
+            for (int polygonIdx = 0; polygonIdx < polygonCount; ++polygonIdx)
+            {
+                int const indexCount = mesh->GetPolygonSize(polygonIdx);
+                int const start      = mesh->GetPolygonVertexIndex(polygonIdx);
+                for (int i = 0; i < indexCount; ++i)
+                {
+                    int controlPointIndex  = polygonVertices[start + i];
+                    int polygonVertexIndex = start + i;
+                    mapping[controlPointIndex].push_back(polygonVertexIndex);
+                }
+            }
+            return mapping;
+        }
+
+        std::unordered_map<int, int> createPolygonIndexToControlPointMapping(FbxMesh const* mesh)
+        {
+            std::unordered_map<int, int> mapping;
+
+            int const* polygonVertices    = mesh->GetPolygonVertices();
+            int const  polygonVertexCount = mesh->GetPolygonVertexCount();
+
+            for (int cornerIdx = 0; cornerIdx < polygonVertexCount; ++cornerIdx)
+            {
+                int const controlPointIndex = polygonVertices[cornerIdx];
+                mapping[cornerIdx]          = controlPointIndex;
+            }
+            return mapping;
+        }
+
+        template <typename Vec, typename Layer>
+            requires(std::is_base_of_v<FbxLayerElementTemplate<Vec>, Layer> &&
+                     (std::is_same_v<Vec, FbxVector2> || std::is_same_v<Vec, FbxVector4>))
+        Vec getLayerElementValue(FbxLayerElementTemplate<Vec> const*   layerElement,
+                                 FbxLayerElement::EReferenceMode const referenceMode,
+                                 int const                             index)
+        {
+            FbxLayerElementArrayTemplate<Vec> const& directArray = layerElement->GetDirectArray();
+            if (referenceMode == FbxLayerElement::EReferenceMode::eDirect)
+                return directArray[index];
+
+            FbxLayerElementArrayTemplate<int> const& indexArray = layerElement->GetIndexArray();
+            return directArray[indexArray[index]];
+        };
+
+        template <typename Layer, typename Vec, typename Func>
+            requires(std::is_base_of_v<FbxLayerElementTemplate<Vec>, Layer> &&
+                     (std::is_same_v<FbxVector4, Vec> || std::is_same_v<FbxVector2, Vec>) &&
+                     std::is_invocable_r_v<Vec, Func, Vec>)
+        std::vector<Vec> processLayerElement(
+            FbxMesh const*                                           mesh,
+            Layer const*                                             layerElement,
+            Func&&                                                   func,
+            std::unordered_map<int, std::vector<int>> const&         controlPointToPolygonIndexMapping,
+            std::unordered_set<FbxLayerElement::EMappingMode> const& supportedMappingModes,
+            char const*                                              layerName)
+        {
+            using EMappingMode   = FbxLayerElement::EMappingMode;
+            using EReferenceMode = FbxLayerElement::EReferenceMode;
+
+            int const        polygonVertexCount = mesh->GetPolygonVertexCount();
+            std::vector<Vec> result(polygonVertexCount);
+
+            EMappingMode const   mappingMode   = layerElement->GetMappingMode();
+            EReferenceMode const referenceMode = layerElement->GetReferenceMode();
+
+            if (!supportedMappingModes.contains(mappingMode))
+                throwUnsupportedMappingMode(mappingMode, supportedMappingModes, layerName);
+
+            // ------------------------------------------------------------
+            // eByPolygonVertex
+            // ------------------------------------------------------------
+            if (mappingMode == EMappingMode::eByPolygonVertex)
+            {
+                for (int pv = 0; pv < polygonVertexCount; ++pv)
+                {
+                    result[pv] = func(getLayerElementValue<Vec, Layer>(layerElement, referenceMode, pv));
+                }
+            }
+
+            // ------------------------------------------------------------
+            // eByControlPoint
+            // ------------------------------------------------------------
+            else if (mappingMode == EMappingMode::eByControlPoint)
+            {
+                int const controlPointCount = referenceMode == EReferenceMode::eDirect
+                                                  ? layerElement->GetDirectArray().GetCount()
+                                                  : layerElement->GetIndexArray().GetCount();
+
+                for (int cp = 0; cp < controlPointCount; ++cp)
+                {
+                    auto it = controlPointToPolygonIndexMapping.find(cp);
+                    if (it == controlPointToPolygonIndexMapping.end())
+                        continue; // control point unused by mesh
+
+                    Vec value = func(getLayerElementValue<Vec, Layer>(layerElement, referenceMode, cp));
+
+                    for (int corner : it->second)
+                        result[corner] = value;
+                }
+            }
+
+            // ------------------------------------------------------------
+            // eByPolygon
+            // ------------------------------------------------------------
+            else if (mappingMode == EMappingMode::eByPolygon)
+            {
+                int const polygonCount = mesh->GetPolygonCount();
+
+                for (int p = 0; p < polygonCount; ++p)
+                {
+                    Vec value = func(getLayerElementValue<Vec, Layer>(layerElement, referenceMode, p));
+
+                    int const start = mesh->GetPolygonVertexIndex(p);
+                    int const size  = mesh->GetPolygonSize(p);
+
+                    for (int i = 0; i < size; ++i)
+                        result[start + i] = value;
+                }
+            }
+
+            return result;
+        }
+
+        std::vector<FbxVector4> processNormalLayerElement(
+            FbxMesh const*                                   mesh,
+            FbxLayerElementNormal const*                     normalsLayerElement,
+            FbxAMatrix const&                                normalMatrix,
+            std::unordered_map<int, std::vector<int>> const& controlPointToPolygonIndexMapping)
+        {
+            using EMappingMode = FbxLayerElement::EMappingMode;
+            static std::unordered_set const supportedMappingModes{EMappingMode::eByControlPoint,
+                                                                  EMappingMode::eByPolygon,
+                                                                  EMappingMode::eByPolygonVertex};
+            return processLayerElement<FbxLayerElementNormal, FbxVector4>( //
+                mesh,
+                normalsLayerElement,
+                [&normalMatrix](FbxVector4 const& val) { return normalMatrix.MultT(val); },
+                controlPointToPolygonIndexMapping,
+                supportedMappingModes,
+                "LayerElementNormal");
+        }
+
+        std::vector<FbxVector2> processUVLayerElement(
+            FbxMesh const*                                   mesh,
+            FbxLayerElementUV const*                         uvLayerElement,
+            std::unordered_map<int, std::vector<int>> const& controlPointToPolygonIndexMapping)
+        {
+            using EMappingMode = FbxLayerElement::EMappingMode;
+            static std::unordered_set const supportedMappingModes{EMappingMode::eByPolygonVertex};
+            return processLayerElement<FbxLayerElementUV, FbxVector2>( //
+                mesh,
+                uvLayerElement,
+                [](FbxVector2 const& val) { return val; },
+                controlPointToPolygonIndexMapping,
+                supportedMappingModes,
+                "LayerElementUV");
+        }
+
+        // first node depth first (recursion flattened with stack)
+        FbxNode* getFirstMeshNodeFromFbxScene(FbxScene const* scene)
+        {
+            assert(scene);
+            FbxNode* root = scene->GetRootNode();
+            if (!root)
+                return nullptr;
+            std::vector<FbxNode*> nodeStack{root};
+            nodeStack.reserve(64);
+            while (!nodeStack.empty())
+            {
+                FbxNode* node = nodeStack.back();
+                nodeStack.pop_back();
+
+                // reverse order insertion of children
+                for (int idx = node->GetChildCount() - 1; idx >= 0; --idx)
+                    nodeStack.push_back(node->GetChild(idx));
+                // instead of having to iterate through attributes of a node, FBX SDK defines
+                // "shortcut" methods for standard attribute types like mesh
+                if (FbxMesh const* mesh = node->GetMesh(); mesh)
+                {
+                    // silently discard empty meshes
+                    if (mesh->GetPolygonCount() > 0)
+                        return node;
+                }
+            }
+            return nullptr;
+        }
+
+        void processMeshNode(Context& ctx, FbxNode* meshNode, TriangleMesh& outMesh)
+        {
+            using namespace std::string_literals;
+            FbxMesh const* mesh = meshNode->GetMesh();
+
+            // we need to apply the world space transform
+            // https://help.autodesk.com/view/FBX/2020/ENU/?guid=FBX_Developer_Help_nodes_and_scene_graph_fbx_nodes_transformation_data_html
+            // global transform: the node transform
+            // geometric transform: how the attribute differs from the node
+            FbxAMatrix const& globalTransform    = meshNode->EvaluateGlobalTransform();
+            FbxAMatrix const  geometricTransform = [meshNode]() {
+                FbxAMatrix t;
+                t.SetT(meshNode->GetGeometricTranslation(FbxNode::eSourcePivot));
+                t.SetR(meshNode->GetGeometricRotation(FbxNode::eSourcePivot));
+                t.SetS(meshNode->GetGeometricScaling(FbxNode::eSourcePivot));
+                return t;
+            }();
+            FbxAMatrix const finalTransform = geometricTransform * globalTransform;
+
+            // for normals and tangents: matrix, remove translation, compute inverse-transpose
+            FbxAMatrix const normalMatrix = [&finalTransform]() {
+                FbxAMatrix result = finalTransform;
+                result.SetT(FbxVector4(0, 0, 0, 1));
+                result = result.Inverse().Transpose();
+                return result;
+            }();
+
+            std::unordered_map<int, std::vector<int>> const controlPointToPolygonIndexMapping = createControlPointToPolygonIndexMapping(
+                mesh);
+            std::unordered_map<int, int> const polygonIndexToControlPointMapping = createPolygonIndexToControlPointMapping(
+                mesh);
+
+            // enumerate number of layers, if zero, throw, if bigger than one, warning
+            int const layerCount = mesh->GetLayerCount();
+            if (layerCount == 0)
+                throw std::runtime_error("Mesh '"s + mesh->GetName() + "' has no layers");
+            if (layerCount > 1)
+                ctx.warn("Mesh '{}' has more than one layer. Considering only layer 0", std::make_tuple(mesh->GetName()));
+
+            // add control points to the mesh
+            for (int i = 0; i < mesh->GetControlPointsCount(); ++i)
+            {
+                // in the ASCII FBX file, there's no w coord. just to be safe, debugbreak
+                FbxVector4 objPos = mesh->GetControlPointAt(i);
+#if defined(DMT_OS_WINDOWS) && defined(DMT_DEBUG)
+                if (objPos.mData[3] != 1. && objPos.mData[3] != 0.)
+                    __debugbreak();
+#endif
+                // Note: we support static mesh and bake to global
+                FbxVector4 const pos = finalTransform.MultT(objPos);
+                outMesh.addPosition(
+                    {static_cast<float>(pos.mData[0]), static_cast<float>(pos.mData[1]), static_cast<float>(pos.mData[2])});
+            }
+
+            std::unordered_set<size_t> const positionIndicesDistinct = [mesh] {
+                std::unordered_set<size_t> theSet;
+                theSet.reserve(mesh->GetPolygonVertexCount() * 3);
+                int const* polygonVertices = mesh->GetPolygonVertices();
+                int const  vertexCount     = mesh->GetPolygonVertexCount();
+                for (int i = 0; i < vertexCount; ++i)
+                {
+                    theSet.insert(polygonVertices[i]);
+                }
+                return theSet;
+            }();
+
+            for (int p = 0; p < mesh->GetPolygonCount(); ++p)
+            {
+                if (mesh->GetPolygonSize(p) != 3)
+                    throw std::runtime_error("Mesh '"s + mesh->GetName() + "', polygon[" + std::to_string(p) + "' has " +
+                                             std::to_string(mesh->GetPolygonSize(p)) + " indices, expected 3");
+            }
+
+            // process layer elements of layer zero (only normals[0] and uvs[0], emit warning
+            // on ignored things and crash on their absence)
+            FbxLayer const* layer = mesh->GetLayer(0);
+            ctx.warn("FBX Import: Examining Layer 0 for normal and uv only, ignoring the rest", {});
+            FbxLayerElementNormal const* normalsLayerElement = layer->GetNormals();
+            if (!normalsLayerElement)
+                throw std::runtime_error("Mesh '"s + mesh->GetName() + "' has no Normal Layer");
+            FbxLayerElementUV const* uvLayerElement = layer->GetUVs();
+            if (!uvLayerElement)
+                throw std::runtime_error("Mesh '"s + mesh->GetName() + "' has no UV layer element");
+            // per corner vectors
+            std::vector<FbxVector4> const normalsPerCorner = processNormalLayerElement(mesh,
+                                                                                       normalsLayerElement,
+                                                                                       normalMatrix,
+                                                                                       controlPointToPolygonIndexMapping);
+            std::vector<FbxVector2> const uvsPerCorner = processUVLayerElement(mesh, uvLayerElement, controlPointToPolygonIndexMapping);
+            assert(normalsPerCorner.size() == uvsPerCorner.size());
+            // push per corner vectors in output mesh
+            for (size_t index = 0; index < normalsPerCorner.size(); ++index)
+            {
+                FbxVector4 const& normal = normalsPerCorner[index];
+                FbxVector2 const& uv     = uvsPerCorner[index];
+                outMesh.addNormal({static_cast<float>(normal.mData[0]),
+                                   static_cast<float>(normal.mData[1]),
+                                   static_cast<float>(normal.mData[2])});
+                outMesh.addUV({static_cast<float>(uv.mData[0]), static_cast<float>(uv.mData[1])});
+            }
+
+            // now finally add the indexed triangles
+            auto const matToVertexIndex = [&](size_t const index) -> VertexIndex {
+                int const    index32     = index;
+                size_t const positionIdx = static_cast<size_t>(polygonIndexToControlPointMapping.at(index32));
+                return {.positionIdx = positionIdx, .normalIdx = index, .uvIdx = index};
+            };
+
+            for (int p = 0; p < mesh->GetPolygonCount(); ++p)
+            {
+                assert(mesh->GetPolygonSize(p) == 3);
+                int const index = mesh->GetPolygonVertexIndex(p);
+                outMesh.addIndexedTriangle(matToVertexIndex(index + 0),
+                                           matToVertexIndex(index + 1),
+                                           matToVertexIndex(index + 2),
+                                           -1);
+            }
+            ctx.log("Mesh '{}' has been processed", std::make_tuple(mesh->GetName()));
+        }
+    } // namespace
+} // namespace dmt::detail
+
+namespace dmt {
+    using namespace dmt::detail;
+
+    class MeshFbxParserImpl
     {
-        InitFbxManager();
-        //m_settings = dFbxIOSettings{FbxIOSettings::Create(getManager(m_mng), IOSROOT), FbxSettingsDeleter{}};
-        m_res.settings = FbxIOSettings::Create(reinterpret_cast<FbxManager*>(m_res.manager), IOSROOT);
+    public:
+        MeshFbxParserImpl();
 
-        auto* set = reinterpret_cast<FbxIOSettings*>(m_res.settings);
-        //set flags for import settings
-        set->SetBoolProp(IMP_FBX_MATERIAL, false);
-        set->SetBoolProp(IMP_FBX_TEXTURE, true);
-        set->SetBoolProp(IMP_FBX_LINK, false);
-        set->SetBoolProp(IMP_FBX_SHAPE, false);
-        set->SetBoolProp(IMP_FBX_GOBO, false);
-        set->SetBoolProp(IMP_FBX_ANIMATION, false);
-        set->SetBoolProp(IMP_FBX_GLOBAL_SETTINGS, true);
-        set->SetBoolProp(IMP_FBX_NORMAL, true);
+        template <typename OnParse, typename OnError>
+            requires(std::is_invocable_r_v<void, OnParse, FbxImporter*, FbxScene*> &&
+                     std::is_invocable_r_v<void, OnError, std::string>)
+        void openSceneImporter(char const* fileName, OnParse&& onParse, OnError&& onError);
+
+    private:
+        // Utilities
+        static Handle<FbxIOSettings> createMeshMinimalIOSettings();
+        static Handle<FbxImporter>   createFbxImporter(char const* name);
+        static std::string      importFile(FbxImporter* importer, char const* fullName, FbxIOSettings* importSettings);
+        static Handle<FbxScene> importScene(FbxImporter* importer, char const* name, std::string& error);
+        static FbxIOPluginRegistry* getIOPluginRegistry() { return s_fbxManager->GetIOPluginRegistry(); }
+
+        // since it's a singleton, we don't care when it's actually destroyed. It'll
+        // live till the end of the program
+        static inline FbxManager* s_fbxManager = FbxManager::Create();
+
+        // private state
+        Handle<FbxIOSettings> m_defaultSettings;
+    };
+
+    template <typename OnParse, typename OnError>
+        requires(std::is_invocable_r_v<void, OnParse, FbxImporter*, FbxScene*> &&
+                 std::is_invocable_r_v<void, OnError, std::string>)
+    void MeshFbxParserImpl::openSceneImporter(char const* fileName, OnParse&& onParse, OnError&& onError)
+    {
+        Handle<FbxImporter> importer = createFbxImporter(fileName);
+        if (!importer)
+        {
+            onError("Couldn't allocate FbxImporter");
+            return;
+        }
+        if (std::string const error = importFile(importer.get(), fileName, m_defaultSettings.get()); !error.empty())
+        {
+            onError(error);
+            return;
+        }
+        std::string      error;
+        Handle<FbxScene> scene = importScene(importer.get(), fileName, error);
+        if (!error.empty())
+        {
+            onError(error);
+            return;
+        }
+
+        onParse(importer.get(), scene.get());
     }
 
-    bool MeshFbxParser::ImportFBX(char const* fileName, TriangleMesh* outMesh)
+    MeshFbxParserImpl::MeshFbxParserImpl() : m_defaultSettings(createMeshMinimalIOSettings()) {}
+
+    Handle<FbxIOSettings> MeshFbxParserImpl::createMeshMinimalIOSettings()
     {
-        auto* mng = reinterpret_cast<FbxManager*>(m_res.manager);
+        FbxIOSettings* importSettings = FbxIOSettings::Create(s_fbxManager, IOSROOT);
+        if (!importSettings)
+            return nullptr;
+
+        // https://help.autodesk.com/cloudhelp/2018/ENU/FBX-Developer-Help/importing_and_exporting_a_scene/io_settings.html
+        // Note: true is the default value, but we'll be explicit about what we use
+        importSettings->SetBoolProp(IMP_FBX_MATERIAL, true);
+        importSettings->SetBoolProp(IMP_FBX_GLOBAL_SETTINGS, true);
+        importSettings->SetBoolProp(IMP_FBX_NORMAL, true);
+
+        importSettings->SetBoolProp(IMP_FBX_TEXTURE, false);
+        importSettings->SetBoolProp(IMP_FBX_LINK, false);
+        importSettings->SetBoolProp(IMP_FBX_SHAPE, false);
+        importSettings->SetBoolProp(IMP_FBX_GOBO, false);
+        importSettings->SetBoolProp(IMP_FBX_ANIMATION, false);
+
+        return makeFbxHandle<FbxIOSettings>(importSettings);
+    }
+
+    Handle<FbxImporter> MeshFbxParserImpl::createFbxImporter(char const* name)
+    {
+        FbxImporter* importer = FbxImporter::Create(s_fbxManager, name);
+        return makeFbxHandle<FbxImporter>(importer);
+    }
+
+    std::string MeshFbxParserImpl::importFile(FbxImporter* importer, char const* fullName, FbxIOSettings* importSettings)
+    {
+        assert(importer && fullName);
+        if (importer->Initialize(fullName, -1, importSettings))
+        {
+            if (Context ctx; ctx.isValid() && ctx.isTraceEnabled())
+                printFileFormatAndVersion(ctx, getIOPluginRegistry(), importer);
+            return "";
+        }
+        return importer->GetStatus().GetErrorString();
+    }
+
+    Handle<FbxScene> MeshFbxParserImpl::importScene(FbxImporter* importer, char const* name, std::string& error)
+    {
+        FbxScene* scene = FbxScene::Create(s_fbxManager, name);
+        if (!scene)
+        {
+            error += "Failed to allocate FbxScene Object '";
+            error += name;
+            error += "'.";
+            return nullptr;
+        }
+        if (!importer->Import(scene))
+        {
+            error += "FBX Scene Import Failed: ";
+            error += importer->GetStatus().GetErrorString();
+            return nullptr;
+        }
+        if (Context ctx; ctx.isValid() && ctx.isTraceEnabled())
+            printSceneObjects(ctx, scene);
+        return makeFbxHandle<FbxScene>(scene);
+    }
+
+    MeshFbxParser::MeshFbxParser() : m_pimpl(std::make_unique<MeshFbxParserImpl>()) {}
+    MeshFbxParser::~MeshFbxParser() = default;
+
+    bool MeshFbxParser::ImportFBX(char const* fileName, TriangleMesh* outMesh) const
+    {
+        assert(outMesh && fileName);
+        Context ctx;
+        assert(ctx.isValid() && "platform Context was not initialized");
 
         os::Path const fbxDirectory = os::Path::fromString(fileName, true);
         if (!fbxDirectory.isValid() || !fbxDirectory.isFile())
             return false;
 
-        m_fileName = fbxDirectory.toUnderlying();
-
-        std::string sceneName = std::string(fileName).substr(0, strlen(fileName) - 4) + "_scene";
-        FbxScene*   pScene    = FbxScene::Create(mng, sceneName.c_str());
-
-        FbxImporter* fbxImporter = FbxImporter::Create(mng, sceneName.c_str());
-        if (!fbxImporter->Initialize(fileName, -1, static_cast<FbxIOSettings*>(m_res.settings)))
-            return false;
-        if (!fbxImporter->Import(pScene))
-        {
-            fbxImporter->Destroy();
-            return false;
-        }
-        fbxImporter->Destroy();
-
-        // Convert scene units and axes
-        if (pScene->GetGlobalSettings().GetSystemUnit() != FbxSystemUnit::m)
-        {
-            FbxSystemUnit::ConversionOptions const opts{.mConvertRrsNodes               = true,
-                                                        .mConvertLimits                 = true,
-                                                        .mConvertClusters               = true,
-                                                        .mConvertLightIntensity         = true,
-                                                        .mConvertPhotometricLProperties = true,
-                                                        .mConvertCameraClipPlanes       = true};
-            FbxSystemUnit::m.ConvertScene(pScene, opts);
-        }
-
-        if (pScene->GetGlobalSettings().GetAxisSystem() != FbxAxisSystem::MayaZUp)
-            FbxAxisSystem::MayaZUp.ConvertScene(pScene);
-
-        FbxNode* rootNode = pScene->GetRootNode();
-        if (!rootNode)
-            return false;
-
-        for (int i = 0; i < rootNode->GetChildCount(); ++i)
-        {
-            FbxNode* child = rootNode->GetChild(i);
-            if (!child->GetNodeAttribute())
-                continue;
-            if (child->GetNodeAttribute()->GetAttributeType() != FbxNodeAttribute::eMesh)
-                continue;
-
-            // auto* mesh = dynamic_cast<FbxMesh*>(child->GetNodeAttribute());
-            FbxMesh* mesh = child->GetMesh();
-            if (!mesh)
-                continue;
-
-            m_meshName       = mesh->GetName();
-            int32_t nPolygon = mesh->GetPolygonCount();
-            if (nPolygon <= 0)
-                continue;
-
-            FbxVector4* controlPoints   = mesh->GetControlPoints();
-            FbxAMatrix  globalTransform = child->EvaluateGlobalTransform();
-
-            int                       nElementNormal = mesh->GetElementNormalCount();
-            FbxGeometryElementNormal* normalLayer    = nElementNormal > 0 ? mesh->GetElementNormal(0) : nullptr;
-
-            int                          nElementSmoothing = mesh->GetElementSmoothingCount();
-            FbxGeometryElementSmoothing* smoothing = nElementSmoothing > 0 ? mesh->GetElementSmoothing(0) : nullptr;
-
-            FbxGeometryElementUV* uvLayer = mesh->GetElementUVCount() > 0 ? mesh->GetElementUV(0) : nullptr;
-            bool                  hasUV   = uvLayer != nullptr;
-
-            int vertexId = 0;
-            for (int k = 0; k < nPolygon; ++k)
+        m_pimpl->openSceneImporter(fileName, [&](FbxImporter* importer, FbxScene* scene) {
+            ctx.log("Importing first mesh from scene {}", std::make_tuple(scene->GetName()));
+            // Create Our System
+            FbxAxisSystem const axisSystem(FbxAxisSystem::EUpVector::eZAxis,
+                                           FbxAxisSystem::EFrontVector::eParityOdd,
+                                           FbxAxisSystem::ECoordSystem::eLeftHanded);
+            // convert everything in centimetres (TODO check if correct. if not, switch to metres)
+            if (scene->GetGlobalSettings().GetSystemUnit() != FbxSystemUnit::cm)
             {
-                int polygonSize = mesh->GetPolygonSize(k);
-                if (polygonSize != 3)
-                    return false; // only triangles supported
-
-                VertexIndex vIdx[3];
-                bool        isSmooth = false;
-
-                if (smoothing)
-                {
-                    switch (smoothing->GetMappingMode())
-                    {
-                        case FbxGeometryElement::eByPolygon:
-                            if (smoothing->GetReferenceMode() == FbxGeometryElement::eDirect)
-                                isSmooth = smoothing->GetDirectArray().GetAt(k) != 0;
-                            else if (smoothing->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
-                                isSmooth = smoothing->GetDirectArray().GetAt(smoothing->GetIndexArray().GetAt(k)) != 0;
-                            break;
-                        default: break;
-                    }
-                }
-
-                // compute flat face normal (always needed as fallback)
-                Vector3f faceNormal{};
-                {
-                    Vector3f p0{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][0]),
-                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][1]),
-                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 0)][2])};
-                    Vector3f p1{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 1)][0]),
-                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 1)][1]),
-                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 1)][2])};
-                    Vector3f p2{static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][0]),
-                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][1]),
-                                static_cast<float>(controlPoints[mesh->GetPolygonVertex(k, 2)][2])};
-                    faceNormal = normalize(cross(p1 - p0, p2 - p0));
-                }
-
-                for (int j = 0; j < 3; ++j, ++vertexId)
-                {
-                    int        cpIndex     = mesh->GetPolygonVertex(k, j);
-                    FbxVector4 cp          = controlPoints[cpIndex];
-                    FbxVector4 transformed = globalTransform.MultT(cp);
-                    Point3f    pos{static_cast<float>(transformed[0]),
-                                static_cast<float>(transformed[1]),
-                                static_cast<float>(transformed[2])};
-
-                    uint32_t posIdx = 0;
-                    if (outMesh->checkPosition(pos, posIdx))
-                        vIdx[j].positionIdx = posIdx;
-                    else
-                    {
-                        outMesh->addPosition(pos);
-                        vIdx[j].positionIdx = outMesh->positionCount() - 1;
-                    }
-
-                    // --- Normals (tiered system) ---
-                    Vector3f nVec{0.f, 0.f, 0.f};
-
-                    if (normalLayer) // 1. custom normals (preferred)
-                    {
-                        int idx = (normalLayer->GetMappingMode() == FbxGeometryElement::eByControlPoint) ? cpIndex : vertexId;
-                        if (normalLayer->GetReferenceMode() == FbxGeometryElement::eIndexToDirect)
-                            idx = normalLayer->GetIndexArray().GetAt(idx);
-
-                        FbxVector4 fn = normalLayer->GetDirectArray().GetAt(idx);
-                        nVec = Vector3f{static_cast<float>(fn[0]), static_cast<float>(fn[1]), static_cast<float>(fn[2])};
-                    }
-                    else if (isSmooth) // 2. smoothing groups (simple average with face normal for now)
-                    {
-                        nVec = faceNormal;
-                    }
-                    else // 3. fallback: flat normal
-                    {
-                        nVec = faceNormal;
-                    }
-
-                    if (dotSelf(nVec) < 1e-12f || !std::isfinite(nVec.x) || !std::isfinite(nVec.y) ||
-                        !std::isfinite(nVec.z))
-                        nVec = faceNormal;
-
-                    Normal3f n = normalize(nVec);
-
-                    uint32_t nIdx = 0;
-                    if (outMesh->checkNormal(n, nIdx))
-                        vIdx[j].normalIdx = nIdx;
-                    else
-                    {
-                        outMesh->addNormal(n);
-                        vIdx[j].normalIdx = outMesh->normalCount() - 1;
-                    }
-
-                    // --- UVs ---
-                    Point2f uv{0.f, 0.f};
-                    if (hasUV)
-                    {
-                        switch (uvLayer->GetMappingMode())
-                        {
-                            case FbxGeometryElement::eByControlPoint:
-                            {
-                                int        uvIndex = uvLayer->GetReferenceMode() == FbxGeometryElement::eDirect
-                                                         ? cpIndex
-                                                         : uvLayer->GetIndexArray().GetAt(cpIndex);
-                                FbxVector2 uvVal   = uvLayer->GetDirectArray().GetAt(uvIndex);
-                                uv = Point2f{static_cast<float>(uvVal[0]), static_cast<float>(uvVal[1])};
-                            }
-                            break;
-                            case FbxGeometryElement::eByPolygonVertex:
-                            {
-                                int        uvIndex = uvLayer->GetReferenceMode() == FbxGeometryElement::eDirect
-                                                         ? vertexId
-                                                         : uvLayer->GetIndexArray().GetAt(vertexId);
-                                FbxVector2 uvVal   = uvLayer->GetDirectArray().GetAt(uvIndex);
-                                uv = Point2f{static_cast<float>(uvVal[0]), static_cast<float>(uvVal[1])};
-                            }
-                            break;
-                            default: uv = Point2f{0.f, 0.f}; break;
-                        }
-                    }
-
-                    uint32_t uvIdx = 0;
-                    if (outMesh->checkUV(uv, uvIdx))
-                        vIdx[j].uvIdx = uvIdx;
-                    else
-                    {
-                        outMesh->addUV(uv);
-                        vIdx[j].uvIdx = outMesh->uvCount() - 1;
-                    }
-                }
-
-                // Add triangle
-                outMesh->addIndexedTriangle(vIdx[0], vIdx[1], vIdx[2], -1);
+                // according to docs, mConvertRrsNodes can cause problems on scaling, so keep it false
+                constexpr FbxSystemUnit::ConversionOptions opts{.mConvertRrsNodes               = false,
+                                                                .mConvertLimits                 = true,
+                                                                .mConvertClusters               = true,
+                                                                .mConvertLightIntensity         = true,
+                                                                .mConvertPhotometricLProperties = true,
+                                                                .mConvertCameraClipPlanes       = true};
+                FbxSystemUnit::cm.ConvertScene(scene, opts);
             }
-        }
+            // convert to our coordinate system (no-op if already correct). "Shallow convert" as only the root node
+            // sees its transform changed
+            // We'd need to extract scene transform from root and apply it to nodes. Fundamental,
+            // as our convertion operations are applied only to the root node.
+            // The method `EvaluateGlobalTransform` for `FbxNode` does that for us
+            axisSystem.ConvertScene(scene);
+            if (ctx.isTraceEnabled())
+                printSceneObjects(ctx, scene);
+            // if there are more mesh objects, emit a warning
+            int const meshCount = scene->GetSrcObjectCount<FbxMesh>();
+            if (meshCount <= 0)
+                throw std::runtime_error("No meshes to import");
+            if (meshCount > 1)
+                ctx.warn(
+                    "[FBX Import] warning: Only first mesh of this FBX file will be read."
+                    "Found {} meshes",
+                    std::make_tuple(meshCount));
+            FbxNode* firstMeshNode = getFirstMeshNodeFromFbxScene(scene);
+            // if it has an animation, issue warning that we are discarding that information (what happens to post-rotation?)
+            if (!firstMeshNode)
+                throw std::runtime_error("No meshes could be found inside the scene");
 
-        if (Context ctx; ctx.isValid() && ctx.isTraceEnabled())
+            processMeshNode(ctx, firstMeshNode, *outMesh);
+        }, [](std::string const& errorMsg) { throw std::runtime_error(errorMsg); });
+
+        if (ctx.isValid() && ctx.isTraceEnabled())
         {
             std::string meshStats = "  Triangle Count: " + std::to_string(outMesh->triCount()) +
                                     "\n  UVs: " + std::to_string(outMesh->uvCount()) +
@@ -686,85 +679,7 @@ namespace dmt {
             ctx.trace("\n{}", std::make_tuple(meshStats));
         }
 
-        pScene->Destroy();
         return true;
     }
-
-    char const* MeshFbxParser::GetMeshName() { return m_meshName.c_str(); }
-
-    MeshFbxParser::~MeshFbxParser() = default;
-
-    void MeshFbxParser::InitFbxManager()
-    {
-        if (m_res.manager == nullptr)
-        {
-            m_res.manager = FbxManager::Create();
-        }
-    }
-
-    void TextureNames(FbxGeometry* pGeometry, std::pmr::unordered_map<char const*, char const*>& chTex)
-    {
-
-        if (!pGeometry || !pGeometry->GetNode())
-            return;
-
-        int32_t nMat = pGeometry->GetNode()->GetSrcObjectCount<FbxSurfaceMaterial>();
-        for (int32_t matIdx = 0; matIdx < nMat; matIdx++)
-        {
-            auto* lMaterial = pGeometry->GetNode()->GetSrcObject<FbxSurfaceMaterial>(matIdx);
-
-            //go through all the possible textures
-            if (lMaterial)
-            {
-
-                uint32_t texIdx = 0;
-                FBXSDK_FOR_EACH_TEXTURE(texIdx)
-                {
-
-                    FbxProperty property = lMaterial->FindProperty(FbxLayerElement::sTextureChannelNames[texIdx]);
-                    GetTextureName(property, chTex, texIdx);
-                }
-            }
-        }
-    }
-
-    void GetTextureName(FbxProperty const& property, std::pmr::unordered_map<char const*, char const*>& chTex, uint32_t texIdx)
-    {
-        if (property.IsValid())
-        {
-            int32_t texCount = property.GetSrcObjectCount<FbxTexture>();
-
-            for (int32_t j = 0; j < texCount; ++j)
-            {
-                //Here we have to check if it's layeredtextures, or just textures:
-                auto* lLayeredTexture = property.GetSrcObject<FbxLayeredTexture>(j);
-                if (lLayeredTexture)
-                {
-                    int32_t nTextures = lLayeredTexture->GetSrcObjectCount<FbxTexture>();
-                    for (int32_t k = 0; k < nTextures; ++k)
-                    {
-                        auto* lTexture = lLayeredTexture->GetSrcObject<FbxTexture>(k);
-                        if (lTexture)
-                        {
-
-                            auto* lFileTexture                                   = FbxCast<FbxFileTexture>(lTexture);
-                            chTex[FbxLayerElement::sTextureChannelNames[texIdx]] = lFileTexture->GetFileName();
-                        }
-                    }
-                }
-                else
-                {
-                    //no layered texture simply get on the property
-                    auto* lTexture = property.GetSrcObject<FbxTexture>(j);
-                    if (lTexture)
-                    {
-                        auto* lFileTexture                                   = FbxCast<FbxFileTexture>(lTexture);
-                        chTex[FbxLayerElement::sTextureChannelNames[texIdx]] = lFileTexture->GetFileName();
-                    }
-                }
-            }
-        }
-    }
-
 
 } // namespace dmt

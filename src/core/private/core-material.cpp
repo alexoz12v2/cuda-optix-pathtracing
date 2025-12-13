@@ -139,7 +139,7 @@ namespace /*static*/ {
             dst1 *= scale;
             shorterLen *= scale;
         }
-        if (shorterLen ==0 )
+        if (shorterLen == 0)
         {
             // compute 1 scalar LOD with *Isotropic Footprint Estimation*
             float const dud = fmaxf(fl::abs(ctx.dUV.dudx), fl::abs(ctx.dUV.dudy));

@@ -556,6 +556,9 @@ function(dmt_add_compile_definitions target properties_visibility)
     endif ()
 
     if (WIN32)
+      if (NOT VSWHERE_PATH)
+        set(VSWHERE_PATH "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe")
+      endif()
       # Use vswhere to locate MSVC toolchain
       execute_process(
         COMMAND "${VSWHERE_PATH}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property

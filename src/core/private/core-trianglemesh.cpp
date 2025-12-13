@@ -82,9 +82,9 @@ namespace dmt {
     }
 
     Point3f  TriangleMesh::getPosition(size_t idx) const { return m_positions[idx]; }
-    uint32_t TriangleMesh::getPositionSize() { return m_positions.size(); }
+    uint32_t TriangleMesh::getPositionSize() const { return m_positions.size(); }
     Normal3f TriangleMesh::getNormal(size_t idx) const { return m_normals[idx]; }
-    uint32_t TriangleMesh::getNormalSize() { return m_normals.size(); }
+    uint32_t TriangleMesh::getNormalSize() const { return m_normals.size(); }
     Point2f  TriangleMesh::getUV(size_t idx) const { return m_uvs[idx]; }
 
     IndexedTri TriangleMesh::getIndexedTri(size_t idx) const { return m_tris[idx]; }

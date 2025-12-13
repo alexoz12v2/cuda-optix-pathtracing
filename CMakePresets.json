@@ -13,7 +13,8 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_CXX_SCAN_FOR_MODULES": "ON",
-        "FMT_MODULE": "OFF"
+        "FMT_MODULE": "OFF",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
       }
     },
     {

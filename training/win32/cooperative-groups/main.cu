@@ -127,7 +127,10 @@ int wmain()
         size_t       prev = 0;
         for (size_t pos = 0; (pos = cmd.find_first_of(L" \t", prev)) != std::wstring::npos; /**/)
         {
-            args.emplace_back(cmd.substr(prev, pos - prev));
+
+             if ((prev - pos+ 1 > 2) && cmd[pos - 1] == L'"' && cmd[prev] == L'"')
+                args.emplace_back(cmd.substr(prev + 1, pos - prev - 2));
+            else args.emplace_back(cmd.substr(prev, pos - prev));
             prev = pos + 1;
         }
         if (prev < cmd.size())

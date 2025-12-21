@@ -2,9 +2,8 @@
 
 namespace dmt {
 
-
-    __constant__ MitchellPiecewise2DGrid gdc_MitchellPiecewise2DGrid;
-    // clang-format off
+__constant__ MitchellPiecewise2DGrid gdc_MitchellPiecewise2DGrid;
+// clang-format off
 __constant__ float gdc_EwaWeightLUT[EWA_LUT_SIZE] = { 
     // MIPMap EWA Lookup Table Values
     0.864664733f, 0.849040031f, 0.83365953f, 0.818519294f, 0.80361563f,
@@ -33,6 +32,6 @@ __constant__ float gdc_EwaWeightLUT[EWA_LUT_SIZE] = {
     0.0281514227f, 0.0255970061f, 0.0230824798f, 0.0206072628f, 0.0181707144f,
     0.0157722086f, 0.013411209f, 0.0110870898f, 0.0087992847f, 0.0065472275f,
     0.00433036685f, 0.0021481365f, 0.f };
-    // clang-format on
+// clang-format on
 
-} // namespace dmt
+}  // namespace dmt

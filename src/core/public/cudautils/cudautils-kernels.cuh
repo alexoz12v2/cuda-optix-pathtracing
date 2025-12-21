@@ -13,46 +13,49 @@
 
 namespace dmt {
 
-    //Take trace of the allocations in the global memory
-    template <typename T>
-    struct DeviceBuffer
-    {
-        T*       ptr      = nullptr;
-        uint32_t capacity = 0;
-    };
+// Take trace of the allocations in the global memory
+template <typename T>
+struct DeviceBuffer {
+  T* ptr = nullptr;
+  uint32_t capacity = 0;
+};
 
-    // ---------- Simple queue of indices ----------
-    struct IndexQueue
-    {
-        uint32_t* items    = nullptr; // indices into RayPool/ShadowPool/etc.
-        uint32_t* tail     = nullptr; // atomic append pointer
-        uint32_t  capacity = 0;
-    };
+// ---------- Simple queue of indices ----------
+struct IndexQueue {
+  uint32_t* items = nullptr;  // indices into RayPool/ShadowPool/etc.
+  uint32_t* tail = nullptr;   // atomic append pointer
+  uint32_t capacity = 0;
+};
 
+// ---- Slot decode helpers: adapt to your packing scheme ----
+DMT_GPU inline bool slot_is_valid(uint64_t slot) { return (slot != 0ull); }
+DMT_GPU inline bool slot_is_leaf(uint64_t slot) {
+  return ((slot >> 24) & 0x1ull) != 0ull;
+}
+DMT_GPU inline uint32_t slot_index(uint64_t slot) {
+  return uint32_t(slot & 0x00FFFFFFu);
+}
 
-    // ---- Slot decode helpers: adapt to your packing scheme ----
-    DMT_GPU inline bool     slot_is_valid(uint64_t slot) { return (slot != 0ull); }
-    DMT_GPU inline bool     slot_is_leaf(uint64_t slot) { return ((slot >> 24) & 0x1ull) != 0ull; }
-    DMT_GPU inline uint32_t slot_index(uint64_t slot) { return uint32_t(slot & 0x00FFFFFFu); }
+inline __device__ uint32_t lane_id() { return threadIdx.x & 31; }
+inline __device__ uint32_t warp_id_in_block() { return threadIdx.x >> 5; }
 
-    inline __device__ uint32_t lane_id() { return threadIdx.x & 31; }
-    inline __device__ uint32_t warp_id_in_block() { return threadIdx.x >> 5; }
+// ---------- Warp bulk enqueue ----------
+// Active lanes call with valid=true and provide 'val' to enqueue to q.
+// Returns the global position written by each active lane.
+DMT_GPU uint32_t warp_enqueue(IndexQueue q, bool valid, uint32_t val);
 
-    // ---------- Warp bulk enqueue ----------
-    // Active lanes call with valid=true and provide 'val' to enqueue to q.
-    // Returns the global position written by each active lane.
-    DMT_GPU uint32_t warp_enqueue(IndexQueue q, bool valid, uint32_t val);
+// ===================================================
+// Kernel 1: RayGen ? fill RayPool and enqueue indices
+// Each warp generates one ray; we map one ray per warp here,
+// but to keep occupancy, we *allow* each thread to handle one ray
+// and rely on warp size being a multiple of 32.
+// ===================================================
+__global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY,
+                        int tileW, int tileH, int spp, RayPool rayPool,
+                        IndexQueue rayQ);
 
-    // ===================================================
-    // Kernel 1: RayGen ? fill RayPool and enqueue indices
-    // Each warp generates one ray; we map one ray per warp here,
-    // but to keep occupancy, we *allow* each thread to handle one ray
-    // and rely on warp size being a multiple of 32.
-    // ===================================================
-    __global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY, int tileW, int tileH, int spp, RayPool rayPool, IndexQueue rayQ);
-
-    __global__ void megakernel();
-    // TODO
+__global__ void megakernel();
+// TODO
 #if 0
     /*
      * trace_kernel_warp
@@ -122,5 +125,5 @@ namespace dmt {
                            IndexQueue      shadeQ,
                            IndexQueue      nextRayQ);
 #endif
-} // namespace dmt
-#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH
+}  // namespace dmt
+#endif  // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_KERNELS_CUH

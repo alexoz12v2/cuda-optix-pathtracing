@@ -4,6 +4,7 @@ add_subdirectory(platform)
 # add_subdirectory(cuda-wrappers)
 
 add_subdirectory(core)
+add_subdirectory(new-core)
 
 # we are not building a GUI Application anymore
 # add_subdirectory(application)

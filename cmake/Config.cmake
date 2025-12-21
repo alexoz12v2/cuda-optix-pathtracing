@@ -705,7 +705,8 @@ function(dmt_add_module_library name module_name)
 
   target_include_directories(
     ${name}
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public")
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private")
 
   # cmake's built-in clang-tidy doesn't seem to work with CXX_MODULES
   set_target_properties(${name} PROPERTIES CXX_CLANG_TIDY "")

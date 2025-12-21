@@ -8,334 +8,323 @@
 #include "cudautils/cudautils-color.cuh"
 
 #ifdef __CUDA_ARCH__
-    #include <cuda_fp16.h>
+#  include <cuda_fp16.h>
 #endif
 
 namespace dmt {
-    struct ImageTexture
-    {
-        RGB*     ptr;
-        uint32_t xRes, yRes;
-    };
+struct ImageTexture {
+  RGB* ptr;
+  uint32_t xRes, yRes;
+};
 
-    struct ApproxDifferentialsContext
-    {
-        Point3f   p{};                   /// intersection point
-        Vector3f  n{};                   /// normal from intersection point
-        Transform cameraFromRender;      /// transform from render space to camera space
-        Vector3f  minPosDifferentialX{}; /// minimum offset in position for a ray differential along the X axis
-        Vector3f  minPosDifferentialY{}; /// minimum offset in position for a ray differential along the Y axis
-        Vector3f  minDirDifferentialX{}; /// minimum offset in direction for a ray differential along the X axis
-        Vector3f  minDirDifferentialY{}; /// minimum offset in direction for a ray differential along the Y axis
-        uint32_t samplesPerPixel{}; /// used to compute a clamped scale factor for differentials max(rsqrt(samplesPerPixel), 1/8)
-    };
+struct ApproxDifferentialsContext {
+  Point3f p{};                 /// intersection point
+  Vector3f n{};                /// normal from intersection point
+  Transform cameraFromRender;  /// transform from render space to camera space
+  Vector3f minPosDifferentialX{};  /// minimum offset in position for a ray
+                                   /// differential along the X axis
+  Vector3f minPosDifferentialY{};  /// minimum offset in position for a ray
+                                   /// differential along the Y axis
+  Vector3f minDirDifferentialX{};  /// minimum offset in direction for a ray
+                                   /// differential along the X axis
+  Vector3f minDirDifferentialY{};  /// minimum offset in direction for a ray
+                                   /// differential along the Y axis
+  uint32_t
+      samplesPerPixel{};  /// used to compute a clamped scale factor for
+                          /// differentials max(rsqrt(samplesPerPixel), 1/8)
+};
 
-    struct LODResult
-    {
-        float sigma_max; // major axis length (texels)
-        float sigma_min; // minor axis length (texels)
-        float lod_major; // = max(0, log2(sigma_max))
-        float lod_minor; // = max(0, log2(sigma_min))  <-- PBRT/EWA uses this typically
-    };
+struct LODResult {
+  float sigma_max;  // major axis length (texels)
+  float sigma_min;  // minor axis length (texels)
+  float lod_major;  // = max(0, log2(sigma_max))
+  float
+      lod_minor;  // = max(0, log2(sigma_min))  <-- PBRT/EWA uses this typically
+};
 
-    // ctx.dUV contains dudx, dudy, dvdx, dvdy
-    // texWidth/texHeight are base-level resolution (not mip-resolved)
-    DMT_CORE_API LODResult
-        computeTextureLOD_from_dudv(float dudx, float dudy, float dvdx, float dvdy, int texWidth, int texHeight);
+// ctx.dUV contains dudx, dudy, dvdx, dvdy
+// texWidth/texHeight are base-level resolution (not mip-resolved)
+DMT_CORE_API LODResult computeTextureLOD_from_dudv(float dudx, float dudy,
+                                                   float dvdx, float dvdy,
+                                                   int texWidth, int texHeight);
 
-    /// orient camera such that z axis is aligned with the ray direction (camera position -> intersection point)
-    /// camera defines min differentials in x and y, for both the origin of the ray and direction of the ray (4 vectors in total).
-    /// they can be used to estimate 2 new rays and intersection points
-    /// All differentials here, in `x` and `y`, are expressed in *Raster Space* (origin top left, y downwards)
-    /// @note **In the current implementation this is called at every intersection**
-    DMT_CORE_API void approximate_dp_dxy(ApproxDifferentialsContext const& apctx, Vector3f* dpdx, Vector3f* dpdy);
+/// orient camera such that z axis is aligned with the ray direction (camera
+/// position -> intersection point) camera defines min differentials in x and y,
+/// for both the origin of the ray and direction of the ray (4 vectors in
+/// total). they can be used to estimate 2 new rays and intersection points All
+/// differentials here, in `x` and `y`, are expressed in *Raster Space* (origin
+/// top left, y downwards)
+/// @note **In the current implementation this is called at every intersection**
+DMT_CORE_API void approximate_dp_dxy(ApproxDifferentialsContext const& apctx,
+                                     Vector3f* dpdx, Vector3f* dpdy);
 
-    /// All differentials here, in `x` and `y`, are expressed in *Raster Space* (origin top left, y downwards)
-    struct UVDifferentialsContext
-    {
-        Vector3f dpdx;
-        Vector3f dpdy;
-        Vector3f dpdu;
-        Vector3f dpdv;
-    };
+/// All differentials here, in `x` and `y`, are expressed in *Raster Space*
+/// (origin top left, y downwards)
+struct UVDifferentialsContext {
+  Vector3f dpdx;
+  Vector3f dpdy;
+  Vector3f dpdu;
+  Vector3f dpdv;
+};
 
-    /// differentials (ie speed of change) of UV coordinates with respect to change into raster space coordinates
-    /// Esample of usage: compute MIP level:
-    /// ```
-    /// float lenX = sqrt(dudx * dudx + dvdx * dvdx); // derivative in screen-x
-    /// float lenY = sqrt(dudy * dudy + dvdy * dvdy); // derivative in screen-y
-    /// float footprintExtent = max(lenX, lenY);
-    /// float lambda = log2(footprintExtent); // assuming normalized uv coordinates
-    /// ```
-    /// After selecting the MIP level, you need to sample a value from it. A good filtering procedure is Elliptic Weighted Average (EWA)
-    /// - 4 values du,dv define a parallelogram into texture space representing the projection of the current pixel into texture space
-    /// - copute ellipse matrix M: The implicit equation $E(u,v) = Au^2 + Buv + Cv^2$ tells you whether uv point is inside or outside ellipse (E(u,v) < 1 for inside)
-    ///   ```
-    ///   M = [ A   B/2 ]
-    ///       [ B/2 C   ]
-    ///   ```
-    ///   To compute coefficients:
-    ///   ```
-    ///   float A = dudy*dudy + dvdy*dvdy;        // "only y"
-    ///   float B = -2 * (dudx*dudy + dvdx*dvdy); // "cross"
-    ///   float C = dudx*dudx + dvdx*dvdx;        // "only x"
-    ///   // ellispe normalization such that largest eigenvalue is 1 (==footprint of ellipse should integrate to 1 pixel only)
-    ///   float F = A * C - 0.25f * B * B;
-    ///   float scale = 1.f / F;
-    ///   A /= scale, B /= scale, C /= scale;
-    ///   ```
-    /// Once you have those, loop over all texels inside the EWA bounding box and compute a weighted average on those, where the weights are equal
-    /// `weight = exp(-k * E(u,v))` where `k = 2.0` falloff coefficient
-    struct UVDifferentials
-    {
-        float dudx;
-        float dudy;
-        float dvdx;
-        float dvdy;
-    };
+/// differentials (ie speed of change) of UV coordinates with respect to change
+/// into raster space coordinates Esample of usage: compute MIP level:
+/// ```
+/// float lenX = sqrt(dudx * dudx + dvdx * dvdx); // derivative in screen-x
+/// float lenY = sqrt(dudy * dudy + dvdy * dvdy); // derivative in screen-y
+/// float footprintExtent = max(lenX, lenY);
+/// float lambda = log2(footprintExtent); // assuming normalized uv coordinates
+/// ```
+/// After selecting the MIP level, you need to sample a value from it. A good
+/// filtering procedure is Elliptic Weighted Average (EWA)
+/// - 4 values du,dv define a parallelogram into texture space representing the
+/// projection of the current pixel into texture space
+/// - copute ellipse matrix M: The implicit equation $E(u,v) = Au^2 + Buv +
+/// Cv^2$ tells you whether uv point is inside or outside ellipse (E(u,v) < 1
+/// for inside)
+///   ```
+///   M = [ A   B/2 ]
+///       [ B/2 C   ]
+///   ```
+///   To compute coefficients:
+///   ```
+///   float A = dudy*dudy + dvdy*dvdy;        // "only y"
+///   float B = -2 * (dudx*dudy + dvdx*dvdy); // "cross"
+///   float C = dudx*dudx + dvdx*dvdx;        // "only x"
+///   // ellispe normalization such that largest eigenvalue is 1 (==footprint of
+///   ellipse should integrate to 1 pixel only) float F = A * C - 0.25f * B * B;
+///   float scale = 1.f / F;
+///   A /= scale, B /= scale, C /= scale;
+///   ```
+/// Once you have those, loop over all texels inside the EWA bounding box and
+/// compute a weighted average on those, where the weights are equal `weight =
+/// exp(-k * E(u,v))` where `k = 2.0` falloff coefficient
+struct UVDifferentials {
+  float dudx;
+  float dudy;
+  float dvdx;
+  float dvdy;
+};
 
-    /// Apply Chain Rule: dpdx = dpdu dudx + dpdv dvdx
-    /// dudx,dudy,dvdx,dvdy should be handled by BDSF evaluation and surface intersection
-    DMT_CORE_API UVDifferentials duv_From_dp_dxy(UVDifferentialsContext const& uvctx);
+/// Apply Chain Rule: dpdx = dpdu dudx + dpdv dvdx
+/// dudx,dudy,dvdx,dvdy should be handled by BDSF evaluation and surface
+/// intersection
+DMT_CORE_API UVDifferentials
+duv_From_dp_dxy(UVDifferentialsContext const& uvctx);
 
-    struct TextureEvalContext
-    {
-        Point3f         p;
-        Vector3f        dpdx;
-        Vector3f        dpdy;
-        Vector3f        n; /// unit
-        Point2f         uv;
-        UVDifferentials dUV;
-    };
+struct TextureEvalContext {
+  Point3f p;
+  Vector3f dpdx;
+  Vector3f dpdy;
+  Vector3f n;  /// unit
+  Point2f uv;
+  UVDifferentials dUV;
+};
 
-    // NOTE: this texture framework, based on a tag + union and switch on texture types is the simplest which can be easily transposed onto device
-    // code when the times comes
-    template <typename T>
-    concept Texture = requires(T const& tex, TextureEvalContext const& texEvalCtx) {
-        { tex.evalFloat(texEvalCtx) } -> std::same_as<float>;
-        { tex.evalRGB(texEvalCtx) } -> std::same_as<RGB>;
-    };
+// NOTE: this texture framework, based on a tag + union and switch on texture
+// types is the simplest which can be easily transposed onto device code when
+// the times comes
+template <typename T>
+concept Texture = requires(T const& tex, TextureEvalContext const& texEvalCtx) {
+  { tex.evalFloat(texEvalCtx) } -> std::same_as<float>;
+  { tex.evalRGB(texEvalCtx) } -> std::same_as<RGB>;
+};
 
-    enum class TextureType
-    {
-        eImage = 0,
-        eChecker,
+enum class TextureType {
+  eImage = 0,
+  eChecker,
 
-        eCount
-    };
+  eCount
+};
 
-    // -- Checker Texture --
+// -- Checker Texture --
 
-    struct DMT_CORE_API CheckerTexture
-    {
-        float evalFloat(TextureEvalContext const& ctx) const;
-        RGB   evalRGB(TextureEvalContext const& ctx) const;
+struct DMT_CORE_API CheckerTexture {
+  float evalFloat(TextureEvalContext const& ctx) const;
+  RGB evalRGB(TextureEvalContext const& ctx) const;
 
-        float scaleU;
-        float scaleV;
-        RGB   color1;
-        RGB   color2;
-    };
-    static_assert(Texture<CheckerTexture>);
+  float scaleU;
+  float scaleV;
+  RGB color1;
+  RGB color2;
+};
+static_assert(Texture<CheckerTexture>);
 
-    enum class TexWrapMode : uint8_t
-    {
-        eClamp = 0,
-        eRepeat,
-        eMirror,
-        eBlack,
+enum class TexWrapMode : uint8_t {
+  eClamp = 0,
+  eRepeat,
+  eMirror,
+  eBlack,
 
-        eCount
-    };
+  eCount
+};
 
-    // -- Image Texture --
-    extern DMT_CORE_API std::array<float, EWA_LUT_SIZE> const EwaWeightLUT;
+// -- Image Texture --
+extern DMT_CORE_API std::array<float, EWA_LUT_SIZE> const EwaWeightLUT;
 
-    enum class TexFormat : uint8_t
-    {
-        FloatRGB = 0,
-        HalfRGB,
-        ByteRGB,
-        FloatGray,
-        HalfGray,
-        ByteGray,
+enum class TexFormat : uint8_t {
+  FloatRGB = 0,
+  HalfRGB,
+  ByteRGB,
+  FloatGray,
+  HalfGray,
+  ByteGray,
 
-        Count
-    };
+  Count
+};
 
-    struct EWAParams
-    {
-        unsigned char const* mortonLevelBuffer; // pointer to start of mip level
-        Point2i              levelRes;          // resolution of this mip
-        TexWrapMode          wrapX;
-        TexWrapMode          wrapY;
-        TexFormat            texFormat;
-        bool                 isNormal;
-    };
+struct EWAParams {
+  unsigned char const* mortonLevelBuffer;  // pointer to start of mip level
+  Point2i levelRes;                        // resolution of this mip
+  TexWrapMode wrapX;
+  TexWrapMode wrapY;
+  TexFormat texFormat;
+  bool isNormal;
+};
 
-    DMT_CORE_API RGB EWAFormula(EWAParams const& p, Point2f st_in, Vector2f dst0_in, Vector2f dst1_in);
+DMT_CORE_API RGB EWAFormula(EWAParams const& p, Point2f st_in, Vector2f dst0_in,
+                            Vector2f dst1_in);
 
-    struct DMT_CORE_API ImageTexturev2
-    {
-        float evalFloat(TextureEvalContext const& ctx) const;
-        RGB   evalRGB(TextureEvalContext const& ctx) const;
+struct DMT_CORE_API ImageTexturev2 {
+  float evalFloat(TextureEvalContext const& ctx) const;
+  RGB evalRGB(TextureEvalContext const& ctx) const;
 
-        // if the texture is float, it just broadcasts to all components
-        RGB at(int32_t s, int32_t t, int32_t level) const;
+  // if the texture is float, it just broadcasts to all components
+  RGB at(int32_t s, int32_t t, int32_t level) const;
 
-        void* data; /// mipmapped image data, stored in morton order
+  void* data;  /// mipmapped image data, stored in morton order
 
-        int32_t     width;          /// original image x resolution (POT)
-        int32_t     height;         /// original image y resolution (POT)
-        uint32_t    mipLevels : 30; /// number of mip levels
-        uint32_t    isRGB     : 1;  /// is the buffer RGB or grayscale
-        uint32_t    isNormal  : 1;  /// is the buffer RGB or grayscale
-        int32_t     deviceIdx;      /// if -1, then CPU resident texture, otherwise index of device (TODO later)
-        TexWrapMode wrapModeX;
-        TexWrapMode wrapModeY;
-        TexFormat   texFormat;
-    };
+  int32_t width;            /// original image x resolution (POT)
+  int32_t height;           /// original image y resolution (POT)
+  uint32_t mipLevels : 30;  /// number of mip levels
+  uint32_t isRGB : 1;       /// is the buffer RGB or grayscale
+  uint32_t isNormal : 1;    /// is the buffer RGB or grayscale
+  int32_t deviceIdx;  /// if -1, then CPU resident texture, otherwise index of
+                      /// device (TODO later)
+  TexWrapMode wrapModeX;
+  TexWrapMode wrapModeY;
+  TexFormat texFormat;
+};
 
-    // ---- Image Texture Utils ----
-    inline constexpr float maxAnisotropy = 8.f;
-    // ---------- Helpers ----------
+// ---- Image Texture Utils ----
+inline constexpr float maxAnisotropy = 8.f;
+// ---------- Helpers ----------
 
-    template <typename T>
-    inline __host__ __device__ float toFloat(T value);
+template <typename T>
+inline __host__ __device__ float toFloat(T value);
 
-    template <>
-    inline __host__ __device__ float toFloat(uint8_t value)
-    {
-        return value / 255.0f;
-    }
+template <>
+inline __host__ __device__ float toFloat(uint8_t value) {
+  return value / 255.0f;
+}
 
-    template <>
-    inline __host__ __device__ float toFloat(Half value)
-    {
-        return static_cast<float>(value);
-    }
+template <>
+inline __host__ __device__ float toFloat(Half value) {
+  return static_cast<float>(value);
+}
 
-    template <>
-    inline __host__ __device__ float toFloat(float value)
-    {
-        return value;
-    }
+template <>
+inline __host__ __device__ float toFloat(float value) {
+  return value;
+}
 
-    // Remap RGB normal in native type
-    template <typename T>
-    inline __host__ __device__ RGB remapNormal(T const& value)
-    {
-        RGB result = {};
+// Remap RGB normal in native type
+template <typename T>
+inline __host__ __device__ RGB remapNormal(T const& value) {
+  RGB result = {};
 
-        if constexpr (std::is_same_v<T, Byte3>)
-        {
-            // Byte3: x/y -> [-1,1], z -> [0,1]
-            result.r = static_cast<float>(value.r) / 255.0f * 2.0f - 1.0f;
-            result.g = static_cast<float>(value.g) / 255.0f * 2.0f - 1.0f;
-            result.b = static_cast<float>(value.b) / 255.0f; // leave z in [0,1]
-        }
-        else if constexpr (std::is_same_v<T, Half3>)
-        {
-            // Half3: x/y -> [-1,1], z -> [0,1] (Half assumed to be [0,1])
-            result.r = static_cast<float>(value.r) * 2.0f - 1.0f;
-            result.g = static_cast<float>(value.g) * 2.0f - 1.0f;
-            result.b = static_cast<float>(value.b); // leave z
-        }
-        else if constexpr (std::is_same_v<T, RGB>)
-        {
-            // RGB float already [0,1], remap x/y if needed
-            result.r = value.r * 2.0f - 1.0f;
-            result.g = value.g * 2.0f - 1.0f;
-            result.b = value.b; // leave z
-        }
-        else
-        {
-            static_assert(sizeof(T) == 0, "remapNormal not implemented for this type");
-        }
+  if constexpr (std::is_same_v<T, Byte3>) {
+    // Byte3: x/y -> [-1,1], z -> [0,1]
+    result.r = static_cast<float>(value.r) / 255.0f * 2.0f - 1.0f;
+    result.g = static_cast<float>(value.g) / 255.0f * 2.0f - 1.0f;
+    result.b = static_cast<float>(value.b) / 255.0f;  // leave z in [0,1]
+  } else if constexpr (std::is_same_v<T, Half3>) {
+    // Half3: x/y -> [-1,1], z -> [0,1] (Half assumed to be [0,1])
+    result.r = static_cast<float>(value.r) * 2.0f - 1.0f;
+    result.g = static_cast<float>(value.g) * 2.0f - 1.0f;
+    result.b = static_cast<float>(value.b);  // leave z
+  } else if constexpr (std::is_same_v<T, RGB>) {
+    // RGB float already [0,1], remap x/y if needed
+    result.r = value.r * 2.0f - 1.0f;
+    result.g = value.g * 2.0f - 1.0f;
+    result.b = value.b;  // leave z
+  } else {
+    static_assert(sizeof(T) == 0, "remapNormal not implemented for this type");
+  }
 
-        return result;
-    }
+  return result;
+}
 
-    // ---------- Texel readers ----------
+// ---------- Texel readers ----------
 
-    // Gray single-channel
-    template <typename T>
-    inline __host__ __device__ RGB readGray(T const* buffer, uint32_t idx)
-    {
-        float f = toFloat(buffer[idx]);
-        return {f, f, f};
-    }
+// Gray single-channel
+template <typename T>
+inline __host__ __device__ RGB readGray(T const* buffer, uint32_t idx) {
+  float f = toFloat(buffer[idx]);
+  return {f, f, f};
+}
 
-    // RGB
-    template <typename T>
-    inline __host__ __device__ RGB readRGB(T const* buffer, uint32_t idx, bool isNormalMap);
+// RGB
+template <typename T>
+inline __host__ __device__ RGB readRGB(T const* buffer, uint32_t idx,
+                                       bool isNormalMap);
 
-    // Specializations for RGB structs
-    template <>
-    inline __host__ __device__ RGB readRGB(RGB const* buffer, uint32_t idx, bool)
-    {
-        return buffer[idx];
-    }
+// Specializations for RGB structs
+template <>
+inline __host__ __device__ RGB readRGB(RGB const* buffer, uint32_t idx, bool) {
+  return buffer[idx];
+}
 
-    template <typename T>
-        requires std::is_same_v<T, Byte3> || std::is_same_v<T, Half3>
-    inline __host__ __device__ RGB readRGB(T const* buffer, uint32_t idx, bool isNormalMap)
-    {
-        T   h      = buffer[idx];
-        RGB result = static_cast<RGB>(h);
-        if (isNormalMap)
-        {
-            result = remapNormal(h);
-        }
-        return result;
-    }
+template <typename T>
+  requires std::is_same_v<T, Byte3> || std::is_same_v<T, Half3>
+inline __host__ __device__ RGB readRGB(T const* buffer, uint32_t idx,
+                                       bool isNormalMap) {
+  T h = buffer[idx];
+  RGB result = static_cast<RGB>(h);
+  if (isNormalMap) {
+    result = remapNormal(h);
+  }
+  return result;
+}
 
-    DMT_CORE_API __host__ __device__ RGB sampleMortonTexel(
-        int         s,
-        int         t,
-        Point2i     levelRes,
-        TexWrapMode wrapX,
-        TexWrapMode wrapY,
-        TexFormat   format,
-        bool        isNormalMap,
-        void const* mortonLevelBuffer);
+DMT_CORE_API __host__ __device__ RGB sampleMortonTexel(
+    int s, int t, Point2i levelRes, TexWrapMode wrapX, TexWrapMode wrapY,
+    TexFormat format, bool isNormalMap, void const* mortonLevelBuffer);
 
-    DMT_CORE_API uint32_t bytesPerPixel(TexFormat texFormat);
-    DMT_CORE_API size_t   alignPerPixel(TexFormat tex);
+DMT_CORE_API uint32_t bytesPerPixel(TexFormat texFormat);
+DMT_CORE_API size_t alignPerPixel(TexFormat tex);
 
-    /// Compute total number of pixels in the mip chain
-    DMT_CORE_API size_t mipChainPixelCount(int w, int h);
+/// Compute total number of pixels in the mip chain
+DMT_CORE_API size_t mipChainPixelCount(int w, int h);
 
-    /// Compute offset in pixels into the mipmapped array for the start of a given level
-    DMT_CORE_API size_t mortonLevelOffset(int baseW, int baseH, int level);
+/// Compute offset in pixels into the mipmapped array for the start of a given
+/// level
+DMT_CORE_API size_t mortonLevelOffset(int baseW, int baseH, int level);
 
-    /// assumes color has been already linearized and that image is stored in row major order
-    DMT_CORE_API ImageTexturev2 makeRGBMipmappedTexture(
-        void const*                image,
-        int32_t                    xRes,
-        int32_t                    yRes,
-        TexWrapMode                wrapModeX,
-        TexWrapMode                wrapModeY,
-        TexFormat                  texFormat,
-        std::pmr::memory_resource* memory);
+/// assumes color has been already linearized and that image is stored in row
+/// major order
+DMT_CORE_API ImageTexturev2
+makeRGBMipmappedTexture(void const* image, int32_t xRes, int32_t yRes,
+                        TexWrapMode wrapModeX, TexWrapMode wrapModeY,
+                        TexFormat texFormat, std::pmr::memory_resource* memory);
 
-    /// the texture object must be initialized and the memory reosurce given must be the same with which you created it
-    DMT_CORE_API void freeImageTexture(ImageTexturev2& tex, std::pmr::memory_resource* memory);
+/// the texture object must be initialized and the memory reosurce given must be
+/// the same with which you created it
+DMT_CORE_API void freeImageTexture(ImageTexturev2& tex,
+                                   std::pmr::memory_resource* memory);
 
-    // -- Texture Dispatch Type --
-    union DMT_CORE_API TexturePayload
-    {
-        ImageTexturev2 image;
-        CheckerTexture checker;
-    };
+// -- Texture Dispatch Type --
+union DMT_CORE_API TexturePayload {
+  ImageTexturev2 image;
+  CheckerTexture checker;
+};
 
-    struct DMT_CORE_API TextureVariant
-    {
-        TextureType    type;
-        TexturePayload payload;
+struct DMT_CORE_API TextureVariant {
+  TextureType type;
+  TexturePayload payload;
 
-        float evalFloat(TextureEvalContext const& ctx) const;
-        RGB   evalRGB(TextureEvalContext const& ctx) const;
-    };
-} // namespace dmt
-#endif // DMT_CORE_PUBLIC_CORE_TEXTURE_H
+  float evalFloat(TextureEvalContext const& ctx) const;
+  RGB evalRGB(TextureEvalContext const& ctx) const;
+};
+}  // namespace dmt
+#endif  // DMT_CORE_PUBLIC_CORE_TEXTURE_H

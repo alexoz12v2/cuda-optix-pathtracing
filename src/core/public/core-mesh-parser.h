@@ -11,18 +11,16 @@
 #include <unordered_map>
 
 namespace dmt {
-    class MeshFbxParserImpl;
-    class DMT_CORE_API MeshFbxParser
-    {
+class MeshFbxParserImpl;
+class DMT_CORE_API MeshFbxParser {
+ public:
+  MeshFbxParser();
+  ~MeshFbxParser();
 
-    public:
-        MeshFbxParser();
-        ~MeshFbxParser();
+  bool ImportFBX(char const* fileName, TriangleMesh* outMesh) const;
 
-        bool ImportFBX(char const* fileName, TriangleMesh* outMesh) const;
-
-    private:
-        std::unique_ptr<MeshFbxParserImpl> m_pimpl = nullptr;
-    };
-} // namespace dmt
-#endif // DMT_CORE_PUBLIC_CORE_MESH_PARSER_H
+ private:
+  std::unique_ptr<MeshFbxParserImpl> m_pimpl = nullptr;
+};
+}  // namespace dmt
+#endif  // DMT_CORE_PUBLIC_CORE_MESH_PARSER_H

@@ -1,5 +1,3 @@
 #include "cuda-test.h"
 
-namespace dmt {
-
-}
+namespace dmt {}

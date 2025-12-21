@@ -19,22 +19,23 @@
 #include "platform-memory-stackAllocator.h"
 
 namespace dmt {
-    /**
-     * Adds a ContextImpl object inside
-     */
-    class DMT_PLATFORM_API Ctx
-    {
-    public:
-        /**
-         * @warning The `resource` object should live beyond the `destroy` function call
-         */
-        static void init(bool                       destroyIfExising = false,
-                         std::pmr::memory_resource* resource         = std::pmr::get_default_resource());
-        static void destroy();
+/**
+ * Adds a ContextImpl object inside
+ */
+class DMT_PLATFORM_API Ctx {
+ public:
+  /**
+   * @warning The `resource` object should live beyond the `destroy` function
+   * call
+   */
+  static void init(
+      bool destroyIfExising = false,
+      std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+  static void destroy();
 
-    private:
-        Ctx()                                               = default;
-        static inline std::pmr::memory_resource* m_resource = nullptr;
-    };
-} // namespace dmt
-#endif // DMT_PLATFORM_PUBLIC_PLATFORM_H
+ private:
+  Ctx() = default;
+  static inline std::pmr::memory_resource* m_resource = nullptr;
+};
+}  // namespace dmt
+#endif  // DMT_PLATFORM_PUBLIC_PLATFORM_H

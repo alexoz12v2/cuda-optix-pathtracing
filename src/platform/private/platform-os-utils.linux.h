@@ -3,9 +3,7 @@
 
 #include "platform-macros.h"
 
-#include <sys/mman.h> // mmap, munmap
+#include <sys/mman.h>  // mmap, munmap
 
-namespace dmt::os::linux {
-
-}
-#endif // DMT_PLATFORM_PRIVATE_PLATFORM_OS_UTILS_LINUX_H
+namespace dmt::os::linux {}
+#endif  // DMT_PLATFORM_PRIVATE_PLATFORM_OS_UTILS_LINUX_H

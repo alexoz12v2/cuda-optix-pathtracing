@@ -7,86 +7,80 @@
 
 namespace dmt {
 
-    DMT_GPU uint32_t warp_enqueue(IndexQueue q, bool valid, uint32_t val)
-    {
-        unsigned mask  = __ballot_sync(0xffffffff, valid);
-        int      count = __popc(mask);
-        if (count == 0)
-            return 0u;
-        int lane = lane_id();
-        int rank = __popc(mask & ((1u << lane) - 1));
+DMT_GPU uint32_t warp_enqueue(IndexQueue q, bool valid, uint32_t val) {
+  unsigned mask = __ballot_sync(0xffffffff, valid);
+  int count = __popc(mask);
+  if (count == 0) return 0u;
+  int lane = lane_id();
+  int rank = __popc(mask & ((1u << lane) - 1));
 
-        uint32_t base = 0;
-        if (rank == 0)
-        { // first active lane reserves space
-            base = atomicAdd(q.tail, count);
-        }
-        base = __shfl_sync(0xffffffff, base, __ffs(mask) - 1);
-        if (valid)
-        {
-            uint32_t pos = base + rank;
-            if (pos < q.capacity)
-                q.items[pos] = val;
-            return pos;
-        }
-        return 0u;
-    }
+  uint32_t base = 0;
+  if (rank == 0) {  // first active lane reserves space
+    base = atomicAdd(q.tail, count);
+  }
+  base = __shfl_sync(0xffffffff, base, __ffs(mask) - 1);
+  if (valid) {
+    uint32_t pos = base + rank;
+    if (pos < q.capacity) q.items[pos] = val;
+    return pos;
+  }
+  return 0u;
+}
 
-    __global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY, int tileW, int tileH, int spp, RayPool rayPool, IndexQueue rayQ)
-    {
-        // One thread == one pixel-sample; warps will cooperatively enqueue
-        int tid     = blockIdx.x * blockDim.x + threadIdx.x;
-        int threads = gridDim.x * blockDim.x;
+__global__ void kRayGen(DeviceCamera cam, int tileStartX, int tileStartY,
+                        int tileW, int tileH, int spp, RayPool rayPool,
+                        IndexQueue rayQ) {
+  // One thread == one pixel-sample; warps will cooperatively enqueue
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int threads = gridDim.x * blockDim.x;
 
-        int total = tileW * tileH * spp;
+  int total = tileW * tileH * spp;
 
-        for (int i = tid; i < total; i += threads)
-        {
-            int s  = i % spp;
-            int p  = i / spp;
-            int tx = p % tileW;
-            int ty = p / tileW;
-            int px = tileStartX + tx;
-            int py = tileStartY + ty;
+  for (int i = tid; i < total; i += threads) {
+    int s = i % spp;
+    int p = i / spp;
+    int tx = p % tileW;
+    int ty = p / tileW;
+    int px = tileStartX + tx;
+    int py = tileStartY + ty;
 
-            // RNG
-            uint32_t      seed = 0x12345678u ^ (px * 9781u + py * 6271u + s * 13007u);
-            DeviceSampler sampler(px, py, s, seed);
-            float         u1 = sampler.get1D();
-            float         u2 = sampler.get1D();
+    // RNG
+    uint32_t seed = 0x12345678u ^ (px * 9781u + py * 6271u + s * 13007u);
+    DeviceSampler sampler(px, py, s, seed);
+    float u1 = sampler.get1D();
+    float u2 = sampler.get1D();
 
-            float3 ro, rd;
-            generate_camera_ray(cam, px, py, u1, u2, ro, rd);
+    float3 ro, rd;
+    generate_camera_ray(cam, px, py, u1, u2, ro, rd);
 
-            // Claim a ray slot = i (re-using linear index) or use atomic counter
-            uint32_t rayIdx = i; // safe because total <= capacity and unique
-            if (rayIdx >= rayPool.capacity)
-                continue;
+    // Claim a ray slot = i (re-using linear index) or use atomic counter
+    uint32_t rayIdx = i;  // safe because total <= capacity and unique
+    if (rayIdx >= rayPool.capacity) continue;
 
-            rayPool.ox[rayIdx]   = ro.x;
-            rayPool.oy[rayIdx]   = ro.y;
-            rayPool.oz[rayIdx]   = ro.z;
-            rayPool.dx[rayIdx]   = rd.x;
-            rayPool.dy[rayIdx]   = rd.y;
-            rayPool.dz[rayIdx]   = rd.z;
-            rayPool.tmin[rayIdx] = 0.0f;
-            rayPool.tmax[rayIdx] = __int_as_float(0x7f800000);
+    rayPool.ox[rayIdx] = ro.x;
+    rayPool.oy[rayIdx] = ro.y;
+    rayPool.oz[rayIdx] = ro.z;
+    rayPool.dx[rayIdx] = rd.x;
+    rayPool.dy[rayIdx] = rd.y;
+    rayPool.dz[rayIdx] = rd.z;
+    rayPool.tmin[rayIdx] = 0.0f;
+    rayPool.tmax[rayIdx] = __int_as_float(0x7f800000);
 
-            rayPool.beta_r[rayIdx]    = 1.f;
-            rayPool.beta_g[rayIdx]    = 1.f;
-            rayPool.beta_b[rayIdx]    = 1.f;
-            rayPool.bsdfPdf[rayIdx]   = 1.f;
-            rayPool.depth[rayIdx]     = 0;
-            rayPool.pixel_x[rayIdx]   = px;
-            rayPool.pixel_y[rayIdx]   = py;
-            rayPool.sampleIdx[rayIdx] = s;
-            rayPool.rngState0[rayIdx] = seed ^ 0xa5a5a5a5u;
-            rayPool.rngState1[rayIdx] = seed ^ 0x3c3c3c3cu;
+    rayPool.beta_r[rayIdx] = 1.f;
+    rayPool.beta_g[rayIdx] = 1.f;
+    rayPool.beta_b[rayIdx] = 1.f;
+    rayPool.bsdfPdf[rayIdx] = 1.f;
+    rayPool.depth[rayIdx] = 0;
+    rayPool.pixel_x[rayIdx] = px;
+    rayPool.pixel_y[rayIdx] = py;
+    rayPool.sampleIdx[rayIdx] = s;
+    rayPool.rngState0[rayIdx] = seed ^ 0xa5a5a5a5u;
+    rayPool.rngState1[rayIdx] = seed ^ 0x3c3c3c3cu;
 
-            // Enqueue
-            warp_enqueue(rayQ, true, rayIdx);
-        }
-    }
+    // Enqueue
+    warp_enqueue(rayQ, true, rayIdx);
+  }
+}
 
 #if 0
     __global__ void trace_kernel_warp(Ray const* __restrict__ rays,
@@ -364,4 +358,4 @@ namespace dmt {
         }
     }
 #endif
-} // namespace dmt
+}  // namespace dmt

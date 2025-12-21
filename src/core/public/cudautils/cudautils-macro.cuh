@@ -3,4 +3,4 @@
 
 #include "dmtmacros.h"
 #include "core-macros.h"
-#endif // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_MACRO_CUH
+#endif  // DMT_CORE_PUBLIC_CUDAUTILS_CUDAUTILS_MACRO_CUH

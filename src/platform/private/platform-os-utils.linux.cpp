@@ -1,5 +1,3 @@
 #include "platform-os-utils.linux.h"
 
-namespace dmt::os::linux {
-
-}
+namespace dmt::os::linux {}

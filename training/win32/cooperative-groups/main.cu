@@ -80,6 +80,58 @@ struct RaysPool
     int       dim     = 0;
 };
 
+template <typename D>
+struct Array2D
+{
+    __device__ Array2D(uint32_t xSize, uint32_t ySize)
+    {
+        m_buffer = new D[xSize + ySize];
+    }
+
+    __device__ float const& operator()(int32_t x, int32_t y) const
+    {
+        assert(x >= 0 && x < static_cast<int32_t>(m_xSize));
+        assert(y >= 0 && y < static_cast<int32_t>(m_ySize));
+        return m_buffer[x + m_xSize * y];
+    }
+
+    private:
+        D* m_buffer;
+        uint32_t m_xSize;
+        uint32_t m_ySize;
+};
+
+class Mitchell
+{
+
+    float evaluate(Point2f p) const
+    {
+
+    }
+
+    Vector2f radius()
+    {
+
+    }
+
+    private:
+    Vector2f      m_radius;
+    float         m_b, m_c;   
+
+};
+class FilterSampler
+{
+    public:
+        static constexpr int32_t NumSamplesPerAxisPerDomainUnit = 32;
+
+    private:
+        __device__ static Array2D<float> evaluateFuncton(Mitchell const& filter, Bounds2f domain)
+        {
+            //parallelize 
+        }
+};
+
+
 __device__ void generate_camera_ray_mega(cooperative_groups::thread_group g)
 {
     int lane = g.thread_rank();
@@ -90,18 +142,24 @@ __device__ void generate_camera_ray_mega(cooperative_groups::thread_group g)
     g.sync();
 }
 
-//__constant__ int d_lookup;
+__constant__ DeviceCamera* d_pCam;//44byte
 
-__global__ void megakernel(DeviceCamera* dp_dc)
+__global__ void megakernel()
 {
-    int                                       nPixel = dp_dc->width * dp_dc->height;
-    cooperative_groups::thread_block          block  = cooperative_groups::this_thread_block();
-    cooperative_groups::thread_block_tile<32> warp   = cooperative_groups::tiled_partition<32>(block);
+    int nPixel = d_pCam->height * d_pCam->width;
+    cooperative_groups::thread_block          block  = cooperative_groups::this_thread_block();//one block handle a tile
+    //one block handle 32px ->  a tile is 
+    //512threads->16pixels->tile:4x4
+    //16x16 px
+    cooperative_groups::thread_block_tile<32> tile   = cooperative_groups::tiled_partition<32>(block);
     for (int i = threadIdx.x; i < nPixel; i += gridDim.x * blockDim.x)
     {
-        //sampling
-        CameraSample cs;
-        generate_camera_ray_mega(warp);
+        int pX = i % d_pCam->width;
+        int pY = i / d_pCam->height; 
+        int tileX = pX / 32;  
+        int tileY = pY / 32;
+        
+
     }
 }
 
@@ -271,15 +329,21 @@ int wmain()
         cudaGetDeviceProperties(&prop, device);
         int nSM             = prop.multiProcessorCount;
         int nThreadPerBlock = prop.maxThreadsPerBlock;
-
+        std::wcout << "[DEBUG-INFO]: device: " << device << std::endl;
+        std::wcout << "\tSM: "<< nSM << std::endl;
+        std::wcout << "\tMax threas per block: "<< nThreadPerBlock << std::endl;
+        std::wcout << "\tTotal constant memory: "<< prop.totalConstMem << " bytes" << std::endl;
         DeviceCamera  h_dc;
-        DeviceCamera* dp_dc;
-        cudaMallocHost(&dp_dc, sizeof(DeviceCamera));
-        cudaMemcpy(dp_dc, &h_dc, sizeof(DeviceCamera), cudaMemcpyHostToDevice);
-        //cudaMemcoyToSymnbol
-        //Inital assumption: number of samples cannot exceed the number of threads per block
-        //cycling for obtain more samples???
-        megakernel<<<nSM, nThreadPerBlock>>>(dp_dc);
+        //kernel to build the BVH 
+        //Mitchel filter
+        Mitchell mitchellFilter();
+        //place camera
+        //kernel to build the light tree
+        //HaltonOwen
+        cudaMemcpyToSymbol(d_pCam, &h_dc, sizeof(DeviceCamera), 0, cudaMemcpyHostToDevice);
+        megakernel<<<nSM, nThreadPerBlock>>>();
+        //loop Opengl
+        //Kernel for reading the buffer
     }
     return 0;
 }

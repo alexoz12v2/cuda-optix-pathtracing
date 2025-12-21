@@ -2,6 +2,7 @@
 #define DMT_CORE_PUBLIC_CORE_TEXTURE_H
 
 #include "core-macros.h"
+#include "core-constants.h"
 #include "core-math.h"
 #include "cudautils/cudautils-transform.cuh"
 #include "cudautils/cudautils-color.cuh"
@@ -148,7 +149,6 @@ namespace dmt {
     };
 
     // -- Image Texture --
-    inline constexpr int32_t EWA_LUT_SIZE = 128;
     extern DMT_CORE_API std::array<float, EWA_LUT_SIZE> const EwaWeightLUT;
 
     enum class TexFormat : uint8_t

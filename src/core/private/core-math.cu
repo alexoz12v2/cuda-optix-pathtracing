@@ -2,6 +2,8 @@
 
 #include "platform-memory.h"
 
+#include "cuda-constants.cuh"
+
 namespace dmt::arch {
     float hmin_ps(__m128 v)
     {
@@ -834,3 +836,39 @@ namespace dmt::transforms {
         return dmt::Transform{m};
     }
 } // namespace dmt::transforms
+
+namespace dmt::cuda {
+    cudaError_t uploadMitcellDistributionToDevice(PiecewiseConstant2D const& mitchellDistribution, cudaStream_t stream)
+    {
+        std::unique_ptr<MitchellPiecewise2DGrid> deviceDistribution = std::make_unique<MitchellPiecewise2DGrid>();
+        deviceDistribution->domain                                  = mitchellDistribution.m_domain;
+        deviceDistribution->marginalIntegral                        = mitchellDistribution.m_pMarginalV.integral();
+        deviceDistribution->gridResolution                          = mitchellDistribution.resolution();
+
+        size_t       runningOffset = 0; // in floats
+        size_t const marginalBytes = mitchellDistribution.m_pMarginalV.m_funcCount * 2 *
+                                     sizeof(float); //half abs func, second half CDF
+        size_t const conditionalBytes = mitchellDistribution.m_pConditionalV[0].m_funcCount * 2 * sizeof(float);
+
+        memcpy(deviceDistribution->data, mitchellDistribution.m_pMarginalV.m_buffer.get(), marginalBytes);
+        runningOffset += marginalBytes / sizeof(float);
+        assert(runningOffset < 8320);
+        for (size_t i = 0; i < mitchellDistribution.m_pConditionalV.size(); ++i)
+        {
+            memcpy(deviceDistribution->data + runningOffset,
+                   mitchellDistribution.m_pConditionalV[i].m_buffer.get(),
+                   conditionalBytes);
+            runningOffset += conditionalBytes / sizeof(float);
+            assert(runningOffset < 8320);
+        }
+#if defined(DMT_OS_WINDOWS) && defined(DMT_DEBUG)
+        __debugbreak();
+#endif
+        return cudaMemcpyToSymbolAsync(gdc_MitchellPiecewise2DGrid,
+                                       deviceDistribution.get(),
+                                       sizeof(MitchellPiecewise2DGrid),
+                                       0,
+                                       cudaMemcpyHostToDevice,
+                                       stream);
+    }
+} // namespace dmt::cuda

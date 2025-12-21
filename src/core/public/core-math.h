@@ -14,6 +14,13 @@
 #endif
 
 #include <immintrin.h>
+#include <cuda_runtime.h>
+
+// std  stuff
+#include <span>
+#include <memory_resource>
+#include <type_traits>
+#include <concepts>
 
 namespace dmt::arch {
     DMT_CORE_API float hmin_ps(__m128 v);
@@ -58,6 +65,15 @@ namespace dmt::numbers {
 
     DMT_CORE_API uint16_t permutationElement(int32_t i, uint32_t l, uint64_t p);
 } // namespace dmt::numbers
+
+namespace dmt {
+    class PiecewiseConstant2D;
+}
+
+namespace dmt::cuda {
+    cudaError_t uploadMitcellDistributionToDevice(::dmt::PiecewiseConstant2D const& mitchellDistribution,
+                                                  cudaStream_t                      stream = 0);
+} // namespace dmt::cuda
 
 namespace dmt {
     struct DMT_CORE_API TriangleData
@@ -121,6 +137,9 @@ namespace dmt {
      */
     class PiecewiseConstant1D
     {
+        friend cudaError_t dmt::cuda::uploadMitcellDistributionToDevice(PiecewiseConstant2D const& mitchellDistribution,
+                                                                        cudaStream_t               stream);
+
     public:
         DMT_CORE_API PiecewiseConstant1D(std::span<float const>     func,
                                          float                      min,
@@ -160,6 +179,9 @@ namespace dmt {
      */
     class PiecewiseConstant2D
     {
+        friend cudaError_t dmt::cuda::uploadMitcellDistributionToDevice(PiecewiseConstant2D const& mitchellDistribution,
+                                                                        cudaStream_t               stream);
+
     public:
         DMT_CORE_API PiecewiseConstant2D(dstd::Array2D<float> const& data,
                                          Bounds2f                    domain,
@@ -231,4 +253,5 @@ namespace dmt::transforms {
     DMT_CORE_API Transform DMT_FASTCALL
         cameraFromRaster_Perspective(float focalLength, float sensorHeight, uint32_t xRes, uint32_t yRes);
 } // namespace dmt::transforms
+
 #endif // DMT_CORE_PUBLIC_CORE_MATH_H

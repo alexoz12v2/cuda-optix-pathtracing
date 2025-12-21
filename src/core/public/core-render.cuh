@@ -2,6 +2,7 @@
 #define DMT_CORE_PUBLIC_CORE_RENDER_H
 
 #include "core-macros.h"
+#include "core-constants.h"
 #include "core-bsdf.h"
 #include "core-texture.h"
 #include "core-texture-cache.h"
@@ -168,9 +169,6 @@ namespace dmt::filtering {
 
     class FilterSampler
     {
-    public:
-        static constexpr int32_t NumSamplesPerAxisPerDomainUnit = 32;
-
     private:
         template <Filter T>
         static dstd::Array2D<float> evaluateFunction(T const& filter, Bounds2f domain, std::pmr::memory_resource* memory)

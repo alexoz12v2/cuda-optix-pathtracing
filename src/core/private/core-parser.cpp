@@ -2,7 +2,7 @@
 
 #include "core-light.h"
 #include "core-math.h"
-#include "core-render.h"
+#include "core-render.cuh"
 #include "core-texture.h"
 #include "core-trianglemesh.h"
 #include "cudautils/cudautils-transform.cuh"

@@ -93,9 +93,7 @@ namespace dmt::_1basics {
         auto* d_result = reinterpret_cast<float*>(static_cast<unsigned char*>(devPtr) + 2 * bytes);
         if (!CUDA_SUCC(cudaMemcpy(d_first, v0, bytes, ::cudaMemcpyHostToDevice)))
             return;
-        if (!CUDA_SUCC(cudaMemcpy(d_second, v0, bytes, ::cudaMemcpyHostToDevice)))
-            return;
-        if (!CUDA_SUCC(cudaMemcpy(d_result, v0, bytes, ::cudaMemcpyHostToDevice)))
+        if (!CUDA_SUCC(cudaMemcpy(d_second, v1, bytes, ::cudaMemcpyHostToDevice)))
             return;
         // now run the kernel and synchronize the whole context
         static constexpr uint32_t elementsPerBlock = 256;

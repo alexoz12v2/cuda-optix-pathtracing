@@ -29,7 +29,7 @@ namespace dmt {
         float f[MaxResolutionGrid * 4]; //8192 bytes
         //TODO: sample, and pdf method
 
-        __device__ FilterSample sample(Point2f u) const {}
+        // __device__ filtering::FilterSample sample(Point2f u) const {}
 
         float DMT_CORE_API pdf(Point2f pr) const;
         //compute the mitchel f

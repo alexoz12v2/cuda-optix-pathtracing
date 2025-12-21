@@ -2,7 +2,7 @@
 #define DMT_WINDOWS_CLI
 #include "platform.h"
 
-#include "core-render.h"
+#include "core-render.cuh"
 #include "core-parser.h"
 
 #include "CLIManager.h"

@@ -1,4 +1,4 @@
-#include "core-render.h"
+#include "core-render.cuh"
 
 #include "core-bsdf.h"
 #include "core-bvh-builder.h"
@@ -123,29 +123,20 @@ namespace dmt::job {
         {
             for (int32_t x = data.StartPixel.x; x < xEnd; ++x)
             {
-#if defined(DMT_DBG_PIXEL)
-                if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y)
-                    int i = 0;
-#endif
-                // TODO remove
                 {
                     Context ctx;
                     ctx.log("[Thread {}] Pixel {} {}", std::make_tuple(tid, x, y));
                 }
                 for (int32_t sampleIndex = 0; sampleIndex < data.SamplesPerPixel; ++sampleIndex)
                 {
-#if defined(DMT_DBG_PIXEL)
-                    if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y && sampleIndex == DMT_DBG_SAMPLEINDEX)
-                        int i = 0;
-#endif
-
                     std::pmr::monotonic_buffer_resource scratch{4096}; // TODO better
                     sampler.startPixelSample({x, y}, sampleIndex);
                     camera::CameraSample const cs = camera::getCameraSample(sampler, {x, y}, *data.filter);
 
                     Ray ray{camera::generateRay(cs, *data.cameraFromRaster, *data.renderFromCamera)};
 
-                    RGB  L = RGB::fromScalar(0.f), beta = RGB::fromScalar(1.f);
+                    RGB  L                     = RGB::fromScalar(0.f);
+                    RGB  beta                  = RGB::fromScalar(1.f);
                     bool hadTransmission       = false;
                     bool specularBounce        = false;
                     bool anyNonSpecularBounces = false;
@@ -156,44 +147,21 @@ namespace dmt::job {
 
                     while (true)
                     {
-                        // TODO remove
-                        //if (data.StartPixel.x != 0 && data.StartPixel.y != 0)
-                        //{
-                        //    Context ctx;
-                        //    ctx.log("[Thread {}]  Ray O {} {} {} Ray D {} {} {}",
-                        //            std::make_tuple(tid, ray.o.x, ray.o.y, ray.o.z, ray.d.x, ray.d.y, ray.d.z));
-                        //}
-
-#if defined(DMT_DBG_PIXEL)
-                        if (x == DMT_DBG_PIXEL_X && y == DMT_DBG_PIXEL_Y && sampleIndex == DMT_DBG_SAMPLEINDEX &&
-                            depth == DMT_DBG_DEPTH)
-                            int i = 0;
-#endif
-
                         // 1. Trace Rays towards scene to find an intersection (Main Path)
                         uint32_t           instanceIdx = 0;
                         size_t             triIdx      = 0;
                         triangle::Triisect trisect     = triangle::Triisect::nothing();
                         if (!bvh::traverseRay(ray, data.bvhRoot, data.bvhNodeNum, &instanceIdx, &triIdx, &trisect))
                         {
-                            assert(data.envLight); // TODO remove
                             if (data.envLight)
                             {
                                 float     pdfLight = 0;
                                 RGB const Le       = envLightEval(*data.envLight, ray.d, &pdfLight);
                                 // 2. if no intersection, light at infinity, break
                                 if (depth == 0 || specularBounce) // specular bounce = PDF BSDF is Dirac Delta
-                                {
                                     L += beta * Le;
-                                    //Context ctx;
-                                    //ctx.trace("NM L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
-                                }
                                 else // MIS
-                                {
                                     L += beta * (bsdfPdf / (bsdfPdf + pdfLight)) * Le;
-                                    //Context ctx;
-                                    //ctx.trace("MIS L = {} {} {}", std::make_tuple(L.r, L.g, L.b));
-                                }
                             }
                             break;
                         }
@@ -215,34 +183,42 @@ namespace dmt::job {
                             IndexedTri const&      triangle = mesh.getIndexedTri(triIdx);
                             Transform const        xform    = transformFromAffine(instance.affineTransform);
                             SurfaceMaterial const& mat      = data.scene->materials[triangle.matIdx];
-                            Point2f const          uv0      = mesh.getUV(triangle.v[0].uvIdx);
-                            Point2f const          uv1      = mesh.getUV(triangle.v[1].uvIdx);
-                            Point2f const          uv2      = mesh.getUV(triangle.v[2].uvIdx);
 
                             // Perform the barycentric interpolation.
                             float const w0 = 1.0f - trisect.u - trisect.v;
                             float const w1 = trisect.u;
                             float const w2 = trisect.v;
 
-                            Point2f const  uv   = w0 * uv0 + w1 * uv1 + w2 * uv2;
+                            Point2f const  uv0  = mesh.getUV(triangle.v[0].uvIdx);
+                            Point2f const  uv1  = mesh.getUV(triangle.v[1].uvIdx);
+                            Point2f const  uv2  = mesh.getUV(triangle.v[2].uvIdx);
                             Vector2f const duv1 = uv1 - uv0;
                             Vector2f const duv2 = uv2 - uv0;
+                            Point2f const  uv   = w0 * uv0 + w1 * uv1 + w2 * uv2;
 
-                            Point3f const p0 = xform(mesh.getPosition(triangle.v[0].positionIdx));
-                            Point3f const p1 = xform(mesh.getPosition(triangle.v[1].positionIdx));
-                            Point3f const p2 = xform(mesh.getPosition(triangle.v[2].positionIdx));
-
+                            Point3f const  p0  = xform(mesh.getPosition(triangle.v[0].positionIdx));
+                            Point3f const  p1  = xform(mesh.getPosition(triangle.v[1].positionIdx));
+                            Point3f const  p2  = xform(mesh.getPosition(triangle.v[2].positionIdx));
                             Vector3f const dp1 = p1 - p0;
                             Vector3f const dp2 = p2 - p0;
+
+                            Vector3f const ngObj = normalize(cross(p2 - p0, p1 - p0));
+                            Vector3f const n0    = mesh.getNormal(triangle.v[0].normalIdx);
+                            Vector3f const n1    = mesh.getNormal(triangle.v[1].normalIdx);
+                            Vector3f const n2    = mesh.getNormal(triangle.v[2].normalIdx);
+                            Normal3f const ng    = xform(ngObj);
 
                             float const det = duv1.x * duv2.y - duv1.y * duv2.x;
                             Vector3f    dpdu, dpdv;
                             if (fl::abs(det) < 1e-8f)
                             {
+                                // Note: Assumes ng points towards the outside of the surface
                                 // UVs are degenerate � fallback to geometric basis
-                                Vector3f ng = normalize(cross(p2 - p0, p1 - p0));
-                                coordinateSystemFallback(ng, &dpdu, &dpdv); // builds arbitrary tangent frame
-                                return;
+                                coordinateSystemFallback(ngObj, &dpdu, &dpdv); // builds arbitrary tangent frame
+#ifdef DMT_OS_WINDOWS
+                                // TODO remove or something else
+                                __debugbreak();
+#endif
                             }
 
                             float const invDet = 1.0f / det;
@@ -251,12 +227,6 @@ namespace dmt::job {
 
                             float const   t = trisect.t;
                             Point3f const p = ray.o + ray.d * t;
-
-                            Vector3f const n0    = mesh.getNormal(triangle.v[0].normalIdx);
-                            Vector3f const n1    = mesh.getNormal(triangle.v[1].normalIdx);
-                            Vector3f const n2    = mesh.getNormal(triangle.v[2].normalIdx);
-                            Normal3f const ngObj = normalFrom(n0 + n1 + n2);
-                            Normal3f const ng    = xform(ngObj);
 
 // TODO remove
 #if 0
@@ -298,6 +268,7 @@ namespace dmt::job {
                                 texCtx.dUV = {};
                             }
 
+                            // TODO remove, use geometric
                             Normal3f const ns = xform(materialShadingNormal(mat, *data.texCache, texCtx, ngObj));
 
                             // 5. (Maybe) BSDF regularization
@@ -306,7 +277,7 @@ namespace dmt::job {
                             // TODO: If material is specular skip direct lighting estimation
                             LightSampleContext lightCtx{};
                             lightCtx.ray             = ray;
-                            lightCtx.n               = ensureValidSpecularReflection(ng, -ray.d, ns);
+                            lightCtx.n               = ng;// ensureValidSpecularReflection(ng, -ray.d, ns);
                             lightCtx.hadTransmission = hadTransmission;
                             lightCtx.p               = p;
 
@@ -407,6 +378,7 @@ namespace dmt::job {
                             if (bool transmission = bs.eta != 1.f; transmission)
                             {
                                 hadTransmission = true;
+                                // TODO check
                                 etascale *= (dot(ng, -ray.d) > 0 ? 1.f : bs.eta * bs.eta);
                             }
                             // prevIntrCtx = ...
@@ -862,6 +834,7 @@ namespace dmt::sampling {
 
 
     // -- halton owen --
+    // TODO Remove useless parameters
     HaltonOwen::HaltonOwen(int32_t samplesPerPixel, Point2i resolution, int32_t seed)
     {
         for (int32_t i = 0; i < NumDimensions; ++i)

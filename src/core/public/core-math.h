@@ -96,6 +96,7 @@ namespace dmt {
     DMT_CORE_API Matrix4f  matrixFromAffine(float const affineTransform[12]);
     DMT_CORE_API Transform transformFromAffine(float const affineTransform[12]);
 
+    // TODO Compare: Frame::FromZ and merge it.
     DMT_CORE_API inline void coordinateSystemFallback(Vector3f const& n, Vector3f* t, Vector3f* b)
     {
         if (fabsf(n.x) > fabsf(n.z))

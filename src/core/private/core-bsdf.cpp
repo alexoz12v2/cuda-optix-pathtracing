@@ -21,7 +21,7 @@ bool refract(Vector3f wi, Normal3f n, float eta, float* etap, Vector3f* wt) {
 
   // snell: cosThetat = sqrt(1-sin2Thetai / eta2). if radicand is negative,
   // total internal reflection
-  float const sin2Thetai = fmaxf(0.f, cosThetai * cosThetai);
+  float const sin2Thetai = fmaxf(0.f, 1.f - cosThetai * cosThetai);
   float sin2Thetat = sin2Thetai / (eta * eta);
   if (sin2Thetat > 1.f) return false;
 

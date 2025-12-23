@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <math_constants.h>
 
 #include <cstdint>
 #include <iostream>
@@ -36,15 +37,12 @@ struct CameraSample {
 };
 static_assert(sizeof(CameraSample) == 16);
 
-struct DeviceHaltonOwen
-{
-
-};
+struct DeviceHaltonOwen {};
 
 // sys left hand: z:up+, y:foward+, x:right+
 struct DeviceCamera {
-  //float focalLength = 20.f;
-  //float sensorSize = 36.f;
+  // float focalLength = 20.f;
+  // float sensorSize = 36.f;
   float3 dir{0.f, 1.f, 0.f};
   int spp = 4;
   float3 pos{0.f, 0.f, 0.f};
@@ -120,12 +118,76 @@ struct CudaTimer {
 // ---------------------------------------------------------------------------
 // Common Math
 // ---------------------------------------------------------------------------
+__device__ __forceinline__ float3 cross(float3 a, float3 b) {
+  return {
+      +a.y * b.z - a.z * b.y,
+      -a.x * b.z + a.z * b.x,
+      +a.y * b.z - a.z * b.y,
+  };
+}
+__device__ __forceinline__ float3 normalize(float3 a) {
+  float const invMag = rsqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+  return make_float3(a.x * invMag, a.y * invMag, a.z * invMag);
+}
+__device__ __forceinline__ float lerp(float a, float b, float t) {
+  // (1 - t) a + t b =  a - ta + tb = a + t ( b - a )
+  float const _1mt = 1.f - t;
+  return _1mt * a + t * b;
+}
+__device__ __forceinline__ float3 operator*(float3 v, float a) {
+  return make_float3(v.x * a, v.y * a, v.z * a);
+}
+__device__ __forceinline__ float3 operator*(float a, float3 v) {
+  return make_float3(v.x * a, v.y * a, v.z * a);
+}
+__device__ __forceinline__ float3 operator+(float3 a, float3 b) {
+  return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+// ---------------------------------------------------------------------------
+// BSDF Bits and Pieces
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ float3 sampleGGCX_VNDF(float3 wo, float2 u, float ax,
+                                                  float ay) {
+  // stretch view (anisotropic roughness)
+  float3 const V = normalize(make_float3(ax * wo.x, ay * wo.y, wo.z));
+
+  // orthonormal basis (Frame) (azimuthal only)
+  float const lensq = V.x * V.x + V.y * V.y;
+  float invLen = rsqrtf(lensq + 1e-7f);
+
+  float3 const T1 = make_float3(-V.y * invLen, V.x * invLen, 0.f);
+  float3 const T2 = cross(V, T1);
+
+  // sample disk
+  float const r = sqrtf(u.x);
+  float const phi = 2.f * CUDART_PI_F * u.y;
+
+  float const t1 = r * cosf(phi);
+
+  // blend toward normal
+  float const s = 0.5f * (1.f + V.z);
+  float const t2 = lerp(sqrtf(fmaxf(0.f, 1.f - t1 * t1)), r * sinf(phi), s);
+
+  // recombine and unstretch
+  float3 Nh = t1 * T1 + t2 * T2 + sqrtf(max(0.f, 1.f - t1 * t1 - t2 * t2)) * V;
+  Nh = normalize(make_float3(ax * Nh.x, ay * Nh.y, fmaxf(0.f, Nh.z)));
+  return Nh;
+}
+
+__device__ __forceinline__ float smithG1(float3 v, float ax, float ay) {
+  float const tan2 = (v.x * v.x) / (ax * ax) + (v.y * v.y) / (ay * ay);
+  float const cos2 = v.z * v.z; // assumes _outward_ normal local space
+  return 2.f / (1.f + sqrtf(1.f + tan2 / cos2));
+}
 
 // ---------------------------------------------------------------------------
 // Kernels
 // ---------------------------------------------------------------------------
 __device__ void raygen();
-__global__ void raygenKernel(DeviceCamera* d_cam, DeviceHaltonOwen* d_haltonOwen, CameraSample* d_samples);
+__global__ void raygenKernel(DeviceCamera* d_cam,
+                             DeviceHaltonOwen* d_haltonOwen,
+                             CameraSample* d_samples);
 
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray);
 __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray);

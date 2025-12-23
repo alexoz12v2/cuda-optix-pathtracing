@@ -26,9 +26,7 @@ int main() {
   SetConsoleOutputCP(CP_UTF8);
 #endif
 
-  //-----------------------------------------
-  // genrayKernel launch
-  //-----------------------------------------
+#if 0
   DeviceCamera h_cam;
   DeviceCamera* d_cam = nullptr;
   cudaMalloc((void**) &d_cam, sizeof(DeviceCamera));
@@ -41,5 +39,5 @@ int main() {
   //
   //launch 
   raygenKernel<<<grid, block>>>(d_cam);
-
+#endif
 }

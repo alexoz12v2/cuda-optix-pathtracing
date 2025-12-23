@@ -1,19 +1,43 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <driver_types.h>
 #include <math_constants.h>
+#include <vector_types.h>
+#include <cooperative_groups.h>
 
 #include <cstdint>
 #include <iostream>
 #include <vector>
 #include <vector>
 
+inline constexpr int WARP_SIZE = 32;
+
 // ---------------------------------------------------------------------------
 // Common Types
 // ---------------------------------------------------------------------------
 struct Ray {
-  float o[3];
-  float d[3];
+  float3 o;
+  float3 d;
+};
+
+struct RayTile {
+  __device__ __forceinline__ void addRay(Ray const& ray) {
+    int const laneId = cooperative_groups::thread_block_tile<32>::thread_rank();
+    ox[laneId] = ray.o.x;
+    oy[laneId] = ray.o.y;
+    oz[laneId] = ray.o.z;
+    dx[laneId] = ray.d.x;
+    dy[laneId] = ray.d.y;
+    dz[laneId] = ray.d.z;
+  }
+
+  float ox[WARP_SIZE];
+  float oy[WARP_SIZE];
+  float oz[WARP_SIZE];
+  float dx[WARP_SIZE];
+  float dy[WARP_SIZE];
+  float dz[WARP_SIZE];
 };
 
 struct Transform {
@@ -22,6 +46,12 @@ struct Transform {
 
   __host__ __device__ Transform();
   __host__ __device__ Transform(float const* m);
+
+  // TODO distinguish between point/vector
+  __host__ __device__ float3 apply(float3 p) const;
+  __host__ __device__ float3 applyInverse(float3 p) const;
+  __host__ __device__ float3 applyTranspose(float3 n) const;
+  __host__ __device__ float3 applyInverseTranspose(float3 n) const;
 };
 
 struct CameraSample {
@@ -37,18 +67,112 @@ struct CameraSample {
 };
 static_assert(sizeof(CameraSample) == 16);
 
-struct DeviceHaltonOwen {};
+inline constexpr int NUM_FILM_DIMENSION = 2;
+
+struct DeviceHaltonOwenParams {
+  int32_t baseScales[NUM_FILM_DIMENSION];
+  int32_t baseExponents[NUM_FILM_DIMENSION];
+  int32_t multInvs[NUM_FILM_DIMENSION];
+};
+
+/// warp-wide struct
+struct DeviceHaltonOwen {
+  static constexpr int MAX_RESOLUTION = 128;
+  __host__ __device__ DeviceHaltonOwenParams computeParams(int width,
+                                                           int height);
+
+  __device__ void startPixelSample(DeviceHaltonOwenParams const& params, int2 p,
+                                   int32_t sampleIndex, int32_t dim = 0);
+  __device__ float get1D(DeviceHaltonOwenParams const& params);
+  __device__ float2 get2D(DeviceHaltonOwenParams const& params);
+  __device__ float2 getPixel2D(DeviceHaltonOwenParams const& params);
+
+  int haltonIndex[WARP_SIZE];  // pixel
+  int dimension[WARP_SIZE];    // general value
+};
 
 // sys left hand: z:up+, y:foward+, x:right+
 struct DeviceCamera {
-  // float focalLength = 20.f;
-  // float sensorSize = 36.f;
+  float focalLength = 20.f;
+  float sensorSize = 36.f;
   float3 dir{0.f, 1.f, 0.f};
   int spp = 4;
   float3 pos{0.f, 0.f, 0.f};
   int width = 128;
   int height = 128;
 };
+
+// ---------------------------------------------------------------------------
+// Morton
+// ---------------------------------------------------------------------------
+struct MortonLayout2D {
+  uint32_t rows;  // height
+  uint32_t cols;  // width
+  uint32_t mortonRows;
+  uint32_t mortonCols;
+  uint64_t mortonCount;
+};
+
+__host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
+  if (x == 0) return 1;
+  --x;
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  return x + 1;
+}
+
+__host__ __device__ __forceinline__ MortonLayout2D mortonLayout(uint32_t rows,
+                                                                uint32_t cols) {
+  MortonLayout2D layout{};
+  layout.rows = rows;
+  layout.cols = cols;
+  layout.mortonRows = nextPow2(rows);
+  layout.mortonCols = nextPow2(cols);
+  layout.mortonCount =
+      (uint64_t)layout.mortonRows * (uint64_t)layout.mortonCols;
+  return layout;
+}
+
+__host__ __device__ __forceinline__ uint32_t part1by1(uint32_t x) {
+  x &= 0x0000ffff;  // x = ---- ---- ---- ---- fedc ba98 7654 3210
+  x = (x | (x << 8)) &
+      0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
+  x = (x | (x << 4)) &
+      0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+  x = (x | (x << 2)) &
+      0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
+  x = (x | (x << 1)) &
+      0x55555555;  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+  return x;
+}
+
+__host__ __device__ __forceinline__ uint32_t compact1By1(uint32_t x) {
+  x &= 0x55555555;  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+  x = (x | (x >> 1)) &
+      0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
+  x = (x | (x >> 2)) &
+      0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+  x = (x | (x >> 4)) &
+      0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
+  x = (x | (x >> 8)) &
+      0x0000ffff;  // x = ---- ---- ---- ---- fedc ba98 7654 3210
+  return x;
+}
+
+// row-major morton 2D -> warp 4 x 8
+__host__ __device__ __forceinline__ uint32_t encodeMorton2D(uint32_t x,
+                                                            uint32_t y) {
+  return (part1by1(y) << 1) | part1by1(x);
+}
+__host__ __device__ __forceinline__ void decodeMorton2D(uint32_t code,
+                                                        uint32_t* x,
+                                                        uint32_t* y) {
+  *x = compact1By1(code);
+  *y = compact1By1(code >> 1);
+}
 
 // ---------------------------------------------------------------------------
 // Device Types
@@ -67,6 +191,7 @@ struct TriangleSoup {
 
 struct HitResult {
   int32_t hit;  // 0 = no hit, 1 = hit
+  float t;
 };
 
 // ---------------------------------------------------------------------------
@@ -134,19 +259,132 @@ __device__ __forceinline__ float lerp(float a, float b, float t) {
   float const _1mt = 1.f - t;
   return _1mt * a + t * b;
 }
+__device__ __forceinline__ float3 operator/(float3 v, float a) {
+  return make_float3(v.x / a, v.y / a, v.z / a);
+}
+__device__ __forceinline__ float3 operator/(float3 v, float3 a) {
+  return make_float3(v.x / a.x, v.y / a.y, v.z / a.z);
+}
 __device__ __forceinline__ float3 operator*(float3 v, float a) {
   return make_float3(v.x * a, v.y * a, v.z * a);
 }
 __device__ __forceinline__ float3 operator*(float a, float3 v) {
   return make_float3(v.x * a, v.y * a, v.z * a);
 }
+__device__ __forceinline__ float3 operator*(float3 a, float3 v) {
+  return make_float3(v.x * a.x, v.y * a.y, v.z * a.z);
+}
 __device__ __forceinline__ float3 operator+(float3 a, float3 b) {
   return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+__device__ __forceinline__ float3 operator+(float3 a, float b) {
+  return make_float3(a.x + b, a.y + b, a.z + b);
+}
+__device__ __forceinline__ float3 operator-(float3 a, float3 b) {
+  return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+__device__ __forceinline__ float3 operator-(float3 a, float b) {
+  return make_float3(a.x - b, a.y - b, a.z - b);
+}
+__device__ __forceinline__ float3 operator-(float3 a) {
+  return make_float3(-a.x, -a.y, -a.z);
+}
+__device__ __forceinline__ float dot(float3 a, float3 b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+__device__ __forceinline__ float safeSqrt(float a) {
+  return sqrtf(fmaxf(a, 0.f));
+}
+__device__ __forceinline__ float3 sqrt(float3 a) {
+  return make_float3(sqrtf(a.x), sqrtf(a.y), sqrtf(a.z));
+}
+
+__device__ __forceinline__ float2 operator+(float2 a, float2 b) {
+  return make_float2(a.x + b.x, a.y + b.y);
+}
+__device__ __forceinline__ float2 operator-(float2 a, float2 b) {
+  return make_float2(a.x - b.x, a.y - b.y);
 }
 
 // ---------------------------------------------------------------------------
 // BSDF Bits and Pieces
 // ---------------------------------------------------------------------------
+__device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
+  return 2.f * dot(wo, n) * n - wo;
+}
+
+// eta = eta_i / eta_t
+__device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
+                                        float* etap, float3* wt) {
+  float cosThetai = dot(wi, n);
+  if (cosThetai < 0)  // inside -> outside
+  {
+    eta = 1.f / eta;
+    cosThetai = -cosThetai;
+    n = -n;
+  }
+
+  // snell: cosThetat = sqrt(1-sin2Thetai / eta2). if radicand is negative,
+  // total internal reflection
+  float const sin2Thetai = fmaxf(0.f, 1.f - cosThetai * cosThetai);
+  float sin2Thetat = sin2Thetai / (eta * eta);
+  if (sin2Thetat > 1.f) {
+    return false;
+  }
+
+  float const cosThetat = safeSqrt(1.f - sin2Thetat);
+
+  *wt = -wi / eta + (cosThetai / eta - cosThetat) * n;
+
+  if (etap) *etap = eta;
+
+  return true;
+}
+
+__device__ __forceinline__ float reflectanceFresnelDielectric(float cosThetaI,
+                                                              float eta) {
+  cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
+  bool const entering = cosThetaI > 0.f;
+  if (!entering) {
+    eta = 1.f / eta;
+    cosThetaI = fabsf(cosThetaI);
+  }
+  float const sinThetaI = safeSqrt(fmaxf(0.f, 1.f - cosThetaI * cosThetaI));
+  float const sinThetaT = sinThetaI / eta;
+  if (sinThetaT >= 1.f) {
+    return 1.f;  // total internal reflection
+  }
+  float const cosThetaT = safeSqrt(fmaxf(0.f, 1.f - sinThetaT * sinThetaT));
+  float const rParl =
+      ((eta * cosThetaI) - (cosThetaT)) / ((eta * cosThetaI) + (cosThetaT));
+  float const rPerp =
+      ((cosThetaI) - (eta * cosThetaT)) / ((cosThetaI) + (eta * cosThetaT));
+  return (rParl * rParl + rPerp * rPerp) * 0.5f;
+}
+
+__device__ __forceinline__ float3 reflectanceFresnelConductor(float cosThetaI,
+                                                              float3 eta,
+                                                              float3 k) {
+  cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
+  float const cosThetaI2 = cosThetaI * cosThetaI;
+  float const sinThetaI2 = 1.f - cosThetaI2;
+  float3 const eta2 = make_float3(eta.x * eta.x, eta.y * eta.y, eta.z * eta.z);
+  float3 const k2 = make_float3(k.x * k.x, k.y * k.y, k.z * k.z);
+
+  float3 const t0 = eta2 - k2 - sinThetaI2;
+  float3 const a2plusb2 = sqrt(t0 * t0 + 4.f * eta2 * k2);
+  float3 const t1 = a2plusb2 + cosThetaI2;
+  float3 const a = sqrt(0.5f * (a2plusb2 + t0));
+  float3 const t2 = 2.f * cosThetaI * a;
+  float3 const Rs = (t1 - t2) / (t1 + t2);
+
+  float3 const t3 = cosThetaI2 * a2plusb2 + sinThetaI2 * sinThetaI2;
+  float3 const t4 = t2 * sinThetaI2;
+  float3 const Rp = Rs * (t3 - t4) / (t3 + t4);
+
+  return 0.5f * (Rp + Rs);
+}
+
 __device__ __forceinline__ float3 sampleGGCX_VNDF(float3 wo, float2 u, float ax,
                                                   float ay) {
   // stretch view (anisotropic roughness)
@@ -177,18 +415,27 @@ __device__ __forceinline__ float3 sampleGGCX_VNDF(float3 wo, float2 u, float ax,
 
 __device__ __forceinline__ float smithG1(float3 v, float ax, float ay) {
   float const tan2 = (v.x * v.x) / (ax * ax) + (v.y * v.y) / (ay * ay);
-  float const cos2 = v.z * v.z; // assumes _outward_ normal local space
+  float const cos2 = v.z * v.z;  // assumes _outward_ normal local space
   return 2.f / (1.f + sqrtf(1.f + tan2 / cos2));
 }
 
 // ---------------------------------------------------------------------------
 // Kernels
 // ---------------------------------------------------------------------------
-__device__ void raygen();
+
+__device__ CameraSample getCameraSample(int2 pPixel, DeviceHaltonOwen& rng,
+                                        DeviceHaltonOwenParams const& params);
+__device__ Ray getCameraRay(CameraSample const& cs,
+                            Transform const& cameraFromRaster,
+                            Transform const& renderFromCamera);
 __global__ void raygenKernel(DeviceCamera* d_cam,
-                             DeviceHaltonOwen* d_haltonOwen,
-                             CameraSample* d_samples);
+                             DeviceHaltonOwen* d_haltonOwen, RayTile* d_rays);
 
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray);
 __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray);
 void triangleIntersectTest();
+
+__global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
+                                            TriangleSoup d_triSoup,
+                                            DeviceHaltonOwen* d_haltonOwen,
+                                            float* d_outBuffer);

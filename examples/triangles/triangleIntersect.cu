@@ -17,9 +17,9 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
       z.z - z.x,  // z[2] - z[0]
   };
   float3 const d_cross_e1 = {
-      ray.d[1] * e1.z - ray.d[2] * e1.y,  // + ay bz - az by
-      ray.d[2] * e1.x - ray.d[0] * e1.z,  // - ax bz + az bx
-      ray.d[0] * e1.y - ray.d[1] * e1.x,  // + ax by - ay bx
+      ray.d.y * e1.z - ray.d.z * e1.y,  // + ay bz - az by
+      ray.d.z * e1.x - ray.d.x * e1.z,  // - ax bz + az bx
+      ray.d.x * e1.y - ray.d.y * e1.x,  // + ax by - ay bx
   };
   float const dce1_dot_e0 =
       d_cross_e1.x * e0.x + d_cross_e1.y * e0.y + d_cross_e1.z * e0.z;
@@ -32,8 +32,8 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
   } else {
     float const invDet = 1 / dce1_dot_e0;
     // first compute everything (u, v, t), then evaluate in or out
-    float3 const origin_to_first = {ray.o[0] - x.x, ray.o[1] - y.x,
-                                    ray.o[2] - z.x};
+    float3 const origin_to_first = {ray.o.x - x.x, ray.o.y - y.x,
+                                    ray.o.z - z.x};
     float3 const t_cross_e0 = {
         origin_to_first.y * e0.z - origin_to_first.z * e0.y,
         origin_to_first.z * e0.x - origin_to_first.x * e0.z,
@@ -42,9 +42,8 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
     float const u = invDet * (d_cross_e1.x * origin_to_first.x +
                               d_cross_e1.y * origin_to_first.y +
                               d_cross_e1.z * origin_to_first.z);
-    float const v =
-        invDet * (t_cross_e0.x * ray.d[0] + t_cross_e0.y * ray.d[1] +
-                  t_cross_e0.z * ray.d[2]);
+    float const v = invDet * (t_cross_e0.x * ray.d.x + t_cross_e0.y * ray.d.y +
+                              t_cross_e0.z * ray.d.z);
     float const t = invDet * (t_cross_e0.x * e1.x + t_cross_e0.y * e1.y +
                               t_cross_e0.z * e1.z);
     // evaluate valid intersection
@@ -55,6 +54,7 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
                         (v + u) <= 1 + MOLLER_TRUMBORE_TOLERANCE);
     if (valid) {
       result.hit = 1;
+      result.t = t;
     } else {
       result.hit = 0;
     }
@@ -176,8 +176,8 @@ std::vector<int32_t> computeExpected(const HostTriangleSoup& soup,
     float3 v1{soup.xs[4 * i + 1], soup.ys[4 * i + 1], soup.zs[4 * i + 1]};
     float3 v2{soup.xs[4 * i + 2], soup.ys[4 * i + 2], soup.zs[4 * i + 2]};
 
-    float3 o{ray.o[0], ray.o[1], ray.o[2]};
-    float3 d{ray.d[0], ray.d[1], ray.d[2]};
+    float3 o{ray.o.x, ray.o.y, ray.o.z};
+    float3 d{ray.d.x, ray.d.y, ray.d.z};
 
     expected[i] = hostIntersectMT(o, d, v0, v1, v2) ? 1 : 0;
   }

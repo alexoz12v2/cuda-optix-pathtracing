@@ -287,8 +287,8 @@ template <int32_t n, Scalar T, glm::qualifier Q>
 #else
 template <int32_t n, typename T, glm::qualifier Q>
 #endif
-inline __host__ __device__ from_glm_t<n, T, Q> const* fromGLM(
-    glm::vec<n, T, Q> const* v) {
+inline __host__ __device__
+    from_glm_t<n, T, Q> const* fromGLM(glm::vec<n, T, Q> const* v) {
 #if defined(__CUDA_ARCH__)
   return reinterpret_cast<from_glm_t<n, T, Q> const*>(v);
 #else

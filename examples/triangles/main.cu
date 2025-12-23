@@ -24,11 +24,18 @@ int main() {
 #endif
 
 #if 0
+  //device camera
   DeviceCamera h_cam;
   DeviceCamera* d_cam = nullptr;
   cudaMalloc((void**)&d_cam, sizeof(DeviceCamera));
   cudaMemcpy(d_cam, &h_cam, sizeof(DeviceCamera), cudaMemcpyHostToDevice);
-
+  //halton howen
+  DeviceHaltonOwen h_ho;
+  h_ho.32px
+  DeviceHaltonOwen* d_ho = nullptr;
+  cudaMalloc((void**)&d_ho, sizeof(DeviceHaltonOwen));
+  cudaMemcpy(d_ho, &h_ho, sizeof(DeviceHaltonOwen), cudaMemcpyHostToDevice);
+  //
   dim3 grid(1, 1, 1);
   dim3 block(32, 32, 1);
   //

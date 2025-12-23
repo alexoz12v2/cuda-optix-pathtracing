@@ -1,16 +1,15 @@
 #include "common.cuh"
 
-__device__ CameraSample raygen() {
-  return {};
-}
+__device__ CameraSample raygen() { return {}; }
 
-__global__ void raygenKernel(DeviceCamera const* d_cam, DeviceHaltonOwen* d_haltonOwen, CameraSample* d_samples) {
+__global__ void raygenKernel(DeviceCamera const* d_cam,
+                             DeviceHaltonOwen* d_haltonOwen,
+                             CameraSample* d_samples) {
   // transforms
   // grid-style loop (2D)
   // - getCameraRay
   // - write to buffer
 }
-
 
 // 128-byte boundary aligned staring address
 // 0x____'____'____'____'____'____'____'__00

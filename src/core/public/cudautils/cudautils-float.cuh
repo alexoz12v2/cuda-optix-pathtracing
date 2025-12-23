@@ -378,7 +378,7 @@ DMT_CPU_GPU DMT_CORE_API inline float smoothstep(float a, float b, float x) {
 
 // TODO SOA
 struct DMT_CORE_API Intervalf {
-  struct DMT_CORE_API SOA {};
+  struct DMT_CORE_API SOA{};
 
  public:
   Intervalf() = default;

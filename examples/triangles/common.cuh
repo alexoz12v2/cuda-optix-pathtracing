@@ -36,15 +36,12 @@ struct CameraSample {
 };
 static_assert(sizeof(CameraSample) == 16);
 
-struct DeviceHaltonOwen
-{
-
-};
+struct DeviceHaltonOwen {};
 
 // sys left hand: z:up+, y:foward+, x:right+
 struct DeviceCamera {
-  //float focalLength = 20.f;
-  //float sensorSize = 36.f;
+  // float focalLength = 20.f;
+  // float sensorSize = 36.f;
   float3 dir{0.f, 1.f, 0.f};
   int spp = 4;
   float3 pos{0.f, 0.f, 0.f};
@@ -125,7 +122,9 @@ struct CudaTimer {
 // Kernels
 // ---------------------------------------------------------------------------
 __device__ void raygen();
-__global__ void raygenKernel(DeviceCamera* d_cam, DeviceHaltonOwen* d_haltonOwen, CameraSample* d_samples);
+__global__ void raygenKernel(DeviceCamera* d_cam,
+                             DeviceHaltonOwen* d_haltonOwen,
+                             CameraSample* d_samples);
 
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray);
 __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray);

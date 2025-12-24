@@ -1,64 +1,49 @@
 #include "common.cuh"
 
 inline uint32_t constexpr TRIANGLES_PER_THREAD = 4;
-inline float constexpr MOLLER_TRUMBORE_TOLERANCE = 1e-5f;
+inline float constexpr MOLLER_TRUMBORE_TOLERANCE = 1e-7f;
 
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
   HitResult result{};
-  // compute edge vectors
-  float3 const e0{
-      x.y - x.x,  // x[1] - x[0]
-      y.y - y.x,  // y[1] - y[0]
-      z.y - z.x,  // z[1] - z[0]
-  };
-  float3 const e1{
-      x.z - x.x,  // x[2] - x[0]
-      y.z - y.x,  // y[2] - y[0]
-      z.z - z.x,  // z[2] - z[0]
-  };
-  float3 const d_cross_e1 = {
-      ray.d.y * e1.z - ray.d.z * e1.y,  // + ay bz - az by
-      ray.d.z * e1.x - ray.d.x * e1.z,  // - ax bz + az bx
-      ray.d.x * e1.y - ray.d.y * e1.x,  // + ax by - ay bx
-  };
-  float const dce1_dot_e0 =
+  result.hit = 0;
+  result.t = CUDART_INF_F;
+
+  float3 const e0{x.y - x.x, y.y - y.x, z.y - z.x};
+  float3 const e1{x.z - x.x, y.z - y.x, z.z - z.x};
+
+  float3 const d_cross_e1{ray.d.y * e1.z - ray.d.z * e1.y,
+                          ray.d.z * e1.x - ray.d.x * e1.z,
+                          ray.d.x * e1.y - ray.d.y * e1.x};
+
+  float const det =
       d_cross_e1.x * e0.x + d_cross_e1.y * e0.y + d_cross_e1.z * e0.z;
-  // if determinant is zero or near to zero, ray // triangle
-  // TODO: shared mem to accumulate results. Delay writing GMEM (coalescing)
-  if (dce1_dot_e0 > -MOLLER_TRUMBORE_TOLERANCE &&
-      dce1_dot_e0 < MOLLER_TRUMBORE_TOLERANCE) {
-    // write to GMEM intersection result
-    result.hit = 0;
-  } else {
-    float const invDet = 1 / dce1_dot_e0;
-    // first compute everything (u, v, t), then evaluate in or out
-    float3 const origin_to_first = {ray.o.x - x.x, ray.o.y - y.x,
-                                    ray.o.z - z.x};
-    float3 const t_cross_e0 = {
-        origin_to_first.y * e0.z - origin_to_first.z * e0.y,
-        origin_to_first.z * e0.x - origin_to_first.x * e0.z,
-        origin_to_first.x * e0.y - origin_to_first.y * e0.x,
-    };
-    float const u = invDet * (d_cross_e1.x * origin_to_first.x +
-                              d_cross_e1.y * origin_to_first.y +
-                              d_cross_e1.z * origin_to_first.z);
-    float const v = invDet * (t_cross_e0.x * ray.d.x + t_cross_e0.y * ray.d.y +
-                              t_cross_e0.z * ray.d.z);
-    float const t = invDet * (t_cross_e0.x * e1.x + t_cross_e0.y * e1.y +
-                              t_cross_e0.z * e1.z);
-    // evaluate valid intersection
-    // TODO: tMin and tMax
-    bool const valid = (u >= -MOLLER_TRUMBORE_TOLERANCE &&
-                        u <= 1 + MOLLER_TRUMBORE_TOLERANCE) &&
-                       (v >= -MOLLER_TRUMBORE_TOLERANCE &&
-                        (v + u) <= 1 + MOLLER_TRUMBORE_TOLERANCE);
-    if (valid) {
-      result.hit = 1;
-      result.t = t;
-    } else {
-      result.hit = 0;
-    }
+  if (fabsf(det) < MOLLER_TRUMBORE_TOLERANCE) return result;  // parallel
+
+  float const invDet = 1.0f / det;
+  float3 const o_to_v0{ray.o.x - x.x, ray.o.y - y.x, ray.o.z - z.x};
+  float3 const t_cross_e0{o_to_v0.y * e0.z - o_to_v0.z * e0.y,
+                          o_to_v0.z * e0.x - o_to_v0.x * e0.z,
+                          o_to_v0.x * e0.y - o_to_v0.y * e0.x};
+
+  float const u =
+      invDet * (d_cross_e1.x * o_to_v0.x + d_cross_e1.y * o_to_v0.y +
+                d_cross_e1.z * o_to_v0.z);
+  float const v = invDet * (t_cross_e0.x * ray.d.x + t_cross_e0.y * ray.d.y +
+                            t_cross_e0.z * ray.d.z);
+  float const t = invDet * (t_cross_e0.x * e1.x + t_cross_e0.y * e1.y +
+                            t_cross_e0.z * e1.z);
+
+  bool const valid =
+      (u >= -MOLLER_TRUMBORE_TOLERANCE && v >= -MOLLER_TRUMBORE_TOLERANCE &&
+       (u + v) <= 1 + MOLLER_TRUMBORE_TOLERANCE) &&
+      (t > 1e-4f);  // <-- reject t <= 0
+
+  if (valid) {
+    result.hit = 1;
+    result.t = t;
   }
+
+  return result;
 }
 
 __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray) {
@@ -80,7 +65,7 @@ __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray) {
 
 HitResult hostIntersectMT(const float3& o, const float3& d, const float3& v0,
                           const float3& v1, const float3& v2) {
-#if 1
+#if 0
   std::cout << "--------------------------------------------" << std::endl;
   std::cout << "Ray Direction" << std::endl;
   std::cout << "    " << d.x << ", " << d.y << ", " << d.z << std::endl;

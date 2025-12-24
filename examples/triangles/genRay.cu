@@ -18,6 +18,20 @@ __device__ CameraSample getCameraSample(int2 pPixel, DeviceHaltonOwen& rng,
   return cs;
 }
 
+__device__ Ray getCameraRayNonRandom(int2 pixel,
+                                     Transform const& cameraFromRaster,
+                                     Transform const& renderFromCamera) {
+  Ray ray;
+  float2 const thePixel = make_float2(pixel.x + 0.5f, pixel.y + 0.5f);
+  float3 const pCamera =
+      cameraFromRaster.apply(make_float3(thePixel.x, thePixel.y, 0.0f));
+
+  ray.o = renderFromCamera.apply(make_float3(0.0f, 0.0f, 0.0f));
+  ray.d = normalize(renderFromCamera.applyDirection(pCamera));
+
+  return ray;
+}
+
 __device__ Ray getCameraRay(CameraSample const& cs,
                             Transform const& cameraFromRaster,
                             Transform const& renderFromCamera) {
@@ -108,22 +122,47 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
                                             TriangleSoup d_triSoup,
                                             DeviceHaltonOwen* d_haltonOwen,
                                             float* d_outBuffer) {
-  uint32_t const mortonIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t const spp = d_cam->spp;
   // constant memory?
   MortonLayout2D const layout = mortonLayout(d_cam->width, d_cam->height);
   DeviceHaltonOwenParams const params =
-      d_haltonOwen[mortonIndex / warpSize].computeParams(layout.cols,
+      d_haltonOwen[mortonStart / warpSize].computeParams(layout.cols,
                                                          layout.rows);
   Transform const cameraFromRaster = cameraFromRaster_Perspective(
       d_cam->focalLength, d_cam->sensorSize, d_cam->width, d_cam->height);
   Transform const renderFromCamera = worldFromCamera(d_cam->dir, d_cam->pos);
 
-  for (int i = mortonIndex; i < layout.mortonCount;
-       i += gridDim.x * blockDim.x) {
+  for (int mortonIndex = mortonStart; mortonIndex < layout.mortonCount;
+       mortonIndex += gridDim.x * blockDim.x) {
     uint2 upixel{};
-    decodeMorton2D(i, &upixel.x, &upixel.y);
+    decodeMorton2D(mortonIndex, &upixel.x, &upixel.y);
     int2 const pixel = make_int2(upixel.x, upixel.y);
+#if 1
+    {
+      printf("Start pixel %d %d\n", pixel.x, pixel.y);
+      HitResult hitResult{};
+      hitResult.t = CUDART_INF_F;
+      Ray const ray =
+          getCameraRayNonRandom(pixel, cameraFromRaster, renderFromCamera);
+      printf("----------------------------------------------------\n");
+      printf("Ray: \n");
+      printf("    Origin: %f %f %f \n", ray.o.x, ray.o.y, ray.o.z);
+      printf("    Direct: %f %f %f \n", ray.d.x, ray.d.y, ray.d.z);
+      for (int tri = 0; tri < d_triSoup.count; ++tri) {
+        float4 const x = reinterpret_cast<float4 const*>(d_triSoup.xs)[tri];
+        float4 const y = reinterpret_cast<float4 const*>(d_triSoup.ys)[tri];
+        float4 const z = reinterpret_cast<float4 const*>(d_triSoup.zs)[tri];
+        HitResult const result = triangleIntersect(x, y, z, ray);
+        if (result.hit && result.t < hitResult.t) {
+          hitResult = result;
+        }
+      }
+      if (hitResult.hit) {
+        printf("    Intersection at t = %f\n", hitResult.t);
+      }
+      printf("----------------------------------------------------\n");
+#else
     for (int s = 0; s < spp; ++s) {
       // start pixel sample and generate ray
       d_haltonOwen->startPixelSample(params, pixel, s);
@@ -142,11 +181,13 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
           hitResult = result;
         }
       }
+#endif
       __syncwarp();
 
       // add to output buffer
       float const toAdd = static_cast<float>(hitResult.hit) / spp;
-      atomicAdd(&d_outBuffer[mortonIndex], toAdd);
+      float* target = d_outBuffer + mortonIndex;
+      atomicAdd(target, toAdd);
     }
   }
 }

@@ -332,8 +332,13 @@ void hostIntersectionKernel(
 namespace {
 
 void testIntersectionMegakernel() {
+#if 0
   uint32_t const threads = 512;
   uint32_t const blocks = 16;
+#else
+  uint32_t const threads = 1;
+  uint32_t const blocks = 1;
+#endif
   // init scene
   std::cout << "Allocating host and device resources" << std::endl;
   uint32_t width, height;
@@ -362,7 +367,7 @@ void testIntersectionMegakernel() {
 #if 1
   {
     std::cout << "Computing intersection to host" << std::endl;
-#  if 0
+#  if 1
     std::vector<float> out;
     out.resize(mortonLayout(h_camera.height, h_camera.width).mortonCount);
     hostIntersectionKernel(true, h_camera, h_mesh,

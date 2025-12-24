@@ -79,6 +79,13 @@ __host__ __device__ Transform::Transform(float const* _m) {
   }
 }
 
+__host__ __device__ float3 Transform::applyDirection(float3 v) const {
+  float const x = m[0] * v.x + m[4] * v.y + m[8] * v.z;
+  float const y = m[1] * v.x + m[5] * v.y + m[9] * v.z;
+  float const z = m[2] * v.x + m[6] * v.y + m[10] * v.z;
+  return make_float3(x, y, z);
+}
+
 // Point transform (w = 1)
 __host__ __device__ float3 Transform::apply(float3 p) const {
   float x = m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12];

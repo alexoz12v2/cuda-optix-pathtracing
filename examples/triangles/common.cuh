@@ -48,6 +48,8 @@ struct Transform {
   __host__ __device__ Transform(float const* m);
 
   // TODO distinguish between point/vector
+  __host__ __device__ float3 applyDirection(float3 v) const;
+
   __host__ __device__ float3 apply(float3 p) const;
   __host__ __device__ float3 applyInverse(float3 p) const;
   __host__ __device__ float3 applyTranspose(float3 n) const;
@@ -91,15 +93,16 @@ struct DeviceHaltonOwen {
   int dimension[WARP_SIZE];    // general value
 };
 
-// sys left hand: z:up+, y:foward+, x:right+
+// Camera Space (left-handed):       y+ up, z+ forward, x+ right
+// World/Render Space (left-handed): z+ up, y+:forward, x+ right
 struct DeviceCamera {
   float focalLength = 20.f;
   float sensorSize = 36.f;
   float3 dir{0.f, 1.f, 0.f};
   int spp = 4;
   float3 pos{0.f, 0.f, 0.f};
-  int width = 128;
-  int height = 128;
+  int width = 16;
+  int height = 16;
 };
 
 // ---------------------------------------------------------------------------
@@ -208,7 +211,7 @@ struct HostTriangleSoup {
 // ---------------------------------------------------------------------------
 #define CUDA_CHECK(call)                                                   \
   do {                                                                     \
-    cudaError_t err = (call);                                              \
+    cudaError_t const err = (call);                                        \
     if (err != cudaSuccess) {                                              \
       std::cerr << "CUDA Error: " << cudaGetErrorName(err) << ": "         \
                 << cudaGetErrorString(err) << "\n\tat " << __FILE__ << ':' \
@@ -243,66 +246,63 @@ struct CudaTimer {
 // ---------------------------------------------------------------------------
 // Common Math
 // ---------------------------------------------------------------------------
-__device__ __forceinline__ float3 cross(float3 a, float3 b) {
-  return {
-      +a.y * b.z - a.z * b.y,
-      -a.x * b.z + a.z * b.x,
-      +a.y * b.z - a.z * b.y,
-  };
+__host__ __device__ __forceinline__ float3 cross(float3 a, float3 b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
-__device__ __forceinline__ float3 normalize(float3 a) {
+// TODO safety assert
+__host__ __device__ __forceinline__ float3 normalize(float3 a) {
   float const invMag = rsqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
   return make_float3(a.x * invMag, a.y * invMag, a.z * invMag);
 }
-__device__ __forceinline__ float lerp(float a, float b, float t) {
+__host__ __device__ __forceinline__ float lerp(float a, float b, float t) {
   // (1 - t) a + t b =  a - ta + tb = a + t ( b - a )
   float const _1mt = 1.f - t;
   return _1mt * a + t * b;
 }
-__device__ __forceinline__ float3 operator/(float3 v, float a) {
+__host__ __device__ __forceinline__ float3 operator/(float3 v, float a) {
   return make_float3(v.x / a, v.y / a, v.z / a);
 }
-__device__ __forceinline__ float3 operator/(float3 v, float3 a) {
+__host__ __device__ __forceinline__ float3 operator/(float3 v, float3 a) {
   return make_float3(v.x / a.x, v.y / a.y, v.z / a.z);
 }
-__device__ __forceinline__ float3 operator*(float3 v, float a) {
+__host__ __device__ __forceinline__ float3 operator*(float3 v, float a) {
   return make_float3(v.x * a, v.y * a, v.z * a);
 }
-__device__ __forceinline__ float3 operator*(float a, float3 v) {
+__host__ __device__ __forceinline__ float3 operator*(float a, float3 v) {
   return make_float3(v.x * a, v.y * a, v.z * a);
 }
-__device__ __forceinline__ float3 operator*(float3 a, float3 v) {
+__host__ __device__ __forceinline__ float3 operator*(float3 a, float3 v) {
   return make_float3(v.x * a.x, v.y * a.y, v.z * a.z);
 }
-__device__ __forceinline__ float3 operator+(float3 a, float3 b) {
+__host__ __device__ __forceinline__ float3 operator+(float3 a, float3 b) {
   return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
 }
-__device__ __forceinline__ float3 operator+(float3 a, float b) {
+__host__ __device__ __forceinline__ float3 operator+(float3 a, float b) {
   return make_float3(a.x + b, a.y + b, a.z + b);
 }
-__device__ __forceinline__ float3 operator-(float3 a, float3 b) {
+__host__ __device__ __forceinline__ float3 operator-(float3 a, float3 b) {
   return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
 }
-__device__ __forceinline__ float3 operator-(float3 a, float b) {
+__host__ __device__ __forceinline__ float3 operator-(float3 a, float b) {
   return make_float3(a.x - b, a.y - b, a.z - b);
 }
-__device__ __forceinline__ float3 operator-(float3 a) {
+__host__ __device__ __forceinline__ float3 operator-(float3 a) {
   return make_float3(-a.x, -a.y, -a.z);
 }
-__device__ __forceinline__ float dot(float3 a, float3 b) {
+__host__ __device__ __forceinline__ float dot(float3 a, float3 b) {
   return a.x * b.x + a.y * b.y + a.z * b.z;
 }
-__device__ __forceinline__ float safeSqrt(float a) {
+__host__ __device__ __forceinline__ float safeSqrt(float a) {
   return sqrtf(fmaxf(a, 0.f));
 }
-__device__ __forceinline__ float3 sqrt(float3 a) {
+__host__ __device__ __forceinline__ float3 sqrt(float3 a) {
   return make_float3(sqrtf(a.x), sqrtf(a.y), sqrtf(a.z));
 }
 
-__device__ __forceinline__ float2 operator+(float2 a, float2 b) {
+__host__ __device__ __forceinline__ float2 operator+(float2 a, float2 b) {
   return make_float2(a.x + b.x, a.y + b.y);
 }
-__device__ __forceinline__ float2 operator-(float2 a, float2 b) {
+__host__ __device__ __forceinline__ float2 operator-(float2 a, float2 b) {
   return make_float2(a.x - b.x, a.y - b.y);
 }
 
@@ -420,6 +420,16 @@ __device__ __forceinline__ float smithG1(float3 v, float ax, float ay) {
 }
 
 // ---------------------------------------------------------------------------
+// Host Device Math
+// ---------------------------------------------------------------------------
+__host__ __device__ Transform worldFromCamera(float3 cameraDirection,
+                                              float3 cameraPosition);
+__host__ __device__ Transform cameraFromRaster_Perspective(float focalLength,
+                                                           float sensorHeight,
+                                                           uint32_t xRes,
+                                                           uint32_t yRes);
+
+// ---------------------------------------------------------------------------
 // Kernels
 // ---------------------------------------------------------------------------
 
@@ -431,6 +441,8 @@ __device__ Ray getCameraRay(CameraSample const& cs,
 __global__ void raygenKernel(DeviceCamera* d_cam,
                              DeviceHaltonOwen* d_haltonOwen, RayTile* d_rays);
 
+HitResult hostIntersectMT(const float3& o, const float3& d, const float3& v0,
+                          const float3& v1, const float3& v2);
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray);
 __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray);
 void triangleIntersectTest();

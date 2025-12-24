@@ -78,10 +78,22 @@ __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray) {
   }
 }
 
-namespace {
-bool hostIntersectMT(const float3& o, const float3& d, const float3& v0,
-                     const float3& v1, const float3& v2) {
-  constexpr float EPS = 1e-5f;
+HitResult hostIntersectMT(const float3& o, const float3& d, const float3& v0,
+                          const float3& v1, const float3& v2) {
+#if 1
+  std::cout << "--------------------------------------------" << std::endl;
+  std::cout << "Ray Direction" << std::endl;
+  std::cout << "    " << d.x << ", " << d.y << ", " << d.z << std::endl;
+  std::cout << "Ray Origin" << std::endl;
+  std::cout << "    " << o.x << ", " << o.y << ", " << o.z << std::endl;
+  std::cout << "Triangle" << std::endl;
+  std::cout << "    " << v0.x << ", " << v0.y << ", " << v0.z << std::endl;
+  std::cout << "    " << v1.x << ", " << v1.y << ", " << v1.z << std::endl;
+  std::cout << "    " << v2.x << ", " << v2.y << ", " << v2.z << std::endl;
+  std::cout << "--------------------------------------------" << std::endl;
+#endif
+  constexpr float EPS = 1e-7f;
+  HitResult hit{};
 
   float3 e0{v1.x - v0.x, v1.y - v0.y, v1.z - v0.z};
   float3 e1{v2.x - v0.x, v2.y - v0.y, v2.z - v0.z};
@@ -90,24 +102,31 @@ bool hostIntersectMT(const float3& o, const float3& d, const float3& v0,
            d.x * e1.y - d.y * e1.x};
 
   float det = p.x * e0.x + p.y * e0.y + p.z * e0.z;
-  if (fabs(det) < EPS) return false;
+  if (fabs(det) < EPS) return hit;
 
   float invDet = 1.0f / det;
 
   float3 t{o.x - v0.x, o.y - v0.y, o.z - v0.z};
 
   float u = invDet * (p.x * t.x + p.y * t.y + p.z * t.z);
-  if (u < -EPS || u > 1 + EPS) return false;
+  if (u < -EPS || u > 1 + EPS) return hit;
 
   float3 q{t.y * e0.z - t.z * e0.y, t.z * e0.x - t.x * e0.z,
            t.x * e0.y - t.y * e0.x};
 
   float v = invDet * (q.x * d.x + q.y * d.y + q.z * d.z);
-  if (v < -EPS || u + v > 1 + EPS) return false;
+  if (v < -EPS || u + v > 1 + EPS) return hit;
 
   float tHit = invDet * (q.x * e1.x + q.y * e1.y + q.z * e1.z);
-  return tHit > EPS;
+  if (tHit > EPS) {
+    hit.hit = 1;
+    hit.t = tHit;
+  }
+
+  return hit;
 }
+
+namespace {
 
 HostTriangleSoup generateTriangleSoup(size_t count) {
   HostTriangleSoup soup;
@@ -179,7 +198,7 @@ std::vector<int32_t> computeExpected(const HostTriangleSoup& soup,
     float3 o{ray.o.x, ray.o.y, ray.o.z};
     float3 d{ray.d.x, ray.d.y, ray.d.z};
 
-    expected[i] = hostIntersectMT(o, d, v0, v1, v2) ? 1 : 0;
+    expected[i] = hostIntersectMT(o, d, v0, v1, v2).hit ? 1 : 0;
   }
 
   return expected;

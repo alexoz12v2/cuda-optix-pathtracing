@@ -26,7 +26,7 @@ __device__ Ray getCameraRay(CameraSample const& cs,
       cameraFromRaster.apply(make_float3(cs.pFilm.x, cs.pFilm.y, 0.0f));
 
   ray.o = renderFromCamera.apply(make_float3(0.0f, 0.0f, 0.0f));
-  ray.d = normalize(renderFromCamera.apply(normalize(pCamera)));
+  ray.d = normalize(renderFromCamera.applyDirection(pCamera));
 
   return ray;
 }
@@ -54,48 +54,52 @@ __global__ void raygenKernel(DeviceCamera* d_cam,
 // 0x____'____'____'____'____'____'____'__c0
 // 0x____'____'____'____'____'____'____'__e0
 
-// | Rx Ux Fx Tx |
-// | Ry Uy Fy Ty |
-// | Rz Uz Fz Tz |
-// | 0  0  0  1  |
-__device__ Transform worldFromCamera(float3 cameraDirection,
-                                     float3 cameraPosition) {
-  float3 const forward = cameraDirection;  // +Z in camera space
-  float3 const worldUp{0.0f, 0.0f, 1.0f};  // World up (0, 0, +Z)
-
-  // Compute right (X) and up (Y) vectors for the camera frame (left handed
-  // system)
-  float3 const right =
-      normalize(cross(forward, worldUp));              // +X in camera space
-  float3 const up = normalize(cross(right, forward));  // +Y in camera space
+__host__ __device__ Transform worldFromCamera(float3 cameraDirection,
+                                              float3 cameraPosition) {
+  float3 const cameraRight =
+      normalize(cross(make_float3(0, 0, 1), cameraDirection));  // X
+  float3 const cameraUp = make_float3(0, 0, 1);                 // Y → world Z
+  float3 const cameraForward = normalize(cameraDirection);      // Z → world Y
 
   // Column-major matrix for worldFromCamera
   // clang-format off
-  float const m[16]{
-    right.x,   right.y,   right.z,   0.0f, // Column 0: right
-    up.x,      up.y,      up.z,      0.0f, // Column 1: up
-    forward.x, forward.y, forward.z, 0.0f, // Column 2: forward
-    cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f // Column 3: position
-  };
+  float m[16];
+  m[ 0] = cameraRight.x; m[ 4] = cameraUp.x; m[ 8] = cameraForward.x; m[12] = cameraPosition.x;
+  m[ 1] = cameraRight.y; m[ 5] = cameraUp.y; m[ 9] = cameraForward.y; m[13] = cameraPosition.y;
+  m[ 2] = cameraRight.z; m[ 6] = cameraUp.z; m[10] = cameraForward.z; m[14] = cameraPosition.z;
+  m[ 3] = 0.0f;          m[ 7] = 0.0f;       m[11] = 0.0f;            m[15] = 1.0f;
   // clang-format on
   return Transform{m};
 }
 
-__device__ Transform cameraFromRaster_Perspective(float focalLength,
-                                                  float sensorHeight,
-                                                  uint32_t xRes,
-                                                  uint32_t yRes) {
-  float const aspectRatio = static_cast<float>(xRes) / static_cast<float>(yRes);
-  float const halfHeight = 0.5f * sensorHeight;
-  float const halfWidth = halfHeight * aspectRatio;
+__host__ __device__ Transform cameraFromRaster_Perspective(
+    float focalLength_mm, float sensorHeight_mm, uint32_t xRes, uint32_t yRes) {
+  // Compute sensor width from aspect ratio
+  const float sensorWidth_mm =
+      sensorHeight_mm * static_cast<float>(xRes) / static_cast<float>(yRes);
 
-  float const pixelSizeX = 2.0f * halfWidth / static_cast<float>(xRes);
-  float const pixelSizeY = 2.0f * halfHeight / static_cast<float>(yRes);
+  static constexpr float MM_TO_M = 0.001f;
 
-  float const tx = -halfWidth + 0.5f * pixelSizeX;
-  float const ty = halfHeight - 0.5f * pixelSizeY;
+  float const focalLength_m = focalLength_mm * MM_TO_M;
+  float const sensorHeight_m = sensorHeight_mm * MM_TO_M;
+  float const sensorWidth_m = sensorWidth_mm * MM_TO_M;
 
-  float const m[16]{0.0f, 0.0f, 1.0f, 0.0f, tx, ty, focalLength, 1.0f};
+  // Pixel size in mm on the sensor
+  const float pixelSizeX = sensorWidth_m / static_cast<float>(xRes);
+  const float pixelSizeY = sensorHeight_m / static_cast<float>(yRes);
+
+  // Offset from raster origin (top-left) to sensor coordinates (centered)
+  float const tx = -0.5f * sensorWidth_m + 0.5f * pixelSizeX;
+  float const ty = 0.5f * sensorHeight_m - 0.5f * pixelSizeY;
+  float const tz = focalLength_m;
+
+  // clang-format off
+  float m[16];
+  m[ 0] = pixelSizeX; m[ 4] = 0.0f;        m[ 8] = 0.0f; m[12] = tx;
+  m[ 1] = 0.0f;       m[ 5] = -pixelSizeY; m[ 9] = 0.0f; m[13] = ty;
+  m[ 2] = 0.0f;       m[ 6] = 0.0f;        m[10] = 1.0f; m[14] = tz;
+  m[ 3] = 0.0f;       m[ 7] = 0.0f;        m[11] = 0.0f; m[15] = 1.0f;
+  // clang-format on
 
   return Transform{m};
 }
@@ -138,6 +142,7 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
           hitResult = result;
         }
       }
+      __syncwarp();
 
       // add to output buffer
       float const toAdd = static_cast<float>(hitResult.hit) / spp;

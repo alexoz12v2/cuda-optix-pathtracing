@@ -271,6 +271,20 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
   writeGrayscaleBMP(theOutPath.c_str(), rowMajorImage.get(), width, height);
 }
 
+Light* deviceLights(uint32_t* lightCount) {
+  Light* d_lights = nullptr;
+  if (lightCount) *lightCount = 2;
+  Light h_lights[2]{
+      makePointLight(make_float3(244.f / 255, 191.f / 255, 117.f / 255),
+                     make_float3(-.5f, 1.5f, 0.45f), 0.01f),
+      makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)),
+  };
+  CUDA_CHECK(cudaMalloc(&d_lights, sizeof(Light) * 2));
+  CUDA_CHECK(cudaMemcpy(d_lights, h_lights, sizeof(Light) * 2,
+                        cudaMemcpyHostToDevice));
+  return d_lights;
+}
+
 Ray cameraToPixelCenterRay(int2 pixel, Transform const& cameraFromRaster,
                            Transform const& renderFromCamera) {
   Ray ray{};
@@ -417,11 +431,15 @@ void testIntersectionMegakernel() {
   }
 #endif
 
+  // lights
+  uint32_t lightCount = 0;
+  Light* d_lights = deviceLights(&lightCount);
+
   // init output buffer
   float4* d_outputBuffer = deviceOutputBuffer(width, height);
 
-  basicIntersectionMegakernel<<<blocks, threads>>>(d_camera, scene, d_rng,
-                                                   d_outputBuffer);
+  basicIntersectionMegakernel<<<blocks, threads>>>(
+      d_camera, scene, d_lights, lightCount, d_rng, d_outputBuffer);
   CUDA_CHECK(cudaGetLastError());
   std::cout << "Running CUDA Kernel" << std::endl;
   CUDA_CHECK(cudaDeviceSynchronize());
@@ -433,6 +451,7 @@ void testIntersectionMegakernel() {
   // cleanup
   std::cout << "Cleanup..." << std::endl;
   cudaFree(d_outputBuffer);
+  cudaFree(d_lights);
   cudaFree(d_rng);
   cudaFree(scene.xs);
   cudaFree(scene.ys);

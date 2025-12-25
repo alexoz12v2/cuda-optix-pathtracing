@@ -4,9 +4,7 @@ inline uint32_t constexpr TRIANGLES_PER_THREAD = 4;
 inline float constexpr MOLLER_TRUMBORE_TOLERANCE = 1e-7f;
 
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
-  HitResult result{};
-  result.hit = 0;
-  result.t = CUDART_INF_F;
+  HitResult result;
 
   float3 const e0{x.y - x.x, y.y - y.x, z.y - z.x};
   float3 const e1{x.z - x.x, y.z - y.x, z.z - z.x};
@@ -39,8 +37,16 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
       (t > 1e-4f);  // <-- reject t <= 0
 
   if (valid) {
+    float3 const p0 = make_float3(x.x, y.x, z.x);
+    float3 const p1 = make_float3(x.y, y.y, z.y);
+    float3 const p2 = make_float3(x.z, y.z, z.z);
+
     result.hit = 1;
     result.t = t;
+    result.pos = p0 + u * e0 + v * e1;
+    // TODO indexed computation of normal. now gamble on counter-clockwise
+    result.normal = cross(e1, e0);
+    result.error = errorFromTriangleIntersection(u, v, p0, p1, p2);
   }
 
   return result;
@@ -78,7 +84,7 @@ HitResult hostIntersectMT(const float3& o, const float3& d, const float3& v0,
   std::cout << "--------------------------------------------" << std::endl;
 #endif
   constexpr float EPS = 1e-7f;
-  HitResult hit{};
+  HitResult hit;
 
   float3 e0{v1.x - v0.x, v1.y - v0.y, v1.z - v0.z};
   float3 e1{v2.x - v0.x, v2.y - v0.y, v2.z - v0.z};
@@ -106,6 +112,10 @@ HitResult hostIntersectMT(const float3& o, const float3& d, const float3& v0,
   if (tHit > EPS) {
     hit.hit = 1;
     hit.t = tHit;
+    hit.pos = v0 + u * e0 + v * e1;
+    // TODO indexed computation of normal. now gamble on counter-clockwise
+    hit.normal = cross(e1, e0);
+    hit.error = errorFromTriangleIntersection(u, v, v0, v1, v2);
   }
 
   return hit;

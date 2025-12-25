@@ -242,7 +242,7 @@ static void evalTile(uintptr_t _data, uint32_t tid) {
 
 #if defined(DMT_PBRT_HITERROR)
             Vector3f const pErr =
-                estimateHitError(trisect.u, trisect.w, trisect.w, p0, p1, p2);
+                estimateHitError(trisect.u, trisect.v, trisect.w, p0, p1, p2);
 #else
             Vector3f const pErr = estimateHitError(dpdx, dpdy, p);
 #endif

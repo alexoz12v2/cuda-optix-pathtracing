@@ -8,7 +8,7 @@
 
 #include <cstdint>
 #include <iostream>
-#include <vector>
+#include <float.h>
 #include <vector>
 
 inline constexpr int WARP_SIZE = 32;
@@ -107,6 +107,86 @@ struct DeviceCamera {
 };
 
 // ---------------------------------------------------------------------------
+// Common Math
+// ---------------------------------------------------------------------------
+inline __host__ __device__ __forceinline__ float length(float3 a) {
+  return sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+inline __host__ __device__ __forceinline__ float3 cross(float3 a, float3 b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+// TODO safety assert
+inline __host__ __device__ __forceinline__ float3 normalize(float3 a) {
+  float const invMag = rsqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+  return make_float3(a.x * invMag, a.y * invMag, a.z * invMag);
+}
+inline __host__ __device__ __forceinline__ float lerp(float a, float b,
+                                                      float t) {
+  // (1 - t) a + t b =  a - ta + tb = a + t ( b - a )
+  float const _1mt = 1.f - t;
+  return _1mt * a + t * b;
+}
+inline __host__ __device__ __forceinline__ float3 operator/(float3 v, float a) {
+  return make_float3(v.x / a, v.y / a, v.z / a);
+}
+inline __host__ __device__ __forceinline__ float3 operator/(float3 v,
+                                                            float3 a) {
+  return make_float3(v.x / a.x, v.y / a.y, v.z / a.z);
+}
+inline __host__ __device__ __forceinline__ float3 operator*(float3 v, float a) {
+  return make_float3(v.x * a, v.y * a, v.z * a);
+}
+inline __host__ __device__ __forceinline__ float3 operator*(float a, float3 v) {
+  return make_float3(v.x * a, v.y * a, v.z * a);
+}
+inline __host__ __device__ __forceinline__ float3 operator*(float3 a,
+                                                            float3 v) {
+  return make_float3(v.x * a.x, v.y * a.y, v.z * a.z);
+}
+inline __host__ __device__ __forceinline__ float3 operator+(float3 a,
+                                                            float3 b) {
+  return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+inline __host__ __device__ __forceinline__ float3 operator+(float3 a, float b) {
+  return make_float3(a.x + b, a.y + b, a.z + b);
+}
+inline __host__ __device__ __forceinline__ float3 operator-(float3 a,
+                                                            float3 b) {
+  return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+inline __host__ __device__ __forceinline__ float3 operator-(float3 a, float b) {
+  return make_float3(a.x - b, a.y - b, a.z - b);
+}
+inline __host__ __device__ __forceinline__ float3 operator-(float3 a) {
+  return make_float3(-a.x, -a.y, -a.z);
+}
+inline __host__ __device__ __forceinline__ float dot(float3 a, float3 b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+inline __host__ __device__ __forceinline__ float safeSqrt(float a) {
+  return sqrtf(fmaxf(a, 0.f));
+}
+inline __host__ __device__ __forceinline__ float3 sqrt(float3 a) {
+  return make_float3(sqrtf(a.x), sqrtf(a.y), sqrtf(a.z));
+}
+inline __host__ __device__ __forceinline__ float3 abs(float3 a) {
+  return make_float3(fabsf(a.x), fabsf(a.y), fabs(a.z));
+}
+
+inline __host__ __device__ __forceinline__ float2 operator+(float2 a,
+                                                            float2 b) {
+  return make_float2(a.x + b.x, a.y + b.y);
+}
+inline __host__ __device__ __forceinline__ float2 operator-(float2 a,
+                                                            float2 b) {
+  return make_float2(a.x - b.x, a.y - b.y);
+}
+
+// ---------------------------------------------------------------------------
+// Sampling
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Octahedral mapping (normal buffer, light direction)
 // ---------------------------------------------------------------------------
 // TODO: probably __forceinline__?
@@ -128,6 +208,7 @@ __host__ __device__ float half_bits_to_float(uint16_t h);
 enum class ELightType : uint16_t { ePoint, eSpot, eEnv, eDirectional };
 struct Light {
   uint16_t intensity[4];  // 3x FP16 + light type as last (high on little end.)
+
   union UnionLight {
     struct Point {
       float3 pos;
@@ -174,6 +255,22 @@ __host__ __device__ Light makeDirectionalLight(float3 const color,
                                                float3 const direction);
 __host__ __device__ Light makeEnvironmentalLight(float3 const color);
 
+struct LightSample {
+  float3 pLight;     // sampled point on light source
+  float3 direction;  // intersection point to light
+  // delta is implicit in light type, which is known
+};
+
+// position = last intersection position
+__host__ __device__ LightSample sampleLight(Light const& light,
+                                            float3 const position,
+                                            bool hadTransmission,
+                                            float3 const normal, float* pdf);
+
+// ---------------------------------------------------------------------------
+// Light specific sampling functions
+// ---------------------------------------------------------------------------
+
 // ---------------------------------------------------------------------------
 // Morton
 // ---------------------------------------------------------------------------
@@ -184,8 +281,7 @@ struct MortonLayout2D {
   uint32_t mortonCols;
   uint64_t mortonCount;
 };
-
-__host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
+inline __host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
   if (x == 0) return 1;
   --x;
   x |= x >> 1;
@@ -195,9 +291,8 @@ __host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
   x |= x >> 16;
   return x + 1;
 }
-
-__host__ __device__ __forceinline__ MortonLayout2D mortonLayout(uint32_t rows,
-                                                                uint32_t cols) {
+inline __host__ __device__ __forceinline__ MortonLayout2D
+mortonLayout(uint32_t rows, uint32_t cols) {
   MortonLayout2D layout{};
   layout.rows = rows;
   layout.cols = cols;
@@ -208,40 +303,35 @@ __host__ __device__ __forceinline__ MortonLayout2D mortonLayout(uint32_t rows,
   return layout;
 }
 
+// clang-format off
+inline
 __host__ __device__ __forceinline__ uint32_t part1by1(uint32_t x) {
-  x &= 0x0000ffff;  // x = ---- ---- ---- ---- fedc ba98 7654 3210
-  x = (x | (x << 8)) &
-      0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
-  x = (x | (x << 4)) &
-      0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
-  x = (x | (x << 2)) &
-      0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
-  x = (x | (x << 1)) &
-      0x55555555;  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+  x &= 0x0000ffff;                  // x = ---- ---- ---- ---- fedc ba98 7654 3210
+  x = (x | (x << 8)) & 0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
+  x = (x | (x << 4)) & 0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+  x = (x | (x << 2)) & 0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
+  x = (x | (x << 1)) & 0x55555555;  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
   return x;
 }
-
+inline
 __host__ __device__ __forceinline__ uint32_t compact1By1(uint32_t x) {
-  x &= 0x55555555;  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
-  x = (x | (x >> 1)) &
-      0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
-  x = (x | (x >> 2)) &
-      0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
-  x = (x | (x >> 4)) &
-      0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
-  x = (x | (x >> 8)) &
-      0x0000ffff;  // x = ---- ---- ---- ---- fedc ba98 7654 3210
+  x &= 0x55555555;                  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+  x = (x | (x >> 1)) & 0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
+  x = (x | (x >> 2)) & 0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+  x = (x | (x >> 4)) & 0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
+  x = (x | (x >> 8)) & 0x0000ffff;  // x = ---- ---- ---- ---- fedc ba98 7654 3210
   return x;
 }
+// clang-format on
 
 // row-major morton 2D -> warp 4 x 8
-__host__ __device__ __forceinline__ uint32_t encodeMorton2D(uint32_t x,
-                                                            uint32_t y) {
+inline __host__ __device__ __forceinline__ uint32_t encodeMorton2D(uint32_t x,
+                                                                   uint32_t y) {
   return (part1by1(y) << 1) | part1by1(x);
 }
-__host__ __device__ __forceinline__ void decodeMorton2D(uint32_t code,
-                                                        uint32_t* x,
-                                                        uint32_t* y) {
+inline __host__ __device__ __forceinline__ void decodeMorton2D(uint32_t code,
+                                                               uint32_t* x,
+                                                               uint32_t* y) {
   *x = compact1By1(code);
   *y = compact1By1(code >> 1);
 }
@@ -261,8 +351,40 @@ struct TriangleSoup {
   size_t count;
 };
 
+inline __host__ __device__ __forceinline__ float gamma(int32_t n) {
+#ifdef __CUDA_ARCH__
+  float const f = static_cast<float>(n) * FLT_EPSILON * 0.5f;
+#else
+  float const f =
+      static_cast<float>(n) * std::numeric_limits<float>::epsilon() * 0.5f;
+#endif
+  return f / (1 - f);
+}
+
+inline __host__ __device__ __forceinline__ float3 errorFromTriangleIntersection(
+    float u, float v, float3 p0, float3 p1, float3 p2) {
+  return gamma(7) * abs(u * p0) + abs(v * p1) + abs((1 - u - v) * p2);
+}
+
 struct HitResult {
-  int32_t hit;  // 0 = no hit, 1 = hit
+  __host__ __device__ HitResult()
+      : pos{},
+        normal{},
+        error{},
+        hit{},
+        t{
+#ifdef __CUDA_ARCH__
+            CUDART_INF_F
+#else
+            std::numeric_limits<float>::infinity()
+#endif
+        } {
+  }
+
+  float3 pos;
+  float3 normal;
+  float3 error;  // intersection error bounds
+  int32_t hit;   // 0 = no hit, 1 = hit
   float t;
 };
 
@@ -313,78 +435,15 @@ struct CudaTimer {
 };
 
 // ---------------------------------------------------------------------------
-// Common Math
-// ---------------------------------------------------------------------------
-__host__ __device__ __forceinline__ float3 cross(float3 a, float3 b) {
-  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-// TODO safety assert
-__host__ __device__ __forceinline__ float3 normalize(float3 a) {
-  float const invMag = rsqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
-  return make_float3(a.x * invMag, a.y * invMag, a.z * invMag);
-}
-__host__ __device__ __forceinline__ float lerp(float a, float b, float t) {
-  // (1 - t) a + t b =  a - ta + tb = a + t ( b - a )
-  float const _1mt = 1.f - t;
-  return _1mt * a + t * b;
-}
-__host__ __device__ __forceinline__ float3 operator/(float3 v, float a) {
-  return make_float3(v.x / a, v.y / a, v.z / a);
-}
-__host__ __device__ __forceinline__ float3 operator/(float3 v, float3 a) {
-  return make_float3(v.x / a.x, v.y / a.y, v.z / a.z);
-}
-__host__ __device__ __forceinline__ float3 operator*(float3 v, float a) {
-  return make_float3(v.x * a, v.y * a, v.z * a);
-}
-__host__ __device__ __forceinline__ float3 operator*(float a, float3 v) {
-  return make_float3(v.x * a, v.y * a, v.z * a);
-}
-__host__ __device__ __forceinline__ float3 operator*(float3 a, float3 v) {
-  return make_float3(v.x * a.x, v.y * a.y, v.z * a.z);
-}
-__host__ __device__ __forceinline__ float3 operator+(float3 a, float3 b) {
-  return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-__host__ __device__ __forceinline__ float3 operator+(float3 a, float b) {
-  return make_float3(a.x + b, a.y + b, a.z + b);
-}
-__host__ __device__ __forceinline__ float3 operator-(float3 a, float3 b) {
-  return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-__host__ __device__ __forceinline__ float3 operator-(float3 a, float b) {
-  return make_float3(a.x - b, a.y - b, a.z - b);
-}
-__host__ __device__ __forceinline__ float3 operator-(float3 a) {
-  return make_float3(-a.x, -a.y, -a.z);
-}
-__host__ __device__ __forceinline__ float dot(float3 a, float3 b) {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-__host__ __device__ __forceinline__ float safeSqrt(float a) {
-  return sqrtf(fmaxf(a, 0.f));
-}
-__host__ __device__ __forceinline__ float3 sqrt(float3 a) {
-  return make_float3(sqrtf(a.x), sqrtf(a.y), sqrtf(a.z));
-}
-
-__host__ __device__ __forceinline__ float2 operator+(float2 a, float2 b) {
-  return make_float2(a.x + b.x, a.y + b.y);
-}
-__host__ __device__ __forceinline__ float2 operator-(float2 a, float2 b) {
-  return make_float2(a.x - b.x, a.y - b.y);
-}
-
-// ---------------------------------------------------------------------------
 // BSDF Bits and Pieces
 // ---------------------------------------------------------------------------
-__device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
+inline __device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
   return 2.f * dot(wo, n) * n - wo;
 }
 
 // eta = eta_i / eta_t
-__device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
-                                        float* etap, float3* wt) {
+inline __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
+                                               float* etap, float3* wt) {
   float cosThetai = dot(wi, n);
   if (cosThetai < 0)  // inside -> outside
   {
@@ -410,8 +469,8 @@ __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
   return true;
 }
 
-__device__ __forceinline__ float reflectanceFresnelDielectric(float cosThetaI,
-                                                              float eta) {
+inline __device__ __forceinline__ float reflectanceFresnelDielectric(
+    float cosThetaI, float eta) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
   bool const entering = cosThetaI > 0.f;
   if (!entering) {
@@ -431,9 +490,8 @@ __device__ __forceinline__ float reflectanceFresnelDielectric(float cosThetaI,
   return (rParl * rParl + rPerp * rPerp) * 0.5f;
 }
 
-__device__ __forceinline__ float3 reflectanceFresnelConductor(float cosThetaI,
-                                                              float3 eta,
-                                                              float3 k) {
+inline __device__ __forceinline__ float3
+reflectanceFresnelConductor(float cosThetaI, float3 eta, float3 k) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
   float const cosThetaI2 = cosThetaI * cosThetaI;
   float const sinThetaI2 = 1.f - cosThetaI2;
@@ -454,8 +512,8 @@ __device__ __forceinline__ float3 reflectanceFresnelConductor(float cosThetaI,
   return 0.5f * (Rp + Rs);
 }
 
-__device__ __forceinline__ float3 sampleGGCX_VNDF(float3 wo, float2 u, float ax,
-                                                  float ay) {
+inline __device__ __forceinline__ float3 sampleGGCX_VNDF(float3 wo, float2 u,
+                                                         float ax, float ay) {
   // stretch view (anisotropic roughness)
   float3 const V = normalize(make_float3(ax * wo.x, ay * wo.y, wo.z));
 
@@ -499,6 +557,12 @@ __host__ __device__ Transform cameraFromRaster_Perspective(float focalLength,
                                                            uint32_t yRes);
 
 // ---------------------------------------------------------------------------
+// Next Event Estimation
+// ---------------------------------------------------------------------------
+Ray generateShadowRay(float3 const intersection, float3 normal,
+                      float3 lightPos);
+
+// ---------------------------------------------------------------------------
 // Kernels
 // ---------------------------------------------------------------------------
 
@@ -518,5 +582,7 @@ void triangleIntersectTest();
 
 __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
                                             TriangleSoup d_triSoup,
+                                            Light const* d_lights,
+                                            uint32_t const lightCount,
                                             DeviceHaltonOwen* d_haltonOwen,
                                             float4* d_outBuffer);

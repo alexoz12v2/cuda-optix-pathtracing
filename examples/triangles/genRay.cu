@@ -126,15 +126,17 @@ __host__ __device__ Transform cameraFromRaster_Perspective(
 
 __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
                                             TriangleSoup d_triSoup,
+                                            Light const* d_lights,
+                                            uint32_t const lightCount,
                                             DeviceHaltonOwen* d_haltonOwen,
                                             float4* d_outBuffer) {
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t const spp = d_cam->spp;
   // constant memory?
   MortonLayout2D const layout = mortonLayout(d_cam->width, d_cam->height);
+  DeviceHaltonOwen& warpRng = d_haltonOwen[mortonStart / warpSize];
   DeviceHaltonOwenParams const params =
-      d_haltonOwen[mortonStart / warpSize].computeParams(layout.cols,
-                                                         layout.rows);
+      warpRng.computeParams(layout.cols, layout.rows);
   Transform const cameraFromRaster = cameraFromRaster_Perspective(
       d_cam->focalLength, d_cam->sensorSize, d_cam->width, d_cam->height);
   Transform const renderFromCamera = worldFromCamera(d_cam->dir, d_cam->pos);
@@ -186,13 +188,14 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
     PRINT("----------------------------------------------------\n");
     PRINT("----------------------------------------------------\n");
     for (int s = 0; s < spp; ++s) {
+      // TODO refactor into path state?
+      float3 L = make_float3(0, 0, 0);
       PRINT("----------------------------------------------------\n");
       PRINT("Start pixel %d %d | Sample %d\n", pixel.x, pixel.y, s);
       // start pixel sample and generate ray
-      d_haltonOwen->startPixelSample(params, pixel, s);
-      Ray const ray =
-          getCameraRay(getCameraSample(pixel, *d_haltonOwen, params),
-                       cameraFromRaster, renderFromCamera);
+      warpRng.startPixelSample(params, pixel, s);
+      Ray const ray = getCameraRay(getCameraSample(pixel, warpRng, params),
+                                   cameraFromRaster, renderFromCamera);
       PRINT("Ray: \n");
       PRINT("    Origin: %f %f %f \n", ray.o.x, ray.o.y, ray.o.z);
       PRINT("    Direct: %f %f %f \n", ray.d.x, ray.d.y, ray.d.z);
@@ -217,9 +220,18 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
       // TODO probably remove
       // if not intersected, contribution is zero (eliminates branch later)
       if (!hitResult.hit) {
+        // TODO all env lights here
         hitResult.t = 0;
       } else {
         // - choose light for Next Event Estimation (direct lighting)
+        Light const light = d_lights[static_cast<int>(fmaxf(
+            fminf(warpRng.get1D(params) * (lightCount - 1), lightCount - 1),
+            0))];
+        float const lightPMF = 1 / lightCount;
+        // TODO first BSDF so that choose refract or reflect
+        Ray shadowRay{
+            length(hitResult.error) * hitResult.normal + hitResult.pos,
+            make_float3(1, 1, 1)};
         // - create shadow ray (offset origin to avoid self intersection)
         // - trace ray
         // - if no intersection, sample light and add light contribution

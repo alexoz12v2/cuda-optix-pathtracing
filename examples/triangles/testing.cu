@@ -6,49 +6,43 @@
 #include <cmath>
 #include <numbers>
 
-// TODO: check winding
 std::vector<Triangle> generateSphereMesh(float3 center, float radius,
                                          int latSubdiv, int lonSubdiv) {
-  static float constexpr PI = std::numbers::pi_v<float>;
   std::vector<Triangle> triangles;
   triangles.reserve(2 * lonSubdiv * (latSubdiv - 1));
 
-  for (int i = 0; i < latSubdiv; ++i) {
-    // theta: 0 -> PI
-    float const theta0 = PI * static_cast<float>(i) / latSubdiv;
-    float const theta1 = PI * static_cast<float>(i + 1) / latSubdiv;
+  float const PI = std::numbers::pi_v<float>;
+  float3 const topPole = center + make_float3(0, radius, 0);
+  float3 const bottomPole = center + make_float3(0, -radius, 0);
 
-    float const y0 = cosf(theta0);
-    float const y1 = cosf(theta1);
-    float const r0 = sinf(theta0);
-    float const r1 = sinf(theta1);
+  // Loop over latitude bands (excluding poles)
+  for (int i = 0; i < latSubdiv; ++i) {
+    float const theta0 = PI * float(i) / latSubdiv;
+    float const theta1 = PI * float(i + 1) / latSubdiv;
+
+    float const y0 = radius * cosf(theta0);
+    float const y1 = radius * cosf(theta1);
+    float const r0 = radius * sinf(theta0);
+    float const r1 = radius * sinf(theta1);
 
     for (int j = 0; j < lonSubdiv; ++j) {
-      // phi: 0 -> 2PI
-      float const phi0 = 2.f * PI * static_cast<float>(j) / lonSubdiv;
-      float const phi1 =
-          2.f * PI * static_cast<float>((j + 1) % lonSubdiv) / lonSubdiv;
+      float const phi0 = 2.f * PI * float(j) / lonSubdiv;
+      float const phi1 = 2.f * PI * float((j + 1) % lonSubdiv) / lonSubdiv;
 
-      float const x00 = r0 * cosf(phi0);
-      float const z00 = r0 * sinf(phi0);
-      float const x01 = r1 * cosf(phi1);
-      float const z01 = r1 * sinf(phi1);
+      float3 p00 = center + make_float3(r0 * cosf(phi0), y0, r0 * sinf(phi0));
+      float3 p01 = center + make_float3(r0 * cosf(phi1), y0, r0 * sinf(phi1));
+      float3 p10 = center + make_float3(r1 * cosf(phi0), y1, r1 * sinf(phi0));
+      float3 p11 = center + make_float3(r1 * cosf(phi1), y1, r1 * sinf(phi1));
 
-      float const x10 = r1 * cosf(phi0);
-      float const z10 = r1 * sinf(phi0);
-      float const x11 = r0 * cosf(phi1);
-      float const z11 = r0 * sinf(phi1);
-
-      float3 const p00 = center + radius * make_float3(x00, y0, z00);
-      float3 const p01 = center + radius * make_float3(x01, y0, z01);
-      float3 const p10 = center + radius * make_float3(x10, y1, z10);
-      float3 const p11 = center + radius * make_float3(x11, y1, z11);
-
-      // skip degenerate caps
-      if (i != 0) {
+      if (i == 0) {
+        // Top cap: connect top pole to first latitude ring
+        triangles.emplace_back(topPole, p10, p11);
+      } else if (i == latSubdiv - 1) {
+        // Bottom cap: connect last latitude ring to bottom pole
+        triangles.emplace_back(p00, bottomPole, p01);
+      } else {
+        // Middle quad split into two triangles
         triangles.emplace_back(p00, p10, p01);
-      }
-      if (i != latSubdiv - 1) {
         triangles.emplace_back(p01, p10, p11);
       }
     }

@@ -77,6 +77,7 @@ struct DeviceHaltonOwenParams {
   int32_t multInvs[NUM_FILM_DIMENSION];
 };
 
+// Or switch to Sobol (easier on GPU)
 /// warp-wide struct
 struct DeviceHaltonOwen {
   static constexpr int MAX_RESOLUTION = 128;
@@ -101,8 +102,8 @@ struct DeviceCamera {
   float3 dir{0.f, 1.f, 0.f};
   int spp = 4;
   float3 pos{0.f, 0.f, 0.f};
-  int width = 16;
-  int height = 16;
+  int width = 256;
+  int height = 128;
 };
 
 // ---------------------------------------------------------------------------

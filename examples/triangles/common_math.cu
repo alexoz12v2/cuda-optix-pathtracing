@@ -179,28 +179,6 @@ __device__ __forceinline__ int32_t inverseRadicalInverse(int32_t inverse,
   return index;
 }
 
-// Approx
-__device__ __forceinline__ float radicalInverse(uint32_t primeIndex,
-                                                uint32_t num, int nDigits) {
-  uint32_t base = primes[primeIndex];
-  float invBase = __frcp_rn((float)base);
-
-  float result = 0.0f;
-  float factor = invBase;
-
-  // Fixed iteration count → warp-uniform
-  for (int i = 0; i < nDigits; ++i) {
-    uint32_t next = num / base;
-    uint32_t digit = num - next * base;
-
-    result += digit * factor;
-    factor *= invBase;
-    num = next;
-  }
-
-  return fminf(result, 0.99999994f);
-}
-
 __device__ __forceinline__ uint32_t mixBits32(uint32_t v) {
   v ^= v >> 16;
   v *= 0x7feb352dU;
@@ -208,6 +186,31 @@ __device__ __forceinline__ uint32_t mixBits32(uint32_t v) {
   v *= 0x846ca68bU;
   v ^= v >> 16;
   return v;
+}
+
+__device__ __forceinline__ float radicalInverse(uint32_t primeIndex,
+                                                uint32_t index) {
+  const uint32_t base = primes[primeIndex];
+  const float invBase = __frcp_rn((float)base);
+  const uint32_t limit = ~0u / base - base;
+
+  uint32_t result = 0;
+  float factor = invBase;
+
+  // TODO is it necessary to sync?
+  const cooperative_groups::coalesced_group theGroup =
+      cooperative_groups::coalesced_threads();
+  while (index && result < limit) {
+    uint32_t next = index / base;
+    uint32_t digit = index - next * base;
+
+    result = result * base + digit;
+    factor *= invBase;
+    index = next;
+  }
+  theGroup.sync();
+
+  return fminf(result * factor, 0.99999994f);
 }
 
 __device__ __forceinline__ uint32_t permutationElement(uint32_t digit,
@@ -328,6 +331,12 @@ __device__ void DeviceHaltonOwen::startPixelSample(
   haltonIndex[laneId] %= sampleStride;
   haltonIndex[laneId] += sampleIndex * sampleStride;
   dimension[laneId] = max(dim, NUM_FILM_DIMENSION);
+  // TODO global debug printing macro control
+#if 0
+  printf("   START PIXEL SAMPLE STATE:\n");
+  printf("     - haltonIndex: %d\n", haltonIndex[laneId]);
+  printf("     - dimension:   %d\n", dimension[laneId]);
+#endif
 }
 
 __device__ float DeviceHaltonOwen::get1D(DeviceHaltonOwenParams const& params) {
@@ -358,9 +367,11 @@ __device__ float2
 DeviceHaltonOwen::getPixel2D(DeviceHaltonOwenParams const& params) {
   int const laneId = cooperative_groups::thread_block_tile<32>::thread_rank();
 
-  return make_float2(
-      radicalInverse(0, haltonIndex[laneId] >> params.baseExponents[0],
-                     params.baseExponents[0]),
-      radicalInverse(1, haltonIndex[laneId] / params.baseScales[1],
-                     params.baseExponents[1]));
+  float2 const result = make_float2(
+      radicalInverse(0, haltonIndex[laneId] >> params.baseExponents[0]),
+      radicalInverse(1, haltonIndex[laneId] / params.baseScales[1]));
+#if 0
+  printf("  Sampled: %f %f\n", result.x, result.y);
+#endif
+  return result;
 }

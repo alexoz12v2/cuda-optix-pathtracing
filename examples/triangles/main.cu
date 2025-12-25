@@ -29,92 +29,90 @@
 //     Origin: arbitrary(preferably camera), worldFromCamera handles camera
 //       orientation
 
+// Stream Aware operations
+// - for a truly asynchronous, stream-aware cudaMemcpyAsync()
+//   from host to device, the source memory must be page-locked (pinned).
+// - Stack memory is normally pageable, so you must register it with
+//   cudaHostRegister() if you want the copy to be asynchronous.
+// - You do not need to manually find page boundaries—the CUDA runtime does
+//   that for you—but if you want to know how it works or align explicitly,
+//   it’s OS-specific and straightforward  cudaHostRegister()
+// - if possible, don't waste time pinning a whole page for a single variable.
+
 namespace {
-// TODO: remove async writes. GPU writes with same direction are hardly
-// concurrent
-// TODO; use double buffering approach
-DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t const blocks,
-                                              uint32_t const threads) {
-  // TODO query warp size?
-  DeviceHaltonOwen h_rng{};
-  DeviceHaltonOwen* d_rng = nullptr;
-  uint32_t const warps = (blocks * threads + WARP_SIZE - 1) / WARP_SIZE;
+DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
+                                              uint32_t threads) {
+  const uint32_t warps = (blocks * threads + WARP_SIZE - 1) / WARP_SIZE;
 
-  CUDA_CHECK(cudaMalloc(&d_rng, warps * sizeof(DeviceHaltonOwen)));
-
-  // issue all copies and wait at the end
-  cudaStream_t copyStream = nullptr;
-  CUDA_CHECK(cudaStreamCreate(&copyStream));
-
-  // - for a truly asynchronous, stream-aware cudaMemcpyAsync()
-  //   from host to device, the source memory must be page-locked (pinned).
-  // - Stack memory is normally pageable, so you must register it with
-  //   cudaHostRegister() if you want the copy to be asynchronous.
-  // - You do not need to manually find page boundaries—the CUDA runtime does
-  //   that for you—but if you want to know how it works or align explicitly,
-  //   it’s OS-specific and straightforward  cudaHostRegister()
-  // - if possible, don't waste time pinning a whole page for a single variable.
-  CUDA_CHECK(cudaHostRegister(&h_rng, sizeof(h_rng), cudaHostRegisterDefault));
+  // Allocate host-side contiguous buffer
+  std::vector<DeviceHaltonOwen> h_rng(warps);
 
   for (uint32_t i = 0; i < warps; ++i) {
-    for (uint32_t j = 0; j < WARP_SIZE; ++j) {
-      h_rng.dimension[j] = i * 33 ^ j;
+    for (uint32_t lane = 0; lane < WARP_SIZE; ++lane) {
+      h_rng[i].dimension[lane] = (i * 33) ^ lane;
     }
-
-    CUDA_CHECK(cudaMemcpyAsync(d_rng + i, &h_rng, sizeof(h_rng),
-                               cudaMemcpyHostToDevice, copyStream));
   }
 
-  CUDA_CHECK(cudaStreamSynchronize(copyStream));
-  CUDA_CHECK(cudaStreamDestroy(copyStream));
-  CUDA_CHECK(cudaHostUnregister(&h_rng));
+  // Allocate device memory
+  DeviceHaltonOwen* d_rng = nullptr;
+  CUDA_CHECK(cudaMalloc(&d_rng, warps * sizeof(DeviceHaltonOwen)));
+
+  // Single synchronous copy (fast, safe)
+  CUDA_CHECK(cudaMemcpy(d_rng, h_rng.data(), warps * sizeof(DeviceHaltonOwen),
+                        cudaMemcpyHostToDevice));
 
   return d_rng;
 }
 
-// TODO: remove async writes. GPU writes with same direction are hardly
-// concurrent
-// TODO (maybe): cluster transpose and then copy
-// TODO; use double buffering approach
-// cudaHostRegister requires a mutating pointer. Probably pinning moves
-// the virtual pointer. Hence, take vector by r-value reference
-TriangleSoup triSoupFromTriangles(std::vector<Triangle>&& tris) {
-  TriangleSoup soup;
+TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
+                                  size_t maxTrianglesPerChunk = 1'000'000) {
+  static int constexpr ComponentCount = 4;
+  TriangleSoup soup{};
   soup.count = tris.size();
-  size_t const compBytes = tris.size() * 3 * sizeof(float);
-  static_assert(sizeof(float) == sizeof(uint32_t));
-  CUDA_CHECK(cudaMalloc(&soup.xs, compBytes));
-  CUDA_CHECK(cudaMalloc(&soup.ys, compBytes));
-  CUDA_CHECK(cudaMalloc(&soup.zs, compBytes));
-  CUDA_CHECK(cudaMalloc(&soup.intersected, compBytes));
-  CUDA_CHECK(cudaMemset(soup.intersected, 0, compBytes));
 
-  cudaStream_t copyStream = nullptr;
-  CUDA_CHECK(cudaStreamCreate(&copyStream));
+  const size_t n = soup.count;
+  const size_t bytes = n * ComponentCount * sizeof(float);
 
-  Triangle* h_data = tris.data();
-  size_t const dataBytes = tris.size() * sizeof(tris[0]);
+  CUDA_CHECK(cudaMalloc(&soup.xs, bytes));
+  CUDA_CHECK(cudaMalloc(&soup.ys, bytes));
+  CUDA_CHECK(cudaMalloc(&soup.zs, bytes));
 
-  // pin host triangles to memory, so that runtime can use them for streams
-  // crashes for large meshes (not that large actually, like ~1GB)
-  CUDA_CHECK(cudaHostRegister(h_data, dataBytes, cudaHostRegisterDefault));
+  // Temporary host buffers (bounded)
+  std::vector<float> h_x(ComponentCount * maxTrianglesPerChunk);
+  std::vector<float> h_y(ComponentCount * maxTrianglesPerChunk);
+  std::vector<float> h_z(ComponentCount * maxTrianglesPerChunk);
 
-  for (size_t i = 0; i < soup.count; ++i) {
-    float const x[3] = {h_data[i].v0.x, h_data[i].v1.x, h_data[i].v2.x};
-    float const y[3] = {h_data[i].v0.y, h_data[i].v1.y, h_data[i].v2.y};
-    float const z[3] = {h_data[i].v0.z, h_data[i].v1.z, h_data[i].v2.z};
+  for (size_t base = 0; base < n; base += maxTrianglesPerChunk) {
+    size_t count = std::min(maxTrianglesPerChunk, n - base);
 
-    CUDA_CHECK(cudaMemcpyAsync(soup.xs + i * 3, x, 3 * sizeof(float),
-                               cudaMemcpyHostToDevice, copyStream));
-    CUDA_CHECK(cudaMemcpyAsync(soup.ys + i * 3, y, 3 * sizeof(float),
-                               cudaMemcpyHostToDevice, copyStream));
-    CUDA_CHECK(cudaMemcpyAsync(soup.zs + i * 3, z, 3 * sizeof(float),
-                               cudaMemcpyHostToDevice, copyStream));
+    for (size_t i = 0; i < count; ++i) {
+      const Triangle& t = tris[base + i];
+
+      h_x[i * ComponentCount + 0] = t.v0.x;
+      h_x[i * ComponentCount + 1] = t.v1.x;
+      h_x[i * ComponentCount + 2] = t.v2.x;
+      h_x[i * ComponentCount + 3] = 0;
+
+      h_y[i * ComponentCount + 0] = t.v0.y;
+      h_y[i * ComponentCount + 1] = t.v1.y;
+      h_y[i * ComponentCount + 2] = t.v2.y;
+      h_y[i * ComponentCount + 3] = 0;
+
+      h_z[i * ComponentCount + 0] = t.v0.z;
+      h_z[i * ComponentCount + 1] = t.v1.z;
+      h_z[i * ComponentCount + 2] = t.v2.z;
+      h_z[i * ComponentCount + 3] = 0;
+    }
+
+    size_t copyBytes = count * ComponentCount * sizeof(float);
+
+    CUDA_CHECK(cudaMemcpy(soup.xs + base * ComponentCount, h_x.data(),
+                          copyBytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(soup.ys + base * ComponentCount, h_y.data(),
+                          copyBytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(soup.zs + base * ComponentCount, h_z.data(),
+                          copyBytes, cudaMemcpyHostToDevice));
   }
-
-  CUDA_CHECK(cudaStreamSynchronize(copyStream));
-  CUDA_CHECK(cudaHostUnregister(h_data));
-  CUDA_CHECK(cudaStreamDestroy(copyStream));
 
   return soup;
 }
@@ -316,7 +314,7 @@ void hostIntersectionKernel(
     for (int row = 0; row < cam.height; ++row) {
       for (int col = 0; col < cam.width; ++col) {
         int2 const pixel = make_int2(col, row);
-        std::cout << "PIXEL " << col << " " << row << std::endl;
+        // std::cout << "PIXEL " << col << " " << row << std::endl;
         hostIntersectCore(-1, pixel, cameraFromRaster, renderFromCamera,
                           triangles, onHit);
       }
@@ -332,7 +330,8 @@ void hostIntersectionKernel(
 namespace {
 
 void testIntersectionMegakernel() {
-#if 0
+#if 1
+  // TODO device query for optimal sizes
   uint32_t const threads = 512;
   uint32_t const blocks = 16;
 #else
@@ -345,8 +344,9 @@ void testIntersectionMegakernel() {
   DeviceCamera h_camera;
   DeviceCamera* d_camera = defaultDeviceCamera(&width, &height, &h_camera);
   TriangleSoup scene{};
-#if 0
-  std::vector<Triangle> h_mesh = generateSphereMesh(make_float3(0, 1.2, 0), 0.25f, 256, 512);
+#if 1
+  std::vector<Triangle> h_mesh =
+      generateSphereMesh(make_float3(0, 1.2, 0), 0.5f, 256, 512);
 #else
   std::vector<Triangle> h_mesh;
   // screen half-height at distance d = d * tan(FOV / 2)
@@ -358,13 +358,10 @@ void testIntersectionMegakernel() {
       {0.0f, 1.0f, 0.45f},     // top-center
   });
 #endif
-  {
-    std::vector<Triangle> h_meshCopy = h_mesh;
-    scene = triSoupFromTriangles(std::move(h_mesh));
-  }
+  scene = triSoupFromTriangles(h_mesh);
   DeviceHaltonOwen* d_rng = copyHaltonOwenToDeviceAlloc(blocks, threads);
 
-#if 1
+#if 0
   {
     std::cout << "Computing intersection to host" << std::endl;
 #  if 1
@@ -384,10 +381,12 @@ void testIntersectionMegakernel() {
     memset(out.data(), 0, h_camera.height * h_camera.width);
     hostIntersectionKernel(
         false, h_camera, h_mesh, [&](int2 pixel, int _unused, float t) {
+#    if 0
           if (std::isfinite(t)) {
             std::cout << "{ " << pixel.y << ", " << pixel.x
                       << " }: Intersection" << std::endl;
           }
+#    endif
           float const value = std::isfinite(t) ? t / 2 : 0;
           out[pixel.x + pixel.y * h_camera.width] =
               static_cast<uint8_t>(fminf(fmaxf(value * 255.f, 0), 255.f));

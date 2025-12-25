@@ -11,9 +11,15 @@ __device__ CameraSample getCameraSample(int2 pPixel, DeviceHaltonOwen& rng,
 
   // TODO filter result from getPixel2D
   float2 const pixelShift = rng.getPixel2D(params) - make_float2(0.5f, 0.5f);
+#if 0
+  printf("  pixelShift: %f %f\n", pixelShift.x, pixelShift.y);
+#endif
 
   cs.pFilm =
       pixelShift + make_float2(0.5, 0.5) + make_float2(pPixel.x, pPixel.y);
+#if 0
+  printf("  pFilm: %f %f\n", cs.pFilm.x, cs.pFilm.y);
+#endif
   cs.filterWeight = 1.f;  // TODO filtering
   return cs;
 }
@@ -132,23 +138,36 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
   Transform const cameraFromRaster = cameraFromRaster_Perspective(
       d_cam->focalLength, d_cam->sensorSize, d_cam->width, d_cam->height);
   Transform const renderFromCamera = worldFromCamera(d_cam->dir, d_cam->pos);
+  // #define PRINT(...) printf(__VA_ARGS__)
+#define PRINT(...)
+#if 0
+  printf("-------------- Triangles ---------------\n");
+  for (int tri = 0; tri < d_triSoup.count; ++tri) {
+    float4 const x = reinterpret_cast<float4 const*>(d_triSoup.xs)[tri];
+    float4 const y = reinterpret_cast<float4 const*>(d_triSoup.ys)[tri];
+    float4 const z = reinterpret_cast<float4 const*>(d_triSoup.zs)[tri];
+    printf("[%d]: \n\t%f %f %f\n\t%f %f %f\n\t %f %f %f\n", tri, x.x, y.x, z.x,
+           x.y, y.y, z.y, x.z, y.z, z.z);
+  }
+#endif
 
   for (int mortonIndex = mortonStart; mortonIndex < layout.mortonCount;
        mortonIndex += gridDim.x * blockDim.x) {
     uint2 upixel{};
     decodeMorton2D(mortonIndex, &upixel.x, &upixel.y);
     int2 const pixel = make_int2(upixel.x, upixel.y);
-#if 1
+#define DO_SAMPLING 1
+#if !DO_SAMPLING
     {
-      printf("Start pixel %d %d\n", pixel.x, pixel.y);
+      PRINT("Start pixel %d %d\n", pixel.x, pixel.y);
       HitResult hitResult{};
       hitResult.t = CUDART_INF_F;
       Ray const ray =
           getCameraRayNonRandom(pixel, cameraFromRaster, renderFromCamera);
-      printf("----------------------------------------------------\n");
-      printf("Ray: \n");
-      printf("    Origin: %f %f %f \n", ray.o.x, ray.o.y, ray.o.z);
-      printf("    Direct: %f %f %f \n", ray.d.x, ray.d.y, ray.d.z);
+      PRINT("----------------------------------------------------\n");
+      PRINT("Ray: \n");
+      PRINT("    Origin: %f %f %f \n", ray.o.x, ray.o.y, ray.o.z);
+      PRINT("    Direct: %f %f %f \n", ray.d.x, ray.d.y, ray.d.z);
       for (int tri = 0; tri < d_triSoup.count; ++tri) {
         float4 const x = reinterpret_cast<float4 const*>(d_triSoup.xs)[tri];
         float4 const y = reinterpret_cast<float4 const*>(d_triSoup.ys)[tri];
@@ -158,17 +177,26 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
           hitResult = result;
         }
       }
+      // TODO remove
       if (hitResult.hit) {
-        printf("    Intersection at t = %f\n", hitResult.t);
+        PRINT("    Intersection at t = %f\n", hitResult.t);
       }
-      printf("----------------------------------------------------\n");
+      PRINT("----------------------------------------------------\n");
 #else
+    PRINT("----------------------------------------------------\n");
+    PRINT("----------------------------------------------------\n");
     for (int s = 0; s < spp; ++s) {
+      PRINT("----------------------------------------------------\n");
+      PRINT("Start pixel %d %d | Sample %d\n", pixel.x, pixel.y, s);
       // start pixel sample and generate ray
       d_haltonOwen->startPixelSample(params, pixel, s);
       Ray const ray =
           getCameraRay(getCameraSample(pixel, *d_haltonOwen, params),
                        cameraFromRaster, renderFromCamera);
+      PRINT("Ray: \n");
+      PRINT("    Origin: %f %f %f \n", ray.o.x, ray.o.y, ray.o.z);
+      PRINT("    Direct: %f %f %f \n", ray.d.x, ray.d.y, ray.d.z);
+      PRINT("----------------------------------------------------\n");
       // intersect with scene
       HitResult hitResult{};
       hitResult.t = CUDART_INF_F;
@@ -181,13 +209,31 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
           hitResult = result;
         }
       }
+      // TODO remove
+      if (hitResult.hit) {
+        PRINT("    Intersection at t = %f\n", hitResult.t);
+      }
 #endif
+      // TODO probably remove
+      // if not intersected, contribution is zero (eliminates branch later)
+      if (!hitResult.hit) {
+        hitResult.t = 0;
+      }
       __syncwarp();
 
-      // add to output buffer
-      float const toAdd = static_cast<float>(hitResult.hit) / spp;
+      // add to output buffer ( assumes max distance is 2)
+      // TODO the rest (this is a branch BTW)
+#if DO_SAMPLING
+      float const toAdd = hitResult.t / 2 / spp;
+#else
+      float const toAdd = hitResult.t / 2;
+#endif
       float* target = d_outBuffer + mortonIndex;
+#if 1  // each pixel now is associated to a thread, no atomic
+      *target += toAdd;
+#else
       atomicAdd(target, toAdd);
+#endif
     }
   }
 }

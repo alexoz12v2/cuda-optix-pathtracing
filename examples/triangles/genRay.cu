@@ -127,7 +127,7 @@ __host__ __device__ Transform cameraFromRaster_Perspective(
 __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
                                             TriangleSoup d_triSoup,
                                             DeviceHaltonOwen* d_haltonOwen,
-                                            float* d_outBuffer) {
+                                            float4* d_outBuffer) {
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t const spp = d_cam->spp;
   // constant memory?
@@ -150,7 +150,7 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
            x.y, y.y, z.y, x.z, y.z, z.z);
   }
 #endif
-
+  // TODO: skip morton indices which are cut
   for (int mortonIndex = mortonStart; mortonIndex < layout.mortonCount;
        mortonIndex += gridDim.x * blockDim.x) {
     uint2 upixel{};
@@ -218,6 +218,11 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
       // if not intersected, contribution is zero (eliminates branch later)
       if (!hitResult.hit) {
         hitResult.t = 0;
+      } else {
+        // - choose light for Next Event Estimation (direct lighting)
+        // - create shadow ray (offset origin to avoid self intersection)
+        // - trace ray
+        // - if no intersection, sample light and add light contribution
       }
       __syncwarp();
 
@@ -228,9 +233,13 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
 #else
       float const toAdd = hitResult.t / 2;
 #endif
-      float* target = d_outBuffer + mortonIndex;
+      float4* target = d_outBuffer + mortonIndex;
 #if 1  // each pixel now is associated to a thread, no atomic
-      *target += toAdd;
+      // TODO: better coalescing?
+      target->x += hitResult.hit * .5f / spp;
+      target->y += hitResult.hit * .5f / spp;
+      target->z += toAdd;
+      target->w += 1;
 #else
       atomicAdd(target, toAdd);
 #endif

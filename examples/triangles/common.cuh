@@ -107,6 +107,74 @@ struct DeviceCamera {
 };
 
 // ---------------------------------------------------------------------------
+// Octahedral mapping (normal buffer, light direction)
+// ---------------------------------------------------------------------------
+// TODO: probably __forceinline__?
+__host__ __device__ uint32_t octaFromDir(float3 const dir);
+__host__ __device__ float3 dirFromOcta(uint32_t const octa);
+
+// ---------------------------------------------------------------------------
+// Half Precision floats Portable storage
+// ---------------------------------------------------------------------------
+// on device code, you can use float16 intrinsics. Host coverts back and forth
+// from full 4-byte float
+// TODO: probably __forceinline__
+__host__ __device__ uint16_t float_to_half_bits(float f);
+__host__ __device__ float half_bits_to_float(uint16_t h);
+
+// ---------------------------------------------------------------------------
+// Lights
+// ---------------------------------------------------------------------------
+enum class ELightType : uint16_t { ePoint, eSpot, eEnv, eDirectional };
+struct Light {
+  uint16_t intensity[4];  // 3x FP16 + light type as last (high on little end.)
+  union UnionLight {
+    struct Point {
+      float3 pos;
+      uint16_t radius;  // FP16, nucleus radius (sampling)
+      uint8_t _padding[8];
+    } point;
+    struct Spot {
+      float3 pos;
+      uint32_t direction;  // Octahedral mapping
+      uint16_t cosTheta0;  // FP16, cosine of maximum intensity angle
+      uint16_t cosThetaE;  // FP16, cosine of maximum penumbra angle
+      uint16_t radius;     // FP16, nucleus radius (sampling)
+      uint8_t _padding[2];
+    } spot;
+    struct Environmental {
+      // TODO (future) store a pointer/id to texture
+      uint8_t _padding[24];
+    } env;
+    struct Directional {
+      uint32_t direction;  // Octahedral mapping
+      uint8_t _padding[20];
+    } dir;
+  } data;
+
+  __device__ __host__ float3 getIntensity() const {
+    return make_float3(half_bits_to_float(intensity[0]),
+                       half_bits_to_float(intensity[1]),
+                       half_bits_to_float(intensity[2]));
+  }
+  __device__ __host__ ELightType type() const {
+    return static_cast<ELightType>(intensity[3]);
+  }
+};
+static_assert(sizeof(Light) == 32 && alignof(Light) == 4);
+
+__host__ __device__ Light makePointLight(float3 const color,
+                                         float3 const position, float radius);
+// direction assumed normalized
+__host__ __device__ Light makeSpotLight(float3 color, float3 position,
+                                        float3 direction, float cosTheta0,
+                                        float cosThetaE, float radius);
+// direction assumed normalized
+__host__ __device__ Light makeDirectionalLight(float3 const color,
+                                               float3 const direction);
+__host__ __device__ Light makeEnvironmentalLight(float3 const color);
+
+// ---------------------------------------------------------------------------
 // Morton
 // ---------------------------------------------------------------------------
 struct MortonLayout2D {
@@ -451,4 +519,4 @@ void triangleIntersectTest();
 __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
                                             TriangleSoup d_triSoup,
                                             DeviceHaltonOwen* d_haltonOwen,
-                                            float* d_outBuffer);
+                                            float4* d_outBuffer);

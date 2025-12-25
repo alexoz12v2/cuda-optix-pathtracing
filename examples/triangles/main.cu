@@ -15,6 +15,12 @@
 #include <filesystem>
 #include <string>
 
+// - rework triangle logic such that we switch to indexed/instanced triangles
+// - add lights, hence shadow ray production and casting (without lights, we
+// cannot reason about bounces)
+// - work on a separate executable on BSDF function and chi2 test on these (CPU
+// and GPU)
+
 // Spaces
 //   Raster space
 //     Pixel coordinates (x, y)
@@ -130,11 +136,12 @@ DeviceCamera* defaultDeviceCamera(uint32_t* width, uint32_t* height,
   return d_camera;
 }
 
-float* deviceOutputBuffer(uint32_t const width, uint32_t const height) {
+float4* deviceOutputBuffer(uint32_t const width, uint32_t const height) {
   MortonLayout2D const layout = mortonLayout(height, width);
-  float* d_outputBuffer = nullptr;
-  CUDA_CHECK(cudaMalloc(&d_outputBuffer, layout.mortonCount * sizeof(float)));
-  CUDA_CHECK(cudaMemset(d_outputBuffer, 0, layout.mortonCount * sizeof(float)));
+  float4* d_outputBuffer = nullptr;
+  CUDA_CHECK(cudaMalloc(&d_outputBuffer, layout.mortonCount * sizeof(float4)));
+  CUDA_CHECK(
+      cudaMemset(d_outputBuffer, 0, layout.mortonCount * sizeof(float4)));
   return d_outputBuffer;
 }
 
@@ -201,15 +208,14 @@ void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
   std::vector<uint8_t> row(rowStride, 0);
 
   for (uint32_t y = 0; y < height; ++y) {
-    uint32_t srcY = height - 1 - y;  // flip vertically
-    const uint8_t* src = input + srcY * width;
+    uint32_t const srcY = height - 1 - y;  // flip vertically
+    const uint8_t* src = input + srcY * width * 3;
     uint8_t* dst = row.data();
 
     for (uint32_t x = 0; x < width; ++x) {
-      uint8_t g = src[x];
-      dst[0] = g;  // B
-      dst[1] = g;  // G
-      dst[2] = g;  // R
+      dst[0] = src[3 * x + 2];  // B
+      dst[1] = src[3 * x + 1];  // G
+      dst[2] = src[3 * x + 0];  // R
       dst += 3;
     }
 
@@ -217,35 +223,46 @@ void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
   }
 }
 
-void writeOutputBuffer(float const* d_outputBuffer, uint32_t const width,
+void writePixel(uint32_t const width, uint8_t* rowMajorImage,
+                float4 const* mortonHostBuffer, uint32_t i, uint32_t const row,
+                uint32_t const col) {
+  float const fr = fminf(fmaxf(mortonHostBuffer[i].x * 255.f, 0.f), 255.f);
+  float const fg = fminf(fmaxf(mortonHostBuffer[i].y * 255.f, 0.f), 255.f);
+  float const fb = fminf(fmaxf(mortonHostBuffer[i].z * 255.f, 0.f), 255.f);
+  uint8_t const u8r = static_cast<uint8_t>(fr);
+  uint8_t const u8g = static_cast<uint8_t>(fg);
+  uint8_t const u8b = static_cast<uint8_t>(fb);
+  rowMajorImage[3 * (col + row * width) + 0] = u8r;
+  rowMajorImage[3 * (col + row * width) + 1] = u8g;
+  rowMajorImage[3 * (col + row * width) + 2] = u8b;
+}
+
+void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
                        uint32_t const height, char const* name = "output.bmp",
                        bool isHost = false) {
   MortonLayout2D const layout = mortonLayout(height, width);
   std::unique_ptr<uint8_t[]> rowMajorImage =
-      std::make_unique<uint8_t[]>(width * height);
+      std::make_unique<uint8_t[]>(width * height * 3);
   {
     // transfer to host
     if (!isHost) {
-      std::unique_ptr<float[]> mortonHostBuffer =
-          std::make_unique<float[]>(layout.mortonCount);
+      const auto mortonHostBuffer =
+          std::make_unique<float4[]>(layout.mortonCount);
       assert(mortonHostBuffer && rowMajorImage);
       CUDA_CHECK(cudaMemcpy(mortonHostBuffer.get(), d_outputBuffer,
-                            layout.mortonCount * sizeof(float),
+                            layout.mortonCount * sizeof(float4),
                             cudaMemcpyDeviceToHost));
       for (uint32_t i = 0; i < layout.mortonCount; ++i) {
         uint32_t row, col;
         decodeMorton2D(i, &col, &row);
-        float const f = fminf(fmaxf(mortonHostBuffer[i] * 255.f, 0.f), 255.f);
-        uint8_t const u8 = static_cast<uint8_t>(f);
-        rowMajorImage[col + row * width] = u8;
+        writePixel(width, rowMajorImage.get(), mortonHostBuffer.get(), i, row,
+                   col);
       }
     } else {
       for (uint32_t i = 0; i < layout.mortonCount; ++i) {
         uint32_t row, col;
         decodeMorton2D(i, &col, &row);
-        float const f = fminf(fmaxf(d_outputBuffer[i] * 255.f, 0.f), 255.f);
-        uint8_t const u8 = static_cast<uint8_t>(f);
-        rowMajorImage[col + row * width] = u8;
+        writePixel(width, rowMajorImage.get(), d_outputBuffer, i, row, col);
       }
     }
   }
@@ -258,9 +275,9 @@ Ray cameraToPixelCenterRay(int2 pixel, Transform const& cameraFromRaster,
                            Transform const& renderFromCamera) {
   Ray ray{};
 
-  float2 const rasterPoint = make_float2(pixel.x + 0.5f, pixel.y + 0.5f);
+  const auto [rasterX, rasterY] = make_float2(pixel.x + 0.5f, pixel.y + 0.5f);
   float3 const pCamera =
-      cameraFromRaster.apply(make_float3(rasterPoint.x, rasterPoint.y, 0.f));
+      cameraFromRaster.apply(make_float3(rasterX, rasterY, 0.f));
 
   ray.o = renderFromCamera.apply(make_float3(0.0f, 0.0f, 0.0f));
   ray.d = normalize(renderFromCamera.applyDirection(pCamera));
@@ -346,7 +363,7 @@ void testIntersectionMegakernel() {
   TriangleSoup scene{};
 #if 1
   std::vector<Triangle> h_mesh =
-      generateSphereMesh(make_float3(0, 1.2, 0), 0.5f, 256, 512);
+      generateSphereMesh(make_float3(0, 1.2, 0), 0.5f, 16, 32);
 #else
   std::vector<Triangle> h_mesh;
   // screen half-height at distance d = d * tan(FOV / 2)
@@ -361,16 +378,16 @@ void testIntersectionMegakernel() {
   scene = triSoupFromTriangles(h_mesh);
   DeviceHaltonOwen* d_rng = copyHaltonOwenToDeviceAlloc(blocks, threads);
 
-#if 0
+#if 1
   {
     std::cout << "Computing intersection to host" << std::endl;
 #  if 1
-    std::vector<float> out;
+    std::vector<float4> out;
     out.resize(mortonLayout(h_camera.height, h_camera.width).mortonCount);
     hostIntersectionKernel(true, h_camera, h_mesh,
                            [&](int2 pixel, int mortonIdx, float t) {
                              float const value = std::isfinite(t) ? t / 2 : 0;
-                             out[mortonIdx] = value;
+                             out[mortonIdx] = make_float4(.5f, .5f, value, 1.f);
                            });
     std::cout << "Writing to host" << std::endl;
     writeOutputBuffer(out.data(), h_camera.width, h_camera.height,
@@ -401,7 +418,7 @@ void testIntersectionMegakernel() {
 #endif
 
   // init output buffer
-  float* d_outputBuffer = deviceOutputBuffer(width, height);
+  float4* d_outputBuffer = deviceOutputBuffer(width, height);
 
   basicIntersectionMegakernel<<<blocks, threads>>>(d_camera, scene, d_rng,
                                                    d_outputBuffer);

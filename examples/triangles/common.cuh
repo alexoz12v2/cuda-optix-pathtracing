@@ -399,6 +399,9 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
 // ---------------------------------------------------------------------------
 __host__ __device__ float3 evalLight(Light const& light, LightSample const& ls);
 
+__host__ __device__ float3 evalInfiniteLight(Light const& light, float3 dir,
+                                             float* pdf);
+
 // ---------------------------------------------------------------------------
 // Morton
 // ---------------------------------------------------------------------------
@@ -673,6 +676,71 @@ __device__ __forceinline__ float smithG1(float3 v, float ax, float ay) {
 }
 
 // ---------------------------------------------------------------------------
+// Software lookup table with linear interpolation
+// ---------------------------------------------------------------------------
+__host__ __device__ float lookupTableRead(float const* __restrict__ table,
+                                          float x, int32_t size);
+__host__ __device__ float lookupTableRead2D(float const* __restrict__ table,
+                                            float x, float y, int32_t sizex,
+                                            int32_t sizey);
+
+// ---------------------------------------------------------------------------
+// BSDF
+// ---------------------------------------------------------------------------
+extern cudaTextureObject_t tex_ggx_E;
+extern cudaTextureObject_t tex_ggx_Eavg;
+
+__host__ void allocateDeviceGGXEnergyPreservingTables();
+
+enum class EBSDFType : uint16_t {
+  eOrenNayar = 0,
+  eGGXDielectric = 1,
+  eGGXConductor = 2,
+};
+
+struct BSDF {
+  // its max component is used to weight samples, while the whole RGB value
+  // is used in the energy preservation term
+  uint16_t weightStorage[4];  // 3xFP16: weight, 1 uint16 -> type
+  union BSDFUnion {
+    struct OrenNayar {
+      uint16_t albedo[3];        // 3xFP16
+      uint16_t multiScatter[3];  // 3xFP16
+      uint16_t roughness;        // FP16. sigma in radians
+      uint16_t a;                // FP16. First precomputed term
+      uint16_t b;                // FP16. Second precomputed term
+      uint8_t _padding[6];
+    } orenNayar;
+    struct GGXDielectric {
+      float eta;
+      float energyScale;
+      uint16_t reflectanceTint[3];    // FP16
+      uint16_t transmittanceTint[3];  // FP16
+      uint16_t alphax;                // integer remapped to 0,1
+      uint16_t alphay;                // integer remapped to 0,1
+    } ggxDielectric;
+    struct GGXConductor {
+      float energyScale;
+      uint16_t eta[3];    // FP16, real part of complex IOR
+      uint16_t kappa[3];  // FP16, complex part of IOR
+      uint16_t alphax;    // integer remapped to 0,1
+      uint16_t alphay;    // integer remapped to 0,1
+      uint8_t _padding[4];
+    } ggxConductor;
+  } data;
+
+  __host__ __device__ float3 weight() const {
+    return make_float3(half_bits_to_float(weightStorage[0]),
+                       half_bits_to_float(weightStorage[1]),
+                       half_bits_to_float(weightStorage[2]));
+  }
+  __host__ __device__ EBSDFType type() const {
+    return static_cast<EBSDFType>(weightStorage[3]);
+  }
+};
+static_assert(sizeof(BSDF) == 32);
+
+// ---------------------------------------------------------------------------
 // Host Device Math
 // ---------------------------------------------------------------------------
 __host__ __device__ Transform worldFromCamera(float3 cameraDirection,
@@ -706,9 +774,18 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray);
 __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray);
 void triangleIntersectTest();
 
-__global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
-                                            TriangleSoup d_triSoup,
-                                            Light const* d_lights,
-                                            uint32_t const lightCount,
-                                            DeviceHaltonOwen* d_haltonOwen,
-                                            float4* d_outBuffer);
+// Large Kernel Parameters from Volta with R530. Otherwise, it's 4096 KB
+// https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
+
+// Grid-Stride Loop + Occupancy API = profit
+// https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
+
+__global__ void __launch_bounds__(/*max threads per block*/ 512,
+                                  /*min blocks per SM*/ 10)
+    basicIntersectionMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
+                                Light const* d_lights,
+                                uint32_t const lightCount,
+                                Light const* d_infiniteLights,
+                                uint32_t const infiniteLightCount,
+                                DeviceHaltonOwen* d_haltonOwen,
+                                float4* d_outBuffer);

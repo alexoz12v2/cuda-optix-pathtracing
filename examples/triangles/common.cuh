@@ -133,11 +133,30 @@ inline __host__ __device__ __forceinline__ float3 operator/(float3 v,
                                                             float3 a) {
   return make_float3(v.x / a.x, v.y / a.y, v.z / a.z);
 }
+inline __host__ __device__ __forceinline__ float3& operator/=(float3& v,
+                                                              float a) {
+  v.x /= a;
+  v.y /= a;
+  v.z /= a;
+  return v;
+}
 inline __host__ __device__ __forceinline__ float3 operator*(float3 v, float a) {
   return make_float3(v.x * a, v.y * a, v.z * a);
 }
 inline __host__ __device__ __forceinline__ float3 operator*(float a, float3 v) {
   return make_float3(v.x * a, v.y * a, v.z * a);
+}
+inline __host__ __device__ __forceinline__ float2 operator*(float2 v, float a) {
+  return make_float2(v.x * a, v.y * a);
+}
+inline __host__ __device__ __forceinline__ float2 operator*(float a, float2 v) {
+  return make_float2(v.x * a, v.y * a);
+}
+inline __host__ __device__ __forceinline__ float2& operator*=(float2& v,
+                                                              float a) {
+  v.x = a;
+  v.y = a;
+  return v;
 }
 inline __host__ __device__ __forceinline__ float3 operator*(float3 a,
                                                             float3 v) {
@@ -146,6 +165,13 @@ inline __host__ __device__ __forceinline__ float3 operator*(float3 a,
 inline __host__ __device__ __forceinline__ float3 operator+(float3 a,
                                                             float3 b) {
   return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+inline __host__ __device__ __forceinline__ float3& operator+=(float3& a,
+                                                              float3 b) {
+  a.x += b.x;
+  a.y += b.y;
+  a.z += b.z;
+  return a;
 }
 inline __host__ __device__ __forceinline__ float3 operator+(float3 a, float b) {
   return make_float3(a.x + b, a.y + b, a.z + b);
@@ -162,6 +188,9 @@ inline __host__ __device__ __forceinline__ float3 operator-(float3 a) {
 }
 inline __host__ __device__ __forceinline__ float dot(float3 a, float3 b) {
   return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+inline __host__ __device__ __forceinline__ float dot(float2 a, float2 b) {
+  return a.x * b.x + a.y * b.y;
 }
 inline __host__ __device__ __forceinline__ float safeSqrt(float a) {
   return sqrtf(fmaxf(a, 0.f));
@@ -182,9 +211,71 @@ inline __host__ __device__ __forceinline__ float2 operator-(float2 a,
   return make_float2(a.x - b.x, a.y - b.y);
 }
 
+inline __host__ __device__ __forceinline__ float sin_sqr_to_one_minus_cos(
+    float const s_sq) {
+  // Using second-order Taylor expansion at small angles for better accuracy.
+  return s_sq > 0.0004f ? 1.0f - safeSqrt(1.0f - s_sq) : 0.5f * s_sq;
+}
+inline __host__ __device__ __forceinline__ float safeacos(float v) {
+  return fminf(fmaxf(acosf(v), -1), 1);
+}
+inline __host__ __device__ __forceinline__ float length2(float3 v) {
+  return dot(v, v);
+}
+inline __host__ __device__ __forceinline__ float length2(float2 v) {
+  return dot(v, v);
+}
+inline __host__ __device__ __forceinline__ void gramSchmidt(float3 n, float3* a,
+                                                            float3* b) {
+  assert(a && b && abs(length(n) - 1.f) < 1e-5f);
+  if (n.x != n.y || n.x != n.z)
+    *a = {n.z - n.y, n.x - n.z, n.y - n.x};  //(1,1,1)x N
+  else
+    *a = {n.z - n.y, n.x + n.z, -n.y - n.x};  //(-1,1,1)x N
+
+  *a = normalize(*a);
+  *b = cross(n, *a);
+}
+inline __host__ __device__ __forceinline__ float2
+cartesianFromPolar(float rho, float phi) {
+  return {rho * cosf(phi), rho * sinf(phi)};
+}
+
+inline __host__ __device__ __forceinline__ float smoothstep(float x) {
+  if (x <= 0.f) return 0.f;
+  if (x >= 1.f) return 1.f;
+  float const x2 = x * x;
+  return 3.f * x2 - 2.f * x2 * x;
+}
+inline __host__ __device__ __forceinline__ float smoothstep(float a, float b,
+                                                            float x) {
+  float const t = fmaxf(fminf((x - a) / (b - a), 0.f), 1.f);
+
+  return smoothstep(t);
+}
+
 // ---------------------------------------------------------------------------
 // Sampling
 // ---------------------------------------------------------------------------
+__host__ __device__ float sphereLightPDF(float distSqr, float radiusSqr,
+                                         float3 n, float3 rayD,
+                                         bool hadTransmission);
+// probably not needed as we are deleting texture coordinates from sample types
+__host__ __device__ float2 mapToSphere(float3 co);
+__host__ __device__ bool raySphereIntersect(float3 rayO, float3 rayD,
+                                            float tMin, float tMax,
+                                            float3 sphereC, float sphereRadius,
+                                            float3* isect_p, float* isect_t);
+__host__ __device__ float3 sampleUniformCone(float3 const N,
+                                             float const one_minus_cos_angle,
+                                             float2 const rand,
+                                             float* cos_theta, float* pdf);
+__host__ __device__ float3 sampleUniformSphere(float2 const rand);
+__host__ __device__ float2 sampleUniformDisk(float2 u);
+__host__ __device__ float3 sampleCosHemisphere(float3 n, float2 u, float* pdf);
+__host__ __device__ float3 sampleUniformHemisphere(float3 n, float2 u,
+                                                   float* pdf);
+__host__ __device__ float cosHemispherePDF(float3 n, float3 d);
 
 // ---------------------------------------------------------------------------
 // Octahedral mapping (normal buffer, light direction)
@@ -224,12 +315,13 @@ struct Light {
       uint8_t _padding[2];
     } spot;
     struct Environmental {
-      // TODO (future) store a pointer/id to texture
+      // TODO (future) store a pointer/id to texture?
       uint8_t _padding[24];
     } env;
     struct Directional {
-      uint32_t direction;  // Octahedral mapping
-      uint8_t _padding[20];
+      uint32_t direction;         // Octahedral mapping
+      uint16_t oneMinusCosAngle;  // falloff angle for light spread
+      uint8_t _padding[18];
     } dir;
   } data;
 
@@ -244,6 +336,16 @@ struct Light {
 };
 static_assert(sizeof(Light) == 32 && alignof(Light) == 4);
 
+// compute inverse transform from position and direction and return local ray
+__host__ __device__ Ray spotLightToLocal(float3 lightPos, float3 lightDirection,
+                                         Ray globalSpaceRay);
+// compute angular attenuation
+inline __host__ __device__ __forceinline__ float spotLightAttenuation(
+    float const cosTheta, float const cosTheta0, float const cosThetaE) {
+  // you can multiply cosTheta to customize falloff
+  return smoothstep(cosThetaE, cosTheta0, cosTheta);
+}
+
 __host__ __device__ Light makePointLight(float3 const color,
                                          float3 const position, float radius);
 // direction assumed normalized
@@ -252,24 +354,50 @@ __host__ __device__ Light makeSpotLight(float3 color, float3 position,
                                         float cosThetaE, float radius);
 // direction assumed normalized
 __host__ __device__ Light makeDirectionalLight(float3 const color,
-                                               float3 const direction);
+                                               float3 const direction,
+                                               float const oneMinusCosAngle);
 __host__ __device__ Light makeEnvironmentalLight(float3 const color);
 
 struct LightSample {
   float3 pLight;     // sampled point on light source
   float3 direction;  // intersection point to light
-  // delta is implicit in light type, which is known
+  // TODO never used in our code?
+  // float3 normal; // normal direction of irradiance of light
+  float pdf;
+  int32_t delta;  // 0 -> not delta, 1 -> delta
+#define NO_LIGHT_SAMPLE_UV 1
+  // TODO uv?
+  // float2 uv;
+  float distance;  // t, used in attenuation
+  float factor;    // used in spotlight angular attenuation
+
+  // either this or check that PDF is not 0
+  __host__ __device__ __forceinline__ operator bool() const {
+    return direction.x != 0 && direction.y != 0 && direction.z != 0 && pdf != 0;
+  }
 };
 
 // position = last intersection position
 __host__ __device__ LightSample sampleLight(Light const& light,
-                                            float3 const position,
+                                            float3 const position, float2 u,
                                             bool hadTransmission,
-                                            float3 const normal, float* pdf);
-
+                                            float3 const normal);
 // ---------------------------------------------------------------------------
 // Light specific sampling functions
 // ---------------------------------------------------------------------------
+__host__ __device__ LightSample samplePointLight(Light const& light,
+                                                 float3 const position,
+                                                 float2 u, bool hadTransmission,
+                                                 float3 const normal);
+__host__ __device__ LightSample sampleSpotLight(Light const& light,
+                                                float3 const position, float2 u,
+                                                bool hadTransmission,
+                                                float3 const normal);
+
+// ---------------------------------------------------------------------------
+// Light Evaluation
+// ---------------------------------------------------------------------------
+__host__ __device__ float3 evalLight(Light const& light, LightSample const& ls);
 
 // ---------------------------------------------------------------------------
 // Morton
@@ -304,8 +432,7 @@ mortonLayout(uint32_t rows, uint32_t cols) {
 }
 
 // clang-format off
-inline
-__host__ __device__ __forceinline__ uint32_t part1by1(uint32_t x) {
+inline __host__ __device__ __forceinline__ uint32_t part1by1(uint32_t x) {
   x &= 0x0000ffff;                  // x = ---- ---- ---- ---- fedc ba98 7654 3210
   x = (x | (x << 8)) & 0x00ff00ff;  // x = ---- ---- fedc ba98 ---- ---- 7654 3210
   x = (x | (x << 4)) & 0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
@@ -313,8 +440,7 @@ __host__ __device__ __forceinline__ uint32_t part1by1(uint32_t x) {
   x = (x | (x << 1)) & 0x55555555;  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
   return x;
 }
-inline
-__host__ __device__ __forceinline__ uint32_t compact1By1(uint32_t x) {
+inline __host__ __device__ __forceinline__ uint32_t compact1By1(uint32_t x) {
   x &= 0x55555555;                  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
   x = (x | (x >> 1)) & 0x33333333;  // x = --fe --dc --ba --98 --76 --54 --32 --10
   x = (x | (x >> 2)) & 0x0f0f0f0f;  // x = ---- fedc ---- ba98 ---- 7654 ---- 3210

@@ -226,9 +226,12 @@ void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
 void writePixel(uint32_t const width, uint8_t* rowMajorImage,
                 float4 const* mortonHostBuffer, uint32_t i, uint32_t const row,
                 uint32_t const col) {
-  float const fr = fminf(fmaxf(mortonHostBuffer[i].x * 255.f, 0.f), 255.f);
-  float const fg = fminf(fmaxf(mortonHostBuffer[i].y * 255.f, 0.f), 255.f);
-  float const fb = fminf(fmaxf(mortonHostBuffer[i].z * 255.f, 0.f), 255.f);
+  float const fr = fminf(
+      fmaxf(mortonHostBuffer[i].x / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
+  float const fg = fminf(
+      fmaxf(mortonHostBuffer[i].y / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
+  float const fb = fminf(
+      fmaxf(mortonHostBuffer[i].z / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
   uint8_t const u8r = static_cast<uint8_t>(fr);
   uint8_t const u8g = static_cast<uint8_t>(fg);
   uint8_t const u8b = static_cast<uint8_t>(fb);
@@ -276,7 +279,7 @@ Light* deviceLights(uint32_t* lightCount) {
   if (lightCount) *lightCount = 2;
   Light h_lights[2]{
       makePointLight(make_float3(244.f / 255, 191.f / 255, 117.f / 255),
-                     make_float3(-.5f, 1.5f, 0.45f), 0.01f),
+                     make_float3(-.5f, 0.5f, 0.45f), 0.01f),
       makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)),
   };
   CUDA_CHECK(cudaMalloc(&d_lights, sizeof(Light) * 2));

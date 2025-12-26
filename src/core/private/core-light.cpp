@@ -134,8 +134,8 @@ bool pointLightSampleFromContext(Light const& light, Point2f u, Point3f p,
   sample->evalFac = light.data.point.evalFac;
 
   float cosTheta = 0.f;
-  if (distSqr > radiusSqr)  // outside sphere
-  {
+  if (distSqr > radiusSqr) {
+    // outside sphere
     float const oneMinusCos = sin_sqr_to_one_minus_cos(radiusSqr / distSqr);
 
     sample->d =
@@ -144,8 +144,8 @@ bool pointLightSampleFromContext(Light const& light, Point2f u, Point3f p,
       sample->pdf = 1.f;
       sample->delta = true;
     }
-  } else  // inside sphere
-  {
+  } else {
+    // inside sphere
     if (hadTransmission) {
       sample->d = sampleUniformSphere(u);
       sample->pdf = 1.f / (4.f * fl::pi());

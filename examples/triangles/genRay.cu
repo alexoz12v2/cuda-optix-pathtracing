@@ -3,6 +3,8 @@
 #include <vector_types.h>
 #include "common.cuh"
 
+#include <numbers>
+
 namespace cg = cooperative_groups;
 
 __device__ CameraSample getCameraSample(int2 pPixel, DeviceHaltonOwen& rng,
@@ -190,6 +192,9 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
     for (int s = 0; s < spp; ++s) {
       // TODO refactor into path state?
       float3 L = make_float3(0, 0, 0);
+      float beta = 1.f;
+      cg::coalesced_group const theWarp = cg::coalesced_threads();
+
       PRINT("----------------------------------------------------\n");
       PRINT("Start pixel %d %d | Sample %d\n", pixel.x, pixel.y, s);
       // start pixel sample and generate ray
@@ -221,40 +226,66 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
       // if not intersected, contribution is zero (eliminates branch later)
       if (!hitResult.hit) {
         // TODO all env lights here
-        hitResult.t = 0;
       } else {
         // - choose light for Next Event Estimation (direct lighting)
-        Light const light = d_lights[static_cast<int>(fmaxf(
-            fminf(warpRng.get1D(params) * (lightCount - 1), lightCount - 1),
-            0))];
+        int32_t const lightIndex =
+            min(static_cast<int>(warpRng.get1D(params) * lightCount),
+                lightCount - 1);
+        Light const light = d_lights[lightIndex];
         float const lightPMF = 1 / lightCount;
-        // TODO first BSDF so that choose refract or reflect
-        Ray shadowRay{
-            length(hitResult.error) * hitResult.normal + hitResult.pos,
-            make_float3(1, 1, 1)};
-        // - create shadow ray (offset origin to avoid self intersection)
-        // - trace ray
-        // - if no intersection, sample light and add light contribution
+        if (LightSample const ls =
+                sampleLight(light, hitResult.pos, warpRng.get2D(params), false,
+                            hitResult.normal);
+            ls) {
+          // - create shadow ray (offset origin to avoid self intersection)
+          Ray const shadowRay{
+              length(hitResult.error) * hitResult.normal + hitResult.pos,
+              ls.direction};
+          // - trace ray
+          bool doNextEventEstimation = true;
+          for (int tri = 0; tri < d_triSoup.count; ++tri) {
+            float4 const x = reinterpret_cast<float4 const*>(d_triSoup.xs)[tri];
+            float4 const y = reinterpret_cast<float4 const*>(d_triSoup.ys)[tri];
+            float4 const z = reinterpret_cast<float4 const*>(d_triSoup.zs)[tri];
+            if (HitResult const result = triangleIntersect(x, y, z, shadowRay);
+                result.hit) {
+              doNextEventEstimation = false;
+              break;
+            }
+          }
+          // - if no intersection, sample light and add light contribution
+          if (doNextEventEstimation) {
+            // TODO attenuation and bsdf factor evaluation
+            float constexpr bsdfFactor = 1.f;
+            float constexpr bsdfPdf = 0.25 * std::numbers::pi_v<float>;
+            float3 const Le = evalLight(light, ls);
+            // TODO revise
+            if (ls.delta) {
+              // MIS if not delta (and not BSDF Delta TODO)
+              L += beta * Le * bsdfFactor / lightPMF;
+            } else {
+              // otherwise (to check bsdf not delta?? TODO)
+              L += beta * (Le * bsdfFactor / (lightPMF * ls.pdf + bsdfPdf));
+            }
+          }
+        }
       }
-      __syncwarp();
+      theWarp.sync();
 
       // add to output buffer ( assumes max distance is 2)
       // TODO the rest (this is a branch BTW)
-#if DO_SAMPLING
-      float const toAdd = hitResult.t / 2 / spp;
-#else
-      float const toAdd = hitResult.t / 2;
-#endif
       float4* target = d_outBuffer + mortonIndex;
 #if 1  // each pixel now is associated to a thread, no atomic
       // TODO: better coalescing?
-      target->x += hitResult.hit * .5f / spp;
-      target->y += hitResult.hit * .5f / spp;
-      target->z += toAdd;
-      target->w += 1;
+      target->x += L.x;
+      target->y += L.y;
+      target->z += L.z;
+      target->w += 1;  // TODO: sum of weights
 #else
       atomicAdd(target, toAdd);
 #endif
+
+      // TODO russian roulette
     }
   }
 }

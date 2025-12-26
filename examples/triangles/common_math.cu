@@ -190,10 +190,11 @@ __device__ __forceinline__ uint32_t mixBits32(uint32_t v) {
   return v;
 }
 
+// TODO Warp Uniform Version
 __device__ __forceinline__ float radicalInverse(uint32_t primeIndex,
                                                 uint32_t index) {
   const uint32_t base = primes[primeIndex];
-  const float invBase = __frcp_rn((float)base);
+  const float invBase = __frcp_rn(static_cast<float>(base));
   const uint32_t limit = ~0u / base - base;
 
   uint32_t result = 0;
@@ -250,37 +251,35 @@ __device__ __forceinline__ uint32_t permutationElement(uint32_t digit,
   return digit;
 }
 
+// TODO Warp Uniform version
 __device__ __forceinline__ float owenScrambledRadicalInverse32(int primeIndex,
-                                                               uint32_t num,
-                                                               uint32_t hash,
-                                                               int nDigits) {
-  uint32_t base = primes[primeIndex];
-  float invBase = __frcp_rn((float)base);
+                                                               uint32_t index,
+                                                               uint32_t seed) {
+  const uint32_t base = primes[primeIndex];
+  double invBase = 1.0 / double(base);
+  double invBaseM = 1.0;
 
-  uint32_t reversed = 0;
-  float invBaseM = 1.0f;
+  uint64_t reversed = 0;
 
-  // IMPORTANT: fixed iteration count → warp-uniform
-  for (int i = 0; i < nDigits; ++i) {
-    uint32_t next = num / base;
-    uint32_t digit = num - next * base;
+  while (index) {
+    uint32_t next = index / base;
+    uint32_t digit = index - next * base;
 
-    uint32_t scramble = mixBits32(hash ^ reversed);
-
+    uint32_t scramble = mixBits32(seed ^ uint32_t(reversed));
     digit = permutationElement(digit, base, scramble);
 
     reversed = reversed * base + digit;
     invBaseM *= invBase;
-    num = next;
+    index = next;
   }
 
-  return fminf(reversed * invBaseM, 0.99999994f);
+  const double result = static_cast<double>(reversed) * invBaseM;
+  return static_cast<float>(fmin(result, 0.999999999999));
 }
 
-__device__ __forceinline__ float sampleDim(int dimension, int haltonIndex,
-                                           int baseExponent) {
-  return owenScrambledRadicalInverse32(
-      dimension, haltonIndex, mixBits32(1 + (dimension << 4)), baseExponent);
+__device__ __forceinline__ float sampleDim(int dimension, int haltonIndex) {
+  uint32_t const seed = mixBits32(1u + (static_cast<uint32_t>(dimension) << 4));
+  return owenScrambledRadicalInverse32(dimension, haltonIndex, seed);
 }
 
 }  // namespace
@@ -344,25 +343,27 @@ __device__ void DeviceHaltonOwen::startPixelSample(
 __device__ float DeviceHaltonOwen::get1D(DeviceHaltonOwenParams const& params) {
   int const laneId = cooperative_groups::thread_block_tile<32>::thread_rank();
 
-  dimension[laneId] = max(dimension[laneId], NUM_PRIMES);
+  if (dimension[laneId] > NUM_PRIMES) dimension[laneId] = 2;
   int const dim = dimension[laneId]++;
-  return sampleDim(dim, haltonIndex[laneId],
-                   params.baseExponents[max(dim, NUM_FILM_DIMENSION - 1)]);
+  float const result = sampleDim(dim, haltonIndex[laneId]);
+#if 0
+  printf("dim: %d halton index: %d exp: %d result: %f\n", dimension[laneId],
+         haltonIndex[laneId],
+         params.baseExponents[max(dim, NUM_FILM_DIMENSION - 1)], result);
+#endif
+  return result;
 }
 
 __device__ float2
 DeviceHaltonOwen::get2D(DeviceHaltonOwenParams const& params) {
   int const laneId = cooperative_groups::thread_block_tile<32>::thread_rank();
 
-  dimension[laneId] = max(dimension[laneId] + 1, NUM_PRIMES);
+  if (dimension[laneId] + 1 > NUM_PRIMES) dimension[laneId] = 2;
   int const dim = dimension[laneId];
   dimension[laneId] += 2;
 
-  return make_float2(
-      sampleDim(dim, haltonIndex[laneId],
-                params.baseExponents[max(dim, NUM_FILM_DIMENSION - 1)]),
-      sampleDim(dim + 1, haltonIndex[laneId],
-                params.baseExponents[max(dim + 1, NUM_FILM_DIMENSION - 1)]));
+  return make_float2(sampleDim(dim, haltonIndex[laneId]),
+                     sampleDim(dim + 1, haltonIndex[laneId]));
 }
 
 __device__ float2
@@ -561,10 +562,12 @@ __host__ __device__ Light makeSpotLight(float3 color, float3 position,
 }
 
 __host__ __device__ Light makeDirectionalLight(float3 const color,
-                                               float3 const direction) {
+                                               float3 const direction,
+                                               float const oneMinusCosAngle) {
   Light l{};
   packIntensity(l, color, ELightType::eDirectional);
   l.data.dir.direction = octaFromDir(direction);
+  l.data.dir.oneMinusCosAngle = float_to_half_bits(oneMinusCosAngle);
   return l;
 }
 
@@ -572,4 +575,15 @@ __host__ __device__ Light makeEnvironmentalLight(float3 const color) {
   Light l{};
   packIntensity(l, color, ELightType::eEnv);
   return l;
+}
+
+__host__ __device__ float3 evalLight(Light const& light,
+                                     LightSample const& ls) {
+  float3 Le = light.getIntensity() * ls.factor;
+  if (ELightType const type = light.type();
+      type == ELightType::ePoint || type == ELightType::eSpot) {
+    // quadratic attenuation (TODO Other variances?)
+    Le /= (ls.distance * ls.distance);
+  }
+  return Le;
 }

@@ -27,7 +27,7 @@ namespace dmt::os {
 class DMT_PLATFORM_API alignas(32) ChunkedFileReader {
  public:
  private:
-  struct DMT_PLATFORM_API EndSentinel {};
+  struct DMT_PLATFORM_API EndSentinel{};
   struct DMT_PLATFORM_API InputIterator {
    public:
     using difference_type = std::ptrdiff_t;

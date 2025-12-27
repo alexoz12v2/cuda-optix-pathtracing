@@ -125,9 +125,9 @@ __host__ __device__ float2 sampleUniformDisk(float2 u) {
   if (a == 0.f && b == 0.f) return {};
 
   if (a > b) {
-    static constexpr float _piOver4 = std::numbers::pi_v<float> / 4;
+    static constexpr float piOver4 = std::numbers::pi_v<float> / 4;
     rho = a;
-    phi = _piOver4 * (b / a);
+    phi = piOver4 * (b / a);
   } else {
     static constexpr float _3piOver4 = 3 * std::numbers::pi_v<float> / 4;
     rho = b;
@@ -356,6 +356,7 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
 // ---------------------------------------------------------------------------
 // Light Sampling dispatcher
 // ---------------------------------------------------------------------------
+// TODO is it ok to synchronize the coalesced warp?
 __host__ __device__ LightSample sampleLight(Light const& light,
                                             float3 const position, float2 u,
                                             bool hadTransmission,

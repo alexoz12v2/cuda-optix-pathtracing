@@ -1,5 +1,12 @@
 #include "common.cuh"
 
+#include <cooperative_groups.h>
+
+#include <cassert>
+#include <numbers>
+
+namespace cg = cooperative_groups;
+
 static int constexpr GGX_E_TABLE_COLS = 32;
 static int constexpr GGX_E_TABLE_ROWS = 1024 / GGX_E_TABLE_COLS;
 static constexpr float table_ggx_E[GGX_E_TABLE_ROWS * GGX_E_TABLE_COLS]{
@@ -215,4 +222,354 @@ __host__ void allocateDeviceGGXEnergyPreservingTables() {
     CUDA_CHECK(cudaCreateTextureObject(&tex_ggx_E, &ggxEDesc, &ggxEDescTexDesc,
                                        nullptr));
   }
+}
+
+// ---------------------------------------------------------------------------
+// BSDF-Specific sampling/evaluation functions
+// ---------------------------------------------------------------------------
+
+namespace {
+__host__ __device__ __forceinline__ float3 tangentFromPhi(const float3 ns,
+                                                          float const phi0) {
+  // Choose a reference vector not parallel to ns
+  float3 const ref = fabsf(ns.x) < 0.999f ? make_float3(1.0f, 0.0f, 0.0f)
+                                          : make_float3(0.0f, 1.0f, 0.0f);
+
+  // Build an orthonormal basis around ns
+  float3 const t = normalize(cross(ref, ns));
+  float3 const b = cross(ns, t);
+
+  // Rotate in tangent plane
+  float const s = sinf(phi0);
+  float const c = cosf(phi0);
+
+  return c * t + s * b;
+}
+
+// simple branches as this should be compiled in PTX/SASS as conditional
+// instructions. TODO Check
+__host__ __device__ __forceinline__ float3 faceForward(const float3 n,
+                                                       const float3 v) {
+  return dot(n, v) < 0.0f ? -n : n;
+}
+
+__host__ __device__ __forceinline__ float3 sampleGGX_VNDF(float3 wo, float2 u,
+                                                          float ax, float ay) {
+  // stretch view (anisotropic roughness)
+  float3 const V = normalize(make_float3(ax * wo.x, ay * wo.y, wo.z));
+
+  // orthonormal basis (Frame) (azimuthal only)
+  float3 T1, T2;
+  if (float const lensq = V.x * V.x + V.y * V.y; lensq > 1e-7f) {
+    float const invLen = rsqrtf(lensq);
+    T1 = make_float3(-V.y * invLen, V.x * invLen, 0.f);
+    T2 = cross(V, T1);
+  } else {
+    T1 = make_float3(1, 0, 0);
+    T2 = make_float3(0, 1, 0);
+  }
+
+  // sample disk
+  float2 t = sampleUniformDisk(u);
+  t.y = lerp(safeSqrt(1.f - t.x * t.x), t.y, 0.5f * (1.f + V.z));
+
+  // recombine and unstretch (disk_to_hemisphere + to_global)
+  float3 Nh = t.x * T1 + t.y * T2 + safeSqrt(1.f - dot(t, t)) * V;
+
+  // transform normal back to ellipsoid configuration
+  Nh = normalize(make_float3(ax * Nh.x, ay * Nh.y, fmaxf(0.f, Nh.z)));
+  return Nh;
+}
+
+__host__ __device__ __forceinline__ void microfacetFresnel(
+    BSDF const& bsdf, float const cos_HO, float* cos_HI, float3* reflectance,
+    float3* transmittance) {
+  EBSDFType const type = bsdf.type();
+#ifndef __CUDA_ARCH__
+  assert(type == EBSDFType::eGGXConductor || type == EBSDFType::eGGXDielectric);
+#endif
+  // TODO how can we improve this branching?
+  if (type == EBSDFType::eGGXDielectric) {  // dielectric tint
+    float const F = reflectanceFresnelDielectric(
+        cos_HO, half_bits_to_float(bsdf.data.ggx.mat.dielectric.eta), cos_HI);
+    *reflectance =
+        F * half_vec_to_float3(bsdf.data.ggx.mat.dielectric.reflectanceTint);
+    *transmittance =
+        (1.f - F) *
+        half_vec_to_float3(bsdf.data.ggx.mat.dielectric.transmittanceTint);
+  } else {  // conductor
+    // doesn't populate cosine as it's cosTheta_T, hence used only on trans.
+    *reflectance = reflectanceFresnelConductor(
+        cos_HO, half_vec_to_float3(bsdf.data.ggx.mat.conductor.eta),
+        half_vec_to_float3(bsdf.data.ggx.mat.conductor.kappa));
+    *transmittance = make_float3(0, 0, 0);
+  }
+}
+
+// assumes normal is properly oriented, hence dot(n,i) > 0
+// starts with cosThetaT already computed
+__host__ __device__ __forceinline__ float3 refractAngle(float3 const incident,
+                                                        float3 const normal,
+                                                        float const cosThetaT,
+                                                        float const invEta) {
+  return (invEta * dot(normal, incident) + cosThetaT) * normal -
+         invEta * incident;
+}
+
+// ---------------------------------------------------------------------------
+// BSDF: Microfacet with Generalized Torrance Sparrow and GGX NDF
+// ---------------------------------------------------------------------------
+
+// common computation between isotropic and anisotropic auxiliary function
+// https://jcgt.org/published/0003/02/03/
+__host__ __device__ __forceinline__ float ggx_lambda_from_sqr_alpha_tan_n(
+    float const sqr_alpha_tan_n) {
+  return 0.5f * (sqrtf(1.f + sqr_alpha_tan_n) - 1.f);
+}
+
+__host__ __device__ __forceinline__ float ggx_D(float const alpha2,
+                                                float const cos_NH) {
+  float const cos_NH2 = fminf(cos_NH * cos_NH, 1.f);
+  float const one_minus_cos_NH2 = 1.f - cos_NH2;
+  return alpha2 / (std::numbers::pi_v<float> *
+                   sqrf(one_minus_cos_NH2 + alpha2 * cos_NH2));
+}
+__host__ __device__ __forceinline__ float ggx_lambda(float const alpha2,
+                                                     float const cos_N) {
+  float const sqr_alpha_tan_n = alpha2 * fmaxf(0.f, 1.f / sqrf(cos_N));
+  return ggx_lambda_from_sqr_alpha_tan_n(sqr_alpha_tan_n);
+}
+__host__ __device__ __forceinline__ float ggx_aniso_D(float const alphax,
+                                                      float const alphay,
+                                                      float3 local_H) {
+  local_H /= make_float3(alphax, alphay, 1.f);
+  // float const cos_NH2 = sqrf(local_H.z); // beckmann only
+  float const alpha2 = alphax * alphay;
+  return std::numbers::inv_pi_v<float> / (alpha2 * sqrf(dot(local_H, local_H)));
+}
+__host__ __device__ __forceinline__ float ggx_aniso_lambda(float const alphax,
+                                                           float const alphay,
+                                                           float3 const V) {
+  float const sqr_alpha_tan_n =
+      (sqrf(alphax * V.x) + sqrf(alphay * V.y)) / sqrf(V.z);
+  return ggx_lambda_from_sqr_alpha_tan_n(sqr_alpha_tan_n);
+}
+
+}  // namespace
+
+// cycles swaps the notion of wi and wo
+static constexpr float piOverUint16Max = std::numbers::pi_v<float> / UINT16_MAX;
+static constexpr float throughputEps = 1e-6f;
+
+__host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
+                                         float3 ng, float2 u, float uc) {
+  BSDFSample sample{};
+  float const cos_NO = dot(ns, wo);
+#if 0  // already checked in dispatcher function
+  if (cos_NI <= 0) {
+    // incident angles from lower hemisphere are invalid. If you are within
+    // a material after a transmission, it's the caller's responsibility
+    // to flip the normals so that cosines are positive
+    return sample;
+  }
+#endif
+  bool const isotropic = bsdf.data.ggx.alphax == bsdf.data.ggx.alphay;
+  float const alphax = static_cast<float>(bsdf.data.ggx.alphax) / UINT16_MAX;
+  float const alphay = static_cast<float>(bsdf.data.ggx.alphay) / UINT16_MAX;
+  float3 const tangent = tangentFromPhi(
+      ns, static_cast<float>(bsdf.data.ggx.phi0) * piOverUint16Max);
+  // eta always refers to outside/inside. hence, if last was transmission,
+  // the caller should flip it. Here we initialize it to 1 as we don't know
+  // whether the GGX is conductor or dielectric yet.
+  sample.eta = 1.f;
+  float invEta = 1.f;
+  // below a certain roughness, GGX becomes effectively specular
+  sample.delta = fmaxf(alphax, alphay) < 1e-3f;  // TODO tweak?
+
+  // half vector (global space) and anisotropic params
+  float3 H{}, local_H{}, local_O{};
+  if (sample.delta) {
+    H = ns;
+  } else {
+    // make tangent-space frame. Consider BSDF tangent if anisotropic
+    float3 X{}, Y{};
+    // TODO remove branch
+    if (isotropic) {
+      gramSchmidt(ns, &X, &Y);
+    } else {
+      orthonormalTangent(ns, tangent, &X, &Y);
+    }
+    // importance sampling of Distribution of Visible Normals
+    // https://jcgt.org/published/0007/04/01/
+    local_O = make_float3(dot(X, wo), dot(Y, wo), cos_NO);
+    local_H = sampleGGX_VNDF(local_O, u, alphax, alphay);
+    // to global
+    H = local_H.x * X + local_H.y * Y + local_H.z * ns;
+  }
+  float const cos_HO = dot(H, wo);
+  // angle betwen half vector and refracted ray. not used in reflection
+  float cos_HI{};
+  float3 reflectance{};
+  float3 transmittance{};
+  microfacetFresnel(bsdf, cos_HO, &cos_HI, &reflectance, &transmittance);
+  // TODO should assert positive or zero values for all components
+  if (nearZeroPos(reflectance, throughputEps) &&
+      nearZeroPos(transmittance, throughputEps)) {
+    return sample;  // TODO better branching?
+  }
+
+  const float pdfReflect =  // TODO assert [0,1]
+      luminance(reflectance) / luminance(reflectance + transmittance);
+  sample.refract = uc >= pdfReflect;
+  // reflected/refracted direction
+  sample.wi =
+      sample.refract
+          ? refractAngle(
+                wo, H, cos_HI,
+                (invEta = 1.f / (sample.eta = half_bits_to_float(
+                                     bsdf.data.ggx.mat.dielectric.eta))))
+          : 2.f * cos_HO * H - wo;
+  // either normal and direction are same hemisphere or refraction
+  if (dot(ng, sample.wi) < 0 && !sample.refract) {  // TODO branching
+    return sample;  // pdf still 0 here, so falsy sample
+  }
+
+  // BSDF/PDF computation
+  if (sample.refract) {
+    sample.f = transmittance;
+    sample.pdf = 1.f - pdfReflect;
+    // if IOR is near to 1.0, then specular
+    sample.delta |= fabsf(sample.eta - 1.f) < 1e-4f;
+  } else {
+    sample.pdf = pdfReflect;
+  }
+  // adjust for singular, otherwise apply Generalized Cook Torrance
+  if (sample.delta) {
+    // TODO: Check if this is necessary, since we don't do MIS for delta
+    sample.pdf *= 1e6f;
+    sample.f *= 1e6f;
+  } else {
+    float D{}, lambdaI{}, lambdaO{};
+
+    // as cycles, we don't support anisotropic for transmission
+    if (isotropic || sample.refract) {  // isotropic D and auxiliary
+      float const alpha2 = alphax * alphay;
+      float const cos_NH = local_H.z;
+      float const cos_NI = dot(ns, sample.wi);
+
+      D = ggx_D(alpha2, cos_NH);
+      lambdaI = ggx_lambda(alpha2, cos_NI);
+      lambdaO = ggx_lambda(alpha2, cos_NO);
+    } else {  // anisotropic D and auxiliary
+      float3 const local_I = 2.f * cos_HO * local_H - local_O;
+
+      D = ggx_aniso_D(alphax, alphay, local_H);
+      lambdaI = ggx_aniso_lambda(alphax, alphay, local_I);
+      lambdaO = ggx_aniso_lambda(alphax, alphay, local_O);
+    }
+
+    // fused cook torrance formula for transmission and reflection
+    float const common = D / cos_NO *
+                         (sample.refract ? fabsf(cos_HO * cos_HI) /
+                                               sqrf(cos_HI + cos_HO * invEta)
+                                         : 0.25f);
+    sample.pdf *= common / (1.f + lambdaO);
+    sample.f *= common / (1.f + lambdaO + lambdaI);
+  }
+
+  return sample;
+}
+
+// ---------------------------------------------------------------------------
+// BSDF: Oren Nayar
+// ---------------------------------------------------------------------------
+
+// From cycles: improved Oren-Nayar model by Yasuhiro Fujii
+// https://mimosa-pudica.net/improved-oren-nayar.html
+// energy-preserving multi-scattering term based on the OpenPBR specification
+// https://academysoftwarefoundation.github.io/OpenPBR
+__host__ __device__ __forceinline__ float orenNayar_G(float const cosTheta) {
+  static float constexpr piOver2 = std::numbers::pi_v<float> / 2;
+  static float constexpr _2Over3 = 2.f / 3.f;
+  static float constexpr piOver2m2Over3 = piOver2 - _2Over3;
+  if (cosTheta < 1e-6f) {
+    return piOver2m2Over3 - cosTheta;
+  }
+  // TODO check that SASS/PTX compiles to condition ops and not branching
+  float const sinTheta = sin_from_cos(cosTheta);
+  float const theta = safeacos(cosTheta);
+  return sinTheta * (theta - _2Over3 - sinTheta * cosTheta) +
+         _2Over3 * (sinTheta / cosTheta) * (1.f - sqrf(sinTheta) * sinTheta);
+}
+
+__host__ __device__ __forceinline__ float3
+orenNayar_intensity(BSDF::BSDFUnion::OrenNayar const& params, float3 const n,
+                    float3 const v, float3 const l) {
+  float const bsdf_a = half_bits_to_float(params.a);
+  float const bsdf_b = half_bits_to_float(params.b);
+  float3 const bsdf_multiScatter = half_vec_to_float3(params.multiScatter);
+
+  float const nl = fmaxf(dot(n, l), 0.f);
+  if (bsdf_b <= 0) {  // should never happen
+    float const r = nl * std::numbers::inv_pi_v<float>;
+    return make_float3(r, r, r);
+  }
+  float const nv = fmaxf(dot(n, v), 0.f);
+  float t = dot(l, v) - nl * nv;
+  // TODO check that SASS/PTX compiles to condition ops and not branching
+  if (t > 0.f) {
+    t /= fmaxf(nl, nv) + FLT_MIN;
+  }
+  float const singleScatter = bsdf_a + bsdf_b * t;
+  float const El =
+      bsdf_a * std::numbers::pi_v<float> + bsdf_b * orenNayar_G(nl);
+  float3 const multiScatter = bsdf_multiScatter * (1.f - El);
+  return nl * (singleScatter + multiScatter);
+}
+
+__host__ __device__ BSDFSample sampleOrenNayar(BSDF const& bsdf, float3 wo,
+                                               float3 ns, float3 ng, float2 u,
+                                               float uc) {
+  BSDFSample sample{};
+  sample.eta = 1.f;
+  sample.wi = sampleCosHemisphere(ns, u, &sample.pdf);
+  if (dot(ng, sample.wi) > 0.f) {
+    sample.f = orenNayar_intensity(bsdf.data.orenNayar, ns, wo, sample.wi);
+  } else {  // TODO better branching
+    sample.pdf = 0;
+  }
+  return sample;
+}
+
+// ---------------------------------------------------------------------------
+// BSDF sampling/evaluation functions
+// ---------------------------------------------------------------------------
+
+// TODO is it ok to synchronize the coalesced warp?
+__host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
+                                          float3 ns, float3 ng, float2 u,
+                                          float uc) {
+  BSDFSample sample{};
+#ifdef __CUDA_ARCH__
+  cg::coalesced_group const theWarp = cg::coalesced_threads();
+#endif
+  // Ensure outgoing direction is same hemisphere of geo normal
+  if (dot(wo, ng) > 0.0f) {
+    // Shading normal must not change hemisphere
+    ns = faceForward(ns, ng);
+
+    switch (bsdf.type()) {
+      case EBSDFType::eOrenNayar:
+        sample = sampleOrenNayar(bsdf, wo, ns, ng, u, uc);
+        break;
+      case EBSDFType::eGGXDielectric:
+      case EBSDFType::eGGXConductor:
+        sample = sampleGGX(bsdf, wo, ns, ng, u, uc);
+        break;
+    }
+  }
+#ifdef __CUDA_ARCH__
+  theWarp.sync();
+#endif
+  return sample;
 }

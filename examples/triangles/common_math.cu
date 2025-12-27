@@ -134,6 +134,10 @@ __host__ __device__ float3 Transform::applyInverseTranspose(float3 n) const {
                      mInv[8] * n.x + mInv[9] * n.y + mInv[10] * n.z);
 }
 
+//------------------------------------------------
+// HaltonOwen
+//------------------------------------------------
+
 inline int constexpr NUM_PRIMES = 10;
 static int h_primes[NUM_PRIMES] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29};
 

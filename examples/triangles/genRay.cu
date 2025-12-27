@@ -126,12 +126,15 @@ __host__ __device__ Transform cameraFromRaster_Perspective(
   return Transform{m};
 }
 
-__global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
-                                            TriangleSoup d_triSoup,
-                                            Light const* d_lights,
-                                            uint32_t const lightCount,
-                                            DeviceHaltonOwen* d_haltonOwen,
-                                            float4* d_outBuffer) {
+__global__ void __launch_bounds__(/*max threads per block*/ 512,
+                                  /*min blocks per SM*/ 10)
+    basicIntersectionMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
+                                Light const* d_lights,
+                                uint32_t const lightCount,
+                                Light const* d_infiniteLights,
+                                uint32_t const infiniteLightCount,
+                                DeviceHaltonOwen* d_haltonOwen,
+                                float4* d_outBuffer) {
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t const spp = d_cam->spp;
   // constant memory?
@@ -226,6 +229,18 @@ __global__ void basicIntersectionMegakernel(DeviceCamera* d_cam,
       // if not intersected, contribution is zero (eliminates branch later)
       if (!hitResult.hit) {
         // TODO all env lights here
+        int32_t const lightIndex =
+            min(static_cast<int>(warpRng.get1D(params) * infiniteLightCount),
+                infiniteLightCount - 1);
+        Light const light = d_infiniteLights[lightIndex];
+        float const lightPMF = 1 / infiniteLightCount;
+        float pdf = 0;
+        float3 const Le = evalInfiniteLight(light, ray.d, &pdf);
+        if (pdf) {
+          // TODO: If any specular bounce or depth == 0, don't do MIS
+          // TODO: Use last BSDF for MIS
+          L += beta * Le;
+        }
       } else {
         // - choose light for Next Event Estimation (direct lighting)
         int32_t const lightIndex =

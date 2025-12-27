@@ -3,6 +3,7 @@
 #include <cuda_fp16.h>
 
 #include <cstring>
+#include <numbers>
 
 __host__ __device__ Transform::Transform() {
   for (int i = 0; i < 4; ++i) {
@@ -589,5 +590,17 @@ __host__ __device__ float3 evalLight(Light const& light,
     // quadratic attenuation (TODO Other variances?)
     Le /= (ls.distance * ls.distance);
   }
+  return Le;
+}
+
+__host__ __device__ float3 evalInfiniteLight(Light const& light, float3 dir,
+                                             float* pdf) {
+  if (ELightType const type = light.type(); type != ELightType::eEnv) {
+    *pdf = 0;
+    return make_float3(0, 0, 0);
+  }
+
+  float3 const Le = light.getIntensity();
+  *pdf = 0.25f * std::numbers::pi_v<float>;
   return Le;
 }

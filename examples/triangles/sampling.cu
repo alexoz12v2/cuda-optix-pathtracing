@@ -125,9 +125,9 @@ __host__ __device__ float2 sampleUniformDisk(float2 u) {
   if (a == 0.f && b == 0.f) return {};
 
   if (a > b) {
-    static constexpr float _piOver4 = std::numbers::pi_v<float> / 4;
+    static constexpr float piOver4 = std::numbers::pi_v<float> / 4;
     rho = a;
-    phi = _piOver4 * (b / a);
+    phi = piOver4 * (b / a);
   } else {
     static constexpr float _3piOver4 = 3 * std::numbers::pi_v<float> / 4;
     rho = b;
@@ -356,6 +356,7 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
 // ---------------------------------------------------------------------------
 // Light Sampling dispatcher
 // ---------------------------------------------------------------------------
+// TODO is it ok to synchronize the coalesced warp?
 __host__ __device__ LightSample sampleLight(Light const& light,
                                             float3 const position, float2 u,
                                             bool hadTransmission,
@@ -397,4 +398,40 @@ __host__ __device__ LightSample sampleLight(Light const& light,
   theWarp.sync();
 #endif
   return sample;
+}
+
+// ---------------------------------------------------------------------------
+// Software lookup table with linear interpolation
+// ---------------------------------------------------------------------------
+__host__ __device__ float lookupTableRead(float const* __restrict__ table,
+                                          float x, int32_t size) {
+  x = fminf(fmaxf(x, 0.f), 1.f) * (size - 1);
+
+  int32_t const index = fminf(static_cast<int32_t>(x), size - 1);
+  int32_t const nIndex = fminf(index + 1, size - 1);
+  float const t = x - index;
+
+  // lerp formula
+  float const data0 = table[index];
+  if (t == 0.f) return data0;
+
+  float const data1 = table[nIndex];
+  return (1.f - t) * data0 + t * data1;
+}
+
+__host__ __device__ float lookupTableRead2D(float const* __restrict__ table,
+                                            float x, float y, int32_t sizex,
+                                            int32_t sizey) {
+  y = fminf(fmaxf(x, 0.f), 1.f) * (sizey - 1);
+
+  int32_t const index = fminf(static_cast<int32_t>(y), sizey - 1);
+  int32_t const nIndex = fminf(index + 1, sizey - 1);
+  float const t = y - index;
+
+  // bilinear interp formula
+  float const data0 = lookupTableRead(table + sizex * index, x, sizex);
+  if (t == 0.f) return data0;
+
+  float const data1 = lookupTableRead(table + sizex * nIndex, x, sizex);
+  return (1.f - t) * data0 + t * data1;
 }

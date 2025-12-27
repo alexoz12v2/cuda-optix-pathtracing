@@ -1,6 +1,7 @@
 #include "common.cuh"
 
 #include <cooperative_groups.h>
+#include <vector_functions.h>
 
 #include <cassert>
 #include <numbers>
@@ -183,8 +184,11 @@ static constexpr float table_ggx_Eavg[GGX_EAVG_TABLE_COUNT] = {
 static cudaArray_t array_ggx_E;
 static cudaArray_t array_ggx_Eavg;
 
-cudaTextureObject_t tex_ggx_E = 0;
-cudaTextureObject_t tex_ggx_Eavg = 0;
+static cudaTextureObject_t tex_ggx_E = 0;
+static cudaTextureObject_t tex_ggx_Eavg = 0;
+
+static __constant__ cudaTextureObject_t d_tex_ggx_E = 0;
+static __constant__ cudaTextureObject_t d_tex_ggx_Eavg = 0;
 
 __host__ void allocateDeviceGGXEnergyPreservingTables() {
   // 1. allocate array backings for our textures. Arrays are 2D matrices.
@@ -208,6 +212,7 @@ __host__ void allocateDeviceGGXEnergyPreservingTables() {
     cudaTextureDesc ggxEavgTexDesc{};                   // clamp is default
     ggxEavgTexDesc.readMode = cudaReadModeElementType;  // should be floats
     ggxEavgTexDesc.filterMode = cudaFilterModeLinear;
+    ggxEavgTexDesc.normalizedCoords = true;
     CUDA_CHECK(cudaCreateTextureObject(&tex_ggx_Eavg, &ggxEavgDesc,
                                        &ggxEavgTexDesc, nullptr));
   }
@@ -219,8 +224,46 @@ __host__ void allocateDeviceGGXEnergyPreservingTables() {
     cudaTextureDesc ggxEDescTexDesc{};
     ggxEDescTexDesc.readMode = cudaReadModeElementType;
     ggxEDescTexDesc.filterMode = cudaFilterModeLinear;
+    ggxEDescTexDesc.normalizedCoords = true;
     CUDA_CHECK(cudaCreateTextureObject(&tex_ggx_E, &ggxEDesc, &ggxEDescTexDesc,
                                        nullptr));
+  }
+  // 3. Upload texture handles to device constant memory
+  CUDA_CHECK(cudaMemcpyToSymbol(d_tex_ggx_Eavg, &tex_ggx_Eavg,
+                                sizeof(cudaTextureObject_t)));
+
+  CUDA_CHECK(
+      cudaMemcpyToSymbol(d_tex_ggx_E, &tex_ggx_E, sizeof(cudaTextureObject_t)));
+}
+
+__host__ void freeDeviceGGXEnergyPreservingTables() {
+  // 0. Clear device-side constant texture handles
+  cudaTextureObject_t zero = 0;
+  CUDA_CHECK(
+      cudaMemcpyToSymbol(d_tex_ggx_Eavg, &zero, sizeof(cudaTextureObject_t)));
+  CUDA_CHECK(
+      cudaMemcpyToSymbol(d_tex_ggx_E, &zero, sizeof(cudaTextureObject_t)));
+
+  // 1. Destroy texture objects (must be done before freeing arrays)
+  if (tex_ggx_Eavg) {
+    CUDA_CHECK(cudaDestroyTextureObject(tex_ggx_Eavg));
+    tex_ggx_Eavg = 0;
+  }
+
+  if (tex_ggx_E) {
+    CUDA_CHECK(cudaDestroyTextureObject(tex_ggx_E));
+    tex_ggx_E = 0;
+  }
+
+  // 2. Free backing CUDA arrays
+  if (array_ggx_Eavg) {
+    CUDA_CHECK(cudaFreeArray(array_ggx_Eavg));
+    array_ggx_Eavg = nullptr;
+  }
+
+  if (array_ggx_E) {
+    CUDA_CHECK(cudaFreeArray(array_ggx_E));
+    array_ggx_E = nullptr;
   }
 }
 
@@ -290,18 +333,18 @@ __host__ __device__ __forceinline__ void microfacetFresnel(
 #endif
   // TODO how can we improve this branching?
   if (type == EBSDFType::eGGXDielectric) {  // dielectric tint
+    auto const& dielectric = bsdf.data.ggx.mat.dielectric;
     float const F = reflectanceFresnelDielectric(
-        cos_HO, half_bits_to_float(bsdf.data.ggx.mat.dielectric.eta), cos_HI);
-    *reflectance =
-        F * half_vec_to_float3(bsdf.data.ggx.mat.dielectric.reflectanceTint);
+        cos_HO, half_bits_to_float(dielectric.eta), cos_HI);
+    *reflectance = F * half_vec_to_float3(dielectric.reflectanceTint);
     *transmittance =
-        (1.f - F) *
-        half_vec_to_float3(bsdf.data.ggx.mat.dielectric.transmittanceTint);
+        (1.f - F) * half_vec_to_float3(dielectric.transmittanceTint);
   } else {  // conductor
+    auto const& conductor = bsdf.data.ggx.mat.conductor;
     // doesn't populate cosine as it's cosTheta_T, hence used only on trans.
-    *reflectance = reflectanceFresnelConductor(
-        cos_HO, half_vec_to_float3(bsdf.data.ggx.mat.conductor.eta),
-        half_vec_to_float3(bsdf.data.ggx.mat.conductor.kappa));
+    *reflectance =
+        reflectanceFresnelConductor(cos_HO, half_vec_to_float3(conductor.eta),
+                                    half_vec_to_float3(conductor.kappa));
     *transmittance = make_float3(0, 0, 0);
   }
 }
@@ -355,10 +398,63 @@ __host__ __device__ __forceinline__ float ggx_aniso_lambda(float const alphax,
   return ggx_lambda_from_sqr_alpha_tan_n(sqr_alpha_tan_n);
 }
 
+// assumes albedo already estimated
+__host__ __device__ __forceinline__ void energyPreservingGGXScale(
+    BSDF& bsdf, float const alpha2, float const cos_NO, float3 const Fss) {
+#ifndef __CUDA_ARCH__
+  float const E = lookupTableRead2D(table_ggx_E, alpha2, cos_NO,
+                                    GGX_E_TABLE_COLS, GGX_E_TABLE_ROWS);
+  float const Eavg =
+      lookupTableRead(table_ggx_Eavg, alpha2, GGX_EAVG_TABLE_COUNT);
+#else
+  float const E = tex2D<float>(d_tex_ggx_E, alpha2, cos_NO);
+  float const Eavg = tex1D<float>(d_tex_ggx_Eavg, alpha2);
+#  if 1
+  {
+    cg::coalesced_group theWarp = cg::coalesced_threads();
+    if (theWarp.thread_rank() == 0) {
+      printf("sampled Energy: %f, Sampled average energy: %f\n", E, Eavg);
+    }
+  }
+#  endif
+#endif
+
+  // assumes that Single Scattering doesn't cover the full energy
+  float const missingFactor = (1.f - E) / E;
+  bsdf.data.ggx.energyScale = 1.f + missingFactor;
+  float3 const Fms = Fss * Eavg / (make_float3(1, 1, 1) - Fss * (1.f - Eavg));
+
+  bsdf.setWeight(bsdf.weight() * (1.f + Fms * missingFactor) /
+                 bsdf.data.ggx.energyScale);
+}
+
+__host__ __device__ __forceinline__ void bsdfInit(BSDF& bsdf, EBSDFType type,
+                                                  float3 albedoEstimate) {
+  bsdf.weightStorage[0] = float_to_half_bits(albedoEstimate.x);
+  bsdf.weightStorage[1] = float_to_half_bits(albedoEstimate.y);
+  bsdf.weightStorage[2] = float_to_half_bits(albedoEstimate.z);
+  bsdf.weightStorage[3] = static_cast<uint16_t>(type);
+}
+
+__host__ __device__ __forceinline__ void bsdfGGXCommon(BSDF& bsdf, float alphax,
+                                                       float alphay,
+                                                       float phi0) {
+  // roughness
+  bsdf.data.ggx.alphax =
+      static_cast<uint16_t>(fminf(fmaxf(alphax * UINT16_MAX, 0.f), UINT16_MAX));
+  bsdf.data.ggx.alphay =
+      static_cast<uint16_t>(fminf(fmaxf(alphay * UINT16_MAX, 0.f), UINT16_MAX));
+  // energy scale estimated during prepare function, where wo is known
+  bsdf.data.ggx.energyScale = 1.f;
+  // tangent encoding through angle to azimuth of local tangent axis
+  bsdf.data.ggx.phi0 = static_cast<uint16_t>(
+      fminf(fmaxf(phi0 / (2.f * std::numbers::pi_v<float>)*UINT16_MAX, 0.f),
+            UINT16_MAX));
+}
+
 }  // namespace
 
 // cycles swaps the notion of wi and wo
-static constexpr float piOverUint16Max = std::numbers::pi_v<float> / UINT16_MAX;
 static constexpr float throughputEps = 1e-6f;
 
 __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
@@ -376,8 +472,7 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
   bool const isotropic = bsdf.data.ggx.alphax == bsdf.data.ggx.alphay;
   float const alphax = static_cast<float>(bsdf.data.ggx.alphax) / UINT16_MAX;
   float const alphay = static_cast<float>(bsdf.data.ggx.alphay) / UINT16_MAX;
-  float3 const tangent = tangentFromPhi(
-      ns, static_cast<float>(bsdf.data.ggx.phi0) * piOverUint16Max);
+  float3 const tangent = tangentFromPhi(ns, bsdf.data.ggx.getPhi0());
   // eta always refers to outside/inside. hence, if last was transmission,
   // the caller should flip it. Here we initialize it to 1 as we don't know
   // whether the GGX is conductor or dielectric yet.
@@ -480,6 +575,137 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
   return sample;
 }
 
+__host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
+                                   float3 ns, float3 ng, float* pdf,
+                                   bool* isDelta) {
+  float const energyScale = half_bits_to_float(bsdf.data.ggx.energyScale);
+  bool const conductor = bsdf.type() == EBSDFType::eGGXConductor;
+  const bool hasReflection =
+      conductor
+          ? true
+          : luminance(half_vec_to_float3(
+                bsdf.data.ggx.mat.dielectric.reflectanceTint)) > throughputEps;
+  const bool hasTransmission =
+      conductor ? false
+                : luminance(half_vec_to_float3(
+                      bsdf.data.ggx.mat.dielectric.transmittanceTint)) >
+                      throughputEps;
+  float const alphax = static_cast<float>(bsdf.data.ggx.alphax) / UINT16_MAX;
+  float const alphay = static_cast<float>(bsdf.data.ggx.alphay) / UINT16_MAX;
+  bool const isotropic = alphax == alphay;
+  float const cos_NO = dot(ns, wo);
+  float const cos_NI = dot(ns, wi);
+  float const cos_NgI = dot(ng, wi);
+  bool const isTransmission = cos_NI < 0.f;  // assumes dielectric
+  float const ior = isTransmission
+                        ? half_bits_to_float(bsdf.data.ggx.mat.dielectric.eta)
+                        : 1.f;
+  bool const effectivelySpecular =
+      fmaxf(alphax, alphay) < 1e-3f;  // TODO tweak?
+  // - outgoing direction and normals (both) must be in the same hemisphere
+  // - specular are not evaluated (dirac)
+  // - incoming direction must be in the same hemisphere of normal (both) for
+  // reflection
+  // - purely reflective -> no transmission. purely transmissive -> no
+  // reflection
+  if (cos_NI <= 0.f || (cos_NgI < 0) != isTransmission ||
+      (effectivelySpecular) || (!hasReflection && cos_NgI > 0.f) ||
+      (!hasTransmission && cos_NgI < 0.f)) {
+    *pdf = 0.f;
+    return make_float3(0, 0, 0);
+  }
+  // half vector
+  float3 H = isTransmission ? -(ior * wi + wo) : (wi + wo);
+  float const invLen_H = rsqrtf(dot(H, H));  // TODO safe division for zero
+  H *= invLen_H;
+
+  // fresnel
+  float const cos_HO = dot(H, wo);
+  float unused{};
+  float3 reflectance{};
+  float3 transmittance{};
+  microfacetFresnel(bsdf, cos_HO, &unused, &reflectance, &transmittance);
+  if (nearZeroPos(reflectance, throughputEps) &&
+      nearZeroPos(transmittance, throughputEps)) {
+    *pdf = 0.f;
+    return make_float3(0, 0, 0);
+  }
+  // D and lambda
+  float const cos_NH = dot(ns, H);
+  float D{}, lambdaI{}, lambdaO{};
+  if (isotropic || isTransmission) {
+    float const alpha2 = alphax * alphay;
+    D = ggx_D(alpha2, cos_NH);
+    lambdaI = ggx_lambda(alpha2, cos_NI);
+    lambdaO = ggx_lambda(alpha2, cos_NO);
+  } else {
+    // anisotropic only for reflection
+    // make tangent-space frame. Consider BSDF tangent if anisotropic
+    float3 const tangent = tangentFromPhi(ns, bsdf.data.ggx.getPhi0());
+    float3 X{}, Y{};
+    orthonormalTangent(ns, tangent, &X, &Y);
+    // to local
+    float3 const local_H = make_float3(dot(X, H), dot(Y, H), dot(ns, H));
+    float3 const local_O = make_float3(dot(X, wo), dot(Y, wo), cos_NO);
+    float3 const local_I = make_float3(dot(X, wi), dot(Y, wi), cos_NI);
+
+    D = ggx_aniso_D(alphax, alphay, local_H);
+    lambdaI = ggx_aniso_lambda(alphax, alphay, local_I);
+    lambdaO = ggx_aniso_lambda(alphax, alphay, local_O);
+  }
+  // generalized cook torrance
+  float const common =
+      D / cos_NO *
+      (isTransmission ? sqrf(ior * invLen_H) * fabsf(cos_HO * dot(H, wi))
+                      : 0.25f);
+  float const pdfReflect =
+      luminance(reflectance) / luminance(reflectance + transmittance);
+  float const lobePdf = isTransmission ? 1.f - pdfReflect : pdfReflect;
+  *pdf = lobePdf * common / (1.f + lambdaO);
+  *isDelta = effectivelySpecular;
+  return energyScale * (isTransmission ? transmittance : reflectance) * common /
+         (1.f + lambdaO + lambdaI);
+}
+
+__host__ __device__ BSDF makeGXXDielectric(float3 reflectanceTint,
+                                           float3 transmittanceTint, float phi0,
+                                           float eta, float alphax,
+                                           float alphay) {
+  BSDF bsdf{};
+  // albedo is estimated in the prepare function, where wo is known
+  bsdfInit(bsdf, EBSDFType::eGGXDielectric, make_float3(1, 1, 1));
+  bsdfGGXCommon(bsdf, alphax, alphay, phi0);
+  auto& dielectric = bsdf.data.ggx.mat.dielectric;
+
+  dielectric.eta = float_to_half_bits(eta);
+  dielectric.reflectanceTint[0] = float_to_half_bits(reflectanceTint.x);
+  dielectric.reflectanceTint[1] = float_to_half_bits(reflectanceTint.y);
+  dielectric.reflectanceTint[2] = float_to_half_bits(reflectanceTint.z);
+  dielectric.transmittanceTint[0] = float_to_half_bits(transmittanceTint.x);
+  dielectric.transmittanceTint[1] = float_to_half_bits(transmittanceTint.y);
+  dielectric.transmittanceTint[2] = float_to_half_bits(transmittanceTint.z);
+
+  return bsdf;
+}
+
+__host__ __device__ BSDF makeGXXConductor(float3 eta, float3 kappa, float phi0,
+                                          float alphax, float alphay) {
+  BSDF bsdf{};
+  // albedo is estimated in the prepare function, where wo is known
+  bsdfInit(bsdf, EBSDFType::eGGXConductor, make_float3(1, 1, 1));
+  bsdfGGXCommon(bsdf, alphax, alphay, phi0);
+  auto& conductor = bsdf.data.ggx.mat.conductor;
+
+  conductor.eta[0] = float_to_half_bits(eta.x);
+  conductor.eta[1] = float_to_half_bits(eta.y);
+  conductor.eta[2] = float_to_half_bits(eta.z);
+  conductor.kappa[0] = float_to_half_bits(kappa.x);
+  conductor.kappa[1] = float_to_half_bits(kappa.y);
+  conductor.kappa[2] = float_to_half_bits(kappa.z);
+
+  return bsdf;
+}
+
 // ---------------------------------------------------------------------------
 // BSDF: Oren Nayar
 // ---------------------------------------------------------------------------
@@ -541,6 +767,49 @@ __host__ __device__ BSDFSample sampleOrenNayar(BSDF const& bsdf, float3 wo,
   return sample;
 }
 
+__host__ __device__ float3 evalOrenNayar(BSDF const& bsdf, float3 wo, float3 wi,
+                                         float3 ns, float3 ng, float* pdf,
+                                         bool* isDelta) {
+  float const cos_NI = dot(ns, wi);
+  if (cos_NI > 0.f) {
+    *pdf = cos_NI * std::numbers::inv_pi_v<float>;
+    *isDelta = false;
+    return orenNayar_intensity(bsdf.data.orenNayar, ns, wo, wi);
+  }
+  return make_float3(0, 0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// BSDF makers
+// ---------------------------------------------------------------------------
+__host__ __device__ BSDF makeOrenNayar(float3 color, float roughness) {
+  static constexpr float piOver2Minus2Over3 =
+      (std::numbers::pi_v<float> / 2.f) - 2.f / 3.f;
+  float3 const albedo =
+      make_float3(fmaxf(0, fminf(color.x, 1)), fmaxf(0, fminf(color.y, 1)),
+                  fmaxf(0, fminf(color.z, 1)));
+
+  BSDF bsdf{};
+  bsdfInit(bsdf, EBSDFType::eOrenNayar, albedo);
+  auto& orenNayar = bsdf.data.orenNayar;
+
+  orenNayar.roughness = float_to_half_bits(fmaxf(0, fminf(roughness, 1)));
+  float const sigma = half_bits_to_float(orenNayar.roughness);
+
+  orenNayar.a = float_to_half_bits(
+      1.f / (std::numbers::pi_v<float> + piOver2Minus2Over3 * sigma));
+  float const a = half_bits_to_float(orenNayar.a);
+
+  orenNayar.b = float_to_half_bits(a * sigma);
+
+  // multi-scatter initialized in prepare function, where wo is known
+  orenNayar.multiScatter[0] = float_to_half_bits(1.f);
+  orenNayar.multiScatter[1] = float_to_half_bits(1.f);
+  orenNayar.multiScatter[2] = float_to_half_bits(1.f);
+
+  return bsdf;
+}
+
 // ---------------------------------------------------------------------------
 // BSDF sampling/evaluation functions
 // ---------------------------------------------------------------------------
@@ -572,4 +841,108 @@ __host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
   theWarp.sync();
 #endif
   return sample;
+}
+
+__host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
+                                    float3 ns, float3 ng, float* pdf,
+                                    bool* isDelta) {
+  float3 f = make_float3(0, 0, 0);
+  *pdf = 0;
+  *isDelta = false;
+#ifdef __CUDA_ARCH__
+  cg::coalesced_group const theWarp = cg::coalesced_threads();
+#endif
+  EBSDFType const type = bsdf.type();
+  switch (type) {
+    case EBSDFType::eOrenNayar:
+      f = evalOrenNayar(bsdf, wo, wi, ns, ng, pdf, isDelta);
+      break;
+    case EBSDFType::eGGXDielectric:
+    case EBSDFType::eGGXConductor:
+      f = evalGGX(bsdf, wo, wi, ns, ng, pdf, isDelta);
+      break;
+  }
+#ifdef __CUDA_ARCH__
+  theWarp.sync();
+#endif
+  return f;
+}
+
+__host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
+#ifdef __CUDA_ARCH__
+  cg::coalesced_group const theWarp = cg::coalesced_threads();
+#endif
+  EBSDFType const type = bsdf->type();
+  switch (type) {
+    case EBSDFType::eOrenNayar: {
+      static constexpr float _2piM5_6Over3 =
+          (2.f * std::numbers::pi_v<float> - 5.6f) / 3.f;
+      static constexpr float _1OverPi = std::numbers::inv_pi_v<float>;
+
+      // energy preserving multi-scattering term
+      float const bsdf_a = half_bits_to_float(bsdf->data.orenNayar.a);
+      float const bsdf_b = half_bits_to_float(bsdf->data.orenNayar.b);
+      float3 const bsdf_albedo =
+          half_vec_to_float3(bsdf->data.orenNayar.albedo);
+
+      float const Eavg = bsdf_a * bsdf_a + _2piM5_6Over3 * bsdf_b;
+      float3 const Ems = _1OverPi - bsdf_albedo * bsdf_albedo *
+                                        (Eavg / (1.f - Eavg)) /
+                                        (1.f - bsdf_albedo * (1.f - Eavg));
+      float const nv = fmaxf(0.f, dot(ns, wo));  // check done at sample/eval
+      float const Ev =
+          bsdf_a * std::numbers::pi_v<float> + bsdf_b * orenNayar_G(nv);
+
+      float3 const multiScatter = Ems * (1.f - Ev);
+      bsdf->data.orenNayar.multiScatter[0] = float_to_half_bits(multiScatter.x);
+      bsdf->data.orenNayar.multiScatter[1] = float_to_half_bits(multiScatter.y);
+      bsdf->data.orenNayar.multiScatter[2] = float_to_half_bits(multiScatter.z);
+      break;
+    }
+    case EBSDFType::eGGXDielectric:
+    case EBSDFType::eGGXConductor: {
+      // estimate albedo (redundant call to fresnel?)
+      {
+        // checking same hemisphere is done in sample and eval
+        float const cos_HO = fabsf(dot(wo, ns));
+        float unused{};
+        float3 reflectance;
+        float3 transmittance;
+        microfacetFresnel(*bsdf, cos_HO, &unused, &reflectance, &transmittance);
+        bsdf->setWeight(reflectance + transmittance);
+      }
+
+      float3 Fss{};
+      if (type == EBSDFType::eGGXDielectric) {
+        // assume dielectric tint = transmission tint
+        Fss =
+            half_vec_to_float3(bsdf->data.ggx.mat.dielectric.transmittanceTint);
+      } else {  // EBSDFType::eGGXConductor
+        float3 const eta = half_vec_to_float3(bsdf->data.ggx.mat.conductor.eta);
+        float3 const kappa =
+            half_vec_to_float3(bsdf->data.ggx.mat.conductor.kappa);
+        // F82-tint
+        float3 const F0 = reflectanceFresnelConductor(1.f, eta, kappa);
+        float3 const F82 = reflectanceFresnelConductor(1.f / 7.f, eta, kappa);
+
+        float3 const B =
+            (lerp(F0, make_float3(1, 1, 1), 0.46266436f) - F82) * 17.651384f;
+        Fss = lerp(F0, make_float3(1, 1, 1), 1.f / 21.f) - B * (1.f / 126.f);
+      }
+      // compute energy scale from table lookup
+      float const alphax =
+          static_cast<float>(bsdf->data.ggx.alphax) / UINT16_MAX;
+      float const alphay =
+          static_cast<float>(bsdf->data.ggx.alphay) / UINT16_MAX;
+      float const alpha2 = alphax * alphay;
+      float const cos_NO =
+          fmaxf(0.f, dot(ns, wo));  // check done at sample/eval
+
+      energyPreservingGGXScale(*bsdf, alpha2, cos_NO, Fss);
+      break;
+    }
+  }
+#ifdef __CUDA_ARCH__
+  theWarp.sync();
+#endif
 }

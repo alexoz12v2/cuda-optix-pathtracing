@@ -1,3 +1,5 @@
+#include <cuda_device_runtime_api.h>
+#include <cuda_runtime_api.h>
 #include "common.cuh"
 #include "testing.h"
 
@@ -71,6 +73,7 @@ DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
 }
 
 TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
+                                  uint32_t const bsdfCount,
                                   size_t maxTrianglesPerChunk = 1'000'000) {
   static int constexpr ComponentCount = 4;
   TriangleSoup soup{};
@@ -82,16 +85,28 @@ TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
   CUDA_CHECK(cudaMalloc(&soup.xs, bytes));
   CUDA_CHECK(cudaMalloc(&soup.ys, bytes));
   CUDA_CHECK(cudaMalloc(&soup.zs, bytes));
+  CUDA_CHECK(cudaMalloc(&soup.matId, tris.size() * sizeof(uint32_t)));
 
   // Temporary host buffers (bounded)
   std::vector<float> h_x(ComponentCount * maxTrianglesPerChunk);
   std::vector<float> h_y(ComponentCount * maxTrianglesPerChunk);
   std::vector<float> h_z(ComponentCount * maxTrianglesPerChunk);
+  std::vector<uint32_t> h_matId(tris.size());
+
+  uint32_t const variation = n / bsdfCount;
+  uint32_t varIndex = variation;
+  uint32_t matIdx = 0;
 
   for (size_t base = 0; base < n; base += maxTrianglesPerChunk) {
-    size_t count = std::min(maxTrianglesPerChunk, n - base);
+    size_t const count = std::min(maxTrianglesPerChunk, n - base);
 
     for (size_t i = 0; i < count; ++i) {
+      if (varIndex-- == 0) {
+        varIndex = variation;
+        matIdx++;
+        assert(matIdx < bsdfCount);
+      }
+
       const Triangle& t = tris[base + i];
 
       h_x[i * ComponentCount + 0] = t.v0.x;
@@ -108,9 +123,11 @@ TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
       h_z[i * ComponentCount + 1] = t.v1.z;
       h_z[i * ComponentCount + 2] = t.v2.z;
       h_z[i * ComponentCount + 3] = 0;
+
+      h_matId[i] = matIdx;
     }
 
-    size_t copyBytes = count * ComponentCount * sizeof(float);
+    size_t const copyBytes = count * ComponentCount * sizeof(float);
 
     CUDA_CHECK(cudaMemcpy(soup.xs + base * ComponentCount, h_x.data(),
                           copyBytes, cudaMemcpyHostToDevice));
@@ -118,6 +135,8 @@ TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
                           copyBytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(soup.zs + base * ComponentCount, h_z.data(),
                           copyBytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(soup.matId + base, h_matId.data(),
+                          count * sizeof(uint32_t), cudaMemcpyHostToDevice));
   }
 
   return soup;
@@ -274,6 +293,28 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
   writeGrayscaleBMP(theOutPath.c_str(), rowMajorImage.get(), width, height);
 }
 
+// conductor ior list:
+// <https://chris.hindefjord.se/resources/rgb-ior-metals/>
+// Gold:
+// eta:   {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
+// kappa: {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
+void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
+  BSDF* d_bsdf = nullptr;
+  if (bsdfCount) *bsdfCount = 3;
+  const BSDF h_bsdf[3]{
+      makeOrenNayar({1.f, 0.7, 0.f}, 1.f),
+      makeGXXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f}, 1.f /*~26 deg*/,
+                        1.44f, .5f, .7f),
+      makeGXXConductor({0.18299f, 0.42108f, 1.37340f},
+                       {3.42420f, 2.34590f, 1.77040f}, 0.f, .1f, .1f)};
+
+  CUDA_CHECK(cudaMalloc(&d_bsdf, sizeof(BSDF) * 3));
+  CUDA_CHECK(
+      cudaMemcpy(d_bsdf, &h_bsdf, sizeof(BSDF) * 3, cudaMemcpyHostToDevice));
+
+  *bsdf = d_bsdf;
+}
+
 void deviceLights(uint32_t* lightCount, uint32_t* infiniteLightsCount,
                   Light** lights, Light** infiniteLights) {
   Light* d_lights = nullptr;
@@ -402,9 +443,6 @@ void testIntersectionMegakernel() {
       {0.0f, 1.0f, 0.45f},     // top-center
   });
 #endif
-  scene = triSoupFromTriangles(h_mesh);
-  DeviceHaltonOwen* d_rng = copyHaltonOwenToDeviceAlloc(blocks, threads);
-
 #if 1
   {
     std::cout << "Computing intersection to host" << std::endl;
@@ -450,13 +488,22 @@ void testIntersectionMegakernel() {
   uint32_t infiniteLightCount = 0;
   Light* d_infiniteLights = nullptr;
   deviceLights(&lightCount, &infiniteLightCount, &d_lights, &d_infiniteLights);
+  // init bsdf
+  BSDF* d_bsdf = nullptr;
+  uint32_t bsdfCount = 0;
+  deviceBSDF(&bsdfCount, &d_bsdf);
+  allocateDeviceGGXEnergyPreservingTables();
+
+  // init device scene
+  scene = triSoupFromTriangles(h_mesh, bsdfCount);
+  DeviceHaltonOwen* d_rng = copyHaltonOwenToDeviceAlloc(blocks, threads);
 
   // init output buffer
   float4* d_outputBuffer = deviceOutputBuffer(width, height);
 
   basicIntersectionMegakernel<<<blocks, threads>>>(
       d_camera, scene, d_lights, lightCount, d_infiniteLights,
-      infiniteLightCount, d_rng, d_outputBuffer);
+      infiniteLightCount, d_bsdf, bsdfCount, d_rng, d_outputBuffer);
   CUDA_CHECK(cudaGetLastError());
   std::cout << "Running CUDA Kernel" << std::endl;
   CUDA_CHECK(cudaDeviceSynchronize());
@@ -468,13 +515,15 @@ void testIntersectionMegakernel() {
   // cleanup
   std::cout << "Cleanup..." << std::endl;
   cudaFree(d_outputBuffer);
-  cudaFree(d_lights);
-  cudaFree(d_infiniteLights);
-  cudaFree(d_rng);
+  cudaFree(scene.matId);
   cudaFree(scene.xs);
   cudaFree(scene.ys);
   cudaFree(scene.zs);
-  cudaFree(scene.intersected);
+  cudaFree(d_bsdf);
+  freeDeviceGGXEnergyPreservingTables();
+  cudaFree(d_rng);
+  cudaFree(d_lights);
+  cudaFree(d_infiniteLights);
   cudaFree(d_camera);
 }
 

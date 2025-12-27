@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iostream>
 #include <float.h>
+#include <numbers>
 #include <vector>
 
 inline constexpr int WARP_SIZE = 32;
@@ -216,6 +217,9 @@ inline __host__ __device__ __forceinline__ float3 operator-(float3 a,
 inline __host__ __device__ __forceinline__ float3 operator-(float3 a, float b) {
   return make_float3(a.x - b, a.y - b, a.z - b);
 }
+inline __host__ __device__ __forceinline__ float3 operator-(float a, float3 b) {
+  return make_float3(a - b.x, a - b.y, a - b.z);
+}
 inline __host__ __device__ __forceinline__ float3 operator-(float3 a) {
   return make_float3(-a.x, -a.y, -a.z);
 }
@@ -234,6 +238,9 @@ inline __host__ __device__ __forceinline__ float3 sqrt(float3 a) {
 inline __host__ __device__ __forceinline__ float3 abs(float3 a) {
   return make_float3(fabsf(a.x), fabsf(a.y), fabs(a.z));
 }
+inline __host__ __device__ __forceinline__ float average(float3 a) {
+  return (a.x + a.y + a.z) / 3.f;
+}
 
 inline __host__ __device__ __forceinline__ float2 operator+(float2 a,
                                                             float2 b) {
@@ -242,6 +249,12 @@ inline __host__ __device__ __forceinline__ float2 operator+(float2 a,
 inline __host__ __device__ __forceinline__ float2 operator-(float2 a,
                                                             float2 b) {
   return make_float2(a.x - b.x, a.y - b.y);
+}
+inline __host__ __device__ __forceinline__ float3 lerp(float3 a, float3 b,
+                                                       float t) {
+  // (1 - t) a + t b =  a - ta + tb = a + t ( b - a )
+  float const _1mt = 1.f - t;
+  return _1mt * a + t * b;
 }
 
 inline __host__ __device__ __forceinline__ float sin_sqr_to_one_minus_cos(
@@ -521,9 +534,9 @@ struct TriangleSoup {
   float* xs;
   float* ys;
   float* zs;
-  // array of 4-byte booleans. starts at 0, if intersected 1
-  // TODO: change this to u,v,t
-  int32_t* intersected;
+  // tri0->matIndex | tri1->matIndex ...
+  uint32_t* matId;
+
   // count of triangles
   size_t count;
 };
@@ -709,6 +722,7 @@ extern cudaTextureObject_t tex_ggx_E;
 extern cudaTextureObject_t tex_ggx_Eavg;
 
 __host__ void allocateDeviceGGXEnergyPreservingTables();
+__host__ void freeDeviceGGXEnergyPreservingTables();
 
 enum class EBSDFType : uint16_t {
   eOrenNayar = 0,
@@ -746,9 +760,19 @@ struct BSDF {
           uint8_t _padding[2];
         } conductor;
       } mat;
+
+      __host__ __device__ __forceinline__ float getPhi0() const {
+        return static_cast<float>(phi0) / UINT16_MAX * 2.f *
+               std::numbers::pi_v<float>;
+      }
     } ggx;
   } data;
 
+  __host__ __device__ void setWeight(float3 const w) {
+    weightStorage[0] = float_to_half_bits(w.x);
+    weightStorage[1] = float_to_half_bits(w.y);
+    weightStorage[2] = float_to_half_bits(w.z);
+  }
   __host__ __device__ float3 weight() const {
     return make_float3(half_bits_to_float(weightStorage[0]),
                        half_bits_to_float(weightStorage[1]),
@@ -759,6 +783,14 @@ struct BSDF {
   }
 };
 static_assert(sizeof(BSDF) == 32 && alignof(BSDF) == 4);
+
+__host__ __device__ BSDF makeOrenNayar(float3 color, float roughness);
+__host__ __device__ BSDF makeGXXDielectric(float3 reflectanceTint,
+                                           float3 transmittanceTint, float phi0,
+                                           float eta, float alphax,
+                                           float alphay);
+__host__ __device__ BSDF makeGXXConductor(float3 eta, float3 kappa, float phi0,
+                                          float alphax, float alphay);
 
 struct BSDFSample {
   float3 wi;  // sampled incident direction
@@ -781,6 +813,9 @@ struct BSDFSample {
 __host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
                                           float3 ns, float3 ng, float2 u,
                                           float uc);
+__host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
+                                    float3 ns, float3 ng, float* pdf,
+                                    bool* isDelta);
 
 // ---------------------------------------------------------------------------
 // BSDF-Specific sampling/evaluation functions
@@ -795,6 +830,13 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
 __host__ __device__ BSDFSample sampleOrenNayar(BSDF const& bsdf, float3 wo,
                                                float3 ns, float3 ng, float2 u,
                                                float uc);
+__host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
+                                   float3 ns, float3 ng, float* pdf,
+                                   bool* isDelta);
+__host__ __device__ float3 evalOrenNayar(BSDF const& bsdf, float3 wo, float3 wi,
+                                         float3 ns, float3 ng, float* pdf,
+                                         bool* isDelta);
+__host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo);
 
 // ---------------------------------------------------------------------------
 // Host Device Math
@@ -827,7 +869,8 @@ __global__ void raygenKernel(DeviceCamera* d_cam,
 HitResult hostIntersectMT(const float3& o, const float3& d, const float3& v0,
                           const float3& v1, const float3& v2);
 __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray);
-__global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray);
+__global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray,
+                                        uint32_t* intersected);
 void triangleIntersectTest();
 
 // Large Kernel Parameters from Volta with R530. Otherwise, it's 4096 KB
@@ -843,5 +886,6 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
                                 uint32_t const lightCount,
                                 Light const* d_infiniteLights,
                                 uint32_t const infiniteLightCount,
+                                BSDF const* d_bsdf, uint32_t const bsdfCount,
                                 DeviceHaltonOwen* d_haltonOwen,
                                 float4* d_outBuffer);

@@ -52,7 +52,8 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
   return result;
 }
 
-__global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray) {
+__global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray,
+                                        uint32_t* intersected) {
   int32_t const gindex = blockIdx.x * blockDim.x + threadIdx.x;
   // grid-stride loop over 4 triangles (possible template param)
   for (int32_t idx = gindex; idx < (soup.count + 3) / 4;
@@ -64,7 +65,7 @@ __global__ void triangleIntersectKernel(TriangleSoup soup, Ray ray) {
       float4 const y = reinterpret_cast<float4 const*>(soup.ys)[idx + i];
       float4 const z = reinterpret_cast<float4 const*>(soup.zs)[idx + i];
       HitResult result = triangleIntersect(x, y, z, ray);
-      soup.intersected[idx + i] = result.hit ? 1 : 0;
+      intersected[idx + i] = result.hit ? 1 : 0;
     }
   }
 }
@@ -206,10 +207,11 @@ void runTestForRay(const HostTriangleSoup& hostSoup,
                    const std::vector<int32_t>& expected, const Ray& ray,
                    dim3 grid, dim3 block) {
   TriangleSoup dev{};
+  uint32_t* d_intersected = nullptr;
   CUDA_CHECK(cudaMalloc(&dev.xs, hostSoup.xs.size() * sizeof(float)));
   CUDA_CHECK(cudaMalloc(&dev.ys, hostSoup.ys.size() * sizeof(float)));
   CUDA_CHECK(cudaMalloc(&dev.zs, hostSoup.zs.size() * sizeof(float)));
-  CUDA_CHECK(cudaMalloc(&dev.intersected, hostSoup.count * sizeof(int32_t)));
+  CUDA_CHECK(cudaMalloc(&d_intersected, hostSoup.count * sizeof(int32_t)));
   dev.count = hostSoup.count;
 
   CUDA_CHECK(cudaMemcpy(dev.xs, hostSoup.xs.data(),
@@ -222,17 +224,17 @@ void runTestForRay(const HostTriangleSoup& hostSoup,
                         hostSoup.zs.size() * sizeof(float),
                         cudaMemcpyHostToDevice));
 
-  CUDA_CHECK(cudaMemset(dev.intersected, 0, hostSoup.count * sizeof(int32_t)));
+  CUDA_CHECK(cudaMemset(d_intersected, 0, hostSoup.count * sizeof(int32_t)));
 
   CudaTimer timer;
   timer.begin();
-  triangleIntersectKernel<<<grid, block>>>(dev, ray);
+  triangleIntersectKernel<<<grid, block>>>(dev, ray, d_intersected);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
   float ms = timer.end();
 
   std::vector<int32_t> result(hostSoup.count);
-  CUDA_CHECK(cudaMemcpy(result.data(), dev.intersected,
+  CUDA_CHECK(cudaMemcpy(result.data(), d_intersected,
                         hostSoup.count * sizeof(int32_t),
                         cudaMemcpyDeviceToHost));
 
@@ -252,7 +254,7 @@ void runTestForRay(const HostTriangleSoup& hostSoup,
   cudaFree(dev.xs);
   cudaFree(dev.ys);
   cudaFree(dev.zs);
-  cudaFree(dev.intersected);
+  cudaFree(d_intersected);
 }
 }  // namespace
 

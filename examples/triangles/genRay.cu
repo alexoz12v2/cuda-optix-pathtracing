@@ -133,6 +133,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
                                 uint32_t const lightCount,
                                 Light const* d_infiniteLights,
                                 uint32_t const infiniteLightCount,
+                                BSDF const* d_bsdf, uint32_t const bsdfCount,
                                 DeviceHaltonOwen* d_haltonOwen,
                                 float4* d_outBuffer) {
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;

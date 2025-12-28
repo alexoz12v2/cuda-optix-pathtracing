@@ -238,7 +238,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
             min(static_cast<int>(warpRng.get1D(params) * infiniteLightCount),
                 infiniteLightCount - 1);
         Light const light = d_infiniteLights[lightIndex];
-        float const lightPMF = 1 / infiniteLightCount;
+        float const lightPMF = 1.f / infiniteLightCount;
         float pdf = 0;
         float3 const Le = evalInfiniteLight(light, ray.d, &pdf);
         if (pdf) {
@@ -255,7 +255,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
             min(static_cast<int>(warpRng.get1D(params) * lightCount),
                 lightCount - 1);
         Light const light = d_lights[lightIndex];
-        float const lightPMF = 1 / lightCount;
+        float const lightPMF = 1.f / lightCount;
         if (LightSample const ls =
                 sampleLight(light, hitResult.pos, warpRng.get2D(params), false,
                             hitResult.normal);
@@ -279,23 +279,35 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           // - if no intersection, sample light and add light contribution
           if (doNextEventEstimation) {
             // TODO attenuation and bsdf factor evaluation
-            float bsdfPdf = 1;
-            bool bsdfDelta = false;
+            float bsdfPdf = 0;
             float3 const bsdf_f =
                 evalBsdf(bsdf, -ray.d, shadowRay.d, hitResult.normal,
-                         hitResult.normal, &bsdfPdf, &bsdfDelta);
+                         hitResult.normal, &bsdfPdf) *
+                bsdf.weight();
+            // bsdfDelta always false TODO assert
             float3 const Le = evalLight(light, ls);
-            // TODO revise
-            if (ls.delta || bsdfDelta) {
-              L += beta * Le * bsdf_f / lightPMF;
-            } else {
-              // MIS if not delta (and not BSDF Delta TODO)
-              L += beta * (Le * bsdf_f / (lightPMF * ls.pdf + bsdfPdf));
+            if (!isZero(bsdf_f)) {
+              if (ls.delta) {
+                L += beta * Le * bsdf_f / lightPMF;
+              } else {
+                // MIS if not delta (and not BSDF Delta TODO)
+                // power heuristic
+                float const w = sqrf(10 * lightPMF * ls.pdf) /
+                                sqrf(10 * lightPMF * ls.pdf + bsdfPdf);
+                float3 const fac0 = Le * bsdf_f;
+                float const fac1 = beta * w;
+                L += fac0 * fac1;
+#if 0
+                printf(
+                    "fac0: %f %f %f, fac1: %f\n\tbsdfPdf: %f lightPdf: %f\n\n",
+                    fac0.x, fac0.y, fac0.z, fac1, bsdfPdf, ls.pdf);
+#endif
+              }
             }
           }
         }
         // TODO russian roulette and ray depth
-      } // end else (hit something)
+      }  // end else (hit something)
       theWarp.sync();
 
       // add to output buffer ( assumes max distance is 2)

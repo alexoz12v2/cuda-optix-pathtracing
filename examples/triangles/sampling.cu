@@ -381,7 +381,7 @@ __host__ __device__ LightSample sampleLight(Light const& light,
       sample.distance = FLT_MAX;
       break;
     case ELightType::eDirectional: {
-      float unused;
+      float unused{};
       sample.pLight =  // special case
           sampleUniformCone(dirFromOcta(light.data.dir.direction),
                             half_bits_to_float(light.data.dir.oneMinusCosAngle),

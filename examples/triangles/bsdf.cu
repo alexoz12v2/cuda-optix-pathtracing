@@ -571,8 +571,7 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
 }
 
 __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
-                                   float3 ns, float3 ng, float* pdf,
-                                   bool* isDelta) {
+                                   float3 ns, float3 ng, float* pdf) {
   float const energyScale = bsdf.data.ggx.energyScale;
   bool const conductor = bsdf.type() == EBSDFType::eGGXConductor;
   const bool hasReflection =
@@ -603,7 +602,7 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   // reflection
   // - purely reflective -> no transmission. purely transmissive -> no
   // reflection
-  if (cos_NI <= 0.f || (cos_NgI < 0) != isTransmission ||
+  if (cos_NO <= 0.f || (cos_NgI < 0) != isTransmission ||
       (effectivelySpecular) || (!hasReflection && cos_NgI > 0.f) ||
       (!hasTransmission && cos_NgI < 0.f)) {
     *pdf = 0.f;
@@ -657,8 +656,13 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
       luminance(reflectance) / luminance(reflectance + transmittance);
   float const lobePdf = isTransmission ? 1.f - pdfReflect : pdfReflect;
   *pdf = lobePdf * common / (1.f + lambdaO);
-  *isDelta = effectivelySpecular;
-#ifdef __CUDA_ARCH__
+#if 0
+  printf(
+      "\t*pdf = lobePdf * common / (1.f + lambdaO);\n\t\t%f = %f * %f / (1 + "
+      "%f)\n",
+      *pdf, lobePdf, common, lambdaO);
+#endif
+#if defined(__CUDA_ARCH__) && 0
   if (cg::coalesced_threads().thread_rank() == 0 && isTransmission) {
     printf(
         "energyScale * (isTransmission ? transmittance : reflectance) * common/"
@@ -673,7 +677,7 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
          (1.f + lambdaO + lambdaI);
 }
 
-__host__ __device__ BSDF makeGXXDielectric(float3 reflectanceTint,
+__host__ __device__ BSDF makeGGXDielectric(float3 reflectanceTint,
                                            float3 transmittanceTint, float phi0,
                                            float eta, float alphax,
                                            float alphay) {
@@ -694,7 +698,7 @@ __host__ __device__ BSDF makeGXXDielectric(float3 reflectanceTint,
   return bsdf;
 }
 
-__host__ __device__ BSDF makeGXXConductor(float3 eta, float3 kappa, float phi0,
+__host__ __device__ BSDF makeGGXConductor(float3 eta, float3 kappa, float phi0,
                                           float alphax, float alphay) {
   BSDF bsdf{};
   // albedo is estimated in the prepare function, where wo is known
@@ -774,12 +778,10 @@ __host__ __device__ BSDFSample sampleOrenNayar(BSDF const& bsdf, float3 wo,
 }
 
 __host__ __device__ float3 evalOrenNayar(BSDF const& bsdf, float3 wo, float3 wi,
-                                         float3 ns, float3 ng, float* pdf,
-                                         bool* isDelta) {
+                                         float3 ns, float3 ng, float* pdf) {
   float const cos_NI = dot(ns, wi);
   if (cos_NI > 0.f) {
     *pdf = cos_NI * std::numbers::inv_pi_v<float>;
-    *isDelta = false;
     return orenNayar_intensity(bsdf.data.orenNayar, ns, wo, wi);
   }
   return make_float3(0, 0, 0);
@@ -799,7 +801,8 @@ __host__ __device__ BSDF makeOrenNayar(float3 color, float roughness) {
   bsdfInit(bsdf, EBSDFType::eOrenNayar, albedo);
   auto& orenNayar = bsdf.data.orenNayar;
 
-  orenNayar.roughness = float_to_half_bits(fmaxf(0, fminf(roughness, 1)));
+  orenNayar.roughness = float_to_half_bits(
+      fmaxf(0, fminf(roughness, std::numbers::pi_v<float> / 2.f)));
   float const sigma = half_bits_to_float(orenNayar.roughness);
 
   orenNayar.a = float_to_half_bits(
@@ -850,38 +853,20 @@ __host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
 }
 
 __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
-                                    float3 ns, float3 ng, float* pdf,
-                                    bool* isDelta) {
+                                    float3 ns, float3 ng, float* pdf) {
   float3 f = make_float3(0, 0, 0);
   *pdf = 0;
-  *isDelta = false;
 #ifdef __CUDA_ARCH__
   cg::coalesced_group const theWarp = cg::coalesced_threads();
 #endif
   EBSDFType const type = bsdf.type();
   switch (type) {
     case EBSDFType::eOrenNayar:
-      f = evalOrenNayar(bsdf, wo, wi, ns, ng, pdf, isDelta);
-#ifdef __CUDA_ARCH__
-      if (theWarp.thread_rank() == 0) {
-        printf("Oren Nayar BSDF Sample: %f %f %f PDF %f\n", f.x, f.y, f.z,
-               *pdf);
-      }
-#endif
+      f = evalOrenNayar(bsdf, wo, wi, ns, ng, pdf);
       break;
-    case EBSDFType::eGGXDielectric:
-#ifdef __CUDA_ARCH__
-      if (theWarp.thread_rank() == 0) {
-        printf("Conductor ");
-      }
-#endif
     case EBSDFType::eGGXConductor:
-      f = evalGGX(bsdf, wo, wi, ns, ng, pdf, isDelta);
-#ifdef __CUDA_ARCH__
-      if (theWarp.thread_rank() == 0) {
-        printf("GGX BSDF Sample: %f %f %f PDF %f\n", f.x, f.y, f.z, *pdf);
-      }
-#endif
+    case EBSDFType::eGGXDielectric:
+      f = evalGGX(bsdf, wo, wi, ns, ng, pdf);
       break;
   }
 #ifdef __CUDA_ARCH__
@@ -904,9 +889,9 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
       // energy preserving multi-scattering term
       float const bsdf_a = half_bits_to_float(bsdf->data.orenNayar.a);
       float const bsdf_b = half_bits_to_float(bsdf->data.orenNayar.b);
-      float3 const bsdf_albedo =
-          half_vec_to_float3(bsdf->data.orenNayar.albedo);
+      float3 const bsdf_albedo = bsdf->weight();
 
+#if 0
       float const Eavg = bsdf_a * bsdf_a + _2piM5_6Over3 * bsdf_b;
       float3 const Ems = _1OverPi - bsdf_albedo * bsdf_albedo *
                                         (Eavg / (1.f - Eavg)) /
@@ -916,6 +901,18 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
           bsdf_a * std::numbers::pi_v<float> + bsdf_b * orenNayar_G(nv);
 
       float3 const multiScatter = Ems * (1.f - Ev);
+#else
+      float const nl = fmaxf(0.f, dot(ns, wo));
+      // Compute multi-scatter energy term using Nayar 1994
+      float const Ev =
+          bsdf_a * std::numbers::pi_v<float> + bsdf_b * orenNayar_G(nl);
+      float3 multiScatter =
+          bsdf_albedo * (1.f - Ev);  // energy preserving scaling
+      // Clamp to avoid negatives
+      multiScatter.x = fmaxf(multiScatter.x, 0.f);
+      multiScatter.y = fmaxf(multiScatter.y, 0.f);
+      multiScatter.z = fmaxf(multiScatter.z, 0.f);
+#endif
       bsdf->data.orenNayar.multiScatter[0] = float_to_half_bits(multiScatter.x);
       bsdf->data.orenNayar.multiScatter[1] = float_to_half_bits(multiScatter.y);
       bsdf->data.orenNayar.multiScatter[2] = float_to_half_bits(multiScatter.z);

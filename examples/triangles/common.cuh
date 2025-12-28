@@ -101,7 +101,7 @@ struct DeviceCamera {
   float focalLength = 20.f;
   float sensorSize = 36.f;
   float3 dir{0.f, 1.f, 0.f};
-  int spp = 4;
+  int spp = 32;
   float3 pos{0.f, 0.f, 0.f};
   int width = 256;
   int height = 128;
@@ -112,6 +112,9 @@ struct DeviceCamera {
 // ---------------------------------------------------------------------------
 inline __host__ __device__ __forceinline__ float sqrf(float const f) {
   return f * f;
+}
+inline __host__ __device__ __forceinline__ bool isZero(const float3 v) {
+  return v.x == 0.f && v.y == 0.f && v.z == 0.f;
 }
 // threshold on L∾ norm
 inline __host__ __device__ __forceinline__ bool nearZero(const float3 v,
@@ -774,6 +777,14 @@ struct BSDF {
     weightStorage[0] = float_to_half_bits(w.x);
     weightStorage[1] = float_to_half_bits(w.y);
     weightStorage[2] = float_to_half_bits(w.z);
+#if 0  // first 3 decimal digits from mantissa are preserved
+    if (!isZero(w)) {
+      float3 decoded = weight();
+      printf("  -> setWeight(%f %f %f)->[%hx %hx %hx] %f %f %f\n", w.x, w.y,
+             w.z, weightStorage[0], weightStorage[1], weightStorage[2],
+             decoded.x, decoded.y, decoded.z);
+    }
+#endif
   }
   __host__ __device__ float3 weight() const {
     return make_float3(half_bits_to_float(weightStorage[0]),
@@ -787,11 +798,11 @@ struct BSDF {
 static_assert(sizeof(BSDF) == 32 && alignof(BSDF) == 4);
 
 __host__ __device__ BSDF makeOrenNayar(float3 color, float roughness);
-__host__ __device__ BSDF makeGXXDielectric(float3 reflectanceTint,
+__host__ __device__ BSDF makeGGXDielectric(float3 reflectanceTint,
                                            float3 transmittanceTint, float phi0,
                                            float eta, float alphax,
                                            float alphay);
-__host__ __device__ BSDF makeGXXConductor(float3 eta, float3 kappa, float phi0,
+__host__ __device__ BSDF makeGGXConductor(float3 eta, float3 kappa, float phi0,
                                           float alphax, float alphay);
 
 struct BSDFSample {
@@ -816,8 +827,7 @@ __host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
                                           float3 ns, float3 ng, float2 u,
                                           float uc);
 __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
-                                    float3 ns, float3 ng, float* pdf,
-                                    bool* isDelta);
+                                    float3 ns, float3 ng, float* pdf);
 
 // ---------------------------------------------------------------------------
 // BSDF-Specific sampling/evaluation functions
@@ -833,11 +843,9 @@ __host__ __device__ BSDFSample sampleOrenNayar(BSDF const& bsdf, float3 wo,
                                                float3 ns, float3 ng, float2 u,
                                                float uc);
 __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
-                                   float3 ns, float3 ng, float* pdf,
-                                   bool* isDelta);
+                                   float3 ns, float3 ng, float* pdf);
 __host__ __device__ float3 evalOrenNayar(BSDF const& bsdf, float3 wo, float3 wi,
-                                         float3 ns, float3 ng, float* pdf,
-                                         bool* isDelta);
+                                         float3 ns, float3 ng, float* pdf);
 __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo);
 
 // ---------------------------------------------------------------------------
@@ -881,7 +889,7 @@ void triangleIntersectTest();
 // Grid-Stride Loop + Occupancy API = profit
 // https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
 
-__global__ void __launch_bounds__(/*max threads per block*/ 512,
+__global__ void __launch_bounds__(/*max threads per block*/ 256,
                                   /*min blocks per SM*/ 10)
     basicIntersectionMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
                                 Light const* d_lights,

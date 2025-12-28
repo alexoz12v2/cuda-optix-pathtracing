@@ -444,8 +444,14 @@ __host__ __device__ float3 dirFromOcta(uint32_t const octa) {
 // ---------------------------------------------------------------------------
 __host__ __device__ uint16_t float_to_half_bits(float f) {
 #if defined(__CUDA_ARCH__)
+  static_assert(sizeof(uint16_t) == sizeof(__half));
   // Device: use native instruction
-  return __float2half_rn(f);
+  union {
+    uint16_t u;
+    __half h;
+  } h;
+  h.h = __float2half_rn(f);
+  return h.u;
 #else
   // Host: software conversion
   union {
@@ -588,7 +594,9 @@ __host__ __device__ float3 evalLight(Light const& light,
   if (ELightType const type = light.type();
       type == ELightType::ePoint || type == ELightType::eSpot) {
     // quadratic attenuation (TODO Other variances?)
+    // printf("------- Light Before %f %f %f\n", Le.x, Le.y, Le.z);
     Le /= (ls.distance * ls.distance);
+    // printf("------- Light After %f %f %f\n", Le.x, Le.y, Le.z);
   }
   return Le;
 }

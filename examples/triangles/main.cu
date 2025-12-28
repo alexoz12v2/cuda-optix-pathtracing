@@ -256,6 +256,7 @@ void writePixel(uint32_t const width, uint8_t* rowMajorImage,
   rowMajorImage[3 * (col + row * width) + 0] = u8r;
   rowMajorImage[3 * (col + row * width) + 1] = u8g;
   rowMajorImage[3 * (col + row * width) + 2] = u8b;
+  // printf("[%u %u]: %f %f %f\n", col, row, fr, fg, fb);
 }
 
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
@@ -298,9 +299,9 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
 // eta:   {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
 // kappa: {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
 void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
-#define ONLY_OREN_NAYAR 0
+#define ONLY_OREN_NAYAR 1
 #define ONLY_CONDUCTOR 0
-#define ONLY_DIELECTRIC 1
+#define ONLY_DIELECTRIC 0
 #define BSDF_ALL 0
 
   BSDF* d_bsdf = nullptr;
@@ -315,14 +316,14 @@ void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
 
   const BSDF h_bsdf[Count]{
 #if BSDF_ALL || ONLY_OREN_NAYAR
-      makeOrenNayar({1.f, 0.7, 0.f}, 1.f),
+      makeOrenNayar(make_float3(0.6f, 0.f, 0.f), 0.698f),
 #endif
 #if BSDF_ALL || ONLY_DIELECTRIC
-      makeGXXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f}, 1.f /*~26 deg*/,
+      makeGGXDielectric({0.2f, 0.7, 0.1f}, {0.f, 0.f, 0.f}, 1.f /*~26 deg*/,
                         1.44f, .5f, .7f),
 #endif
 #if BSDF_ALL || ONLY_CONDUCTOR
-      makeGXXConductor({0.18299f, 0.42108f, 1.37340f},
+      makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
                        {3.42420f, 2.34590f, 1.77040f}, 0.f, .1f, .1f)
 #endif
   };
@@ -341,7 +342,7 @@ void deviceLights(uint32_t* lightCount, uint32_t* infiniteLightsCount,
   if (lightCount) *lightCount = 2;
   if (infiniteLightsCount) *infiniteLightsCount = 1;
   Light h_lights[2]{
-      makePointLight(make_float3(244.f / 255, 191.f / 255, 117.f / 255),
+      makePointLight(10 * make_float3(244.f / 255, 191.f / 255, 117.f / 255),
                      make_float3(-.5f, 0.5f, 0.45f), 0.01f),
       makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)),
   };
@@ -436,8 +437,8 @@ namespace {
 void testIntersectionMegakernel() {
 #if 1
   // TODO device query for optimal sizes
-  uint32_t const threads = 512;
-  uint32_t const blocks = 16;
+  uint32_t const threads = 256;
+  uint32_t const blocks = 32;
 #else
   uint32_t const threads = 1;
   uint32_t const blocks = 1;

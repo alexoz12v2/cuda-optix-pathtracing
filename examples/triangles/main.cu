@@ -74,6 +74,7 @@ DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
 
 TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
                                   uint32_t const bsdfCount,
+                                  uint32_t materialPatchSize = 64,
                                   size_t maxTrianglesPerChunk = 1'000'000) {
   static int constexpr ComponentCount = 4;
   TriangleSoup soup{};
@@ -93,18 +94,16 @@ TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
   std::vector<float> h_z(ComponentCount * maxTrianglesPerChunk);
   std::vector<uint32_t> h_matId(tris.size());
 
-  uint32_t const variation = n / bsdfCount;
-  uint32_t varIndex = variation;
   uint32_t matIdx = 0;
+  uint32_t patchCounter = 0;
 
   for (size_t base = 0; base < n; base += maxTrianglesPerChunk) {
     size_t const count = std::min(maxTrianglesPerChunk, n - base);
 
     for (size_t i = 0; i < count; ++i) {
-      if (varIndex-- == 0) {
-        varIndex = variation;
-        matIdx++;
-        assert(matIdx < bsdfCount);
+      if (++patchCounter >= materialPatchSize) {
+        patchCounter = 0;
+        matIdx = (matIdx + 1) % bsdfCount;
       }
 
       const Triangle& t = tris[base + i];
@@ -299,14 +298,34 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
 // eta:   {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
 // kappa: {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
 void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
+#define ONLY_OREN_NAYAR 0
+#define ONLY_CONDUCTOR 0
+#define ONLY_DIELECTRIC 1
+#define BSDF_ALL 0
+
   BSDF* d_bsdf = nullptr;
-  if (bsdfCount) *bsdfCount = 3;
-  const BSDF h_bsdf[3]{
+#if ONLY_OREN_NAYAR || ONLY_CONDUCTOR || ONLY_DIELECTRIC
+  static constexpr int Count = 1;
+  if (bsdfCount) *bsdfCount = Count;
+#else
+#  define BSDF_ALL 1
+  static constexpr int Count = 3;
+  if (bsdfCount) *bsdfCount = Count;
+#endif
+
+  const BSDF h_bsdf[Count]{
+#if BSDF_ALL || ONLY_OREN_NAYAR
       makeOrenNayar({1.f, 0.7, 0.f}, 1.f),
+#endif
+#if BSDF_ALL || ONLY_DIELECTRIC
       makeGXXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f}, 1.f /*~26 deg*/,
                         1.44f, .5f, .7f),
+#endif
+#if BSDF_ALL || ONLY_CONDUCTOR
       makeGXXConductor({0.18299f, 0.42108f, 1.37340f},
-                       {3.42420f, 2.34590f, 1.77040f}, 0.f, .1f, .1f)};
+                       {3.42420f, 2.34590f, 1.77040f}, 0.f, .1f, .1f)
+#endif
+  };
 
   CUDA_CHECK(cudaMalloc(&d_bsdf, sizeof(BSDF) * 3));
   CUDA_CHECK(

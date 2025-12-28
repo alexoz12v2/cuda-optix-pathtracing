@@ -562,6 +562,7 @@ struct HitResult {
         normal{},
         error{},
         hit{},
+        matId{},
         t{
 #ifdef __CUDA_ARCH__
             CUDART_INF_F
@@ -573,8 +574,9 @@ struct HitResult {
 
   float3 pos;
   float3 normal;
-  float3 error;  // intersection error bounds
-  int32_t hit;   // 0 = no hit, 1 = hit
+  float3 error;    // intersection error bounds
+  int32_t hit;     // 0 = no hit, 1 = hit
+  uint32_t matId;  // bsdf index
   float t;
 };
 

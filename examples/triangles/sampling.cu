@@ -422,7 +422,7 @@ __host__ __device__ float lookupTableRead(float const* __restrict__ table,
 __host__ __device__ float lookupTableRead2D(float const* __restrict__ table,
                                             float x, float y, int32_t sizex,
                                             int32_t sizey) {
-  y = fminf(fmaxf(x, 0.f), 1.f) * (sizey - 1);
+  y = fminf(fmaxf(y, 0.f), 1.f) * (sizey - 1);
 
   int32_t const index = fminf(static_cast<int32_t>(y), sizey - 1);
   int32_t const nIndex = fminf(index + 1, sizey - 1);

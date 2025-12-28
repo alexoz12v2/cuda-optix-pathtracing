@@ -219,12 +219,16 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
         HitResult const result = triangleIntersect(x, y, z, ray);
         if (result.hit && result.t < hitResult.t) {
           hitResult = result;
+          // TODO better? Coalescing?
+          hitResult.matId = d_triSoup.matId[tri];
         }
       }
       // TODO remove
+#  if 0
       if (hitResult.hit) {
         PRINT("    Intersection at t = %f\n", hitResult.t);
       }
+#  endif
 #endif
       // TODO probably remove
       // if not intersected, contribution is zero (eliminates branch later)
@@ -243,6 +247,9 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           L += beta * Le;
         }
       } else {
+        BSDF bsdf = d_bsdf[hitResult.matId];
+        prepareBSDF(&bsdf, hitResult.normal, -ray.d);
+
         // - choose light for Next Event Estimation (direct lighting)
         int32_t const lightIndex =
             min(static_cast<int>(warpRng.get1D(params) * lightCount),
@@ -272,20 +279,23 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           // - if no intersection, sample light and add light contribution
           if (doNextEventEstimation) {
             // TODO attenuation and bsdf factor evaluation
-            float constexpr bsdfFactor = 1.f;
-            float constexpr bsdfPdf = 0.25 * std::numbers::pi_v<float>;
+            float bsdfPdf = 1;
+            bool bsdfDelta = false;
+            float3 const bsdf_f =
+                evalBsdf(bsdf, -ray.d, shadowRay.d, hitResult.normal,
+                         hitResult.normal, &bsdfPdf, &bsdfDelta);
             float3 const Le = evalLight(light, ls);
             // TODO revise
-            if (ls.delta) {
-              // MIS if not delta (and not BSDF Delta TODO)
-              L += beta * Le * bsdfFactor / lightPMF;
+            if (ls.delta || bsdfDelta) {
+              L += beta * Le * bsdf_f / lightPMF;
             } else {
-              // otherwise (to check bsdf not delta?? TODO)
-              L += beta * (Le * bsdfFactor / (lightPMF * ls.pdf + bsdfPdf));
+              // MIS if not delta (and not BSDF Delta TODO)
+              L += beta * (Le * bsdf_f / (lightPMF * ls.pdf + bsdfPdf));
             }
           }
         }
-      }
+        // TODO russian roulette and ray depth
+      } // end else (hit something)
       theWarp.sync();
 
       // add to output buffer ( assumes max distance is 2)
@@ -300,8 +310,6 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
 #else
       atomicAdd(target, toAdd);
 #endif
-
-      // TODO russian roulette
     }
   }
 }

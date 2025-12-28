@@ -192,16 +192,18 @@ static __constant__ cudaTextureObject_t d_tex_ggx_Eavg = 0;
 
 __host__ void allocateDeviceGGXEnergyPreservingTables() {
   // 1. allocate array backings for our textures. Arrays are 2D matrices.
-  cudaChannelFormatDesc desc = cudaCreateChannelDesc<float>();
+  cudaChannelFormatDesc const desc = cudaCreateChannelDesc<float>();
   CUDA_CHECK(cudaMallocArray(&array_ggx_Eavg, &desc, GGX_EAVG_TABLE_COUNT, 1));
   CUDA_CHECK(
       cudaMallocArray(&array_ggx_E, &desc, GGX_E_TABLE_COLS, GGX_E_TABLE_ROWS));
 
   CUDA_CHECK(cudaMemcpy2DToArray(array_ggx_Eavg, 0, 0, table_ggx_Eavg,
-                                 GGX_EAVG_TABLE_COUNT, GGX_EAVG_TABLE_COUNT, 1,
+                                 GGX_EAVG_TABLE_COUNT * sizeof(float),
+                                 GGX_EAVG_TABLE_COUNT * sizeof(float), 1,
                                  cudaMemcpyHostToDevice));
   CUDA_CHECK(cudaMemcpy2DToArray(array_ggx_E, 0, 0, table_ggx_E,
-                                 GGX_E_TABLE_COLS, GGX_E_TABLE_COLS,
+                                 GGX_E_TABLE_COLS * sizeof(float),
+                                 GGX_E_TABLE_COLS * sizeof(float),
                                  GGX_E_TABLE_ROWS, cudaMemcpyHostToDevice));
   // 2. create texture object with linear filtering
   {
@@ -398,6 +400,7 @@ __host__ __device__ __forceinline__ float ggx_aniso_lambda(float const alphax,
   return ggx_lambda_from_sqr_alpha_tan_n(sqr_alpha_tan_n);
 }
 
+// TODO unit test
 // assumes albedo already estimated
 __host__ __device__ __forceinline__ void energyPreservingGGXScale(
     BSDF& bsdf, float const alpha2, float const cos_NO, float3 const Fss) {
@@ -409,14 +412,6 @@ __host__ __device__ __forceinline__ void energyPreservingGGXScale(
 #else
   float const E = tex2D<float>(d_tex_ggx_E, alpha2, cos_NO);
   float const Eavg = tex1D<float>(d_tex_ggx_Eavg, alpha2);
-#  if 1
-  {
-    cg::coalesced_group theWarp = cg::coalesced_threads();
-    if (theWarp.thread_rank() == 0) {
-      printf("sampled Energy: %f, Sampled average energy: %f\n", E, Eavg);
-    }
-  }
-#  endif
 #endif
 
   // assumes that Single Scattering doesn't cover the full energy
@@ -578,7 +573,7 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
 __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
                                    float3 ns, float3 ng, float* pdf,
                                    bool* isDelta) {
-  float const energyScale = half_bits_to_float(bsdf.data.ggx.energyScale);
+  float const energyScale = bsdf.data.ggx.energyScale;
   bool const conductor = bsdf.type() == EBSDFType::eGGXConductor;
   const bool hasReflection =
       conductor
@@ -663,6 +658,17 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   float const lobePdf = isTransmission ? 1.f - pdfReflect : pdfReflect;
   *pdf = lobePdf * common / (1.f + lambdaO);
   *isDelta = effectivelySpecular;
+#ifdef __CUDA_ARCH__
+  if (cg::coalesced_threads().thread_rank() == 0 && isTransmission) {
+    printf(
+        "energyScale * (isTransmission ? transmittance : reflectance) * common/"
+        "(1.f + lambdaO + lambdaI):\n\t%f * (%d ? %f %f %f : %f %f %f) * %f / "
+        "(1 + %f + %f)\n\n",
+        energyScale, isTransmission, transmittance.x, transmittance.y,
+        transmittance.z, reflectance.x, reflectance.y, reflectance.z, common,
+        lambdaO, lambdaI);
+  }
+#endif
   return energyScale * (isTransmission ? transmittance : reflectance) * common /
          (1.f + lambdaO + lambdaI);
 }
@@ -856,10 +862,26 @@ __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
   switch (type) {
     case EBSDFType::eOrenNayar:
       f = evalOrenNayar(bsdf, wo, wi, ns, ng, pdf, isDelta);
+#ifdef __CUDA_ARCH__
+      if (theWarp.thread_rank() == 0) {
+        printf("Oren Nayar BSDF Sample: %f %f %f PDF %f\n", f.x, f.y, f.z,
+               *pdf);
+      }
+#endif
       break;
     case EBSDFType::eGGXDielectric:
+#ifdef __CUDA_ARCH__
+      if (theWarp.thread_rank() == 0) {
+        printf("Conductor ");
+      }
+#endif
     case EBSDFType::eGGXConductor:
       f = evalGGX(bsdf, wo, wi, ns, ng, pdf, isDelta);
+#ifdef __CUDA_ARCH__
+      if (theWarp.thread_rank() == 0) {
+        printf("GGX BSDF Sample: %f %f %f PDF %f\n", f.x, f.y, f.z, *pdf);
+      }
+#endif
       break;
   }
 #ifdef __CUDA_ARCH__

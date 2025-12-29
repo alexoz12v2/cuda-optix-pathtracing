@@ -1,7 +1,9 @@
-#include "common.cuh"
+#include "bsdf.cuh"
+
+#include "extra_math.cuh"
+#include "sampling.cuh"
 
 #include <cooperative_groups.h>
-#include <vector_functions.h>
 
 #include <cassert>
 #include <numbers>

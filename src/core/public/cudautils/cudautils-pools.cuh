@@ -25,9 +25,9 @@ struct RayPool {
   float *dx, *dy, *dz;  // direction
   float *tmin, *tmax;
   float *beta_r, *beta_g, *beta_b;
-  float *bsdfPdf;  // last bsdf pdf
-  int *sampleIdx;
-  int32_t *depth;                   // current depth
+  float* bsdfPdf;  // last bsdf pdf
+  int* sampleIdx;
+  int32_t* depth;                   // current depth
   int32_t *pixel_x, *pixel_y;       // pixel coords for film
   uint32_t *rngState0, *rngState1;  // RNG state per ray (or counter)
   uint32_t capacity;

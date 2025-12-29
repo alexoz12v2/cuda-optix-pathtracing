@@ -1,7 +1,16 @@
+#include "cuda-core/types.cuh"
+#include "cuda-core/bsdf.cuh"
+#include "cuda-core/rng.cuh"
+#include "cuda-core/common_math.cuh"
+#include "cuda-core/extra_math.cuh"
+#include "cuda-core/host_scene.cuh"
+#include "cuda-core/light.cuh"
+#include "cuda-core/morton.cuh"
+#include "cuda-core/shapes.cuh"
+#include "cuda-core/kernels.cuh"
+
 #include <cuda_device_runtime_api.h>
 #include <cuda_runtime_api.h>
-#include "common.cuh"
-#include "testing.h"
 
 #ifdef DMT_OS_WINDOWS
 #  include <Windows.h>
@@ -72,13 +81,12 @@ DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
   return d_rng;
 }
 
-TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
+TriangleSoup triSoupFromTriangles(const HostTriangleScene& hostScene,
                                   uint32_t const bsdfCount,
-                                  uint32_t materialPatchSize = 64,
                                   size_t maxTrianglesPerChunk = 1'000'000) {
   static int constexpr ComponentCount = 4;
   TriangleSoup soup{};
-  soup.count = tris.size();
+  soup.count = hostScene.triangles.size();
 
   const size_t n = soup.count;
   const size_t bytes = n * ComponentCount * sizeof(float);
@@ -86,27 +94,30 @@ TriangleSoup triSoupFromTriangles(const std::vector<Triangle>& tris,
   CUDA_CHECK(cudaMalloc(&soup.xs, bytes));
   CUDA_CHECK(cudaMalloc(&soup.ys, bytes));
   CUDA_CHECK(cudaMalloc(&soup.zs, bytes));
-  CUDA_CHECK(cudaMalloc(&soup.matId, tris.size() * sizeof(uint32_t)));
+  CUDA_CHECK(cudaMalloc(&soup.matId, soup.count * sizeof(uint32_t)));
 
   // Temporary host buffers (bounded)
   std::vector<float> h_x(ComponentCount * maxTrianglesPerChunk);
   std::vector<float> h_y(ComponentCount * maxTrianglesPerChunk);
   std::vector<float> h_z(ComponentCount * maxTrianglesPerChunk);
-  std::vector<uint32_t> h_matId(tris.size());
+  std::vector<uint32_t> h_matId(maxTrianglesPerChunk);
 
   uint32_t matIdx = 0;
-  uint32_t patchCounter = 0;
+  uint32_t meshIdx = 0;
+  uint32_t nextIncrement = hostScene.nextMeshIndices[0];
 
   for (size_t base = 0; base < n; base += maxTrianglesPerChunk) {
     size_t const count = std::min(maxTrianglesPerChunk, n - base);
 
     for (size_t i = 0; i < count; ++i) {
-      if (++patchCounter >= materialPatchSize) {
-        patchCounter = 0;
+      if (meshIdx + 1 < hostScene.nextMeshIndices.size() &&
+          base + i >= nextIncrement) {
+        ++meshIdx;
+        nextIncrement = hostScene.nextMeshIndices[meshIdx];
         matIdx = (matIdx + 1) % bsdfCount;
       }
 
-      const Triangle& t = tris[base + i];
+      const Triangle& t = hostScene.triangles[base + i];
 
       h_x[i * ComponentCount + 0] = t.v0.x;
       h_x[i * ComponentCount + 1] = t.v1.x;
@@ -277,14 +288,18 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
       for (uint32_t i = 0; i < layout.mortonCount; ++i) {
         uint32_t row, col;
         decodeMorton2D(i, &col, &row);
-        writePixel(width, rowMajorImage.get(), mortonHostBuffer.get(), i, row,
-                   col);
+        if (row < height && col < width) {
+          writePixel(width, rowMajorImage.get(), mortonHostBuffer.get(), i, row,
+                     col);
+        }
       }
     } else {
       for (uint32_t i = 0; i < layout.mortonCount; ++i) {
         uint32_t row, col;
         decodeMorton2D(i, &col, &row);
-        writePixel(width, rowMajorImage.get(), d_outputBuffer, i, row, col);
+        if (row < height && col < width) {
+          writePixel(width, rowMajorImage.get(), d_outputBuffer, i, row, col);
+        }
       }
     }
   }
@@ -305,7 +320,10 @@ void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
 #define BSDF_ALL 0
 
   BSDF* d_bsdf = nullptr;
-#if ONLY_OREN_NAYAR || ONLY_CONDUCTOR || ONLY_DIELECTRIC
+#if ONLY_OREN_NAYAR
+  static constexpr int Count = 4;
+  if (bsdfCount) *bsdfCount = Count;
+#elif ONLY_CONDUCTOR || ONLY_DIELECTRIC
   static constexpr int Count = 1;
   if (bsdfCount) *bsdfCount = Count;
 #else
@@ -316,14 +334,19 @@ void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
 
   const BSDF h_bsdf[Count]{
 #if BSDF_ALL || ONLY_OREN_NAYAR
-      makeOrenNayar(make_float3(0.6f, 0.f, 0.f), 0.698f),
+      makeOrenNayar({1.f, 0.7, 0.f}, .4f),
+#endif
+#if ONLY_OREN_NAYAR
+      makeOrenNayar({.5f, .7f, 0.f}, .5f),
+      makeOrenNayar({.2f, .2f, 0.f}, .6f),
+      makeOrenNayar({1.f, .7f, .3f}, .7f),
 #endif
 #if BSDF_ALL || ONLY_DIELECTRIC
-      makeGGXDielectric({0.2f, 0.7, 0.1f}, {0.f, 0.f, 0.f}, 1.f /*~26 deg*/,
+      makeGXXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f}, 1.f /*~26 deg*/,
                         1.44f, .5f, .7f),
 #endif
 #if BSDF_ALL || ONLY_CONDUCTOR
-      makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
+      makeGXXConductor({0.18299f, 0.42108f, 1.37340f},
                        {3.42420f, 2.34590f, 1.77040f}, 0.f, .1f, .1f)
 #endif
   };
@@ -339,18 +362,35 @@ void deviceLights(uint32_t* lightCount, uint32_t* infiniteLightsCount,
                   Light** lights, Light** infiniteLights) {
   Light* d_lights = nullptr;
   Light* d_infiniteLights = nullptr;
+#define ONE_LIGHT 1
+#if ONE_LIGHT
+  static int constexpr LIGHT_COUNT = 1;
+  if (lightCount) *lightCount = 1;
+#else
+  static int constexpr LIGHT_COUNT = 2;
   if (lightCount) *lightCount = 2;
+#endif
   if (infiniteLightsCount) *infiniteLightsCount = 1;
-  Light h_lights[2]{
-      makePointLight(10 * make_float3(244.f / 255, 191.f / 255, 117.f / 255),
-                     make_float3(-.5f, 0.5f, 0.45f), 0.01f),
-      makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)),
+  Light h_lights[LIGHT_COUNT]{
+      // makePointLight(20 * make_float3(244.f / 255, 191.f / 255, 117.f / 255),
+      //               make_float3(.5f, 2, 1), 0.01f),
+      // TODO spot light broken
+      // makeSpotLight(0.001f * make_float3(1, 1, 1),
+      // make_float3(0, 1.2f, 1.7f),
+      //               make_float3(0, 0, -1), cosf(std::numbers::pi_v<float> /
+      //               6),
+      //               cosf(std::numbers::pi_v<float> / 3), 0.01f)
+      makePointLight(2 * make_float3(1, 1, 1), make_float3(0, 0.7f, 1.5f),
+                     0.01f),
+#if !ONE_LIGHT
+      makeEnvironmentalLight(10.f * make_float3(0.1f, 0.1f, 0.1f)),
+#endif
   };
   Light h_infiniteLights[1]{
       makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)),
   };
-  CUDA_CHECK(cudaMalloc(&d_lights, sizeof(Light) * 2));
-  CUDA_CHECK(cudaMemcpy(d_lights, h_lights, sizeof(Light) * 2,
+  CUDA_CHECK(cudaMalloc(&d_lights, sizeof(Light) * LIGHT_COUNT));
+  CUDA_CHECK(cudaMemcpy(d_lights, h_lights, sizeof(Light) * LIGHT_COUNT,
                         cudaMemcpyHostToDevice));
   CUDA_CHECK(cudaMalloc(&d_infiniteLights, sizeof(Light) * 1));
   CUDA_CHECK(cudaMemcpy(d_infiniteLights, h_infiniteLights, sizeof(Light) * 1,
@@ -450,8 +490,20 @@ void testIntersectionMegakernel() {
   DeviceCamera* d_camera = defaultDeviceCamera(&width, &height, &h_camera);
   TriangleSoup scene{};
 #if 1
-  std::vector<Triangle> h_mesh =
-      generateSphereMesh(make_float3(0, 1.2, 0), 0.5f, 16, 32);
+  HostTriangleScene h_scene;
+  // h_scene.addModel(
+  //     generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 16, 32));
+  // h_scene.addModel(generateCube(make_float3(0, 2, 0), make_float3(1, 1, 1)));
+  h_scene.addModel(
+      generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
+  h_scene.addModel(
+      generatePlane(make_float3(0, 2, -.5f), make_float3(0, 0, 1), 4, 4));
+  h_scene.addModel(
+      generatePlane(make_float3(0, 2, 2), make_float3(0, 0, -1), 4, 4));
+  h_scene.addModel(
+      generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
+  h_scene.addModel(
+      generatePlane(make_float3(2, 2, 0), make_float3(-1, 0, 0), 4, 4));
 #else
   std::vector<Triangle> h_mesh;
   // screen half-height at distance d = d * tan(FOV / 2)
@@ -463,10 +515,10 @@ void testIntersectionMegakernel() {
       {0.0f, 1.0f, 0.45f},     // top-center
   });
 #endif
-#if 1
+#if 0
   {
     std::cout << "Computing intersection to host" << std::endl;
-#  if 1
+#  if 0
     std::vector<float4> out;
     out.resize(mortonLayout(h_camera.height, h_camera.width).mortonCount);
     hostIntersectionKernel(true, h_camera, h_mesh,
@@ -515,22 +567,29 @@ void testIntersectionMegakernel() {
   allocateDeviceGGXEnergyPreservingTables();
 
   // init device scene
-  scene = triSoupFromTriangles(h_mesh, bsdfCount);
+  scene = triSoupFromTriangles(h_scene, bsdfCount);
   DeviceHaltonOwen* d_rng = copyHaltonOwenToDeviceAlloc(blocks, threads);
 
   // init output buffer
   float4* d_outputBuffer = deviceOutputBuffer(width, height);
 
-  basicIntersectionMegakernel<<<blocks, threads>>>(
-      d_camera, scene, d_lights, lightCount, d_infiniteLights,
-      infiniteLightCount, d_bsdf, bsdfCount, d_rng, d_outputBuffer);
-  CUDA_CHECK(cudaGetLastError());
+  static int constexpr MAX_SPP = 2048;
   std::cout << "Running CUDA Kernel" << std::endl;
-  CUDA_CHECK(cudaDeviceSynchronize());
-  std::cout << "Finished, writing to file" << std::endl;
+  // TODO stream based write back
+  for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {
+    basicIntersectionMegakernel<<<blocks, threads>>>(
+        d_camera, scene, d_lights, lightCount, d_infiniteLights,
+        infiniteLightCount, d_bsdf, bsdfCount, sTot, d_rng, d_outputBuffer);
+    CUDA_CHECK(cudaGetLastError());
+    std::cout << "Running CUDA Kernel (" << sTot << ")" << std::endl;
+    CUDA_CHECK(cudaDeviceSynchronize());
+    std::string const name =
+        "output-" + std::to_string(sTot + h_camera.spp) + ".bmp";
+    std::cout << "Writing to file" << std::endl;
 
-  // copy to host and to file
-  writeOutputBuffer(d_outputBuffer, width, height);
+    // copy to host and to file
+    writeOutputBuffer(d_outputBuffer, width, height, name.c_str());
+  }
 
   // cleanup
   std::cout << "Cleanup..." << std::endl;

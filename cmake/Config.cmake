@@ -488,6 +488,15 @@ function(dmt_set_target_optimization target properties_visibility)
       endif ()
     endif ()
 
+    set(default_cuda_nvcc_flags -lineinfo)
+    if (DMT_DEVICE_DEBUG)
+      if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        list(APPEND default_cuda_nvcc_flags -G)
+      else ()
+        message(WARNING "DMT_DEVICE_DEBUG Specified for a non Debug Build. Ignoring it")
+      endif ()
+    endif ()
+
     if (CMAKE_BUILD_TYPE STREQUAL "Debug") # you can also use the CONFIG generator expression
       # NRVO has an issue with visual studio debugger, you cannot inspect the returned struct, hence disabling it
       # https://developercommunity.visualstudio.com/t/When-a-custom-function-returns-a-custom-/10422600
@@ -504,8 +513,7 @@ function(dmt_set_target_optimization target properties_visibility)
         -ftest-coverage>
         >
         $<$<COMPILE_LANGUAGE:CUDA>:
-        -G
-        -g
+        ${default_cuda_nvcc_flags}
         -O0>)
       target_link_options(${target} PUBLIC
         $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
@@ -524,12 +532,17 @@ function(dmt_set_target_optimization target properties_visibility)
         -g>
         >
         $<$<COMPILE_LANGUAGE:CUDA>:
-        -G
+        ${default_cuda_nvcc_flags}
         -g>)
     elseif (CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
       target_compile_options(
-        ${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>: $<$<BOOL:${DMT_COMPILER_MSVC}>:/O1>
-        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-Os> >)
+        ${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>:
+        $<$<BOOL:${DMT_COMPILER_MSVC}>:/O1>
+        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-Os>
+        >
+        $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags}>
+      )
     endif ()
   endif ()
 endfunction()
@@ -558,7 +571,7 @@ function(dmt_add_compile_definitions target properties_visibility)
     if (WIN32)
       if (NOT VSWHERE_PATH)
         set(VSWHERE_PATH "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe")
-      endif()
+      endif ()
       # Use vswhere to locate MSVC toolchain
       execute_process(
         COMMAND "${VSWHERE_PATH}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property
@@ -584,9 +597,9 @@ function(dmt_add_compile_definitions target properties_visibility)
       string(REGEX MATCHALL "^[ \t]+/[^ \n]+" INCLUDE_DIRS "${COMPILER_INFO}")
       string(REGEX MATCHALL "/[^ \n]+" INCLUDE_DIRS "${INCLUDE_BLOCK}")
       message(STATUS "Compiler include dirs:")
-      foreach(dir ${INCLUDE_DIRS})
+      foreach (dir ${INCLUDE_DIRS})
         message(STATUS "  ${dir}")
-      endforeach()
+      endforeach ()
     endif ()
 
     if (DEFINED DMT_OS_LINUX)

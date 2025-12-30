@@ -458,14 +458,8 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
                                          float3 ng, float2 u, float uc) {
   BSDFSample sample{};
   float const cos_NO = dot(ns, wo);
-#if 0  // already checked in dispatcher function
-  if (cos_NI <= 0) {
-    // incident angles from lower hemisphere are invalid. If you are within
-    // a material after a transmission, it's the caller's responsibility
-    // to flip the normals so that cosines are positive
-    return sample;
-  }
-#endif
+  assert(cos_NO > 0);
+
   bool const isotropic = bsdf.data.ggx.alphax == bsdf.data.ggx.alphay;
   float const alphax = static_cast<float>(bsdf.data.ggx.alphax) / UINT16_MAX;
   float const alphay = static_cast<float>(bsdf.data.ggx.alphay) / UINT16_MAX;
@@ -498,6 +492,7 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
     // to global
     H = local_H.x * X + local_H.y * Y + local_H.z * ns;
   }
+  assert(fabsf(length2(H) - 1.f) < 1e-3f && "micronormal unit");
   float const cos_HO = dot(H, wo);
   // angle betwen half vector and refracted ray. not used in reflection
   float cos_HI{};
@@ -510,20 +505,23 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
     return sample;  // TODO better branching?
   }
 
-  const float pdfReflect =  // TODO assert [0,1]
-      luminance(reflectance) / luminance(reflectance + transmittance);
-  sample.refract = uc >= pdfReflect;
+  const float pdfReflect = fminf(
+      fmaxf(average(reflectance) / average(reflectance + transmittance), 0.f),
+      1.f);
+  assert(pdfReflect >= 0 && pdfReflect <= 1);
+  sample.refract = uc > pdfReflect;
+  if (sample.refract) {
+    assert(bsdf.type() == EBSDFType::eGGXDielectric);
+    invEta = 1.f / half_bits_to_float(bsdf.data.ggx.mat.dielectric.eta);
+    assert(invEta > 0.f && invEta <= 1.f);
+  }
   // reflected/refracted direction
-  sample.wi =
-      sample.refract
-          ? refractAngle(
-                wo, H, cos_HI,
-                (invEta = 1.f / (sample.eta = half_bits_to_float(
-                                     bsdf.data.ggx.mat.dielectric.eta))))
-          : 2.f * cos_HO * H - wo;
+  sample.wi = sample.refract ? refractAngle(wo, H, cos_HI, invEta)
+                             : 2.f * cos_HO * H - wo;
   // either normal and direction are same hemisphere or refraction
-  if (dot(ng, sample.wi) < 0 && !sample.refract) {  // TODO branching
-    return sample;  // pdf still 0 here, so falsy sample
+  if (dot(ng, sample.wi) <= 0 && !sample.refract) {  // TODO branching
+    sample.pdf = 0;
+    return sample;
   }
 
   // BSDF/PDF computation
@@ -568,12 +566,18 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
     sample.pdf *= common / (1.f + lambdaO);
     sample.f *= common / (1.f + lambdaO + lambdaI);
   }
-
+#ifdef __CUDA_ARCH__
+  cg::coalesced_group g = cg::coalesced_threads();
+  if (g.thread_rank() == 0)
+    printf("f: %f %f %f, pdf %f\n", sample.f.x, sample.f.y, sample.f.z,
+           sample.pdf);
+#endif
   return sample;
 }
 
 __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
                                    float3 ns, float3 ng, float* pdf) {
+  assert(dot(ns, ng) > 0.f);
   float const energyScale = bsdf.data.ggx.energyScale;
   bool const conductor = bsdf.type() == EBSDFType::eGGXConductor;
   const bool hasReflection =
@@ -607,13 +611,31 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   if (cos_NO <= 0.f || (cos_NgI < 0) != isTransmission ||
       (effectivelySpecular) || (!hasReflection && cos_NgI > 0.f) ||
       (!hasTransmission && cos_NgI < 0.f)) {
+    printf(
+        "Invalid Material:\n\t"
+        "  outgoing (input) dir not same hemi: cos_NO: %f\n\t"
+        "  incoming (output) dir under and not T: cos_NgI: %f, T? %d\n\t"
+        "  effectivelySpecular? %d | hasReflection? %d | hasTransmission? "
+        "%d\n\n",
+        cos_NO, cos_NgI, isTransmission, effectivelySpecular, hasReflection,
+        hasTransmission);
     *pdf = 0.f;
     return make_float3(0, 0, 0);
   }
   // half vector
+#if 1
+  if (float theDot = dot(wi, wo); !(isTransmission ^ theDot > 0)) {
+    printf(
+        "wi: %f %f %f wo: %f %f %f\n"
+        "  Conductor ? %d | No Transmission (%d) but dot is %f\n",
+        wi.x, wi.y, wi.z, wo.x, wo.y, wo.z, conductor, isTransmission, theDot);
+  }
+#endif
+  assert(isTransmission ^ dot(wi, wo) > 0);
   float3 H = isTransmission ? -(ior * wi + wo) : (wi + wo);
   float const invLen_H = rsqrtf(dot(H, H));  // TODO safe division for zero
   H *= invLen_H;
+  assert(fabsf(length2(H) - 1.f) < 1e-3f && "micronormal unit");
 
   // fresnel
   float const cos_HO = dot(H, wo);
@@ -624,6 +646,10 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   if (nearZeroPos(reflectance, throughputEps) &&
       nearZeroPos(transmittance, throughputEps)) {
     *pdf = 0.f;
+#ifdef __CUDA_ARCH__
+    if (cg::coalesced_threads().thread_rank() == 0)
+      printf("Dying without energy\n");
+#endif
     return make_float3(0, 0, 0);
   }
   // D and lambda
@@ -655,7 +681,7 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
       (isTransmission ? sqrf(ior * invLen_H) * fabsf(cos_HO * dot(H, wi))
                       : 0.25f);
   float const pdfReflect =
-      luminance(reflectance) / luminance(reflectance + transmittance);
+      average(reflectance) / average(reflectance + transmittance);
   float const lobePdf = isTransmission ? 1.f - pdfReflect : pdfReflect;
   *pdf = lobePdf * common / (1.f + lambdaO);
 #if 0
@@ -664,7 +690,7 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
       "%f)\n",
       *pdf, lobePdf, common, lambdaO);
 #endif
-#if defined(__CUDA_ARCH__) && 0
+#if defined(__CUDA_ARCH__) && 1
   if (cg::coalesced_threads().thread_rank() == 0 && isTransmission) {
     printf(
         "energyScale * (isTransmission ? transmittance : reflectance) * common/"
@@ -675,8 +701,11 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
         lambdaO, lambdaI);
   }
 #endif
-  return energyScale * (isTransmission ? transmittance : reflectance) * common /
-         (1.f + lambdaO + lambdaI);
+  float3 const eval = energyScale *
+                      (isTransmission ? transmittance : reflectance) * common /
+                      (1.f + lambdaO + lambdaI);
+  assert(maxComponentValue(eval) > 0.f && allStrictlyPositive(eval));
+  return eval;
 }
 
 __host__ __device__ BSDF makeGGXDielectric(float3 reflectanceTint,
@@ -886,7 +915,6 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
     case EBSDFType::eOrenNayar: {
       static constexpr float _2piM5_6Over3 =
           (2.f * std::numbers::pi_v<float> - 5.6f) / 3.f;
-      static constexpr float _1OverPi = std::numbers::inv_pi_v<float>;
 
       // energy preserving multi-scattering term
       float const bsdf_a = half_bits_to_float(bsdf->data.orenNayar.a);
@@ -894,6 +922,7 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
       float3 const bsdf_albedo = bsdf->weight();
 
 #if 0
+      static constexpr float _1OverPi = std::numbers::inv_pi_v<float>;
       float const Eavg = bsdf_a * bsdf_a + _2piM5_6Over3 * bsdf_b;
       float3 const Ems = _1OverPi - bsdf_albedo * bsdf_albedo *
                                         (Eavg / (1.f - Eavg)) /

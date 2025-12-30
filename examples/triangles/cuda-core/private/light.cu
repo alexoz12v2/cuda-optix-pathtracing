@@ -19,10 +19,12 @@ __host__ __device__ LightSample samplePointLight(Light const& light,
   LightSample sample = {};
   sample.factor = 1.0f;  // light intensity doesn't depend on direction
 
-  float const radiusSqr = half_bits_to_float(light.data.point.radius) *
-                          half_bits_to_float(light.data.point.radius);
+  float const radiusSqr = sqrf(half_bits_to_float(light.data.point.radius));
+  assert(radiusSqr > 0 && is_valid_non_denormal(radiusSqr));
+  // TODO check if light -> shape is correct
   float3 lightN = position - light.data.point.pos;
   float const distSqr = dot(lightN, lightN);
+  assert(distSqr > 0 && is_valid_non_denormal(distSqr));
   float const dist = sqrtf(distSqr);
   lightN /= dist;
   bool const effectivelyDelta =
@@ -32,9 +34,9 @@ __host__ __device__ LightSample samplePointLight(Light const& light,
   if (distSqr > radiusSqr) {
     // outside sphere
     float const oneMinusCos = sin_sqr_to_one_minus_cos(radiusSqr / distSqr);
-    sample.direction =
-        sampleUniformCone(-lightN, oneMinusCos, u, &cosTheta, &sample.pdf);
-    if (effectivelyDelta) {
+    sample.direction = sampleUniformCone(-lightN, oneMinusCos, u, &cosTheta,
+                                         &sample.pdf, &sample.delta);
+    if (effectivelyDelta || sample.delta) {
       sample.pdf = 1;
       sample.delta = true;
     }
@@ -57,9 +59,12 @@ __host__ __device__ LightSample samplePointLight(Light const& light,
                 distSqr - radiusSqr);
   // remap sampled point to sphere to prevent precision issues on small radius
   sample.pLight = position + sample.direction * sample.distance;
+
+#if 0  // TODO turn on
   float3 const ng = normalize(sample.pLight - light.data.point.pos);
   sample.pLight =
-      ng * half_bits_to_float(light.data.point.radius) * light.data.point.pos;
+      ng * half_bits_to_float(light.data.point.radius) + light.data.point.pos;
+#endif
 #if !NO_LIGHT_SAMPLE_UV
   // texture coordinates
   Point2f const uv = mapToSphere(light.lightFromRender(normalFrom(sample->ng)));
@@ -125,13 +130,14 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
         sin_sqr_to_one_minus_cos(radiusSqr / distSqr);
     if (oneMinusCosHalfAngle < oneMinusCosHalfSpotSpread) {
       // direction towards apex: sample visible part of the sphere
-      sample.direction = sampleUniformCone(-lightN, oneMinusCosHalfAngle, u,
-                                           &cosTheta, &sample.pdf);
+      sample.direction =
+          sampleUniformCone(-lightN, oneMinusCosHalfAngle, u, &cosTheta,
+                            &sample.pdf, &sample.delta);
     } else {
       // direction towards cone: sample spread cone, if you fall within it
       sample.direction = sampleUniformCone(
           -dirFromOcta(light.data.spot.direction), oneMinusCosHalfSpotSpread, u,
-          &cosTheta, &sample.pdf);
+          &cosTheta, &sample.pdf, &sample.delta);
       if (!raySphereIntersect(position, sample.direction, 0.f, FLT_MAX,
                               light.data.spot.pos,
                               half_bits_to_float(light.data.spot.radius),
@@ -172,7 +178,6 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
                         copysignf(safeSqrt(radiusSqr - distSqr +
                                            distSqr * cosTheta * cosTheta),
                                   distSqr - radiusSqr);
-      sample.pLight = position + sample.direction * sample.distance;
     }
 
     if (effectivelyDelta) {
@@ -184,7 +189,7 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
     sample.pLight = position + sample.direction * sample.distance;
     float3 const ng = normalize(sample.pLight - light.data.spot.pos);
     sample.pLight =
-        ng * half_bits_to_float(light.data.spot.radius) * light.data.spot.pos;
+        ng * half_bits_to_float(light.data.spot.radius) + light.data.spot.pos;
 
 #if !NO_LIGHT_SAMPLE_UV
     sample->uv = spotLightUV(
@@ -227,7 +232,7 @@ __host__ __device__ LightSample sampleLight(Light const& light,
       sample.pLight =  // special case
           sampleUniformCone(dirFromOcta(light.data.dir.direction),
                             half_bits_to_float(light.data.dir.oneMinusCosAngle),
-                            u, &unused, &sample.pdf);
+                            u, &unused, &sample.pdf, &sample.delta);
       sample.direction = -sample.pLight;
       sample.factor = 1.f;
       sample.delta = true;

@@ -38,6 +38,9 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
     }
     int2 const pixel = make_int2(upixel.x, upixel.y);
 
+#define OFFSET_RAY_ORIGIN 0
+#define FIRST_BOUNCE_ONLY 1
+
     for (int sbase = 0; sbase < spp; ++sbase) {
       int const s = sbase + sampleOffset;
       warpRng.startPixelSample(params, pixel, s);
@@ -47,6 +50,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
       int depth = 0;
       int transmissionCount = 0;
       bool specularBounce = false;
+      bool lastBounceTransmission = false;
       float3 L = make_float3(0, 0, 0);
       float3 beta = make_float3(1, 1, 1);
       cg::coalesced_group const theWarp = cg::coalesced_threads();
@@ -107,14 +111,21 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
         float const lightPMF = 1.f / lightCount;
         PRINT("    - Fetched Light.\n");
         if (LightSample const ls =
-                sampleLight(light, hitResult.pos, warpRng.get2D(params), false,
-                            hitResult.normal);
+                sampleLight(light, hitResult.pos, warpRng.get2D(params),
+                            lastBounceTransmission, hitResult.normal);
             ls) {
           PRINT("    Sampled Light. Evaluating shadow ray.\n");
           // - create shadow ray (offset origin to avoid self intersection)
-          Ray const shadowRay{offsetRayOrigin(hitResult.pos, hitResult.error,
-                                              hitResult.normal, ls.direction),
-                              ls.direction};
+          assert(componentWiseNear(normalize(ls.pLight - hitResult.pos),
+                                   ls.direction));
+          Ray const shadowRay{
+#if OFFSET_RAY_ORIGIN
+              offsetRayOrigin(hitResult.pos, hitResult.error, hitResult.normal,
+                              ls.direction),
+#else
+              hitResult.pos,
+#endif
+              ls.direction};
           // - trace ray
           bool doNextEventEstimation = true;
           for (int tri = 0; tri < d_triSoup.count; ++tri) {
@@ -150,6 +161,9 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           }
           PRINT("    No Occlusion. Performing NEE.\n");
         }
+#if FIRST_BOUNCE_ONLY
+        break;
+#endif
 
         // Bounce
         BSDFSample const bs =
@@ -165,10 +179,24 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
         // update state
         specularBounce |= bs.delta;
         transmissionCount += bs.refract;
-        // next ray (TODO offset ray origin)
+        lastBounceTransmission = bs.refract;
+        // next ray
+        // TODO remove
+        if (!bs.refract && dot(bs.wi, hitResult.normal) <= 0) {
+          printf(
+              "%d %d %d refract: %d, wi: %f %f %f, n: %f %f %f\n"
+              "       pos: %f %f %f\n",
+              pixel.x, pixel.y, depth, bs.refract, bs.wi.x, bs.wi.y, bs.wi.z,
+              hitResult.normal.x, hitResult.normal.y, hitResult.normal.z,
+              hitResult.pos.x, hitResult.pos.y, hitResult.pos.z);
+        }
         assert(bs.refract || dot(bs.wi, hitResult.normal) > 0);
+#if OFFSET_RAY_ORIGIN
         ray.o = offsetRayOrigin(hitResult.pos, hitResult.error,
                                 hitResult.normal, bs.wi);
+#else
+        ray.o = hitResult.pos;
+#endif
         ray.d = bs.wi;
         // update path throughput
         beta *= bs.f * fabsf(dot(bs.wi, hitResult.normal)) / bs.pdf;

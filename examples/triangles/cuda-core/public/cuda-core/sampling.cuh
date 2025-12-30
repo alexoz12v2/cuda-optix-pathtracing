@@ -15,7 +15,8 @@ __host__ __device__ bool raySphereIntersect(float3 rayO, float3 rayD,
 __host__ __device__ float3 sampleUniformCone(float3 const N,
                                              float const one_minus_cos_angle,
                                              float2 const rand,
-                                             float* cos_theta, float* pdf);
+                                             float* cos_theta, float* pdf,
+                                             int* delta);
 __host__ __device__ float3 sampleUniformSphere(float2 const rand);
 __host__ __device__ float2 sampleUniformDisk(float2 u);
 __host__ __device__ float3 sampleCosHemisphere(float3 n, float2 u, float* pdf);

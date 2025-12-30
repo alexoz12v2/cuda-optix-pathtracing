@@ -43,4 +43,11 @@ target_include_directories(dmt-megakernel PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/m
 #######################################################################################
 ## wavefront executable
 #######################################################################################
-## TODO
+file(GLOB_RECURSE WAVEFRONT_SRCS CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/wavefront/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/wavefront/*.cu"
+)
+dmt_add_example(dmt-wavefront NO_GUI_WIN32)
+target_sources(dmt-wavefront PRIVATE ${WAVEFRONT_SRCS})
+target_link_libraries(dmt-wavefront PRIVATE dmt-cuda-core)
+target_include_directories(dmt-wavefront PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/wavefront")

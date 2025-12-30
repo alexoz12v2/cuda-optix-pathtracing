@@ -178,6 +178,24 @@ inline __host__ __device__ __forceinline__ float3 lerp(float3 a, float3 b,
   float const _1mt = 1.f - t;
   return _1mt * a + t * b;
 }
+inline __host__ __device__ __forceinline__ bool allStrictlyPositive(float3 a) {
+  return a.x > 1e-4f && isfinite(a.x) && a.y > 1e-4f && isfinite(a.y) &&
+         a.z > 1e-4f && isfinite(a.z);
+}
+inline __host__ __device__ __forceinline__ bool componentWiseNear(float3 a,
+                                                                  float3 b) {
+  bool const validNums0 = isfinite(a.x) && isfinite(a.y) && isfinite(a.z);
+  bool const validNums1 = isfinite(b.x) && isfinite(b.y) && isfinite(b.z);
+  return validNums1 && validNums0 && fabsf(maxComponentValue(a - b)) < 1e-4f;
+}
+
+__host__ __device__ inline bool is_valid_non_denormal(float x) {
+  if (!isfinite(x)) return false;
+
+  // fabsf is device-safe
+  float ax = fabsf(x);
+  return (ax == 0.0f) || (ax >= FLT_MIN);
+}
 
 inline __host__ __device__ __forceinline__ float sin_sqr_to_one_minus_cos(
     float const s_sq) {
@@ -185,7 +203,7 @@ inline __host__ __device__ __forceinline__ float sin_sqr_to_one_minus_cos(
   return s_sq > 0.0004f ? 1.0f - safeSqrt(1.0f - s_sq) : 0.5f * s_sq;
 }
 inline __host__ __device__ __forceinline__ float safeacos(float v) {
-  return fminf(fmaxf(acosf(v), -1), 1);
+  return acosf(fminf(fmaxf(v, -1.f), 1.f));
 }
 inline __host__ __device__ __forceinline__ float length2(float3 v) {
   return dot(v, v);
@@ -196,7 +214,7 @@ inline __host__ __device__ __forceinline__ float length2(float2 v) {
 inline __host__ __device__ __forceinline__ void gramSchmidt(float3 n, float3* a,
                                                             float3* b) {
   assert(a && b && abs(length(n) - 1.f) < 1e-5f);
-  if (n.x != n.y || n.x != n.z)
+  if (fabsf(n.x - n.y) > 1e-3f || fabsf(n.x - n.z) > 1e-3f)
     *a = {n.z - n.y, n.x - n.z, n.y - n.x};  //(1,1,1)x N
   else
     *a = {n.z - n.y, n.x + n.z, -n.y - n.x};  //(-1,1,1)x N

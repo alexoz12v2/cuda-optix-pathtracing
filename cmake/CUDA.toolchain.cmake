@@ -1,14 +1,14 @@
 include_guard()
 
 # Reference: https://cmake.org/cmake/help/latest/module/FindCUDAToolkit.html
-function(dmt_setup_cuda_toolkit_12_6)
+function(dmt_setup_cuda_toolkit_12_8)
   # we want to control search completely, hence don't use stuff from the system
   unset(ENV{CUDA_PATH})
   unset(CACHE{CMAKE_CUDA_COMPILER})
   unset(CUDACXX)
   unset(CACHE{CUDAToolkit_BIN_DIR})
   unset(CACHE{CUDAToolkit_NVCC_EXECUTABLE})
-  set(CUDA_VERSION 12.6)
+  set(CUDA_VERSION 12.8)
   if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     set(CUDAToolkit_ROOT "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v${CUDA_VERSION}" CACHE PATH "CUDA Toolkit" FORCE)
     set(CUDAToolkit_BIN_DIR "${CUDAToolkit_ROOT}\\bin" CACHE PATH "CUDA Binary Directory" FORCE)

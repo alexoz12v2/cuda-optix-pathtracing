@@ -9,7 +9,9 @@
 //------------------------------------------------
 
 inline int constexpr NUM_PRIMES = 10;
+#ifndef __CUDA_ARCH
 static int h_primes[NUM_PRIMES] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29};
+#endif
 
 __device__ __constant__ int primes[NUM_PRIMES] = {2,  3,  5,  7,  11,
                                                   13, 17, 19, 23, 29};

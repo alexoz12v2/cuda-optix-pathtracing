@@ -4,6 +4,7 @@
 #include "cuda-core/common_math.cuh"
 #include "cuda-core/extra_math.cuh"
 #include "cuda-core/host_scene.cuh"
+#include "cuda-core/host_utils.cuh"
 #include "cuda-core/light.cuh"
 #include "cuda-core/morton.cuh"
 #include "cuda-core/shapes.cuh"
@@ -56,425 +57,14 @@
 //   it’s OS-specific and straightforward  cudaHostRegister()
 // - if possible, don't waste time pinning a whole page for a single variable.
 
-namespace {
-DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
-                                              uint32_t threads) {
-  const uint32_t warps = (blocks * threads + WARP_SIZE - 1) / WARP_SIZE;
-
-  // Allocate host-side contiguous buffer
-  std::vector<DeviceHaltonOwen> h_rng(warps);
-
-  for (uint32_t i = 0; i < warps; ++i) {
-    for (uint32_t lane = 0; lane < WARP_SIZE; ++lane) {
-      h_rng[i].dimension[lane] = (i * 33) ^ lane;
-    }
-  }
-
-  // Allocate device memory
-  DeviceHaltonOwen* d_rng = nullptr;
-  CUDA_CHECK(cudaMalloc(&d_rng, warps * sizeof(DeviceHaltonOwen)));
-
-  // Single synchronous copy (fast, safe)
-  CUDA_CHECK(cudaMemcpy(d_rng, h_rng.data(), warps * sizeof(DeviceHaltonOwen),
-                        cudaMemcpyHostToDevice));
-
-  return d_rng;
-}
-
-TriangleSoup triSoupFromTriangles(const HostTriangleScene& hostScene,
-                                  uint32_t const bsdfCount,
-                                  size_t maxTrianglesPerChunk = 1'000'000) {
-  static int constexpr ComponentCount = 4;
-  TriangleSoup soup{};
-  soup.count = hostScene.triangles.size();
-
-  const size_t n = soup.count;
-  const size_t bytes = n * ComponentCount * sizeof(float);
-
-  CUDA_CHECK(cudaMalloc(&soup.xs, bytes));
-  CUDA_CHECK(cudaMalloc(&soup.ys, bytes));
-  CUDA_CHECK(cudaMalloc(&soup.zs, bytes));
-  CUDA_CHECK(cudaMalloc(&soup.matId, soup.count * sizeof(uint32_t)));
-
-  // Temporary host buffers (bounded)
-  std::vector<float> h_x(ComponentCount * maxTrianglesPerChunk);
-  std::vector<float> h_y(ComponentCount * maxTrianglesPerChunk);
-  std::vector<float> h_z(ComponentCount * maxTrianglesPerChunk);
-  std::vector<uint32_t> h_matId(maxTrianglesPerChunk);
-
-  uint32_t matIdx = 0;
-  uint32_t meshIdx = 0;
-  uint32_t nextIncrement = hostScene.nextMeshIndices[0];
-
-  for (size_t base = 0; base < n; base += maxTrianglesPerChunk) {
-    size_t const count = std::min(maxTrianglesPerChunk, n - base);
-
-    for (size_t i = 0; i < count; ++i) {
-      if (meshIdx + 1 < hostScene.nextMeshIndices.size() &&
-          base + i >= nextIncrement) {
-        ++meshIdx;
-        nextIncrement = hostScene.nextMeshIndices[meshIdx];
-        matIdx = (matIdx + 1) % bsdfCount;
-      }
-
-      const Triangle& t = hostScene.triangles[base + i];
-
-      h_x[i * ComponentCount + 0] = t.v0.x;
-      h_x[i * ComponentCount + 1] = t.v1.x;
-      h_x[i * ComponentCount + 2] = t.v2.x;
-      h_x[i * ComponentCount + 3] = 0;
-
-      h_y[i * ComponentCount + 0] = t.v0.y;
-      h_y[i * ComponentCount + 1] = t.v1.y;
-      h_y[i * ComponentCount + 2] = t.v2.y;
-      h_y[i * ComponentCount + 3] = 0;
-
-      h_z[i * ComponentCount + 0] = t.v0.z;
-      h_z[i * ComponentCount + 1] = t.v1.z;
-      h_z[i * ComponentCount + 2] = t.v2.z;
-      h_z[i * ComponentCount + 3] = 0;
-
-      h_matId[i] = matIdx;
-    }
-
-    size_t const copyBytes = count * ComponentCount * sizeof(float);
-
-    CUDA_CHECK(cudaMemcpy(soup.xs + base * ComponentCount, h_x.data(),
-                          copyBytes, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(soup.ys + base * ComponentCount, h_y.data(),
-                          copyBytes, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(soup.zs + base * ComponentCount, h_z.data(),
-                          copyBytes, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(soup.matId + base, h_matId.data(),
-                          count * sizeof(uint32_t), cudaMemcpyHostToDevice));
-  }
-
-  return soup;
-}
-
-DeviceCamera* defaultDeviceCamera(uint32_t* width, uint32_t* height,
-                                  DeviceCamera* outHost) {
-  DeviceCamera const h_camera;
-  DeviceCamera* d_camera = nullptr;
-  if (outHost) *outHost = h_camera;
-  CUDA_CHECK(cudaMalloc(&d_camera, sizeof(DeviceCamera)));
-  CUDA_CHECK(cudaMemcpy(d_camera, &h_camera, sizeof(DeviceCamera),
-                        cudaMemcpyHostToDevice));
-  if (width) *width = h_camera.width;
-  if (height) *height = h_camera.height;
-  return d_camera;
-}
-
-float4* deviceOutputBuffer(uint32_t const width, uint32_t const height) {
-  MortonLayout2D const layout = mortonLayout(height, width);
-  float4* d_outputBuffer = nullptr;
-  CUDA_CHECK(cudaMalloc(&d_outputBuffer, layout.mortonCount * sizeof(float4)));
-  CUDA_CHECK(
-      cudaMemset(d_outputBuffer, 0, layout.mortonCount * sizeof(float4)));
-  return d_outputBuffer;
-}
-
-std::filesystem::path getExecutableDirectory() {
-#if defined(_WIN32)
-
-  // Get wide path to executable
-  wchar_t buffer[MAX_PATH];
-  DWORD len = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-  if (len == 0 || len == MAX_PATH)
-    throw std::runtime_error("GetModuleFileNameW failed");
-
-  // Convert UTF-16 → UTF-8
-  int utf8Len = WideCharToMultiByte(CP_UTF8, 0, buffer, len, nullptr, 0,
-                                    nullptr, nullptr);
-
-  std::string utf8Path(utf8Len, '\0');
-
-  WideCharToMultiByte(CP_UTF8, 0, buffer, len, utf8Path.data(), utf8Len,
-                      nullptr, nullptr);
-
-  return std::filesystem::path(utf8Path).parent_path();
-
-#elif defined(__linux__)
-
-  char buffer[PATH_MAX];
-  ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
-  if (len == -1) throw std::runtime_error("readlink failed");
-
-  buffer[len] = '\0';
-  return std::filesystem::path(buffer).parent_path();
-
-#else
-#  error Unsupported platform
-#endif
-}
-void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
-                       uint32_t const width, uint32_t const height) {
-  // 24-bit BMP row padding
-  uint32_t const rowStride = (width * 3 + 3) & ~3u;
-  uint32_t const pixelDataSize = rowStride * height;
-  uint32_t const fileSize = 54 + pixelDataSize;
-
-  uint8_t header[54] = {};
-  header[0] = 'B';
-  header[1] = 'M';
-
-  memcpy(&header[2], &fileSize, 4);
-  uint32_t val = 54;
-  memcpy(&header[10], &val, 4);
-  val = 40;
-  memcpy(&header[14], &val, 4);
-  memcpy(&header[18], &width, 4);
-  memcpy(&header[22], &height, 4);
-  uint16_t val16 = 1;
-  memcpy(&header[26], &val16, 2);
-  val16 = 24;
-  memcpy(&header[28], &val16, 2);
-
-  std::ofstream out(fileName, std::ios::binary);
-  out.write(reinterpret_cast<char*>(header), sizeof(header));
-
-  // Write pixels bottom-up (BMP convention)
-  std::vector<uint8_t> row(rowStride, 0);
-
-  for (uint32_t y = 0; y < height; ++y) {
-    uint32_t const srcY = height - 1 - y;  // flip vertically
-    const uint8_t* src = input + srcY * width * 3;
-    uint8_t* dst = row.data();
-
-    for (uint32_t x = 0; x < width; ++x) {
-      dst[0] = src[3 * x + 2];  // B
-      dst[1] = src[3 * x + 1];  // G
-      dst[2] = src[3 * x + 0];  // R
-      dst += 3;
-    }
-
-    out.write(reinterpret_cast<char*>(row.data()), rowStride);
-  }
-}
-
-void writePixel(uint32_t const width, uint8_t* rowMajorImage,
-                float4 const* mortonHostBuffer, uint32_t i, uint32_t const row,
-                uint32_t const col) {
-  float const fr = fminf(
-      fmaxf(mortonHostBuffer[i].x / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
-  float const fg = fminf(
-      fmaxf(mortonHostBuffer[i].y / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
-  float const fb = fminf(
-      fmaxf(mortonHostBuffer[i].z / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
-  uint8_t const u8r = static_cast<uint8_t>(fr);
-  uint8_t const u8g = static_cast<uint8_t>(fg);
-  uint8_t const u8b = static_cast<uint8_t>(fb);
-  rowMajorImage[3 * (col + row * width) + 0] = u8r;
-  rowMajorImage[3 * (col + row * width) + 1] = u8g;
-  rowMajorImage[3 * (col + row * width) + 2] = u8b;
-  // printf("[%u %u]: %f %f %f\n", col, row, fr, fg, fb);
-}
-
-void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
-                       uint32_t const height, char const* name = "output.bmp",
-                       bool isHost = false) {
-  MortonLayout2D const layout = mortonLayout(height, width);
-  std::unique_ptr<uint8_t[]> rowMajorImage =
-      std::make_unique<uint8_t[]>(width * height * 3);
-  {
-    // transfer to host
-    if (!isHost) {
-      const auto mortonHostBuffer =
-          std::make_unique<float4[]>(layout.mortonCount);
-      assert(mortonHostBuffer && rowMajorImage);
-      CUDA_CHECK(cudaMemcpy(mortonHostBuffer.get(), d_outputBuffer,
-                            layout.mortonCount * sizeof(float4),
-                            cudaMemcpyDeviceToHost));
-      for (uint32_t i = 0; i < layout.mortonCount; ++i) {
-        uint32_t row, col;
-        decodeMorton2D(i, &col, &row);
-        if (row < height && col < width) {
-          writePixel(width, rowMajorImage.get(), mortonHostBuffer.get(), i, row,
-                     col);
-        }
-      }
-    } else {
-      for (uint32_t i = 0; i < layout.mortonCount; ++i) {
-        uint32_t row, col;
-        decodeMorton2D(i, &col, &row);
-        if (row < height && col < width) {
-          writePixel(width, rowMajorImage.get(), d_outputBuffer, i, row, col);
-        }
-      }
-    }
-  }
-
-  std::string const theOutPath = (getExecutableDirectory() / name).string();
-  writeGrayscaleBMP(theOutPath.c_str(), rowMajorImage.get(), width, height);
-}
-
-// conductor ior list:
-// <https://chris.hindefjord.se/resources/rgb-ior-metals/>
-// Gold:
-// eta:   {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
-// kappa: {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
-void deviceBSDF(uint32_t* bsdfCount, BSDF** bsdf) {
-#define ONLY_OREN_NAYAR 1
-#define ONLY_CONDUCTOR 0
-#define ONLY_DIELECTRIC 0
-#define BSDF_ALL 0
-
-  BSDF* d_bsdf = nullptr;
-#if ONLY_OREN_NAYAR
-  static constexpr int Count = 4;
-  if (bsdfCount) *bsdfCount = Count;
-#elif ONLY_CONDUCTOR || ONLY_DIELECTRIC
-  static constexpr int Count = 1;
-  if (bsdfCount) *bsdfCount = Count;
-#else
-#  define BSDF_ALL 1
-  static constexpr int Count = 3;
-  if (bsdfCount) *bsdfCount = Count;
-#endif
-
-  const BSDF h_bsdf[Count]{
-#if BSDF_ALL || ONLY_OREN_NAYAR
-      makeOrenNayar({1.f, 0.7, 0.f}, .4f),
-#endif
-#if ONLY_OREN_NAYAR
-      makeOrenNayar({.5f, .7f, 0.f}, .5f),
-      makeOrenNayar({.2f, .2f, 0.f}, .6f),
-      makeOrenNayar({1.f, .7f, .3f}, .7f),
-#endif
-#if BSDF_ALL || ONLY_DIELECTRIC
-      makeGXXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f}, 1.f /*~26 deg*/,
-                        1.44f, .5f, .7f),
-#endif
-#if BSDF_ALL || ONLY_CONDUCTOR
-      makeGXXConductor({0.18299f, 0.42108f, 1.37340f},
-                       {3.42420f, 2.34590f, 1.77040f}, 0.f, .1f, .1f)
-#endif
-  };
-
-  CUDA_CHECK(cudaMalloc(&d_bsdf, sizeof(BSDF) * 3));
-  CUDA_CHECK(
-      cudaMemcpy(d_bsdf, &h_bsdf, sizeof(BSDF) * 3, cudaMemcpyHostToDevice));
-
-  *bsdf = d_bsdf;
-}
-
-void deviceLights(uint32_t* lightCount, uint32_t* infiniteLightsCount,
-                  Light** lights, Light** infiniteLights) {
-  Light* d_lights = nullptr;
-  Light* d_infiniteLights = nullptr;
-#define ONE_LIGHT 1
-#if ONE_LIGHT
-  static int constexpr LIGHT_COUNT = 1;
-  if (lightCount) *lightCount = 1;
-#else
-  static int constexpr LIGHT_COUNT = 2;
-  if (lightCount) *lightCount = 2;
-#endif
-  if (infiniteLightsCount) *infiniteLightsCount = 1;
-  Light h_lights[LIGHT_COUNT]{
-      // makePointLight(20 * make_float3(244.f / 255, 191.f / 255, 117.f / 255),
-      //               make_float3(.5f, 2, 1), 0.01f),
-      // TODO spot light broken
-      // makeSpotLight(0.001f * make_float3(1, 1, 1),
-      // make_float3(0, 1.2f, 1.7f),
-      //               make_float3(0, 0, -1), cosf(std::numbers::pi_v<float> /
-      //               6),
-      //               cosf(std::numbers::pi_v<float> / 3), 0.01f)
-      makePointLight(2 * make_float3(1, 1, 1), make_float3(0, 0.7f, 1.5f),
-                     0.01f),
-#if !ONE_LIGHT
-      makeEnvironmentalLight(10.f * make_float3(0.1f, 0.1f, 0.1f)),
-#endif
-  };
-  Light h_infiniteLights[1]{
-      makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)),
-  };
-  CUDA_CHECK(cudaMalloc(&d_lights, sizeof(Light) * LIGHT_COUNT));
-  CUDA_CHECK(cudaMemcpy(d_lights, h_lights, sizeof(Light) * LIGHT_COUNT,
-                        cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMalloc(&d_infiniteLights, sizeof(Light) * 1));
-  CUDA_CHECK(cudaMemcpy(d_infiniteLights, h_infiniteLights, sizeof(Light) * 1,
-                        cudaMemcpyHostToDevice));
-  *lights = d_lights;
-  *infiniteLights = d_infiniteLights;
-}
-
-Ray cameraToPixelCenterRay(int2 pixel, Transform const& cameraFromRaster,
-                           Transform const& renderFromCamera) {
-  Ray ray{};
-
-  const auto [rasterX, rasterY] = make_float2(pixel.x + 0.5f, pixel.y + 0.5f);
-  float3 const pCamera =
-      cameraFromRaster.apply(make_float3(rasterX, rasterY, 0.f));
-
-  ray.o = renderFromCamera.apply(make_float3(0.0f, 0.0f, 0.0f));
-  ray.d = normalize(renderFromCamera.applyDirection(pCamera));
-
-  return ray;
-}
-
-void hostIntersectCore(int mortonOrNegative, int2 pixel,
-                       Transform const& cameraFromRaster,
-                       Transform const& renderFromCamera,
-                       std::vector<Triangle> const& triangles,
-                       std::function<void(int2, int, float)> const& onHit) {
-  Ray const ray =
-      cameraToPixelCenterRay(pixel, cameraFromRaster, renderFromCamera);
-  HitResult hitResult{};
-  hitResult.t = std::numeric_limits<float>::infinity();
-  for (Triangle const& tri : triangles) {
-    HitResult const result =
-        hostIntersectMT(ray.o, ray.d, tri.v0, tri.v1, tri.v2);
-    if (result.hit && result.t < hitResult.t) {
-      hitResult = result;
-    }
-  }
-  if (hitResult.hit) {
-    onHit(pixel, mortonOrNegative, hitResult.t);
-  }
-}
-
-void hostIntersectionKernel(
-    bool morton, DeviceCamera cam, std::vector<Triangle> const& triangles,
-    std::function<void(int2, int, float)> const& onHit) {
-  MortonLayout2D const layout = mortonLayout(cam.height, cam.width);
-
-  Transform const cameraFromRaster = cameraFromRaster_Perspective(
-      cam.focalLength, cam.sensorSize, cam.width, cam.height);
-  Transform const renderFromCamera = worldFromCamera(cam.dir, cam.pos);
-
-  if (morton) {
-    for (int i = 0; i < layout.mortonCount; ++i) {
-      uint2 upixel{};
-      decodeMorton2D(i, &upixel.x, &upixel.y);
-      if (upixel.x >= cam.width || upixel.y >= cam.height) {
-        continue;
-      }
-
-      int2 const pixel = make_int2(upixel.x, upixel.y);
-      hostIntersectCore(i, pixel, cameraFromRaster, renderFromCamera, triangles,
-                        onHit);
-    }
-  } else {
-    for (int row = 0; row < cam.height; ++row) {
-      for (int col = 0; col < cam.width; ++col) {
-        int2 const pixel = make_int2(col, row);
-        // std::cout << "PIXEL " << col << " " << row << std::endl;
-        hostIntersectCore(-1, pixel, cameraFromRaster, renderFromCamera,
-                          triangles, onHit);
-      }
-    }
-  }
-}
-
-}  // namespace
+namespace {}  // namespace
 
 // ---------------------------------------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------
 namespace {
 
-void testIntersectionMegakernel() {
+void megakernelMain() {
 #if 1
   // TODO device query for optimal sizes
   uint32_t const threads = 256;
@@ -485,101 +75,32 @@ void testIntersectionMegakernel() {
 #endif
   // init scene
   std::cout << "Allocating host and device resources" << std::endl;
-  uint32_t width, height;
-  DeviceCamera h_camera;
-  DeviceCamera* d_camera = defaultDeviceCamera(&width, &height, &h_camera);
-  TriangleSoup scene{};
-#if 1
   HostTriangleScene h_scene;
-  // h_scene.addModel(
-  //     generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 16, 32));
-  // h_scene.addModel(generateCube(make_float3(0, 2, 0), make_float3(1, 1, 1)));
-  h_scene.addModel(
-      generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
-  h_scene.addModel(
-      generatePlane(make_float3(0, 2, -.5f), make_float3(0, 0, 1), 4, 4));
-  h_scene.addModel(
-      generatePlane(make_float3(0, 2, 2), make_float3(0, 0, -1), 4, 4));
-  h_scene.addModel(
-      generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
-  h_scene.addModel(
-      generatePlane(make_float3(2, 2, 0), make_float3(-1, 0, 0), 4, 4));
-#else
-  std::vector<Triangle> h_mesh;
-  // screen half-height at distance d = d * tan(FOV / 2)
-  // FOV = 2 * atan(36 / (2 * 20)) ≈ 84°
-  // h = 1 * tan(84° / 2) ≈ 0.9 m
-  h_mesh.push_back({
-      {-0.45f, 1.0f, -0.45f},  // bottom-left
-      {0.45f, 1.0f, -0.45f},   // bottom-right
-      {0.0f, 1.0f, 0.45f},     // top-center
-  });
-#endif
-#if 0
-  {
-    std::cout << "Computing intersection to host" << std::endl;
-#  if 0
-    std::vector<float4> out;
-    out.resize(mortonLayout(h_camera.height, h_camera.width).mortonCount);
-    hostIntersectionKernel(true, h_camera, h_mesh,
-                           [&](int2 pixel, int mortonIdx, float t) {
-                             float const value = std::isfinite(t) ? t / 2 : 0;
-                             out[mortonIdx] = make_float4(.5f, .5f, value, 1.f);
-                           });
-    std::cout << "Writing to host" << std::endl;
-    writeOutputBuffer(out.data(), h_camera.width, h_camera.height,
-                      "output-host.bmp", true);
-#  else
-    std::vector<uint8_t> out;
-    out.resize(h_camera.height * h_camera.width);
-    memset(out.data(), 0, h_camera.height * h_camera.width);
-    hostIntersectionKernel(
-        false, h_camera, h_mesh, [&](int2 pixel, int _unused, float t) {
-#    if 0
-          if (std::isfinite(t)) {
-            std::cout << "{ " << pixel.y << ", " << pixel.x
-                      << " }: Intersection" << std::endl;
-          }
-#    endif
-          float const value = std::isfinite(t) ? t / 2 : 0;
-          out[pixel.x + pixel.y * h_camera.width] =
-              static_cast<uint8_t>(fminf(fmaxf(value * 255.f, 0), 255.f));
-        });
-    std::cout << "Writing to host" << std::endl;
-    std::string const outPath =
-        (getExecutableDirectory() / "output-host.bmp").string();
-    writeGrayscaleBMP(outPath.c_str(), out.data(), h_camera.width,
-                      h_camera.height);
-#  endif
-  }
-#endif
+  std::vector<Light> h_lights;
+  std::vector<Light> h_infiniteLights;
+  std::vector<BSDF> h_bsdfs;
+  DeviceCamera h_camera;
+  cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
-  // lights
-  uint32_t lightCount = 0;
+  TriangleSoup d_scene = triSoupFromTriangles(h_scene, h_bsdfs.size());
+  BSDF* d_bsdfs = deviceBSDF(h_bsdfs);
   Light* d_lights = nullptr;
-  uint32_t infiniteLightCount = 0;
   Light* d_infiniteLights = nullptr;
-  deviceLights(&lightCount, &infiniteLightCount, &d_lights, &d_infiniteLights);
-  // init bsdf
-  BSDF* d_bsdf = nullptr;
-  uint32_t bsdfCount = 0;
-  deviceBSDF(&bsdfCount, &d_bsdf);
+  deviceLights(h_lights, h_infiniteLights, &d_lights, &d_infiniteLights);
+  DeviceCamera* d_camera = deviceCamera(h_camera);
+
   allocateDeviceGGXEnergyPreservingTables();
-
-  // init device scene
-  scene = triSoupFromTriangles(h_scene, bsdfCount);
   DeviceHaltonOwen* d_rng = copyHaltonOwenToDeviceAlloc(blocks, threads);
-
-  // init output buffer
-  float4* d_outputBuffer = deviceOutputBuffer(width, height);
+  float4* d_outputBuffer = deviceOutputBuffer(h_camera.width, h_camera.height);
 
   static int constexpr MAX_SPP = 2048;
   std::cout << "Running CUDA Kernel" << std::endl;
   // TODO stream based write back
   for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {
     basicIntersectionMegakernel<<<blocks, threads>>>(
-        d_camera, scene, d_lights, lightCount, d_infiniteLights,
-        infiniteLightCount, d_bsdf, bsdfCount, sTot, d_rng, d_outputBuffer);
+        d_camera, d_scene, d_lights, h_lights.size(), d_infiniteLights,
+        h_infiniteLights.size(), d_bsdfs, h_bsdfs.size(), sTot, d_rng,
+        d_outputBuffer);
     CUDA_CHECK(cudaGetLastError());
     std::cout << "Running CUDA Kernel (" << sTot << ")" << std::endl;
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -588,17 +109,18 @@ void testIntersectionMegakernel() {
     std::cout << "Writing to file" << std::endl;
 
     // copy to host and to file
-    writeOutputBuffer(d_outputBuffer, width, height, name.c_str());
+    writeOutputBuffer(d_outputBuffer, h_camera.width, h_camera.height,
+                      name.c_str());
   }
 
   // cleanup
   std::cout << "Cleanup..." << std::endl;
   cudaFree(d_outputBuffer);
-  cudaFree(scene.matId);
-  cudaFree(scene.xs);
-  cudaFree(scene.ys);
-  cudaFree(scene.zs);
-  cudaFree(d_bsdf);
+  cudaFree(d_scene.matId);
+  cudaFree(d_scene.xs);
+  cudaFree(d_scene.ys);
+  cudaFree(d_scene.zs);
+  cudaFree(d_bsdfs);
   freeDeviceGGXEnergyPreservingTables();
   cudaFree(d_rng);
   cudaFree(d_lights);
@@ -616,30 +138,13 @@ int main() {
 #endif
 #ifdef DMT_OS_WINDOWS
   SetConsoleOutputCP(CP_UTF8);
+  for (DWORD conoutHandleId : {STD_OUTPUT_HANDLE, STD_ERROR_HANDLE}) {
+    HANDLE const hConsole = GetStdHandle(conoutHandleId);
+    DWORD mode = 0;
+    if (GetConsoleMode(hConsole, &mode)) {
+      mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    }
+  }
 #endif
-
-#if 0
-  //device camera
-  DeviceCamera h_cam;
-  DeviceCamera* d_cam = nullptr;
-  cudaMalloc((void**)&d_cam, sizeof(DeviceCamera));
-  cudaMemcpy(d_cam, &h_cam, sizeof(DeviceCamera), cudaMemcpyHostToDevice);
-  //halton howen
-  DeviceHaltonOwen h_ho;
-  h_ho .32px
-  DeviceHaltonOwen* d_ho = nullptr;
-  cudaMalloc((void**)&d_ho, sizeof(DeviceHaltonOwen));
-  cudaMemcpy(d_ho, &h_ho, sizeof(DeviceHaltonOwen), cudaMemcpyHostToDevice);
-  //
-  dim3 grid(1, 1, 1);
-  dim3 block(32, 32, 1);
-  //
-  //block2dim-> buffer
-  //
-  //launch 
-  raygenKernel<<<grid, block>>>(d_cam);
-#endif
-#if 1
-  testIntersectionMegakernel();
-#endif
-}  // namespace
+  megakernelMain();
+}

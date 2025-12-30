@@ -8,6 +8,16 @@
 
 namespace cg = cooperative_groups;
 
+///  Functions that take a normal n:
+///    sampleCosHemisphere
+///    sampleUniformHemisphere
+///    sampleUniformCone
+///  - return directions in world space, oriented around n, using gramSchmidt.
+///  Functions that don’t take a normal:
+///    sampleUniformSphere
+///    sampleUniformDisk
+///  - return samples in their canonical local spaces (unit sphere / disk).
+
 __host__ __device__ float sphereLightPDF(float distSqr, float radiusSqr,
                                          float3 n, float3 rayD,
                                          bool hadTransmission) {
@@ -30,7 +40,7 @@ __host__ __device__ float2 mapToSphere(float3 co) {
     } else {
       u = (0.5f - atan2f(co.x, co.y) * _1Over2Pi);
     }
-    v = 1.0f - safeacos(co.z / sqrtf(l)) * _1Over2Pi;
+    v = 1.0f - safeacos(co.z / sqrtf(l)) * std::numbers::inv_pi_v<float>;
   } else {
     u = v = 0.0f;
   }
@@ -76,7 +86,8 @@ __host__ __device__ bool raySphereIntersect(float3 rayO, float3 rayD,
 __host__ __device__ float3 sampleUniformCone(float3 const N,
                                              float const one_minus_cos_angle,
                                              float2 const rand,
-                                             float* cos_theta, float* pdf) {
+                                             float* cos_theta, float* pdf,
+                                             int* delta) {
   if (one_minus_cos_angle > 0) {
     float2 xy = sampleUniformDisk(rand);
     float const r2 = length2(xy);
@@ -86,9 +97,15 @@ __host__ __device__ float3 sampleUniformCone(float3 const N,
 
     /* Remap disk radius to cone radius, equivalent to `xy *= sin_theta /
      * sqrt(r2)`. */
+#if 1
+    xy *=
+        safeSqrt(r2 * one_minus_cos_angle * (2.0f - r2 * one_minus_cos_angle));
+#else
     xy *= safeSqrt(one_minus_cos_angle * (2.0f - one_minus_cos_angle * r2));
+#endif
 
-    *pdf = 0.5f / (std::numbers::pi_v<float> * one_minus_cos_angle);
+    float const denom = fmaxf(one_minus_cos_angle, 1e-8f);
+    *pdf = 0.5f / (std::numbers::pi_v<float> * denom);
 
     float3 T{};
     float3 B{};
@@ -96,6 +113,7 @@ __host__ __device__ float3 sampleUniformCone(float3 const N,
     return xy.x * T + xy.y * B + *cos_theta * N;
   }
 
+  *delta = true;
   *cos_theta = 1.0f;
   *pdf = 1.0f;
 
@@ -123,7 +141,7 @@ __host__ __device__ float2 sampleUniformDisk(float2 u) {
   float rho = 0.f;
   if (a == 0.f && b == 0.f) return {};
 
-  if (a > b) {
+  if (fabsf(a) > fabsf(b)) {
     static constexpr float piOver4 = std::numbers::pi_v<float> / 4;
     rho = a;
     phi = piOver4 * (b / a);
@@ -151,16 +169,15 @@ __host__ __device__ float3 sampleCosHemisphere(float3 n, float2 u, float* pdf) {
 __host__ __device__ float3 sampleUniformHemisphere(float3 n, float2 u,
                                                    float* pdf) {
   assert(fabsf(length2(n) - 1.f) < 1e-5f && "Expected unit vector");
-  float2 xy = sampleUniformDisk(u);
-  float const z = 1.f - length2(xy);
+  float const z = u.x;
+  float const r = safeSqrt(1 - sqrf(z));
+  float const phi = 2 * std::numbers::pi_v<float> * u.y;
 
-  xy *= safeSqrt(z + 1.f);
-  float3 T{}, B{};
-  gramSchmidt(n, &T, &B);
-
-  float3 wo = xy.x * T + xy.y * B + z * n;
   if (pdf) *pdf = 0.5f * std::numbers::inv_pi_v<float>;
-  return wo;
+
+  float3 T, B;
+  gramSchmidt(n, &T, &B);
+  return r * cosf(phi) * T + r * sinf(phi) * B + z * n;
 }
 
 __host__ __device__ float cosHemispherePDF(float3 n, float3 d) {

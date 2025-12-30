@@ -37,8 +37,13 @@ __host__ __device__ __forceinline__ float3 offsetRayOrigin(float3 const p,
                                                            float3 const error,
                                                            float3 const ng,
                                                            float3 const w) {
+#ifdef __CUDA_ARCH__
+  float const pInfinity = CUDART_INF_F;
+#else
+  float const pInfinity = std::numeric_limits<float>::infinity();
+#endif
   // Push along the geometric normal, but flip if ray goes below surface
-  float d = dot(abs(ng), error);
+  float const d = dot(abs(ng), error);
   float3 offset = ng * d;
 
   if (dot(w, ng) < 0.f) offset = -offset;
@@ -46,9 +51,9 @@ __host__ __device__ __forceinline__ float3 offsetRayOrigin(float3 const p,
   float3 po = p + offset;
 
   // Round away from surface to avoid re-intersection
-  po.x = nextafterf(po.x, offset.x > 0 ? INFINITY : -INFINITY);
-  po.y = nextafterf(po.y, offset.y > 0 ? INFINITY : -INFINITY);
-  po.z = nextafterf(po.z, offset.z > 0 ? INFINITY : -INFINITY);
+  po.x = nextafterf(po.x, offset.x > 0 ? pInfinity : -pInfinity);
+  po.y = nextafterf(po.y, offset.y > 0 ? pInfinity : -pInfinity);
+  po.z = nextafterf(po.z, offset.z > 0 ? pInfinity : -pInfinity);
 
   return po;
 }

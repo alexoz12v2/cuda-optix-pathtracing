@@ -25,7 +25,7 @@
 
 namespace cg = cooperative_groups;
 
-__device__ int atomicAggIncWrap(int* ptr, int const modulus) {
+__device__ int atomicAggInc(int* ptr) {
   cg::coalesced_group g = cg::coalesced_threads();
   int prev = 0;
 
@@ -37,10 +37,10 @@ __device__ int atomicAggIncWrap(int* ptr, int const modulus) {
   // broadcast previous value within the warp
   // and add each active thread’s rank to it
   prev = g.thread_rank() + g.shfl(prev, 0);
-  return prev % modulus;
+  return prev;
 }
 
-__device__ int atomicAggDecWrap(int* ptr, int const modulus) {
+__device__ int atomicAggDec(int* ptr) {
   cg::coalesced_group g = cg::coalesced_threads();
   int prev = 0;
 
@@ -52,7 +52,7 @@ __device__ int atomicAggDecWrap(int* ptr, int const modulus) {
   // broadcast previous value within the warp
   // and add each active thread’s rank to it
   prev = g.thread_rank() + g.shfl(prev, 0);
-  return prev % modulus;
+  return prev;
 }
 
 // Synchronization → PTX instruction mapping
@@ -68,7 +68,8 @@ __device__ int atomicAggDecWrap(int* ptr, int const modulus) {
 
 __device__ unsigned pushAggGMEM(void const* input, int inputSize,
                                 int* reserve_back, int* publish_back,
-                                int* front, void* queue, int queueCapacity) {
+                                int* queue_open, int* front, void* queue,
+                                int queueCapacity) {
   assert(!(reinterpret_cast<intptr_t>(queue) & 0xf));  // 16 byte aligned
   assert((queueCapacity & (queueCapacity - 1)) == 0);
   cg::coalesced_group const g = cg::coalesced_threads();
@@ -114,7 +115,12 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
   if (g.thread_rank() == 0) {
     // asm volatile("membar.gl;" ::: "memory");
     __threadfence();
+    // wait until it is our turn to publish
+    while (atomicAdd(publish_back, 0) < base) {
+      // spin
+    }
     atomicAdd(publish_back, actualCount);
+    atomicExch(queue_open, 1);
   }
 
   // last time, everyone gets together
@@ -136,28 +142,44 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
 }
 
 __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
-                               int* front, void* queue, int queueCapacity) {
+                               int* queue_open, int* front, void* queue,
+                               int queueCapacity) {
   assert(!(reinterpret_cast<intptr_t>(queue) & 0xf));  // 16 byte aligned
   assert((queueCapacity & (queueCapacity - 1)) == 0);
 
   cg::coalesced_group const g = cg::coalesced_threads();
-  int outputCount = g.size();
-  // best effort to estimate current capacity
-  {
-    int const currentBack = atomicAdd(publish_back, 0);
-    int const currentFront = atomicAdd(front, 0);
-    int const used =
-        (currentBack - currentFront + queueCapacity) & (queueCapacity - 1);
-    outputCount = min(used, outputCount);
+  // block until first elements are produced
+  if (g.thread_rank() == 0) {
+    while (atomicAdd(queue_open, 0) == 0) {
+      // spin
+    }
+  }
+  g.sync();
+
+  // will this ensure that, between 2 consumers warps, only one is allowed to
+  // proceed?
+  int base = 0;
+  int claimed = 0;
+  if (g.thread_rank() == 0) {
+    // acquire semantics
+    __threadfence();
+    int const pub = atomicAdd(publish_back, 0);
+    int const fr = atomicAdd(front, 0);
+    int const avail = (pub - fr + queueCapacity) & (queueCapacity - 1);
+
+    claimed = min(avail, g.size());
+    if (claimed > 0) {
+      base = atomicCAS(front, fr, fr + claimed);
+      if (base != fr) {
+        claimed = 0;
+      }
+    }
   }
 
-  int base = 0;
-  if (g.thread_rank() == 0) {
-    base = atomicAdd(front, outputCount);
-  }
-  outputCount = g.shfl(outputCount, 0);
+  claimed = g.shfl(claimed, 0);
   base = g.shfl(base, 0);
-  if (outputCount == 0) {
+
+  if (claimed == 0) {
     return 0;
   }
 
@@ -165,7 +187,7 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
   int const slot = idx & (queueCapacity - 1);
 
   // warp-coalesced copy from queue to output
-  bool const popped = g.thread_rank() < outputCount;
+  bool const popped = g.thread_rank() < claimed;
   if (popped) {
     // all threads are submitting their own element, which is in LMEM
     memcpy(output, static_cast<uint8_t*>(queue) + slot * outputSize,
@@ -238,14 +260,15 @@ struct QueueGMEM {
   int* front;
   int* reserve_back;
   int* publish_back;
+  int* queue_open;
   int queueCapacity;
 
   __device__ __forceinline__ unsigned push(T const* elem) {
-    return pushAggGMEM(elem, sizeof(T), reserve_back, publish_back, front,
-                       queue, queueCapacity);
+    return pushAggGMEM(elem, sizeof(T), reserve_back, publish_back, queue_open,
+                       front, queue, queueCapacity);
   }
   __device__ __forceinline__ unsigned pop(T* elem) {
-    return popAggGMEM(elem, sizeof(T), publish_back, front, queue,
+    return popAggGMEM(elem, sizeof(T), publish_back, queue_open, front, queue,
                       queueCapacity);
   }
 };
@@ -258,6 +281,7 @@ __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
   // three kind of kernels:
   // 0 -> push. 1 -> peek and replace. 2 -> pop and push result
   cg::grid_group const grid = cg::this_grid();
+  int const producerBlocks = gridDim.x / 3;
   // ensure first type has bound number of pushes per block
   if (blockIdx.x % 3 == 0) {
     int& pushCount = SMEM[0];
@@ -270,7 +294,7 @@ __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
   if (blockIdx.x % 3 == 0) {
     int& pushCount = SMEM[0];
     int rem = 0;
-    while ((rem = atomicSub(&pushCount, 1)) > 0) {
+    while ((rem = atomicAggDec(&pushCount)) > 0) {
       auto g = cg::coalesced_threads();
       TestPayload const tp{.a = 2.f * rem + blockIdx.x / 3 + g.thread_rank(),
                            .b = 3.f * rem + blockIdx.x / 3 + g.thread_rank()};
@@ -278,13 +302,31 @@ __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
         printf("[%u] Block Type 0: [%u] pushing %f %f\n", blockIdx.x,
                g.thread_rank(), tp.a, tp.b);
         int mask = 0;
+        bool notDone = true;
         do {
           mask = iqueue.push(&tp);
-        } while (0 == (mask & (1 << g.thread_rank())));
+          notDone = 0 == (mask & (1 << g.thread_rank()));
+          if (g.thread_rank() == 0) {
+            printf("[%u] Block Type 0: [%u] push status: %d\n", blockIdx.x,
+                   g.thread_rank(), notDone);
+          }
+          if (pushCount < 0) {
+            break;
+          }
+        } while (notDone);
       }
     }
-    if (threadIdx.x + blockDim.x * blockIdx.x == 0) {
-      atomicExch(producerDone, 1);
+
+    if (cg::coalesced_threads().thread_rank() == 0) {
+      printf("[%u] Producer Dying\n", blockIdx.x);
+    }
+
+    if (cg::coalesced_threads().thread_rank() == 0) {
+      while (atomicAdd(iqueue.reserve_back, 0) !=
+             atomicAdd(iqueue.publish_back, 0)) {
+        // busy wait
+      }
+      atomicAdd(producerDone, 1);
     }
   } else if (blockIdx.x % 3 == 1) {
 #if 0
@@ -332,6 +374,8 @@ __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
     while (true) {
       cg::coalesced_group const g = cg::coalesced_threads();
       if (unsigned const mask = iqueue.pop(&tp); mask) {
+        printf("[%u] Block Type 2: [%u] Mask: 0x%x \n", blockIdx.x,
+               g.thread_rank(), mask);
         if (1 << g.thread_rank() & mask) {
           if (g.thread_rank() == 0) {
             printf("[%u] Block Type 2: [%u] Inputs: %f %f\n", blockIdx.x,
@@ -347,14 +391,22 @@ __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
         bool done = false;
         cg::coalesced_group const exiting = cg::coalesced_threads();
         if (exiting.thread_rank() == 0) {
-          int const back = atomicAdd(iqueue.reserve_back, 0);
+          int const back = atomicAdd(iqueue.publish_back, 0);
           int const front = atomicAdd(iqueue.front, 0);
-          done = back == front;
-          // printf("Block Type 2: popping FAILED Maybe Done? %d\n", done);
+          int const pd = atomicAdd(producerDone, 0);
+          done = back == front && pd == producerBlocks;
+          // stuck here, producer 3 absent
+          printf(
+              "[%u] Block Type 2: [%u] popping FAILED Maybe Done? %d. pd: %d "
+              "of %d\n",
+              blockIdx.x, g.thread_rank(), done, pd, producerBlocks);
         }
         exiting.sync();
         done = exiting.shfl(done, 0);
-        if (done && atomicAdd(producerDone, 0) == 1) {
+        if (done) {
+          if (cg::coalesced_threads().thread_rank() == 0) {
+            printf("[%u] consumer dying\n", blockIdx.x);
+          }
           break;
         }
       }
@@ -384,26 +436,28 @@ void testQueueBehaviour() {
   CUDA_CHECK(cudaGetDeviceProperties(&deviceProp, 0));
   // allocate queues
   static constexpr int QUEUE_CAPACITY = 1 << 13;
-  int init[3] = {0, 0, 1};
+  int init[4] = {0, 0, 0, 0};
 
   QueueGMEM<TestPayload> iqueue{};
   iqueue.queueCapacity = QUEUE_CAPACITY;
   CUDA_CHECK(
       cudaMalloc(&iqueue.queue, sizeof(TestPayload) * iqueue.queueCapacity));
-  CUDA_CHECK(cudaMalloc(&iqueue.front, sizeof(int) * 3));
+  CUDA_CHECK(cudaMalloc(&iqueue.front, sizeof(int) * 4));
   CUDA_CHECK(
-      cudaMemcpy(iqueue.front, init, sizeof(int) * 3, cudaMemcpyHostToDevice));
+      cudaMemcpy(iqueue.front, init, sizeof(int) * 4, cudaMemcpyHostToDevice));
   iqueue.reserve_back = iqueue.front + 1;
-  iqueue.publish_back = iqueue.front + 1;
+  iqueue.publish_back = iqueue.front + 2;
+  iqueue.queue_open = iqueue.front + 3;
 
   QueueGMEM<float> oqueue{};
   oqueue.queueCapacity = QUEUE_CAPACITY;
   CUDA_CHECK(cudaMalloc(&oqueue.queue, sizeof(float) * oqueue.queueCapacity));
-  CUDA_CHECK(cudaMalloc(&oqueue.front, sizeof(int) * 3));
+  CUDA_CHECK(cudaMalloc(&oqueue.front, sizeof(int) * 4));
   CUDA_CHECK(
-      cudaMemcpy(oqueue.front, init, sizeof(int) * 3, cudaMemcpyHostToDevice));
+      cudaMemcpy(oqueue.front, init, sizeof(int) * 4, cudaMemcpyHostToDevice));
   oqueue.reserve_back = oqueue.front + 1;
-  oqueue.publish_back = oqueue.front + 1;
+  oqueue.publish_back = oqueue.front + 2;
+  oqueue.queue_open = oqueue.front + 3;
 
   int* d_producerDone = nullptr;
   CUDA_CHECK(cudaMalloc(&d_producerDone, sizeof(int)));

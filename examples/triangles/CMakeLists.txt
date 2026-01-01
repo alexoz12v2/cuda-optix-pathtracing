@@ -38,6 +38,17 @@ target_include_directories(dmt-megakernel PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/m
 #######################################################################################
 ## tests
 #######################################################################################
+
+## BVH Experimentation Test
+file(GLOB_RECURSE TEST_BVH_SRCS CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/bvh/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/bvh/*.cu"
+)
+dmt_add_example(dmt-test-bvh NO_GUI_WIN32)
+target_sources(dmt-test-bvh PRIVATE ${TEST_BVH_SRCS})
+target_link_libraries(dmt-test-bvh PRIVATE dmt-cuda-core)
+target_include_directories(dmt-test-bvh PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/bvh")
+
 ## TODO
 
 #######################################################################################

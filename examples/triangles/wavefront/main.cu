@@ -51,8 +51,30 @@ __device__ int atomicAggDec(int* ptr) {
 
   // broadcast previous value within the warp
   // and add each active thread’s rank to it
-  prev = g.thread_rank() + g.shfl(prev, 0);
+  prev = g.thread_rank() - g.shfl(prev, 0);
   return prev;
+}
+
+__device__ int atomicAggDecSaturate(int* ptr) {
+  cg::coalesced_group g = cg::coalesced_threads();
+  int prev = 0;
+  int dec = 0;
+
+  if (g.thread_rank() == 0) {
+    // cap decrement to remaining items
+    int const old = atomicAdd(ptr, 0);
+    dec = min(old, g.size());
+    if (dec > 0) {
+      prev = atomicSub(ptr, dec);
+    }
+  }
+
+  prev = g.shfl(prev, 0);
+  dec = g.shfl(dec, 0);
+
+  // Each lane gets its own ticket (or -1)
+  int const my = prev - 1 - g.thread_rank();
+  return (g.thread_rank() < dec) ? my : -1;
 }
 
 // Synchronization → PTX instruction mapping
@@ -293,35 +315,34 @@ __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
 
   if (blockIdx.x % 3 == 0) {
     int& pushCount = SMEM[0];
-    int rem = 0;
-    while ((rem = atomicAggDec(&pushCount)) > 0) {
+    int ticket = 0;
+    while ((ticket = atomicAggDecSaturate(&pushCount)) >= 0) {
       auto g = cg::coalesced_threads();
-      TestPayload const tp{.a = 2.f * rem + blockIdx.x / 3 + g.thread_rank(),
-                           .b = 3.f * rem + blockIdx.x / 3 + g.thread_rank()};
-      if (g.thread_rank() < rem) {
-        printf("[%u] Block Type 0: [%u] pushing %f %f\n", blockIdx.x,
-               g.thread_rank(), tp.a, tp.b);
-        int mask = 0;
-        bool notDone = true;
-        do {
-          mask = iqueue.push(&tp);
-          notDone = 0 == (mask & (1 << g.thread_rank()));
-          if (g.thread_rank() == 0) {
-            printf("[%u] Block Type 0: [%u] push status: %d\n", blockIdx.x,
-                   g.thread_rank(), notDone);
-          }
-          if (pushCount < 0) {
-            break;
-          }
-        } while (notDone);
-      }
+      TestPayload const tp{
+          .a = 2.f * ticket + blockIdx.x / 3 + g.thread_rank(),
+          .b = 3.f * ticket + blockIdx.x / 3 + g.thread_rank()};
+      printf("[%u] Block Type 0: [%u] pushing %f %f\n", blockIdx.x,
+             g.thread_rank(), tp.a, tp.b);
+      int mask = 0;
+      bool notDone = true;
+      do {
+        mask = iqueue.push(&tp);
+        notDone = 0 == (mask & (1 << g.thread_rank()));
+        if (g.thread_rank() == 0) {
+          printf("[%u] Block Type 0: [%u] push status: %d\n", blockIdx.x,
+                 g.thread_rank(), notDone);
+        }
+        if (pushCount < 0) {
+          break;
+        }
+      } while (notDone);
     }
 
-    if (cg::coalesced_threads().thread_rank() == 0) {
+    if (threadIdx.x == 0) {
       printf("[%u] Producer Dying\n", blockIdx.x);
     }
 
-    if (cg::coalesced_threads().thread_rank() == 0) {
+    if (threadIdx.x == 0) {
       while (atomicAdd(iqueue.reserve_back, 0) !=
              atomicAdd(iqueue.publish_back, 0)) {
         // busy wait
@@ -465,11 +486,11 @@ void testQueueBehaviour() {
 
   // cooperative launch
   void* args[] = {&iqueue, &oqueue, &d_producerDone};
-#if 0
+#if 1
   dim3 const gridDim{
       min(static_cast<unsigned int>(deviceProp.multiProcessorCount), 6), 1, 1};
   assert(gridDim.x >= 3);
-  dim3 const blockDim{64, 1, 1};
+  dim3 const blockDim{256, 1, 1};
 #else
   dim3 const gridDim{6, 1, 1};
   dim3 const blockDim{1, 1, 1};
@@ -520,6 +541,7 @@ int main() {
     DWORD mode = 0;
     if (GetConsoleMode(hConsole, &mode)) {
       mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+      SetConsoleMode(hConsole, mode);
     }
   }
 #endif

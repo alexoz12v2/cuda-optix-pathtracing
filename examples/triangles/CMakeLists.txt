@@ -49,6 +49,16 @@ target_sources(dmt-test-bvh PRIVATE ${TEST_BVH_SRCS})
 target_link_libraries(dmt-test-bvh PRIVATE dmt-cuda-core)
 target_include_directories(dmt-test-bvh PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/bvh")
 
+## Queue Test
+file(GLOB_RECURSE TEST_QUEUE_SRCS CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/queue/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/queue/*.cu"
+)
+dmt_add_example(dmt-test-queue NO_GUI_WIN32)
+target_sources(dmt-test-queue PRIVATE ${TEST_QUEUE_SRCS})
+target_link_libraries(dmt-test-queue PRIVATE dmt-cuda-core)
+target_include_directories(dmt-test-queue PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/queue/")
+
 ## TODO
 
 #######################################################################################

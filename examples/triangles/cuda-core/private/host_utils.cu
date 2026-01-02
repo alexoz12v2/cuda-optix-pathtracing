@@ -240,14 +240,19 @@ void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
       generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 2, 4));
   // h_scene->addModel(generateCube(make_float3(0, 2, 0), make_float3(1, 1,
   // 1)));
-  h_scene->addModel(
-      generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
+  // far plane
+  // h_scene->addModel(
+  //    generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
+  // floor plane
   h_scene->addModel(
       generatePlane(make_float3(0, 2, -.5f), make_float3(0, 0, 1), 4, 4));
+  // roof plane
   h_scene->addModel(
       generatePlane(make_float3(0, 2, 2), make_float3(0, 0, -1), 4, 4));
-  h_scene->addModel(
-      generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
+  // left plane
+  // h_scene->addModel(
+  //     generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
+  // right plane
   h_scene->addModel(
       generatePlane(make_float3(2, 2, 0), make_float3(-1, 0, 0), 4, 4));
 

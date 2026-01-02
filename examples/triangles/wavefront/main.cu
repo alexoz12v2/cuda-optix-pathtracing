@@ -159,6 +159,7 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
     // no holes: must be 0b000...011...1
     assert((mask & (mask + 1)) == 0);
   }
+  g.sync();
 #endif
   return mask;
 }
@@ -229,6 +230,7 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
     // no holes: must be 0b000...011...1
     assert((mask & (mask + 1)) == 0);
   }
+  g.sync();
 #endif
   return mask;
 }

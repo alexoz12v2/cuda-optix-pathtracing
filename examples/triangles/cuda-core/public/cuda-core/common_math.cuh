@@ -25,8 +25,17 @@ inline __host__ __device__ __forceinline__ float sqrf(float const f) {
 inline __host__ __device__ __forceinline__ float maxComponentValue(float3 v) {
   return fmaxf(v.x, fmaxf(v.y, v.z));
 }
+inline __host__ __device__ __forceinline__ float minComponentValue(float3 v) {
+  return fminf(v.x, fminf(v.y, v.z));
+}
 inline __host__ __device__ __forceinline__ bool isZero(const float3 v) {
   return v.x == 0.f && v.y == 0.f && v.z == 0.f;
+}
+inline __host__ __device__ __forceinline__ float3 minv(float3 a, float3 b) {
+  return make_float3(fminf(a.x, b.x), fminf(a.y, b.y), fminf(a.z, b.z));
+}
+inline __host__ __device__ __forceinline__ float3 maxv(float3 a, float3 b) {
+  return make_float3(fmaxf(a.x, b.x), fmaxf(a.y, b.y), fmaxf(a.z, b.z));
 }
 // threshold on L∾ norm
 inline __host__ __device__ __forceinline__ bool nearZero(const float3 v,
@@ -186,7 +195,7 @@ inline __host__ __device__ __forceinline__ bool componentWiseNear(float3 a,
                                                                   float3 b) {
   bool const validNums0 = isfinite(a.x) && isfinite(a.y) && isfinite(a.z);
   bool const validNums1 = isfinite(b.x) && isfinite(b.y) && isfinite(b.z);
-  return validNums1 && validNums0 && fabsf(maxComponentValue(a - b)) < 1e-4f;
+  return validNums1 && validNums0 && fabsf(maxComponentValue(a - b)) < 1e-3f;
 }
 
 __host__ __device__ inline bool is_valid_non_denormal(float x) {

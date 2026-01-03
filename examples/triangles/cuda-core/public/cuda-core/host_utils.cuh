@@ -48,7 +48,8 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
 // --------------------------------------------------------------------------
 // Scenes
 // --------------------------------------------------------------------------
-void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
+void cornellBox(bool megakernel, HostTriangleScene* h_scene,
+                std::vector<Light>* h_lights,
                 std::vector<Light>* h_infiniteLights,
                 std::vector<BSDF>* h_bsdfs, DeviceCamera* h_camera);
 

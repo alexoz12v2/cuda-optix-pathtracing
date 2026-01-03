@@ -82,7 +82,7 @@ struct RaygenOutput {
   PathState* state;
   Ray ray;
 };
-static_assert(sizeof(RaygenOutput) == 76);
+static_assert(sizeof(RaygenOutput) == 32);
 
 // Kernels:
 // - raygen (pixel coords, sample index -> ray) (camera, RNG)
@@ -119,9 +119,9 @@ __device__ RaygenOutput raygen(RaygenInput const& raygenInput,
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
   RaygenOutput out{};
-  PathState const state = PathState::make(raygenInput.px, raygenInput.py,
-                              raygenInput.sampleIndex, raygenInput.spp);
-  out.state = (PathState*)malloc(sizeof(PathState));
+  PathState const state = PathState::make(
+      raygenInput.px, raygenInput.py, raygenInput.sampleIndex, raygenInput.spp);
+  out.state = static_cast<PathState*>(malloc(sizeof(PathState)));
   memcpy(out.state, &state, sizeof(PathState));
   out.ray = getCameraRay(cs, *raygenInput.cameraFromRaster,
                          *raygenInput.renderFromCamera);
@@ -129,7 +129,7 @@ __device__ RaygenOutput raygen(RaygenInput const& raygenInput,
 }
 
 __global__ void wavefrontKernel(WavefrontInput input) {
-  // initialize camera ray 
+  // initialize camera ray
 }
 
 namespace {
@@ -193,9 +193,10 @@ void wavefrontMain() {
   std::vector<Light> h_infiniteLights;
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
-  cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+  cornellBox(false, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs,
+             &h_camera);
 
-  WavefrontInput kinput;
+  WavefrontInput kinput{};
   kinput.d_triSoup = triSoupFromTriangles(h_scene, h_bsdfs.size());
   kinput.d_bsdf = deviceBSDF(h_bsdfs);
   kinput.bsdfCount = h_bsdfs.size();

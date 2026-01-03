@@ -15,7 +15,7 @@ __host__ __device__ LightSample samplePointLight(Light const& light,
                                                  float2 u, bool hadTransmission,
                                                  float3 const normal) {
   assert(fabsf(length2(normal) - 1.f) < 1e-3f && "Expected unit vector");
-  PRINT("    - Entered Point Light Sampling Procedure\n");
+  // PRINT("    - Entered Point Light Sampling Procedure\n");
   LightSample sample = {};
   sample.factor = 1.0f;  // light intensity doesn't depend on direction
 
@@ -73,8 +73,9 @@ __host__ __device__ LightSample samplePointLight(Light const& light,
   sample->uv[0] = uv.y;
   sample->uv[1] = 1.f - uv.x - uv.y;
 #endif
-  PRINT("    - Light Sample: { p: %f %f %f t: %f pdf: %f }\n", sample.pLight.x,
-        sample.pLight.y, sample.pLight.z, sample.distance, sample.pdf);
+  // PRINT("    - Light Sample: { p: %f %f %f t: %f pdf: %f }\n",
+  // sample.pLight.x,
+  //       sample.pLight.y, sample.pLight.z, sample.distance, sample.pdf);
   return sample;
 }
 
@@ -112,20 +113,22 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
                                                 float3 const normal) {
   LightSample sample{};
   sample.distance = FLT_MAX;
-  float const radiusSqr = half_bits_to_float(light.data.spot.radius) *
-                          half_bits_to_float(light.data.spot.radius);
+  float const radius = half_bits_to_float(light.data.spot.radius);
+  float const cosThetaE = half_bits_to_float(light.data.spot.cosThetaE);
+  float const cosTheta0 = half_bits_to_float(light.data.spot.cosTheta0);
+  float3 const spotDirection =
+      normalize(dirFromOcta(light.data.spot.direction));
+  float const radiusSqr = radius * radius;
   float3 lightN = position - light.data.spot.pos;
   float const distSqr = dot(lightN, lightN);
   float const dist = sqrtf(distSqr);
   lightN /= dist;
-  bool const effectivelyDelta =
-      (half_bits_to_float(light.data.spot.radius) / dist) < 1e-3f;
+  bool const effectivelyDelta = (radius / dist) < 1e-3f;
   bool outsideConeRange = false;
   float cosTheta = 0.f;
   if (distSqr > radiusSqr) {
     // if outside sphere
-    float const oneMinusCosHalfSpotSpread =
-        1.f - half_bits_to_float(light.data.spot.cosThetaE);
+    float const oneMinusCosHalfSpotSpread = 1.f - cosThetaE;
     float const oneMinusCosHalfAngle =
         sin_sqr_to_one_minus_cos(radiusSqr / distSqr);
     if (oneMinusCosHalfAngle < oneMinusCosHalfSpotSpread) {
@@ -135,13 +138,12 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
                             &sample.pdf, &sample.delta);
     } else {
       // direction towards cone: sample spread cone, if you fall within it
-      sample.direction = sampleUniformCone(
-          -dirFromOcta(light.data.spot.direction), oneMinusCosHalfSpotSpread, u,
-          &cosTheta, &sample.pdf, &sample.delta);
+      sample.direction =
+          sampleUniformCone(-spotDirection, oneMinusCosHalfSpotSpread, u,
+                            &cosTheta, &sample.pdf, &sample.delta);
       if (!raySphereIntersect(position, sample.direction, 0.f, FLT_MAX,
-                              light.data.spot.pos,
-                              half_bits_to_float(light.data.spot.radius),
-                              &sample.pLight, &sample.distance)) {
+                              light.data.spot.pos, radius, &sample.pLight,
+                              &sample.distance)) {
         outsideConeRange = true;
         sample.pdf = 0;
       }
@@ -157,14 +159,11 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
     cosTheta = -dot(sample.direction, lightN);
   }
 
-  Ray const localRay = spotLightToLocal(light.data.spot.pos,
-                                        dirFromOcta(light.data.spot.direction),
+  Ray const localRay = spotLightToLocal(light.data.spot.pos, spotDirection,
                                         {position, -sample.direction});
   if (!outsideConeRange) {
     // angular attenuation
-    sample.factor = spotLightAttenuation(
-        localRay.d.z, half_bits_to_float(light.data.spot.cosTheta0),
-        half_bits_to_float(light.data.spot.cosThetaE));
+    sample.factor = spotLightAttenuation(localRay.d.z, cosTheta0, cosThetaE);
     if (sample.factor <= 0.f) {
       outsideConeRange = true;
     }
@@ -188,8 +187,14 @@ __host__ __device__ LightSample sampleSpotLight(Light const& light,
     // remap onto sphere to prevent precision issue with small radius
     sample.pLight = position + sample.direction * sample.distance;
     float3 const ng = normalize(sample.pLight - light.data.spot.pos);
-    sample.pLight =
-        ng * half_bits_to_float(light.data.spot.radius) + light.data.spot.pos;
+    sample.pLight = ng * radius + light.data.spot.pos;
+    // fix precision issues with direction
+    {
+      float3 const newDir = sample.pLight - position;
+      float const distance = length(newDir);
+      sample.direction = newDir / distance;
+      sample.distance = distance;
+    }
 
 #if !NO_LIGHT_SAMPLE_UV
     sample->uv = spotLightUV(
@@ -210,7 +215,7 @@ __host__ __device__ LightSample sampleLight(Light const& light,
   LightSample sample{};
   // on device,we want to enter and exit with the same warp configuration
 #ifdef __CUDA_ARCH__
-  PRINT("    - Sample Light: Still alive before the coalesced threads\n");
+  // PRINT("    - Sample Light: Still alive before the coalesced threads\n");
   cg::coalesced_group theWarp = cooperative_groups::coalesced_threads();
 #endif
   switch (light.type()) {

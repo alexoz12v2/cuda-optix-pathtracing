@@ -38,8 +38,8 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
     }
     int2 const pixel = make_int2(upixel.x, upixel.y);
 
-#define OFFSET_RAY_ORIGIN 0
-#define FIRST_BOUNCE_ONLY 1
+#define OFFSET_RAY_ORIGIN 1
+#define FIRST_BOUNCE_ONLY 0
 
     for (int sbase = 0; sbase < spp; ++sbase) {
       int const s = sbase + sampleOffset;
@@ -57,7 +57,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
       Ray ray = getCameraRay(getCameraSample(pixel, warpRng, params),
                              cameraFromRaster, renderFromCamera);
       while (true) {
-        PRINT("  Ray Depth %d\n", depth);
+        PRINT("  [%d %d] Ray Depth %d\n", pixel.x, pixel.y, depth);
         // intersect with scene
         HitResult hitResult;
         for (int tri = 0; tri < d_triSoup.count; ++tri) {
@@ -85,7 +85,8 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
             // TODO: Use last BSDF for MIS
             L += beta * Le / lightPMF;
           }
-          PRINT("    No Intersection. Killing path\n");
+          PRINT("   [%d %d:%d] No Intersection. Killing path\n", pixel.x,
+                pixel.y, depth);
           break;
         }
 
@@ -96,12 +97,13 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
         }
 
         // update last bounce BSDF
-        PRINT("    Intersection at %f %f %f with normal %f %f %f.\n",
-              hitResult.pos.x, hitResult.pos.y, hitResult.pos.z,
-              hitResult.normal.x, hitResult.normal.y, hitResult.normal.z);
+        PRINT("    [%d %d:%d] Intersection at %f %f %f with normal %f %f %f.\n",
+              pixel.x, pixel.y, depth, hitResult.pos.x, hitResult.pos.y,
+              hitResult.pos.z, hitResult.normal.x, hitResult.normal.y,
+              hitResult.normal.z);
         bsdf = d_bsdf[hitResult.matId];
         prepareBSDF(&bsdf, hitResult.normal, -ray.d);
-        PRINT("    - Prepared BSDF.\n");
+        PRINT("    - [%d %d:%d] Prepared BSDF.\n", pixel.x, pixel.y, depth);
 
         // - choose light for Next Event Estimation (direct lighting)
         int32_t const lightIndex =
@@ -109,13 +111,23 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
                 lightCount - 1);
         Light const light = d_lights[lightIndex];
         float const lightPMF = 1.f / lightCount;
-        PRINT("    - Fetched Light.\n");
+        PRINT("    - [%d %d:%d] Fetched Light.\n", pixel.x, pixel.y, depth);
         if (LightSample const ls =
                 sampleLight(light, hitResult.pos, warpRng.get2D(params),
                             lastBounceTransmission, hitResult.normal);
             ls) {
-          PRINT("    Sampled Light. Evaluating shadow ray.\n");
+          PRINT("    [%d %d:%d] Sampled Light. Evaluating shadow ray.\n",
+                pixel.x, pixel.y, depth);
           // - create shadow ray (offset origin to avoid self intersection)
+          if (float3 diff = normalize(ls.pLight - hitResult.pos);
+              !componentWiseNear(diff, ls.direction)) {
+            printf(
+                "b: [%u %u %u] t: [%u %u %u] px: [%d %d] d: %d\n\t"
+                "diff: %f %f %f\n\tlsdi: %f %f %f\n",
+                blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y,
+                threadIdx.z, pixel.x, pixel.y, depth, diff.x, diff.y, diff.z,
+                ls.direction.x, ls.direction.y, ls.direction.z);
+          }
           assert(componentWiseNear(normalize(ls.pLight - hitResult.pos),
                                    ls.direction));
           Ray const shadowRay{
@@ -133,13 +145,17 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
             float4 const y = reinterpret_cast<float4 const*>(d_triSoup.ys)[tri];
             float4 const z = reinterpret_cast<float4 const*>(d_triSoup.zs)[tri];
             if (HitResult const result = triangleIntersect(x, y, z, shadowRay);
-                result.hit) {
+                result.hit && result.t < ls.distance) {
+              PRINT("    [%d %d:%d] Shadow Occlusion with %d. Skip NEE.\n",
+                    pixel.x, pixel.y, depth, tri);
               doNextEventEstimation = false;
               break;
             }
           }
           // - if no occlusion, sample light and add light contribution
           if (doNextEventEstimation) {
+            PRINT("    [%d %d:%d] No Occlusion. Performing NEE.\n", pixel.x,
+                  pixel.y, depth);
             float bsdfPdf = 0;
             float3 const bsdf_f =
                 evalBsdf(bsdf, -ray.d, shadowRay.d, hitResult.normal,
@@ -159,7 +175,6 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
               }
             }
           }
-          PRINT("    No Occlusion. Performing NEE.\n");
         }
 #if FIRST_BOUNCE_ONLY
         break;

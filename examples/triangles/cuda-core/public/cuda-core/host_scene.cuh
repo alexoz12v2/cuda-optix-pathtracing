@@ -33,7 +33,7 @@ struct HostTriangleScene {
 
   void addModel(std::vector<Triangle> const& mesh) {
     triangles.insert(triangles.end(), mesh.begin(), mesh.end());
-    if (nextMeshIndices.size())
+    if (!nextMeshIndices.empty())
       nextMeshIndices.push_back(nextMeshIndices.back() + mesh.size());
     else
       nextMeshIndices.push_back(mesh.size());

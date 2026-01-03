@@ -11,6 +11,7 @@ enum class EBSDFType : uint16_t {
   eOrenNayar = 0,
   eGGXDielectric = 1,
   eGGXConductor = 2,
+  eLambert = 3,
 };
 
 struct BSDF {
@@ -18,6 +19,9 @@ struct BSDF {
   // is used in the energy preservation term
   uint16_t weightStorage[4];  // 3xFP16: weight, 1 uint16 -> type
   union BSDFUnion {
+    struct Lambert {
+      uint8_t _padding[24];
+    } lambert;
     struct OrenNayar {
       uint16_t albedo[3];        // 3xFP16 (TODO check if need)
       uint16_t multiScatter[3];  // 3xFP16
@@ -94,6 +98,7 @@ extern cudaTextureObject_t tex_ggx_Eavg;
 __host__ void allocateDeviceGGXEnergyPreservingTables();
 __host__ void freeDeviceGGXEnergyPreservingTables();
 
+__host__ __device__ BSDF makeLambert();
 __host__ __device__ BSDF makeOrenNayar(float3 color, float roughness);
 __host__ __device__ BSDF makeGGXDielectric(float3 reflectanceTint,
                                            float3 transmittanceTint, float phi0,
@@ -120,12 +125,17 @@ __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
 // Note: Shading normals are not allowed to change the hemisphere of light
 // transport. (check and change hemisphere of ns if necessary)
 
+__host__ __device__ BSDFSample sampleLambert(BSDF const& bsdf, float3 wo,
+                                             float3 ns, float3 ng, float2 u,
+                                             float uc);
 // assumes energy preservation table has been initialized
 __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
                                          float3 ng, float2 u, float uc);
 __host__ __device__ BSDFSample sampleOrenNayar(BSDF const& bsdf, float3 wo,
                                                float3 ns, float3 ng, float2 u,
                                                float uc);
+__host__ __device__ float3 evalLambert(BSDF const& bsdf, float3 wo, float3 wi,
+                                       float3 ns, float3 ng, float* pdf);
 __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
                                    float3 ns, float3 ng, float* pdf);
 __host__ __device__ float3 evalOrenNayar(BSDF const& bsdf, float3 wo, float3 wi,

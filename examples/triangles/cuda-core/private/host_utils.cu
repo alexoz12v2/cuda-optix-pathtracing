@@ -231,69 +231,98 @@ DeviceCamera* deviceCamera(DeviceCamera const& h_camera) {
 // Gold:
 // eta:   {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
 // kappa: {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
-void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
+void cornellBox(bool megakernel, HostTriangleScene* h_scene,
+                std::vector<Light>* h_lights,
                 std::vector<Light>* h_infiniteLights,
                 std::vector<BSDF>* h_bsdfs, DeviceCamera* h_camera) {
   *h_scene = {};
   // TODO test only with walls, as crash is there
+  // TODO complete scene for both megakernel and wavefront
   h_scene->addModel(
       generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 2, 4));
   // h_scene->addModel(generateCube(make_float3(0, 2, 0), make_float3(1, 1,
   // 1)));
-  // far plane
-  // h_scene->addModel(
-  //    generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
+  if (megakernel) {
+    // far plane
+    h_scene->addModel(
+        generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
+  }
   // floor plane
   h_scene->addModel(
       generatePlane(make_float3(0, 2, -.5f), make_float3(0, 0, 1), 4, 4));
-  // roof plane
+  // ceiling plane
   h_scene->addModel(
       generatePlane(make_float3(0, 2, 2), make_float3(0, 0, -1), 4, 4));
-  // left plane
-  // h_scene->addModel(
-  //     generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
+  if (megakernel) {
+    // left plane
+    h_scene->addModel(
+        generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
+  }
   // right plane
   h_scene->addModel(
       generatePlane(make_float3(2, 2, 0), make_float3(-1, 0, 0), 4, 4));
 
   *h_lights = {};
-  // makePointLight(20 * make_float3(244.f / 255, 191.f / 255, 117.f / 255),
-  //               make_float3(.5f, 2, 1), 0.01f),
   // TODO spot light broken
-  // makeSpotLight(0.001f * make_float3(1, 1, 1),
-  // make_float3(0, 1.2f, 1.7f),
-  //               make_float3(0, 0, -1), cosf(std::numbers::pi_v<float> /
-  //               6),
-  //               cosf(std::numbers::pi_v<float> / 3), 0.01f)
-  h_lights->push_back(makePointLight(4 * make_float3(1, 1, 1),
-                                     make_float3(0, 0.7f, 1.5f), 0.01f));
+  if (megakernel) {
+#define SPOT_LIGHT 1
+#if SPOT_LIGHT
+    h_lights->push_back(makeSpotLight(
+        2.f * make_float3(1, 1, 1), make_float3(0, 1.8f, 1.7f),
+        make_float3(0, 0, -1), cosf(std::numbers::pi_v<float> / 6),
+        cosf(std::numbers::pi_v<float> / 3), 0.01f));
+#else
+    h_lights->push_back(makePointLight(2.7 * make_float3(1, 1, 1),
+                                       make_float3(0, 0.7f, 1.5f), 0.01f));
+#endif
+  } else {
+    h_lights->push_back(makePointLight(4 * make_float3(1, 1, 1),
+                                       make_float3(0, 0.7f, 1.5f), 0.01f));
+  }
   *h_infiniteLights = {};
   h_infiniteLights->push_back(
       makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)));
 
+  *h_bsdfs = {};
+  if (megakernel) {
 #define ONLY_OREN_NAYAR 1
+#define ONLY_LAMBERT 0
 #define ONLY_CONDUCTOR 0
 #define ONLY_DIELECTRIC 0
 #define BSDF_ALL 0
 
-  *h_bsdfs = {};
+#if BSDF_ALL || ONLY_LAMBERT
+    h_bsdfs->push_back(makeLambert());
+#endif
 #if BSDF_ALL || ONLY_OREN_NAYAR
-  h_bsdfs->push_back(makeOrenNayar({1.f, 0.7, 0.f}, .4f));
+    // ball
+    h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
 #endif
 #if ONLY_OREN_NAYAR
-  // h_bsdfs->push_back(makeOrenNayar({.5f, .7f, 0.f}, .5f));
-  // h_bsdfs->push_back(makeOrenNayar({.2f, .2f, 0.f}, .6f));
-  // h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
+    float3 const white = make_float3(0.9f, 170.f / 204.f, 160.f / 204.f);
+    // far
+    h_bsdfs->push_back(makeOrenNayar(white, .5f));
+    // floor
+    h_bsdfs->push_back(makeOrenNayar(white, .5f));
+    // ceiling
+    h_bsdfs->push_back(makeOrenNayar(white, .5f));
+    // left
+    h_bsdfs->push_back(makeOrenNayar({1.f, 0.01f, 0.01f}, .6f));
+    // right
+    h_bsdfs->push_back(makeOrenNayar({0.01f, 1.f, 0.01f}, .6f));
 #endif
 #if BSDF_ALL || ONLY_DIELECTRIC
-  h_bsdfs->push_back(makeGGXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f},
-                                       1.f /*~26 deg*/, 1.44f, .5f, .7f));
+    h_bsdfs->push_back(makeGGXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f},
+                                         1.f /*~26 deg*/, 1.44f, .5f, .7f));
 #endif
 #if BSDF_ALL || ONLY_CONDUCTOR
-  h_bsdfs->push_back(makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
-                                      {3.42420f, 2.34590f, 1.77040f}, 0.f, .9f,
-                                      .9f));
+    h_bsdfs->push_back(makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
+                                        {3.42420f, 2.34590f, 1.77040f}, 0.f,
+                                        .9f, .9f));
 #endif
+  } else {
+    h_bsdfs->push_back(makeLambert());
+  }
 
   *h_camera = DeviceCamera();
 }

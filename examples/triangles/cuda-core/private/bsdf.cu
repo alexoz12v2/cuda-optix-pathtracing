@@ -748,6 +748,41 @@ __host__ __device__ BSDF makeGGXConductor(float3 eta, float3 kappa, float phi0,
 }
 
 // ---------------------------------------------------------------------------
+// BSDF: Lambert
+// ---------------------------------------------------------------------------
+
+__host__ __device__ BSDF makeLambert() {
+  BSDF bsdf{};
+  bsdfInit(bsdf, EBSDFType::eLambert, make_float3(1, 1, 1));
+
+  return bsdf;
+}
+
+__host__ __device__ BSDFSample sampleLambert(BSDF const& bsdf, float3 wo,
+                                             float3 ns, float3 ng, float2 u,
+                                             float uc) {
+  BSDFSample sample{};
+  assert(dot(ns, ng) > 0.f && dot(ns, wo) > 0);
+  sample.eta = 1.f;
+  sample.wi = sampleCosHemisphere(ns, u, &sample.pdf);
+  if (dot(ng, sample.wi) > 0.f) {
+    assert(sample.pdf <= 1.f);
+    sample.f = make_float3(sample.pdf, sample.pdf, sample.pdf);
+  } else {  // TODO better branching
+    sample.pdf = 0;
+  }
+  return sample;
+}
+
+__host__ __device__ float3 evalLambert(BSDF const& bsdf, float3 wo, float3 wi,
+                                       float3 ns, float3 ng, float* pdf) {
+  float const cos_NI = fmaxf(dot(ns, wi), 0.f);
+  *pdf = cos_NI * std::numbers::inv_pi_v<float>;
+  assert(dot(wo, wi) > 0 && dot(ns, ng) > 0 && dot(ns, wo) > 0 && *pdf <= 1);
+  return make_float3(*pdf, *pdf, *pdf);
+}
+
+// ---------------------------------------------------------------------------
 // BSDF: Oren Nayar
 // ---------------------------------------------------------------------------
 
@@ -875,6 +910,9 @@ __host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
       case EBSDFType::eGGXConductor:
         sample = sampleGGX(bsdf, wo, ns, ng, u, uc);
         break;
+      case EBSDFType::eLambert:
+        sample = sampleLambert(bsdf, wo, ns, ng, u, uc);
+        break;
     }
   }
 #ifdef __CUDA_ARCH__
@@ -898,6 +936,9 @@ __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
     case EBSDFType::eGGXConductor:
     case EBSDFType::eGGXDielectric:
       f = evalGGX(bsdf, wo, wi, ns, ng, pdf);
+      break;
+    case EBSDFType::eLambert:
+      f = evalLambert(bsdf, wo, wi, ns, ng, pdf);
       break;
   }
 #ifdef __CUDA_ARCH__
@@ -991,6 +1032,8 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
       energyPreservingGGXScale(*bsdf, alpha2, cos_NO, Fss);
       break;
     }
+    case EBSDFType::eLambert:
+      break;
   }
 #ifdef __CUDA_ARCH__
   theWarp.sync();

@@ -80,7 +80,7 @@ void megakernelMain() {
   std::vector<Light> h_infiniteLights;
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
-  cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+  cornellBox(true, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
   TriangleSoup d_scene = triSoupFromTriangles(h_scene, h_bsdfs.size());
   BSDF* d_bsdfs = deviceBSDF(h_bsdfs);

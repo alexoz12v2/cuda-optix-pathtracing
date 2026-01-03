@@ -29,6 +29,8 @@ struct TestPayload {
   float b;
 };
 
+namespace cg = cooperative_groups;
+
 __global__ void kQueueTest(QueueGMEM<TestPayload> iqueue,
                            QueueGMEM<float> oqueue, int* producerDone) {
   static int constexpr PUSH_COUNT_PER_BLOCK = 1000;

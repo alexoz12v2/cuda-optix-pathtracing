@@ -151,3 +151,16 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
 #endif
   return mask;
 }
+
+__device__ int queueAvail(int* back, int* front, int queueCapacity) {
+  cg::coalesced_group const g = cg::coalesced_threads();
+  int avail = 0;
+  if (g.thread_rank() == 0) {
+    int const pub = atomicAdd(back, 0);
+    int const fr = atomicAdd(front, 0);
+    avail = (pub - fr + queueCapacity) & (queueCapacity - 1);
+  }
+  g.sync();
+  g.shfl(avail, 0);
+  return avail;
+}

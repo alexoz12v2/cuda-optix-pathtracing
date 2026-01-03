@@ -19,6 +19,49 @@ struct Transform {
   __host__ __device__ float3 applyInverseTranspose(float3 n) const;
 };
 
+inline __host__ __device__ __forceinline__ int ceilDiv(int num, int den) {
+  return (num + den - 1) / den;
+}
+
+inline __host__ __device__ __forceinline__ uint32_t ceilDiv(uint32_t num, uint32_t den) {
+  return (num + den - 1) / den;
+}
+
+// While the reinterpret_cast approach feels more "efficient" because it looks
+// like direct memory access, it can actually hinder the compiler's ability to
+// optimize registers in a CUDA kernel. The CUDA compiler (nvcc) is highly
+// optimized for small, fixed-size switches. Because float3 only has three
+// members, the compiler can often resolve this into a simple conditional move
+// (SEL or CSEL in PTX/SASS assembly) rather than actual branching logic
+// TODO check generated PTX
+inline __host__ __device__ __forceinline__ float& float3_at(float3& v, int i) {
+  switch (i) {
+    case 0:
+      return v.x;
+    case 1:
+      return v.y;
+    case 2:
+      return v.z;
+    default:
+      assert(false);
+      return v.x;
+  }
+}
+inline __host__ __device__ __forceinline__ float const& float3_at(
+    float3 const& v, int i) {
+  switch (i) {
+    case 0:
+      return v.x;
+    case 1:
+      return v.y;
+    case 2:
+      return v.z;
+    default:
+      assert(false);
+      return v.x;
+  }
+}
+
 inline __host__ __device__ __forceinline__ float sqrf(float const f) {
   return f * f;
 }

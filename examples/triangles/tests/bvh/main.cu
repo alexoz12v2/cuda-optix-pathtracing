@@ -10,9 +10,12 @@
 #  include <limits.h>
 #endif
 
+#include <algorithm>
+#include <array>
+#include <algorithm>
+#include <numeric>
 #include <iostream>
 #include <span>
-#include <numeric>
 
 // - spatial splits
 //     During the construction, both spatial splits and (standard) object splits
@@ -66,6 +69,8 @@ inline AABB bbUnion(AABB const& a, AABB const& b) {
   return ret;
 }
 
+inline float3 bbCentroid(AABB const& a) { return (min + max) * 0.5f; }
+
 inline float surfaceArea(AABB const& box) {
   assert(maxComponentValue(box.min) < minComponentValue(box.max));
   const auto [x, y, z] = box.max - box.min;
@@ -86,33 +91,11 @@ inline AABB bounds(Triangle const& tri) {
   return ret;
 }
 
-inline float splitCost(std::span<Triangle> triangles, size_t splitPos,
-                       float triCost = 1) {
-  float const A_S =
-      surfaceArea(std::accumulate(triangles.begin(), triangles.end(), AABB(),
-                                  [](AABB const& acc, Triangle const& tri) {
-                                    return bbUnion(acc, ::bounds(tri));
-                                  }));
-  float const A_S1 = surfaceArea(
-      std::accumulate(triangles.begin(), triangles.begin() + splitPos, AABB(),
-                      [](AABB const& acc, Triangle const& tri) {
-                        return bbUnion(acc, ::bounds(tri));
-                      }));
-  float const A_S2 = surfaceArea(
-      std::accumulate(triangles.begin() + splitPos, triangles.end(), AABB(),
-                      [](AABB const& acc, Triangle const& tri) {
-                        return bbUnion(acc, ::bounds(tri));
-                      }));
-  ptrdiff_t const NS1 = splitPos;
-  ptrdiff_t const NS2 = triangles.size() - splitPos;
-  return A_S1 / A_S * NS1 * triCost + A_S2 / A_S * NS2 * triCost;
-}
-
 class IBVHBuildNode {
  public:
-  bool isLeaf() const { return do_isLeaf(); }
-  AABB bounds() const { return do_bounds(); }
-  float surfaceArea() const { return ::surfaceArea(bounds()); }
+  [[nodiscard]] bool isLeaf() const { return do_isLeaf(); }
+  [[nodiscard]] AABB bounds() const { return do_bounds(); }
+  [[nodiscard]] float surfaceArea() const { return ::surfaceArea(bounds()); }
   virtual ~IBVHBuildNode() = default;
 
  protected:
@@ -120,10 +103,26 @@ class IBVHBuildNode {
   virtual AABB do_bounds() const = 0;
 };
 
+enum class ESplitAxis : int { X = 0, Y = 1, Z = 2 };
+inline operator int(ESplitAxis a) { return static_cast<int>(a); }
+inline operator ESplitAxis(int a) {
+  assert(a >= 0 && a <= 2);
+  return static_cast<ESplitAxis>(a);
+}
+inline bool operator<=(int a, ESplitAxis b) {
+  int bi = static_cast<int>(b);
+  return a <= bi;
+}
+
 class BVHBuildInteriorNode final : public IBVHBuildNode {
+ public:
   explicit BVHBuildInteriorNode(std::unique_ptr<IBVHBuildNode> left,
-                                std::unique_ptr<IBVHBuildNode> right)
-      : m_left(std::move(left)), m_right(std::move(right)) {}
+                                std::unique_ptr<IBVHBuildNode> right, int axis)
+      : m_left(std::move(left)),
+        m_right(std::move(right)),
+        m_axis(static_cast<ESplitAxis>(axis)) {}
+
+  [[nodiscard]] ESplitAxis splitAxis() const { return m_axis; }
 
  protected:
   bool do_isLeaf() const override { return false; }
@@ -134,9 +133,11 @@ class BVHBuildInteriorNode final : public IBVHBuildNode {
  private:
   std::unique_ptr<IBVHBuildNode> m_left;
   std::unique_ptr<IBVHBuildNode> m_right;
+  ESplitAxis m_axis;
 };
 
 class BVHBuildLeafTriangles final : public IBVHBuildNode {
+ public:
   explicit BVHBuildLeafTriangles(std::span<Triangle> triangles)
       : m_triangles(triangles.begin(), triangles.end()) {}
   size_t primitiveCount() const { return m_triangles.size(); }
@@ -153,6 +154,122 @@ class BVHBuildLeafTriangles final : public IBVHBuildNode {
  private:
   std::vector<Triangle> m_triangles;
 };
+
+inline float3 triCentroid(Triangle const& tri) {
+  return (tri.v0 + tri.v1 + tri.v2) / 3;
+}
+
+inline std::array<float, 2> leafCostAndSurfaceArea(
+    std::span<Triangle> triangles, float rootSurfaceArea, float triCost = 1) {
+  float const A_b =
+      surfaceArea(std::accumulate(triangles.begin(), triangles.end(), AABB(),
+                                  [](AABB const& acc, Triangle const& tri) {
+                                    return bbUnion(acc, ::bounds(tri));
+                                  }));
+  return {
+      A_b / rootSurfaceArea * static_cast<float>(triangles.size()) * triCost,
+      A_b};
+}
+
+inline float SAH(float const setSurfaceArea, int leftCount, float leftArea,
+                 int rightCount, float rightArea, float triCost = 1,
+                 float boxCost = 1) {
+  return 2 * boxCost + leftArea / setSurfaceArea * leftCount * triCost +
+         rightArea / setSurfaceArea * rightCount * triCost;
+}
+
+// SAH, Top Down, binary BVH construction by minimizing cost function at
+// each step
+// - The number of bins can also be reduced during
+//   construction, i.e., based on the current tree depth. The full binning
+//   resolution is only required for the top of the tree, where picking
+//   the best split position matters the mos
+std::unique_ptr<IBVHBuildNode> BVHBuildCentroidBasedSAH(
+    float rootSurfaceArea, std::span<Triangle> triangles, int bins,
+    int leafThreshold) {
+  assert(rootSurfaceArea > 0 && !triangles.empty() && bins > 0 &&
+         (bins & (bins - 1)) == 0 && leafThreshold > 0 &&
+         (leafThreshold & (leafThreshold - 1)) == 0);
+  if (triangles.size() <= leafThreshold) {
+    return std::make_unique<BVHBuildLeafTriangles>(triangles);
+  }
+  auto [bestCost, setSurfaceArea] =
+      leafCostAndSurfaceArea(triangles, rootSurfaceArea);
+  int bestAxis = -1;
+  int bestSplitPositions = -1;
+  // for each axis
+  for (int axis = static_cast<int>(ESplitAxis::X); axis <= ESplitAxis::Z;
+       ++axis) {
+    // sort based on centroid order in the current axis
+    std::ranges::sort(triangles,
+                      [axis](Triangle const& first, Triangle const& second) {
+                        return float3_at(triCentroid(first), axis) <
+                               float3_at(triCentroid(second), axis);
+                      });
+    float const minC = float3_at(triCentroid(triangles.front()), axis);
+    float const maxC = float3_at(triCentroid(triangles.back()), axis);
+    float const extent = maxC - minC;
+
+    // for each bin
+    for (int bin = 0; bin < bins; ++bin) {
+      float const split = minC + extent * (bin + 1) / bins;
+
+      int const firstRight =
+          std::ranges::find_if(triangles,
+                               [axis, split](Triangle const& tri) {
+                                 return float3_at(bbCentroid(bounds(tri)),
+                                                  axis) >= split;
+                               }) -
+          triangles.begin();
+      if (firstRight >= triangles.size() || firstRight == 0) {
+        continue;
+      }
+      // surface area for the two partitions and SAH
+      int const leftCount = firstRight;
+      int const rightCount = static_cast<int>(triangles.size()) - leftCount;
+      float const leftArea = surfaceArea(
+          std::accumulate(triangles.begin(), triangles.begin() + leftCount,
+                          AABB(), [](AABB const& acc, Triangle const& tri) {
+                            return bbUnion(acc, bounds(tri));
+                          }));
+      float const rightArea = surfaceArea(
+          std::accumulate(triangles.begin() + leftCount, triangles.end(),
+                          AABB(), [](AABB const& acc, Triangle const& tri) {
+                            return bbUnion(acc, bounds(tri));
+                          }));
+      float const cost =
+          SAH(setSurfaceArea, leftCount, leftArea, rightCount, rightArea);
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestAxis = axis;
+        bestSplitPositions = firstRight;
+      }
+    }
+  }
+
+  // if best is leaf, do it
+  if (bestAxis == -1) {
+    return std::make_unique<BVHBuildLeafTriangles>(triangles);
+  }
+  // otherwise sort at best axis
+  std::ranges::sort(triangles,
+                    [bestAxis](Triangle const& first, Triangle const& second) {
+                      return float3_at(triCentroid(first), bestAxis) <
+                             float3_at(triCentroid(second), bestAxis);
+                    });
+  // make inner node with recursion
+  int const nextBins = std::max(1, bins >> 1);
+  return std::make_unique<BVHBuildInteriorNode>(
+      BVHBuildCentroidBasedSAH(
+          rootSurfaceArea,
+          std::span(triangles.begin(), triangles.begin() + bestSplitPositions),
+          nextBins, leafThreshold),
+      BVHBuildCentroidBasedSAH(
+          rootSurfaceArea,
+          std::span(triangles.begin() + bestSplitPositions, triangles.end()),
+          nextBins, leafThreshold),
+      bestAxis);
+}
 
 namespace {
 

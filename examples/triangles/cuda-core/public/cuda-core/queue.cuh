@@ -70,6 +70,8 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
 __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
                                int* queue_open, int* front, void* queue,
                                int queueCapacity);
+// back = publish_back (consumers) or reserve_back (producers)
+__device__ int queueAvail(int* back, int* front, int queueCapacity);
 
 // now back starts from 0 and front starts from 0
 // Queue is empty → back == front
@@ -84,6 +86,14 @@ struct QueueGMEM {
   int* publish_back;
   int* queue_open;
   int queueCapacity;
+
+  __device__ __forceinline__ int producerSize() {
+    return queueAvail(reserve_back, front, queueCapacity);
+  }
+
+  __device__ __forceinline__ int consumerSize() {
+    return queueAvail(publish_back, front, queueCapacity);
+  }
 
   __device__ __forceinline__ unsigned push(T const* elem) {
     return pushAggGMEM(elem, sizeof(T), reserve_back, publish_back, queue_open,

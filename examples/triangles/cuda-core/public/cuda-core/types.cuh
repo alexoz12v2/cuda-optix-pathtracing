@@ -97,13 +97,13 @@ struct DeviceHaltonOwenParams {
 // Camera Space (left-handed):       y+ up, z+ forward, x+ right
 // World/Render Space (left-handed): z+ up, y+:forward, x+ right
 struct DeviceCamera {
-  float focalLength = 20.f;
-  float sensorSize = 36.f;
   float3 dir{0.f, 1.f, 0.f};
-  int spp = 32;
   float3 pos{0.f, 0.f, 0.f};
   int width = 1024;
   int height = 512;
+  int spp = 32;
+  float focalLength = 20.f;
+  float sensorSize = 36.f;
 };
 
 struct MortonLayout2D {

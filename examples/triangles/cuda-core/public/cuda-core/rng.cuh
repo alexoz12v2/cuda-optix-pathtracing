@@ -7,8 +7,8 @@
 /// warp-wide struct
 struct DeviceHaltonOwen {
   static constexpr int MAX_RESOLUTION = 128;
-  __host__ __device__ DeviceHaltonOwenParams computeParams(int width,
-                                                           int height);
+  static __host__ __device__ DeviceHaltonOwenParams computeParams(int width,
+                                                                  int height);
 
   __device__ void startPixelSample(DeviceHaltonOwenParams const& params, int2 p,
                                    int32_t sampleIndex, int32_t dim = 0);

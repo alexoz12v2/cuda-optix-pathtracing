@@ -158,11 +158,23 @@ std::filesystem::path getExecutableDirectory() {
 #endif
 }
 
+void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
+                               uint32_t const height, char const* name) {
+  const auto rowMajorImage = std::make_unique<uint8_t[]>(width * height * 3);
+  for (uint32_t row = 0; row < height; ++row) {
+    for (uint32_t col = 0; col < width; ++col) {
+      uint32_t const i = row * width + col;
+      writePixel(width, rowMajorImage.get(), outputBuffer, i, row, col);
+    }
+  }
+  std::string const theOutPath = (getExecutableDirectory() / name).string();
+  writeGrayscaleBMP(theOutPath.c_str(), rowMajorImage.get(), width, height);
+}
+
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
                        uint32_t const height, char const* name, bool isHost) {
   MortonLayout2D const layout = mortonLayout(height, width);
-  std::unique_ptr<uint8_t[]> rowMajorImage =
-      std::make_unique<uint8_t[]>(width * height * 3);
+  auto const rowMajorImage = std::make_unique<uint8_t[]>(width * height * 3);
   {
     // transfer to host
     if (!isHost) {

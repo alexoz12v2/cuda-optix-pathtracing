@@ -452,6 +452,7 @@ function(dmt_set_target_warnings target properties_visibility)
   set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Shared)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
   # the commented ones are done by default
+  dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
   target_compile_options(
     ${target}
     ${properties_visibility}
@@ -466,6 +467,8 @@ function(dmt_set_target_warnings target properties_visibility)
     # -dc
     -use_fast_math
     # --relocatable-device-code true set by cuda separable compilation
+    -maxrregcount ${DMT_NVCC_MAXREGCOUNT}
+    -Xptxas -v
     >)
 endfunction()
 

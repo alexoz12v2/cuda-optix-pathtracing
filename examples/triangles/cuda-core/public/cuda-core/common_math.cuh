@@ -23,7 +23,8 @@ inline __host__ __device__ __forceinline__ int ceilDiv(int num, int den) {
   return (num + den - 1) / den;
 }
 
-inline __host__ __device__ __forceinline__ uint32_t ceilDiv(uint32_t num, uint32_t den) {
+inline __host__ __device__ __forceinline__ uint32_t ceilDiv(uint32_t num,
+                                                            uint32_t den) {
   return (num + den - 1) / den;
 }
 
@@ -173,6 +174,13 @@ inline __host__ __device__ __forceinline__ float3 operator+(float3 a,
 }
 inline __host__ __device__ __forceinline__ float3& operator+=(float3& a,
                                                               float3 b) {
+  a.x += b.x;
+  a.y += b.y;
+  a.z += b.z;
+  return a;
+}
+inline __host__ __device__ __forceinline__ float4& operator+=(float4& a,
+                                                              float4 b) {
   a.x += b.x;
   a.y += b.y;
   a.z += b.z;

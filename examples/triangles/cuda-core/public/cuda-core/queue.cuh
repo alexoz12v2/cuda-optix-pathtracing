@@ -87,6 +87,25 @@ struct QueueGMEM {
   int* queue_open;
   int queueCapacity;
 
+  static __host__ QueueGMEM create(int capacity) {
+    int init[4] = {0, 0, 0, 0};
+    QueueGMEM<T> oqueue{};
+    oqueue.queueCapacity = capacity;
+    CUDA_CHECK(cudaMalloc(&oqueue.queue, sizeof(T) * oqueue.queueCapacity));
+    CUDA_CHECK(cudaMalloc(&oqueue.front, sizeof(int) * 4));
+    CUDA_CHECK(cudaMemcpy(oqueue.front, init, sizeof(int) * 4,
+                          cudaMemcpyHostToDevice));
+    oqueue.reserve_back = oqueue.front + 1;
+    oqueue.publish_back = oqueue.front + 2;
+    oqueue.queue_open = oqueue.front + 3;
+    return oqueue;
+  }
+
+  static __host__ void free(QueueGMEM<T>& queue) {
+    CUDA_CHECK(cudaFree(queue.queue));
+    CUDA_CHECK(cudaFree(queue.front));
+  }
+
   __device__ __forceinline__ int producerSize() {
     return queueAvail(reserve_back, front, queueCapacity);
   }

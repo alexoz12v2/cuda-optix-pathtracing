@@ -44,6 +44,9 @@ std::filesystem::path getExecutableDirectory();
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
                        uint32_t const height, char const* name = "output.bmp",
                        bool isHost = false);
+void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
+                               uint32_t const height,
+                               char const* name = "output.bmp");
 
 // --------------------------------------------------------------------------
 // Scenes

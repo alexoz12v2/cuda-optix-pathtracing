@@ -572,22 +572,24 @@ function(dmt_add_compile_definitions target properties_visibility)
     endif ()
 
     if (WIN32)
-      ## if (NOT VSWHERE_PATH)
-      ##   set(VSWHERE_PATH "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe")
-      ## endif ()
-      ## # Use vswhere to locate MSVC toolchain
-      ## execute_process(
-      ##   COMMAND "${VSWHERE_PATH}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property
-      ##   installationPath
-      ##   OUTPUT_VARIABLE VS_INSTALL_PATH
-      ##   OUTPUT_STRIP_TRAILING_WHITESPACE
-      ##   COMMAND_ECHO STDOUT
-      ##   COMMAND_ERROR_IS_FATAL ANY
-      ## )
-      ## # Typical MSVC include path looks like: <VS_INSTALL_PATH>/VC/Tools/MSVC/<version>/include
-      ## file(GLOB MSVC_TOOLSET_DIR "${VS_INSTALL_PATH}/VC/Tools/MSVC/*")
-      ## list(SORT MSVC_TOOLSET_DIR)
-      ## list(GET MSVC_TOOLSET_DIR -1 MSVC_TOOLSET_DIR) # take latest
+      #if (NOT VSWHERE_PATH)
+      #  set(VSWHERE_PATH "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe")
+      #endif ()
+      ## Use vswhere to locate MSVC toolchain
+      #execute_process(
+      #  COMMAND "${VSWHERE_PATH}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property
+      #  installationPath
+      #  OUTPUT_VARIABLE VS_INSTALL_PATH
+      #  OUTPUT_STRIP_TRAILING_WHITESPACE
+      #  COMMAND_ECHO STDOUT
+      #  COMMAND_ERROR_IS_FATAL ANY
+      #)
+#
+      ## Typical MSVC include path looks like: <VS_INSTALL_PATH>/VC/Tools/MSVC/<version>/include
+      #file(GLOB MSVC_TOOLSET_DIR "${VS_INSTALL_PATH}/VC/Tools/MSVC/*")
+      #list(SORT MSVC_TOOLSET_DIR)
+      #list(GET MSVC_TOOLSET_DIR -1 MSVC_TOOLSET_DIR) # take latest
+
     elseif (UNIX AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
       execute_process(
         COMMAND ${CMAKE_CXX_COMPILER} -E -x c++ - -v

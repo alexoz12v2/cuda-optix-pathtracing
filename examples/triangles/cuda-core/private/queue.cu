@@ -5,6 +5,9 @@
 
 namespace cg = cooperative_groups;
 
+#define OTHER_THING 0
+
+#if OTHER_THING
 __device__ unsigned pushAggGMEM(void const* input, int inputSize,
                                 int* reserve_back, int* publish_back,
                                 int* queue_open, int* front, void* queue,
@@ -27,16 +30,11 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
   // reservation
   int base = 0;
   if (g.thread_rank() == 0) {
-#if __CUDA_ARCH__ >= 700
-    base = __nv_atomic_add(reserve_back, actualCount, __NV_ATOMIC_ACQ_REL,
-                           __NV_THREAD_SCOPE_DEVICE);
-#else
     base = atomicAdd(reserve_back, actualCount);
     // volatile → compiler cannot remove or move it
     // "memory" clobber → compiler assumes memory is affected
     // ensure queue is in its last up-to-date state
     asm volatile("membar.gl;" ::: "memory");
-#endif
   }
   base = g.shfl(base, 0);
 
@@ -67,7 +65,7 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
 
   // compute warp uniform return value (mask of who did the push successfully)
   unsigned const mask = g.ballot(pushed);
-#ifndef NDEBUG
+#  ifndef NDEBUG
   if (g.thread_rank() == 0) {
     // A contiguous LSB mask looks like: 00011111
     // Adding 1 flips it to: 00100000
@@ -77,10 +75,60 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
     assert((mask & (mask + 1)) == 0);
   }
   g.sync();
-#endif
+#  endif
   return mask;
 }
+#else
+__device__ unsigned pushAggGMEM(void const* input, int inputSize,
+                                int* reserve_back, int* publish_back,
+                                int* queue_open, int* front, void* queue,
+                                int queueCapacity) {
+  cg::coalesced_group g = cg::coalesced_threads();
+  int const laneId = g.thread_rank();
 
+  // 1. Unified Reservation
+  unsigned base = 0;
+  int actualCount = 0;
+
+  if (laneId == 0) {
+    unsigned const snapFront = atomicAdd(front, 0);
+    unsigned const snapBack = atomicAdd(reserve_back, 0);
+    int const freePlaces = queueCapacity - (snapBack - snapFront);
+
+    actualCount = max(0, min((int)g.size(), freePlaces));
+    if (actualCount > 0) {
+      base = atomicAdd(reserve_back, actualCount);
+    }
+  }
+
+  actualCount = g.shfl(actualCount, 0);
+  base = g.shfl(base, 0);
+
+  bool const pushed = laneId < actualCount;
+  if (pushed) {
+    unsigned const slot = (base + laneId) & (queueCapacity - 1);
+    memcpy(static_cast<uint8_t*>(queue) + slot * inputSize, input, inputSize);
+  }
+
+  // 2. Safe Publishing (Ordered)
+  if (actualCount > 0 && laneId == 0) {
+    __threadfence();  // Ensure memcpy is visible before updating publish_back
+
+    // DANGER: If you keep the ordered spin-lock, you MUST use
+    // a "yield" or ensure high occupancy.
+    // Better: Use an array of "ready" flags for each slot.
+    while (atomicAdd(publish_back, 0) != base) {
+      // Optional: __nanosleep() or pascal_fixed_sleep()
+    }
+    atomicAdd(publish_back, actualCount);
+  }
+
+  g.sync();  // All threads must hit this
+  return g.ballot(pushed);
+}
+#endif
+
+#if OTHER_THING
 __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
                                int* queue_open, int* front, void* queue,
                                int queueCapacity) {
@@ -119,10 +167,6 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
   claimed = g.shfl(claimed, 0);
   base = g.shfl(base, 0);
 
-  if (claimed == 0) {
-    return 0;
-  }
-
   int const idx = base + g.thread_rank();
   int const slot = idx & (queueCapacity - 1);
 
@@ -137,23 +181,49 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
   g.sync();
 
   // compute warp uniform return value
-  unsigned const mask = g.ballot(popped);
-#ifndef NDEBUG
-  if (g.thread_rank() == 0) {
-    // A contiguous LSB mask looks like: 00011111
-    // Adding 1 flips it to: 00100000
-    // ANDing them gives 0
-    // Any hole breaks this property
-    // no holes: must be 0b000...011...1
-    assert((mask & (mask + 1)) == 0);
-  }
-  g.sync();
-#endif
-  return mask;
+  return g.ballot(popped);
 }
+#else
+__device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
+                               int* queue_open, int* front, void* queue,
+                               int queueCapacity) {
+  cg::coalesced_group g = cg::coalesced_threads();
+  int const laneId = g.thread_rank();
+  unsigned const mask = queueCapacity - 1;
+
+  unsigned base = 0;
+  int claimed = 0;
+
+  if (laneId == 0) {
+    unsigned snapPub = atomicAdd(publish_back, 0);
+    unsigned snapFront = atomicAdd(front, 0);
+
+    int avail = snapPub - snapFront;
+    claimed = max(0, min((int)g.size(), avail));
+
+    if (claimed > 0) {
+      base = atomicAdd(front, claimed);
+    }
+  }
+
+  claimed = g.shfl(claimed, 0);
+  base = g.shfl(base, 0);
+
+  bool const popped = laneId < claimed;
+  if (popped) {
+    unsigned const slot = (base + laneId) & mask;
+    memcpy(output, static_cast<uint8_t*>(queue) + slot * outputSize,
+           outputSize);
+  }
+
+  g.sync();  // Ensure no threads exit before the group-wide operation is done
+  return g.ballot(popped);
+}
+#endif
 
 // number of available pushes (empty slots)
-__device__ int queueConsumerUsedCount(int* publish_back, int* front, int capacity) {
+__device__ int queueConsumerUsedCount(int* publish_back, int* front,
+                                      int capacity) {
   cg::coalesced_group const g = cg::coalesced_threads();
   int h = 0;
   int t = 0;
@@ -168,7 +238,8 @@ __device__ int queueConsumerUsedCount(int* publish_back, int* front, int capacit
 }
 
 // number of available pops (full slots, already published)
-__device__ int queueProducerFreeCount(int* reserve_back, int* front, int capacity) {
+__device__ int queueProducerFreeCount(int* reserve_back, int* front,
+                                      int capacity) {
   cg::coalesced_group const g = cg::coalesced_threads();
   int h = 0;
   int t = 0;

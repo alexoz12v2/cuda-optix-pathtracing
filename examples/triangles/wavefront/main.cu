@@ -364,56 +364,6 @@ inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
 // raygen
 // ----------------------------------------------------------------------------
 
-// should be called from raygen block
-// Bx: spp, By: width, Bz: height.
-// int const S = spp;       // total samples per pixel
-// int const W = width;     // image width
-// int const H = height;    // image height
-// int const ps = psPerGen; // samples per warp iteration
-// int const px = pxPerGen; // 8
-// int const py = pyPerGen; // 4
-//
-// global index = (blockIdx.z * gridDim.y * gridDim.x + blockIdx.y * gridDim.x +
-// blockIdx.x)
-//                |-    block Number -|
-//                * (blockDim.x * blockDim.y * blockDim.y)
-//                |-   how many elements does a block have -|
-//                + (threadIdx.z * blockDim.y * blockDim.x + threadIdx.y *
-// blockDim.x + threadIdx.x)
-//                |- thread offset inside selected block -|
-//
-// warpRayIdx -> slice 32 elements linearized
-// 3D grid indexing (example for ns: 2, nw: 2, nh: 2)
-// s0 w0 h0 | s1 w0 h0 | s0 w1 h0 | s1 w1 h0 | s0 w2 h0 | s1 w2 h0 |
-// s0 w0 h1 | s1 w0 h1 | s0 w1 h1 | s1 w1 h1 | s0 w2 h1 | s1 w2 h1 |
-__device__ __forceinline__ void raygenPositionFromWarp(int H, int W, int S,
-                                                       int linear, int& xStart,
-                                                       int& xEnd, int& yStart,
-                                                       int& yEnd, int& sStart,
-                                                       int& sEnd) {
-  static int constexpr nSamplesLoop = 4;
-  static int constexpr samplesPerGen = 1;
-  static int constexpr ps = nSamplesLoop * samplesPerGen;  // -> Tx
-  static int constexpr px = 8;                             // -> Ty
-  static int constexpr py = 4;                             // -> Tz
-  static_assert(samplesPerGen * px * py == WARP_SIZE);
-
-  int const gridS = ceilDiv(S, ps);  // sample tiles
-  int const gridX = ceilDiv(W, px);  // pixel tiles in X
-  // int const gridY = ceilDiv(H, py);  // pixel tiles in Y
-
-  int const sTile = linear % gridS;
-  int const xTile = (linear / gridS) % gridX;
-  int const yTile = linear / (gridS * gridX);
-
-  sStart = sTile * ps;
-  sEnd = min(sStart + ps, S);
-  xStart = xTile * px;
-  xEnd = min(xStart + px, W);
-  yStart = yTile * py;
-  yEnd = min(yStart + py, H);
-}
-
 // ----------------------------------------------------------------------------
 // closesthit
 // ----------------------------------------------------------------------------
@@ -500,6 +450,12 @@ inline constexpr int WAVEFRONT_KERNEL_ANYHIT_DIVISOR = 2;
 inline constexpr int WAVEFRONT_KERNEL_MISS_DIVISOR = 3;
 inline constexpr int WAVEFRONT_KERNEL_SHADE_DIVISOR = 4;
 
+#define WAVEFRONT_KERNEL_RAYGEN_ACTIVE 1
+#define WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE 0
+#define WAVEFRONT_KERNEL_ANYHIT_ACTIVE 0
+#define WAVEFRONT_KERNEL_MISS_ACTIVE 0
+#define WAVEFRONT_KERNEL_SHADE_ACTIVE 0
+
 // only one of __lanuch_bounds__ and __maxnreg__ can be applied to a kernel
 // (max reg count can be manipulated from nvcc)
 
@@ -528,153 +484,121 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       input.d_haltonOwen[(blockIdx.x * blockDim.x + threadIdx.x) / warpSize];
 
   if (blockType == WAVEFRONT_KERNEL_RAYGEN_DIVISOR) {
-    static int constexpr ps = 4;
+#if WAVEFRONT_KERNEL_RAYGEN_ACTIVE
     static int constexpr px = 8;
     static int constexpr py = 4;
-    static_assert(py * px == WARP_SIZE);
-    int& raysPerBlock = SMEM[0];
-    int& blockWideRayIndex = SMEM[1];
-    int& warpRemaining = SMEM[2];
-    // 4 byte per warp (note: other kernel types will use SMEM queue caches)
+    int& warpRemaining = SMEM[0];
 
+    // 1. Determine our position in the subdivided grid
+    // we assume only the (gridDim / WAVEFRONT_KERNEL_TYPES) handle raygen
+    int const raygenGridDim = gridDim.x / WAVEFRONT_KERNEL_TYPES;
+
+    // 2. Calculate warp ID and Stride (TODO check PTX)
+    assert(warpSize == 32);
+    int const threadsPerBlock = blockDim.x;
+    int const laneId = threadIdx.x % 32;
+    int const warpIdInBlock = threadIdx.x / 32;
+    int const warpsPerBlock = threadsPerBlock / 32;
     if (threadIdx.x == 0) {
-      blockWideRayIndex = 0;
-      int const gridS = ceilDiv(CMEM_spp, ps);
-      int const gridX = ceilDiv(input.d_cam->width, px);
-      int const gridY = ceilDiv(input.d_cam->height, py);
-      // TODO check PTX vectorized ld.global.b128 instruction
-      raysPerBlock =
-          ceilDiv(gridS * gridX * gridY,
-                  static_cast<int>(gridDim.x) / WAVEFRONT_KERNEL_TYPES);
-#if PRINT_ASSERT
-      if (raysPerBlock % warpSize != 0) {
-        printf("[%u %u %d] raysPerBlock %% warpSize == 0\n", blockIdx.x,
-               threadIdx.x, __LINE__);
-      }
-#endif
-      assert(raysPerBlock % warpSize == 0);
-
-      if (blockIdx.x == WAVEFRONT_KERNEL_RAYGEN_DIVISOR && threadIdx.x == 0) {
-        int nwarpId;
-        asm volatile("mov.u32 %0, %%nwarpid;" : "=r"(nwarpId));
-        warpRemaining = nwarpId;
-      }
+      warpRemaining = warpsPerBlock;
     }
-    __syncthreads();
-    static constexpr int wkt2 = WAVEFRONT_KERNEL_TYPES * WAVEFRONT_KERNEL_TYPES;
+    __syncthreads();  // bar.sync 0;
 
-    // while block is not done
-    int ticket = 0;
-    while ((ticket = atomicAggInc(&blockWideRayIndex)) < raysPerBlock) {
-#if PRINT_ASSERT
-      if (__activemask() != 0xFFFF'FFFFU) {
-        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU\n", blockIdx.x,
-               threadIdx.x, __LINE__);
-      }
-#endif
-      assert(__activemask() == 0xFFFF'FFFFU);
-      uint32_t const lane = ThisWarp::thread_rank();
-      bool lastTicket = false;
-      if (lane == 0) {
-#if PRINT_ASSERT
-        if ((ticket & 31) != 0) {
-          printf("[%u %u %d] (ticket & 31) == 0\n", blockIdx.x, threadIdx.x,
-                 __LINE__);
-        }
-#endif
-        assert((ticket & 31) == 0);
-        // last warp of raygen block: 1, ...
-        const int raygenWarpIdxCompl =
-            blockDim.x * (gridDim.x - blockIdx.x) / (wkt2 * warpSize) + 1;
-        lastTicket = ticket + raygenWarpIdxCompl * warpSize >= raysPerBlock;
-      }
-      ThisWarp::sync();
-      lastTicket = theWarp.shfl(lastTicket, 0);
+    // Global warp ID across the raygen portion of the grid
+    int const globalWarpId = blockIdx.x * warpsPerBlock + warpIdInBlock;
+    int const totalWarps = raygenGridDim * warpsPerBlock;
 
-      int xStart = 0;
-      int xEnd = 0;
-      int yStart = 0;
-      int yEnd = 0;
-      int sStart = 0;
-      int sEnd = 0;
-      if (ThisWarp::thread_rank() == 0) {
-        int const linear = blockIdx.x * blockDim.x / (wkt2 * warpSize) + ticket;
-        raygenPositionFromWarp(CMEM_imageResolution.y, CMEM_imageResolution.x,
-                               CMEM_spp, linear, xStart, xEnd, yStart, yEnd,
-                               sStart, sEnd);
-        sStart += input.sampleOffset;
-        sEnd += input.sampleOffset;
-      }
-      ThisWarp::sync();
-      xStart = theWarp.shfl(xStart, 0);
-      xEnd = theWarp.shfl(xEnd, 0);
-      yStart = theWarp.shfl(yStart, 0);
-      yEnd = theWarp.shfl(yEnd, 0);
-      sStart = theWarp.shfl(sStart, 0);
-      sEnd = theWarp.shfl(sEnd, 0);
+    // 3. Define Work Space
+    int const numTilesX = ceilDiv(CMEM_imageResolution.x, px);
+    int const numTilesY = ceilDiv(CMEM_imageResolution.y, py);
+    int const totalTiles = numTilesX * numTilesY;
+    int const totalWorkUnits = totalTiles * CMEM_spp;
 
-      int const x = xStart + (lane / ps) % px;
-      int const y = yStart + lane / (ps * px);
-      for (int ss = 0; ss < ps; ++ss) {
-        int const sample = (sStart + lane % ps) + ss;
+    // 4. Grid-Stride loop: each warp grabs a work unit (8x4 tile for _1_
+    // specific sample)
+    for (int i = globalWarpId; i < totalWorkUnits; i += totalWarps) {
+      // Decode 1D index into (Tile, Sample)
+      assert(i / totalTiles < CMEM_spp);
+      int const sampleIdx = i / totalTiles + input.sampleOffset;
+      int const tileIdx = i % totalTiles;
 
-        // construct raygen input
-        ClosestHitInput raygenElem{};  // TODO SMEM?
+      // Decode tile index into 2D coordinates
+      int const tileY = tileIdx / numTilesX;
+      int const tileX = tileIdx % numTilesX;
+
+      // 5. Map threads within the warp into pixels in the 8x4 tile (row major)
+      int const x = tileX * px + (laneId % px);
+      int const y = tileY * py + (laneId / px);
+
+      // boundary check for image res not divisible by 8x4
+      if (x < CMEM_imageResolution.x && y < CMEM_imageResolution.y) {
+        // generate ray for (x, y) at sampleIndex
         {
-          // TODO without struct
-          RaygenInput const raygenInput = {
-              .px = x,
-              .py = y,
-              .sampleIndex = sample,
-              .spp = input.d_cam->spp,
-              .cameraFromRaster = arrayAsTransform(CMEM_cameraFromRaster),
-              .renderFromCamera = arrayAsTransform(CMEM_renderFromCamera),
-          };
-          // TODO add start pixel sample to every kernel
-          warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(x, y),
-                                   sample);
-          raygenElem = raygen(raygenInput, warpRng, CMEM_haltonOwenParams);
-          // we got here "AFTER raygen: 0xffffffff"
-          // printf("AFTER raygen: 0x%x\n", __activemask());
-        }
-        // check if 32 available places in queue
-        while (input.closesthitQueue.producerFreeCount() < warpSize &&
-               !lastTicket) {
-          // busy wait
-          pascal_fixed_sleep(64);
-        }
-        unsigned active = __activemask();
-        while (active) {
-          // warp-wide push
-          active &= ~input.closesthitQueue.push(&raygenElem);
-          if (!active) {
-            pascal_fixed_sleep(64);
+          // construct raygen input
+          ClosestHitInput raygenElem{};  // TODO SMEM?
+          {
+            // TODO without struct
+            RaygenInput const raygenInput = {
+                .px = x,
+                .py = y,
+                .sampleIndex = sampleIdx,
+                .spp = input.d_cam->spp,
+                .cameraFromRaster = arrayAsTransform(CMEM_cameraFromRaster),
+                .renderFromCamera = arrayAsTransform(CMEM_renderFromCamera),
+            };
+            // TODO add start pixel sample to every kernel
+            warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(x, y),
+                                     sampleIdx);
+            raygenElem = raygen(raygenInput, warpRng, CMEM_haltonOwenParams);
+            // we got here "AFTER raygen: 0xffffffff"
+            // printf("AFTER raygen: 0x%x\n", __activemask());
           }
+          // check if 32 available places in queue
+          // printf(
+          //     "[%u %u] RAYGEN CAP failed for sample [%d %d] %d. Queue "
+          //     "Free: %d\n",
+          //     blockIdx.x, threadIdx.x, x, y, sampleIdx,
+          //     input.closesthitQueue.producerFreeCount());
+          unsigned active = __activemask();
+          while (active) {
+            // warp-wide push (push already does __threadfence())
+            active &= ~input.closesthitQueue.push(&raygenElem);
+            if (active) {
+              pascal_fixed_sleep(64);
+              // printf(
+              //     "[%u %u] RAYGEN push failed for sample [%d %d] %d. Queue "
+              //     "Free: %d\n",
+              //     blockIdx.x, threadIdx.x, x, y, sampleIdx,
+              //     input.closesthitQueue.producerFreeCount());
+            }
+          }
+          printf("[%u %u] RAYGEN activemask 0x%x generated sample [%d %d] %d\n",
+                 blockIdx.x, threadIdx.x, __activemask(), x, y, sampleIdx);
         }
-        // printf("RAYGEN activemask 0x%x generated sample %d\n",
-        // __activemask(), sample);
-      }  // sample loop
-      ThisWarp::sync();
-    }  // persistent kernel thread loop
-
-#if PRINT_ASSERT
-    if (__activemask() != 0xFFFF'FFFFu) {
-      printf("[%u %u %d] __activemask() == 0xFFFF'FFFFu\n", blockIdx.x,
-             threadIdx.x, __LINE__);
+      }
     }
-#endif
-    assert(__activemask() == 0xFFFF'FFFFu);
-    // __ffs(__activemask()) - 1
+    ThisWarp::sync();
+
+    printf("[%u %u] RAYGEN activemask 0x%x finished generation\n", blockIdx.x,
+           threadIdx.x, __activemask());
+
     // warp leader decrements warpRemaining
     if ((threadIdx.x & 31) == 0) {
       // if warpRemaining zero (not negative),
       // warp leader increments GMEM signalTerm
-      if (atomicSub(&warpRemaining, 1) == 0) {
+      if (atomicSub(&warpRemaining, 1) == 1) {
+#  if 0
+        if (atomicInc(input.signalTerm, 1) == blockNumPerKernel - 1) {
+          printf("GLOBALLY FINISHED RAYGEN\n");
+        }
+#  else
         atomicInc(input.signalTerm, 1);
+#  endif
       }
     }
-
+#endif
   } else if (blockType == WAVEFRONT_KERNEL_CLOSESTHIT_DIVISOR) {
+#if WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE
     int& blockTerminated = SMEM[0];
     if (threadIdx.x == 0) {
       blockTerminated = 0;
@@ -682,21 +606,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     __syncthreads();
 
     while (true) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       if (input.closesthitQueue.consumerUsedCount() < warpSize) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
           printf(
               "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
               blockIdx.x, threadIdx.x, __LINE__);
         }
-#endif
+#  endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -705,7 +629,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         // atomic operations shouldn't need external synchronization. also, this
         // can cause deadlock
         // __syncthreads();
-        if (blockTerminated == blockNumPerKernel) {
+        if (blockTerminated == blockNumPerKernel - 1) {
           // if there are remainders which are less than warp size, let first
           // warp of the first block handle that, while everybody else dies
           uint32_t warpId = -1U;
@@ -722,22 +646,22 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         }
       }
       // printf("CLOSEST HIT START \n");
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       ClosestHitInput kinput{};  // TODO SMEM?
       int const mask = input.closesthitQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!blockTerminated) {
           printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
                  __LINE__);
         }
-#endif
+#  endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -799,7 +723,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       // group sync
       g.sync();
     }
+#endif
   } else if (blockType == WAVEFRONT_KERNEL_ANYHIT_DIVISOR) {
+#if WAVEFRONT_KERNEL_ANYHIT_ACTIVE
     // preamble same as closest hit
     int& blockTerminated = SMEM[0];
     if (threadIdx.x == 0) {
@@ -808,21 +734,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     __syncthreads();
 
     while (true) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       if (input.anyhitQueue.consumerUsedCount() < warpSize) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
           printf(
               "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
               blockIdx.x, threadIdx.x, __LINE__);
         }
-#endif
+#  endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -831,7 +757,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         // atomic operations shouldn't need external synchronization. also, this
         // can cause deadlock
         // __syncthreads();
-        if (blockTerminated == blockNumPerKernel) {
+        if (blockTerminated == blockNumPerKernel - 1) {
           // if there are remainders which are less than warp size, let first
           // warp of the first block handle that, while everybody else dies
           uint32_t warpId = -1;
@@ -847,23 +773,23 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           continue;
         }
       }
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       // TODO is this necessary?
       AnyhitInput kinput{};  // TODO SMEM?
       int const mask = input.anyhitQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!blockTerminated) {
           printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
                  __LINE__);
         }
-#endif
+#  endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -894,7 +820,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       groupedAtomicAdd(reinterpret_cast<float*>(&kinput.state->L) + 2, Le.y);
       g.sync();
     }  // end persistent kernel thread loop
+#endif
   } else if (blockType == WAVEFRONT_KERNEL_MISS_DIVISOR) {
+#if WAVEFRONT_KERNEL_MISS_ACTIVE
     // usual consumer kernel preamble
     int& blockTerminated = SMEM[0];
     if (threadIdx.x == 0) {
@@ -903,21 +831,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     __syncthreads();
 
     while (true) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       if (input.missQueue.consumerUsedCount() < warpSize) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
           printf(
               "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
               blockIdx.x, threadIdx.x, __LINE__);
         }
-#endif
+#  endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -926,7 +854,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         // atomic operations shouldn't need external synchronization. also,
         // synch here can cause deadlocks
         // __syncthreads();
-        if (blockTerminated == blockNumPerKernel) {
+        if (blockTerminated == blockNumPerKernel - 1) {
           // if there are remainders which are less than warp size, let first
           // warp of first block handle that, while everybody else dies
           uint32_t warpId = -1u;
@@ -942,22 +870,22 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           continue;
         }
       }
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       MissInput kinput{};
       int const mask = input.missQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!blockTerminated) {
           printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
                  __LINE__);
         }
-#endif
+#  endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -996,7 +924,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       freeState(kinput.state);
       kinput.state = nullptr;
     }  // end persistent thread loop
+#endif
   } else if (blockType == WAVEFRONT_KERNEL_SHADE_DIVISOR) {
+#if WAVEFRONT_KERNEL_SHADE_ACTIVE
     // possible optimization:
     // - warp-loop over BSDF types. First loop search for 32 ready queue, second
     //   loop anything is fine
@@ -1006,21 +936,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     }
     __syncthreads();
     while (true) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
                blockIdx.x, threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       if (input.shadeQueue.consumerUsedCount() < warpSize) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
           printf(
               "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
               blockIdx.x, threadIdx.x, __LINE__);
         }
-#endif
+#  endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -1029,7 +959,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         // atomic operations shouldn't need external synchronization. also, this
         // can cause deadlock
         // __syncthreads();
-        if (blockTerminated == blockNumPerKernel) {
+        if (blockTerminated == blockNumPerKernel - 1) {
           // if there are remainders which are less than warp size, let first
           // warp of the first block handle that, while everybody else dies
           uint32_t warpId = -1u;
@@ -1045,22 +975,22 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           continue;
         }
       }  // exit if-block without continue/break: then execute core function
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
       if (__activemask() != 0xFFFF'FFFFU) {
         printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU\n", blockIdx.x,
                threadIdx.x, __LINE__);
       }
-#endif
+#  endif
       assert(__activemask() == 0xFFFF'FFFFU);
       ShadeInput kinput{};
       int const mask = input.shadeQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
-#if PRINT_ASSERT
+#  if PRINT_ASSERT
         if (!blockTerminated) {
           printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
                  __LINE__);
         }
-#endif
+#  endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -1150,6 +1080,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       }
       g.sync();
     }  // end persistent kernel thread loop
+#endif
   }
 }
 
@@ -1353,6 +1284,8 @@ void wavefrontMain() {
     CUDA_CHECK(cudaEventCreate(&ready[i]));
   }
 
+#define ONLY_ONE_EXEC 1
+
   static int constexpr TOTAL_SAMPLES = 2048;
   void* kArgs[] = {&kinput};
   dim3 const gridDim{blocks, 1, 1};
@@ -1372,6 +1305,21 @@ void wavefrontMain() {
     CUDA_CHECK(cudaEventRecord(ready[0], streams[0]));
     CUDA_CHECK(cudaEventSynchronize(ready[0]));
     streamCallbackWriteBuffer(callbackData.get());
+
+#define INSPECT_CLOSEST_HIT 1
+#if INSPECT_CLOSEST_HIT
+    auto const theInput = std::make_unique<ClosestHitInput[]>(
+        kinput.closesthitQueue.queueCapacity);
+    CUDA_CHECK(cudaMemcpy(
+        theInput.get(), kinput.closesthitQueue.queue,
+        kinput.closesthitQueue.queueCapacity * sizeof(ClosestHitInput),
+        cudaMemcpyDeviceToHost));
+    printf("Some stuff\n");
+#endif
+
+#if ONLY_ONE_EXEC
+    break;
+#endif
   }
 
   std::cout << "Cleanup..." << std::endl;

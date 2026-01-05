@@ -337,6 +337,11 @@ void cornellBox(bool megakernel, HostTriangleScene* h_scene,
   }
 
   *h_camera = DeviceCamera();
+  if (!megakernel) {
+    h_camera->width = 16;
+    h_camera->height = 16;
+    h_camera->spp = 4;
+  }
 }
 
 // private stuff impl

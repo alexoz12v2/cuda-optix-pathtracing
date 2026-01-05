@@ -31,6 +31,19 @@ namespace cg = cooperative_groups;
 
 // TODO: add device LTO
 
+#define PRINT_ASSERT 1
+
+__device__ void pascal_fixed_sleep(uint64_t nanoseconds) {
+  uint64_t start;
+  // Read the 64-bit nanosecond global timer
+  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(start));
+
+  uint64_t now = start;
+  while (now < start + nanoseconds) {
+    asm volatile("mov.u64 %0, %globaltimer;" : "=l"(now));
+  }
+}
+
 // TODO how to use?
 __device__ float groupedAtomicFetch(float* address) {
   unsigned const fullwarp = __activemask();
@@ -138,7 +151,7 @@ __device__ void groupedAtomicAdd(T* address, T val) {
 }
 
 // TODO __CUDA_ARCH__ >= 700 version
-__device__ int groupedAtomicIntLeaderOnly(int* address) {
+__device__ int groupedAtomicIncLeaderOnly(int* address) {
   // pascal doesn't have match instructions. iterative ballot approach.
   // loop through unique addresses present in the warp one by one
   // 0. mask of lanes which haven't been processed yet
@@ -446,6 +459,12 @@ __device__ void anyhitNEE(
     if (!bsdfPdf) {
       return;
     }
+
+#if PRINT_ASSERT
+    if (isZero(bsdf_f)) {
+      printf("[%u %u %d] !isZero(bsdf_f)\n", blockIdx.x, threadIdx.x, __LINE__);
+    }
+#endif
     assert(!isZero(bsdf_f));
 
     for (int tri = 0; tri < triSoup.count; ++tri) {
@@ -484,7 +503,7 @@ inline constexpr int WAVEFRONT_KERNEL_SHADE_DIVISOR = 4;
 // only one of __lanuch_bounds__ and __maxnreg__ can be applied to a kernel
 // (max reg count can be manipulated from nvcc)
 
-// Dynamic SMEM: 8B
+// Dynamic SMEM: 12B
 __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     //__maxnreg__(32)
     void wavefrontKernel(WavefrontInput input) {
@@ -494,6 +513,12 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
   int const blockType = blockIdx.x % WAVEFRONT_KERNEL_TYPES;
   int const blockNumPerKernel = gridDim.x / WAVEFRONT_KERNEL_TYPES;
   // assumes 1D block
+#if PRINT_ASSERT
+  if (blockDim.x % warpSize != 0) {
+    printf("[%u %u %d] blockDim.x %% warpSize == 0\n", blockIdx.x, threadIdx.x,
+           __LINE__);
+  }
+#endif
   assert(blockDim.x % warpSize == 0);
 
   using ThisWarp = cg::thread_block_tile<32>;
@@ -521,6 +546,12 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       raysPerBlock =
           ceilDiv(gridS * gridX * gridY,
                   static_cast<int>(gridDim.x) / WAVEFRONT_KERNEL_TYPES);
+#if PRINT_ASSERT
+      if (raysPerBlock % warpSize != 0) {
+        printf("[%u %u %d] raysPerBlock %% warpSize == 0\n", blockIdx.x,
+               threadIdx.x, __LINE__);
+      }
+#endif
       assert(raysPerBlock % warpSize == 0);
 
       if (blockIdx.x == WAVEFRONT_KERNEL_RAYGEN_DIVISOR && threadIdx.x == 0) {
@@ -535,10 +566,22 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     // while block is not done
     int ticket = 0;
     while ((ticket = atomicAggInc(&blockWideRayIndex)) < raysPerBlock) {
+#if PRINT_ASSERT
+      if (__activemask() != 0xFFFF'FFFFU) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU\n", blockIdx.x,
+               threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU);
       uint32_t const lane = ThisWarp::thread_rank();
       bool lastTicket = false;
       if (lane == 0) {
+#if PRINT_ASSERT
+        if ((ticket & 31) != 0) {
+          printf("[%u %u %d] (ticket & 31) == 0\n", blockIdx.x, threadIdx.x,
+                 __LINE__);
+        }
+#endif
         assert((ticket & 31) == 0);
         // last warp of raygen block: 1, ...
         const int raygenWarpIdxCompl =
@@ -587,26 +630,39 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
               .cameraFromRaster = arrayAsTransform(CMEM_cameraFromRaster),
               .renderFromCamera = arrayAsTransform(CMEM_renderFromCamera),
           };
+          // TODO add start pixel sample to every kernel
           warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(x, y),
                                    sample);
           raygenElem = raygen(raygenInput, warpRng, CMEM_haltonOwenParams);
+          // we got here "AFTER raygen: 0xffffffff"
+          // printf("AFTER raygen: 0x%x\n", __activemask());
         }
         // check if 32 available places in queue
-        // TODO wait N clocks before retrying
-        // TODO handle case in which last rays are not 32 multiple and when
-        // TODO last has been generated set signalTerm
-        while (input.closesthitQueue.producerSize() < warpSize && !lastTicket) {
+        while (input.closesthitQueue.producerFreeCount() < warpSize &&
+               !lastTicket) {
           // busy wait
+          pascal_fixed_sleep(64);
         }
         unsigned active = __activemask();
         while (active) {
           // warp-wide push
           active &= ~input.closesthitQueue.push(&raygenElem);
+          if (!active) {
+            pascal_fixed_sleep(64);
+          }
         }
+        // printf("RAYGEN activemask 0x%x generated sample %d\n",
+        // __activemask(), sample);
       }  // sample loop
       ThisWarp::sync();
     }  // persistent kernel thread loop
 
+#if PRINT_ASSERT
+    if (__activemask() != 0xFFFF'FFFFu) {
+      printf("[%u %u %d] __activemask() == 0xFFFF'FFFFu\n", blockIdx.x,
+             threadIdx.x, __LINE__);
+    }
+#endif
     assert(__activemask() == 0xFFFF'FFFFu);
     // __ffs(__activemask()) - 1
     // warp leader decrements warpRemaining
@@ -626,8 +682,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     __syncthreads();
 
     while (true) {
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-      if (input.closesthitQueue.consumerSize() < warpSize) {
+      if (input.closesthitQueue.consumerUsedCount() < warpSize) {
+#if PRINT_ASSERT
+        if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+          printf(
+              "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+              blockIdx.x, threadIdx.x, __LINE__);
+        }
+#endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -642,20 +711,33 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           uint32_t warpId = -1U;
           asm volatile("mov.u32  %0, %%warpid;" : "=r"(warpId));
           if (blockIdx.x == WAVEFRONT_KERNEL_CLOSESTHIT_DIVISOR &&
-              warpId == 0 && input.closesthitQueue.consumerSize() > 0) {
+              warpId == 0 && input.closesthitQueue.consumerUsedCount() > 0) {
             // go down
           } else {
             break;
           }
         } else {
-          // TODO wait N clocks before retrying
+          pascal_fixed_sleep(64);
           continue;
         }
       }
+      // printf("CLOSEST HIT START \n");
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       ClosestHitInput kinput{};  // TODO SMEM?
       int const mask = input.closesthitQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
+#if PRINT_ASSERT
+        if (!blockTerminated) {
+          printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
+                 __LINE__);
+        }
+#endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -677,8 +759,10 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                                       .t = result.t};
         int coalescedMask = 0;
         do {
-          // TODO clock backoff
           coalescedMask = input.anyhitQueue.push(&anyHitInput);
+          if (!(coalescedMask & (1 << gHit.thread_rank()))) {
+            pascal_fixed_sleep(64);
+          }
         } while (!(coalescedMask & (1 << gHit.thread_rank())));
 
         // enqueue shadeQueue (TODO SMEM?)
@@ -692,8 +776,10 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             .t = result.t,
         };
         do {
-          // TODO clock backoff
           coalescedMask = input.shadeQueue.push(&shadeInput);
+          if (!(coalescedMask & (1 << g.thread_rank()))) {
+            pascal_fixed_sleep(64);
+          }
         } while (!(coalescedMask & (1 << g.thread_rank())));
 
       } else {
@@ -704,8 +790,10 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                                   .rayDirection = kinput.ray.d};
         int coalescedMask = 0;
         do {
-          // TODO clock backoff
           coalescedMask = input.missQueue.push(&missInput);
+          if (!(coalescedMask & (1 << gMiss.thread_rank()))) {
+            pascal_fixed_sleep(64);
+          }
         } while (!(coalescedMask & (1 << gMiss.thread_rank())));
       }
       // group sync
@@ -720,8 +808,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     __syncthreads();
 
     while (true) {
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-      if (input.anyhitQueue.consumerSize() < warpSize) {
+      if (input.anyhitQueue.consumerUsedCount() < warpSize) {
+#if PRINT_ASSERT
+        if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+          printf(
+              "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+              blockIdx.x, threadIdx.x, __LINE__);
+        }
+#endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -736,7 +837,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           uint32_t warpId = -1;
           asm volatile("mov.u32  %0, %%warpid;" : "=r"(warpId));
           if (blockIdx.x == WAVEFRONT_KERNEL_ANYHIT_DIVISOR && warpId == 0 &&
-              input.anyhitQueue.consumerSize() > 0) {
+              input.anyhitQueue.consumerUsedCount() > 0) {
             // go down
           } else {
             break;
@@ -746,11 +847,23 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           continue;
         }
       }
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       // TODO is this necessary?
       AnyhitInput kinput{};  // TODO SMEM?
       int const mask = input.anyhitQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
+#if PRINT_ASSERT
+        if (!blockTerminated) {
+          printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
+                 __LINE__);
+        }
+#endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -790,8 +903,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     __syncthreads();
 
     while (true) {
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-      if (input.missQueue.consumerSize() < warpSize) {
+      if (input.missQueue.consumerUsedCount() < warpSize) {
+#if PRINT_ASSERT
+        if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+          printf(
+              "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+              blockIdx.x, threadIdx.x, __LINE__);
+        }
+#endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -806,7 +932,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           uint32_t warpId = -1u;
           asm volatile("mov.u32 %0, %%warpid;" : "=r"(warpId));
           if (blockIdx.x == WAVEFRONT_KERNEL_MISS_DIVISOR && warpId == 0 &&
-              input.missQueue.consumerSize() > 0) {
+              input.missQueue.consumerUsedCount() > 0) {
             // go down
           } else {
             break;
@@ -816,10 +942,22 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           continue;
         }
       }
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
       MissInput kinput{};
       int const mask = input.missQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
+#if PRINT_ASSERT
+        if (!blockTerminated) {
+          printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
+                 __LINE__);
+        }
+#endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -868,8 +1006,21 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     }
     __syncthreads();
     while (true) {
+#if PRINT_ASSERT
+      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+               blockIdx.x, threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-      if (input.shadeQueue.consumerSize() < warpSize) {
+      if (input.shadeQueue.consumerUsedCount() < warpSize) {
+#if PRINT_ASSERT
+        if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
+          printf(
+              "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
+              blockIdx.x, threadIdx.x, __LINE__);
+        }
+#endif
         assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
         if (threadIdx.x == 0) {
           // termination signal (block leader checks atomic var)
@@ -884,7 +1035,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           uint32_t warpId = -1u;
           asm volatile("mov.u32 %0, %%warpid;" : "=r"(warpId));
           if (blockIdx.x == WAVEFRONT_KERNEL_SHADE_DIVISOR && warpId == 0 &&
-              input.shadeQueue.consumerSize() > 0) {
+              input.shadeQueue.consumerUsedCount() > 0) {
             // go down
           } else {
             break;
@@ -894,10 +1045,22 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           continue;
         }
       }  // exit if-block without continue/break: then execute core function
+#if PRINT_ASSERT
+      if (__activemask() != 0xFFFF'FFFFU) {
+        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU\n", blockIdx.x,
+               threadIdx.x, __LINE__);
+      }
+#endif
       assert(__activemask() == 0xFFFF'FFFFU);
       ShadeInput kinput{};
       int const mask = input.shadeQueue.pop(&kinput);
       if (!(mask & (1 << ThisWarp::thread_rank()))) {
+#if PRINT_ASSERT
+        if (!blockTerminated) {
+          printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
+                 __LINE__);
+        }
+#endif
         assert(blockTerminated);
         // this is the last batch
         break;
@@ -908,7 +1071,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       // 1. if max depth reached, kill path
       bool pathDied = false;
       static int constexpr MAX_DEPTH = 32;
-      int oldDepth = groupedAtomicIntLeaderOnly(&kinput.state->depth);
+      int oldDepth = groupedAtomicIncLeaderOnly(&kinput.state->depth);
       if (oldDepth >= MAX_DEPTH) {
         pathDied = true;
       }
@@ -980,7 +1143,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         int coalescedMask = 0;
         do {
           coalescedMask = input.closesthitQueue.push(&closestHitInput);
-          // TODO clock backoff
+          if (!(coalescedMask & (1 << gAlive.thread_rank()))) {
+            pascal_fixed_sleep(64);
+          }
         } while (!(coalescedMask & (1 << gAlive.thread_rank())));
       }
       g.sync();
@@ -990,8 +1155,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
 
 namespace {
 
-void optimalBlocksAndThreads(uint32_t& blocks, uint32_t& threads,
-                             uint32_t& sharedBytes) {
+__host__ void optimalBlocksAndThreads(uint32_t& blocks, uint32_t& threads,
+                                      uint32_t& sharedBytes) {
   // do we actually support cooperative kernel launches? (Pascal: yes.)
   int supportsCoopLaunch = 0;
   CUDA_CHECK(cudaDeviceGetAttribute(&supportsCoopLaunch,
@@ -1077,6 +1242,8 @@ void allocateDeviceMemory(uint32_t threads, uint32_t blocks,
   // output buffer
   kinput.d_outBuffer = nullptr;
   CUDA_CHECK(cudaMalloc(&kinput.d_outBuffer,
+                        h_camera.width * h_camera.height * sizeof(float4)));
+  CUDA_CHECK(cudaMemset(kinput.d_outBuffer, 0,
                         h_camera.width * h_camera.height * sizeof(float4)));
   // GMEM queues
   static int constexpr QUEUE_CAP = 1024;
@@ -1178,8 +1345,13 @@ void wavefrontMain() {
   callbackData->width = h_camera.width;
   callbackData->height = h_camera.height;
 
-  cudaStream_t outputStream = nullptr;
-  CUDA_CHECK(cudaStreamCreate(&outputStream));
+  // TODO double buffering
+  cudaStream_t streams[2]{};
+  cudaEvent_t ready[2]{};
+  for (int i = 0; i < 2; ++i) {
+    CUDA_CHECK(cudaStreamCreate(&streams[i]));
+    CUDA_CHECK(cudaEventCreate(&ready[i]));
+  }
 
   static int constexpr TOTAL_SAMPLES = 2048;
   void* kArgs[] = {&kinput};
@@ -1190,21 +1362,25 @@ void wavefrontMain() {
     callbackData->sample = kinput.sampleOffset;
     std::cout << "Launching kernel (" << kinput.sampleOffset << ")"
               << std::endl;
-    // 1. Kernel execution
     CUDA_CHECK(cudaLaunchCooperativeKernel(wavefrontKernel, gridDim, blockDim,
-                                           kArgs, sharedBytes, outputStream));
+                                           kArgs, sharedBytes, streams[0]));
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(
         cudaMemcpyAsync(hostImage, kinput.d_outBuffer,
                         sizeof(float4) * h_camera.width * h_camera.height,
-                        cudaMemcpyDeviceToHost, outputStream));
-    CUDA_CHECK(cudaLaunchHostFunc(outputStream, streamCallbackWriteBuffer,
-                                  callbackData.get()));
-    // when adding double buffering, switch stream pointer and sleep to avoid
-    // saturating
-    cudaStreamSynchronize(outputStream);
+                        cudaMemcpyDeviceToHost, streams[0]));
+    CUDA_CHECK(cudaEventRecord(ready[0], streams[0]));
+    CUDA_CHECK(cudaEventSynchronize(ready[0]));
+    streamCallbackWriteBuffer(callbackData.get());
   }
 
   std::cout << "Cleanup..." << std::endl;
+  for (int i = 0; i < 2; ++i) {
+    CUDA_CHECK(cudaEventSynchronize(ready[i]));
+    CUDA_CHECK(cudaEventDestroy(ready[i]));
+    CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    CUDA_CHECK(cudaStreamDestroy(streams[i]));
+  }
   CUDA_CHECK(cudaFreeHost(hostImage));
   freeDeviceMemory(kinput);
 }

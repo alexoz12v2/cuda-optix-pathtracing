@@ -152,15 +152,32 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
   return mask;
 }
 
-__device__ int queueAvail(int* back, int* front, int queueCapacity) {
+// number of available pushes (empty slots)
+__device__ int queueConsumerUsedCount(int* publish_back, int* front, int capacity) {
   cg::coalesced_group const g = cg::coalesced_threads();
-  int avail = 0;
+  int h = 0;
+  int t = 0;
   if (g.thread_rank() == 0) {
-    int const pub = atomicAdd(back, 0);
-    int const fr = atomicAdd(front, 0);
-    avail = (pub - fr + queueCapacity) & (queueCapacity - 1);
+    h = atomicAdd(front, 0);
+    t = atomicAdd(publish_back, 0);
   }
   g.sync();
-  g.shfl(avail, 0);
-  return avail;
+  h = g.shfl(h, 0);
+  t = g.shfl(t, 0);
+  return t - h;
+}
+
+// number of available pops (full slots, already published)
+__device__ int queueProducerFreeCount(int* reserve_back, int* front, int capacity) {
+  cg::coalesced_group const g = cg::coalesced_threads();
+  int h = 0;
+  int t = 0;
+  if (g.thread_rank() == 0) {
+    h = atomicAdd(front, 0);
+    t = atomicAdd(reserve_back, 0);
+  }
+  g.sync();
+  h = g.shfl(h, 0);
+  t = g.shfl(t, 0);
+  return capacity - (t - h);
 }

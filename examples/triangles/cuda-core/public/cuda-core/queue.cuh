@@ -70,8 +70,11 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
 __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
                                int* queue_open, int* front, void* queue,
                                int queueCapacity);
-// back = publish_back (consumers) or reserve_back (producers)
-__device__ int queueAvail(int* back, int* front, int queueCapacity);
+
+__device__ int queueConsumerUsedCount(int* publish_back, int* front,
+                                      int capacity);
+__device__ int queueProducerFreeCount(int* reserve_back, int* front,
+                                      int capacity);
 
 // now back starts from 0 and front starts from 0
 // Queue is empty → back == front
@@ -106,12 +109,12 @@ struct QueueGMEM {
     CUDA_CHECK(cudaFree(queue.front));
   }
 
-  __device__ __forceinline__ int producerSize() {
-    return queueAvail(reserve_back, front, queueCapacity);
+  __device__ __forceinline__ int producerFreeCount() const {
+    return queueProducerFreeCount(reserve_back, front, queueCapacity);
   }
 
-  __device__ __forceinline__ int consumerSize() {
-    return queueAvail(publish_back, front, queueCapacity);
+  __device__ __forceinline__ int consumerUsedCount() const {
+    return queueConsumerUsedCount(publish_back, front, queueCapacity);
   }
 
   __device__ __forceinline__ unsigned push(T const* elem) {

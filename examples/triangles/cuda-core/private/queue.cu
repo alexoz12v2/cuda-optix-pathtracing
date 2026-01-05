@@ -91,11 +91,12 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
   int actualCount = 0;
 
   if (laneId == 0) {
-    unsigned const snapFront = atomicAdd(front, 0);
-    unsigned const snapBack = atomicAdd(reserve_back, 0);
+    // TODO: these two should be read _at the same time_
+    unsigned const snapFront = *front;
+    unsigned const snapBack = *reserve_back;
     int const freePlaces = queueCapacity - (snapBack - snapFront);
 
-    actualCount = max(0, min((int)g.size(), freePlaces));
+    actualCount = max(0, min(static_cast<int>(g.size()), freePlaces));
     if (actualCount > 0) {
       base = atomicAdd(reserve_back, actualCount);
     }
@@ -117,8 +118,8 @@ __device__ unsigned pushAggGMEM(void const* input, int inputSize,
     // DANGER: If you keep the ordered spin-lock, you MUST use
     // a "yield" or ensure high occupancy.
     // Better: Use an array of "ready" flags for each slot.
-    while (atomicAdd(publish_back, 0) != base) {
-      // Optional: __nanosleep() or pascal_fixed_sleep()
+    while (*publish_back != base) {
+      // TODO Optional: __nanosleep() or pascal_fixed_sleep()
     }
     atomicAdd(publish_back, actualCount);
   }
@@ -195,11 +196,12 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
   int claimed = 0;
 
   if (laneId == 0) {
-    unsigned snapPub = atomicAdd(publish_back, 0);
-    unsigned snapFront = atomicAdd(front, 0);
+    // TODO: these two should be read _at the same time_
+    unsigned const snapPub = *publish_back;
+    unsigned const snapFront = *front;
 
-    int avail = snapPub - snapFront;
-    claimed = max(0, min((int)g.size(), avail));
+    int const avail = snapPub - snapFront;
+    claimed = max(0, min(static_cast<int>(g.size()), avail));
 
     if (claimed > 0) {
       base = atomicAdd(front, claimed);
@@ -222,33 +224,20 @@ __device__ unsigned popAggGMEM(void* output, int outputSize, int* publish_back,
 #endif
 
 // number of available pushes (empty slots)
+// (TODO if consecutive, attempt vector access)
 __device__ int queueConsumerUsedCount(int* publish_back, int* front,
                                       int capacity) {
-  cg::coalesced_group const g = cg::coalesced_threads();
-  int h = 0;
-  int t = 0;
-  if (g.thread_rank() == 0) {
-    h = atomicAdd(front, 0);
-    t = atomicAdd(publish_back, 0);
-  }
-  g.sync();
-  h = g.shfl(h, 0);
-  t = g.shfl(t, 0);
+  // if GMEM, this is a broadcast access
+  int const h = *front;
+  int const t = *publish_back;
   return t - h;
 }
 
 // number of available pops (full slots, already published)
 __device__ int queueProducerFreeCount(int* reserve_back, int* front,
                                       int capacity) {
-  cg::coalesced_group const g = cg::coalesced_threads();
-  int h = 0;
-  int t = 0;
-  if (g.thread_rank() == 0) {
-    h = atomicAdd(front, 0);
-    t = atomicAdd(reserve_back, 0);
-  }
-  g.sync();
-  h = g.shfl(h, 0);
-  t = g.shfl(t, 0);
+  // if GMEM, this is a broadcast access
+  int const h = *front;
+  int const t = *reserve_back;
   return capacity - (t - h);
 }

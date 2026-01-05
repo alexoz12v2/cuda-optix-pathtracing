@@ -44,6 +44,27 @@ __device__ void pascal_fixed_sleep(uint64_t nanoseconds) {
   }
 }
 
+__device__ __forceinline__ unsigned getWarpId() {
+  unsigned warpId = -1U;
+  asm("mov.u32 %0, %%warpid;" : "=r"(warpId));
+  return warpId;
+}
+
+__device__ __forceinline__ unsigned getLaneId() {
+  unsigned laneId = -1U;
+  asm("mov.u32 %0, %%laneid;" : "=r"(laneId));
+  return laneId;
+}
+
+// this is an alternatives to coalesced groups. Does it make a diff? IDK
+__device__ __forceinline__ unsigned getCoalescedLaneId(unsigned mask) {
+  // 1. Create a mask of all lanes _Lower_ than the current lane
+  uint32_t const lower = (1u << getLaneId()) - 1;
+  // 2. Count how many active threads are lower than me
+  int const rank = __popc(mask & lower);
+  return rank;
+}
+
 // TODO how to use?
 __device__ float groupedAtomicFetch(float* address) {
   unsigned const fullwarp = __activemask();
@@ -191,8 +212,8 @@ __device__ int groupedAtomicIncLeaderOnly(int* address) {
 // - any specular bounces
 // - last BSDF PDF
 struct PathState {
-  __device__ static PathState make(int px, int py, int s, int spp) {
-    PathState state{};
+  __device__ static void make(PathState& state, int px, int py, int s,
+                              int spp) {
     state.pixelCoordX = px;
     state.pixelCoordY = py;
     state.sampleIndex = s;
@@ -204,7 +225,6 @@ struct PathState {
     state.transmissionCount = 0;
     state.lastBounceTransmission = 0;
     state.anySpecularBounces = 0;
-    return state;
   }
 
   int pixelCoordX;
@@ -310,10 +330,10 @@ __device__ ClosestHitInput raygen(RaygenInput const& raygenInput,
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
   ClosestHitInput out{};
-  PathState const state = PathState::make(
-      raygenInput.px, raygenInput.py, raygenInput.sampleIndex, raygenInput.spp);
   out.state = static_cast<PathState*>(malloc(sizeof(PathState)));
-  memcpy(out.state, &state, sizeof(PathState));
+  assert(out.state);
+  PathState::make(*out.state, raygenInput.px, raygenInput.py,
+                  raygenInput.sampleIndex, raygenInput.spp);
   out.ray = getCameraRay(cs, *raygenInput.cameraFromRaster,
                          *raygenInput.renderFromCamera);
   return out;
@@ -451,10 +471,22 @@ inline constexpr int WAVEFRONT_KERNEL_MISS_DIVISOR = 3;
 inline constexpr int WAVEFRONT_KERNEL_SHADE_DIVISOR = 4;
 
 #define WAVEFRONT_KERNEL_RAYGEN_ACTIVE 1
-#define WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE 0
+#define WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE 1
 #define WAVEFRONT_KERNEL_ANYHIT_ACTIVE 0
 #define WAVEFRONT_KERNEL_MISS_ACTIVE 0
 #define WAVEFRONT_KERNEL_SHADE_ACTIVE 0
+
+// #define RG_PRINT(...) printf(__VA_ARGS__)
+#define CH_PRINT(...) printf(__VA_ARGS__)
+#define AH_PRINT(...) printf(__VA_ARGS__)
+#define MS_PRINT(...) printf(__VA_ARGS__)
+#define SH_PRINT(...) printf(__VA_ARGS__)
+
+#define RG_PRINT(...)
+// #define CH_PRINT(...)
+// #define AH_PRINT(...)
+// #define MS_PRINT(...)
+// #define SH_PRINT(...)
 
 // only one of __lanuch_bounds__ and __maxnreg__ can be applied to a kernel
 // (max reg count can be manipulated from nvcc)
@@ -550,37 +582,32 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(x, y),
                                      sampleIdx);
             raygenElem = raygen(raygenInput, warpRng, CMEM_haltonOwenParams);
-            // we got here "AFTER raygen: 0xffffffff"
-            // printf("AFTER raygen: 0x%x\n", __activemask());
+            assert(raygenElem.state);
           }
           // check if 32 available places in queue
-          // printf(
-          //     "[%u %u] RAYGEN CAP failed for sample [%d %d] %d. Queue "
-          //     "Free: %d\n",
-          //     blockIdx.x, threadIdx.x, x, y, sampleIdx,
-          //     input.closesthitQueue.producerFreeCount());
           unsigned active = __activemask();
           while (active) {
             // warp-wide push (push already does __threadfence())
             active &= ~input.closesthitQueue.push(&raygenElem);
             if (active) {
               pascal_fixed_sleep(64);
-              // printf(
-              //     "[%u %u] RAYGEN push failed for sample [%d %d] %d. Queue "
-              //     "Free: %d\n",
-              //     blockIdx.x, threadIdx.x, x, y, sampleIdx,
-              //     input.closesthitQueue.producerFreeCount());
+              RG_PRINT(
+                  "[%u %u] RAYGEN push failed for sample [%d %d] %d. Queue "
+                  "Free: %d\n",
+                  blockIdx.x, threadIdx.x, x, y, sampleIdx,
+                  input.closesthitQueue.producerFreeCount());
             }
           }
-          printf("[%u %u] RAYGEN activemask 0x%x generated sample [%d %d] %d\n",
-                 blockIdx.x, threadIdx.x, __activemask(), x, y, sampleIdx);
+          RG_PRINT(
+              "[%u %u] RAYGEN activemask 0x%x generated sample [%d %d] %d\n",
+              blockIdx.x, threadIdx.x, __activemask(), x, y, sampleIdx);
         }
       }
     }
     ThisWarp::sync();
 
-    printf("[%u %u] RAYGEN activemask 0x%x finished generation\n", blockIdx.x,
-           threadIdx.x, __activemask());
+    RG_PRINT("[%u %u] RAYGEN activemask 0x%x finished generation\n", blockIdx.x,
+             threadIdx.x, __activemask());
 
     // warp leader decrements warpRemaining
     if ((threadIdx.x & 31) == 0) {
@@ -599,130 +626,108 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
 #endif
   } else if (blockType == WAVEFRONT_KERNEL_CLOSESTHIT_DIVISOR) {
 #if WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE
-    int& blockTerminated = SMEM[0];
-    if (threadIdx.x == 0) {
-      blockTerminated = 0;
-    }
-    __syncthreads();
-
+    bool extraLife = true;
     while (true) {
-#  if PRINT_ASSERT
-      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
-        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
-               blockIdx.x, threadIdx.x, __LINE__);
-      }
-#  endif
-      assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-      if (input.closesthitQueue.consumerUsedCount() < warpSize) {
-#  if PRINT_ASSERT
-        if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
-          printf(
-              "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
-              blockIdx.x, threadIdx.x, __LINE__);
-        }
-#  endif
-        assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-        if (threadIdx.x == 0) {
-          // termination signal (block leader checks atomic var)
-          blockTerminated = atomicAdd(input.signalTerm, 0);
-        }
-        // atomic operations shouldn't need external synchronization. also, this
-        // can cause deadlock
-        // __syncthreads();
-        if (blockTerminated == blockNumPerKernel - 1) {
-          // if there are remainders which are less than warp size, let first
-          // warp of the first block handle that, while everybody else dies
-          uint32_t warpId = -1U;
-          asm volatile("mov.u32  %0, %%warpid;" : "=r"(warpId));
-          if (blockIdx.x == WAVEFRONT_KERNEL_CLOSESTHIT_DIVISOR &&
-              warpId == 0 && input.closesthitQueue.consumerUsedCount() > 0) {
-            // go down
-          } else {
-            break;
-          }
-        } else {
-          pascal_fixed_sleep(64);
-          continue;
-        }
-      }
-      // printf("CLOSEST HIT START \n");
-#  if PRINT_ASSERT
-      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
-        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
-               blockIdx.x, threadIdx.x, __LINE__);
-      }
-#  endif
-      assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
+      // used for any vote
+      bool finished = false;
+      assert(__activemask() == 0xFFFF'FFFFU);
+
       ClosestHitInput kinput{};  // TODO SMEM?
-      int const mask = input.closesthitQueue.pop(&kinput);
-      if (!(mask & (1 << ThisWarp::thread_rank()))) {
-#  if PRINT_ASSERT
-        if (!blockTerminated) {
-          printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
-                 __LINE__);
+      if (int const mask = input.closesthitQueue.pop(&kinput);
+          mask & (1 << getLaneId())) {
+        // TODO optimize GMEM access
+        warpRng.startPixelSample(
+            CMEM_haltonOwenParams,
+            make_int2(kinput.state->pixelCoordX, kinput.state->pixelCoordY),
+            kinput.state->sampleIndex);
+        if (auto const hitResult = closesthit(kinput.ray, input.d_triSoup);
+            hitResult.hit) {
+          extraLife = true;
+          assert(kinput.state);
+          // if hit -> enqueue anyhit queue and shade queue
+          int const hitWorkersMask = __activemask();
+          int const coalescedLaneId = getCoalescedLaneId(hitWorkersMask);
+          // TODO SMEM?
+          {
+            // scope for struct
+            int coalescedMask = 0;
+            AnyhitInput const anyHitInput{.state = kinput.state,
+                                          .pos = hitResult.pos,
+                                          .rayD = kinput.ray.d,
+                                          .normal = hitResult.normal,
+                                          .error = hitResult.error,
+                                          .matId = hitResult.matId,
+                                          .t = hitResult.t};
+            // Warning: Potential Deadlock
+            do {
+              coalescedMask = input.anyhitQueue.push(&anyHitInput);
+              if (!(coalescedMask & (1 << coalescedLaneId))) {
+                pascal_fixed_sleep(64);
+              }
+            } while (!(coalescedMask & (1 << coalescedLaneId)));
+          }
+          // TODO SMEM?
+          {
+            int coalescedMask = 0;
+            // scope for struct
+            ShadeInput const shadeInput{
+                .state = kinput.state,
+                .pos = hitResult.pos,
+                .rayD = kinput.ray.d,
+                .normal = hitResult.normal,
+                .error = hitResult.error,
+                .matId = hitResult.matId,
+                .t = hitResult.t,
+            };
+            // Warning: Potential Deadlock
+            do {
+              coalescedMask = input.shadeQueue.push(&shadeInput);
+              if (!(coalescedMask & (1 << coalescedLaneId))) {
+                pascal_fixed_sleep(64);
+              }
+            } while (!(coalescedMask & (1 << coalescedLaneId)));
+          }
+
+          CH_PRINT("[%u %u] px: [%d %d] d: %d | hit at: %f %f %f\n", blockIdx.x,
+                   threadIdx.x, kinput.state->pixelCoordX,
+                   kinput.state->pixelCoordY, kinput.state->depth,
+                   hitResult.pos.x, hitResult.pos.y, hitResult.pos.z);
+        } else {
+          int const missWorkersMask = __activemask();
+          int const coalescedLaneId = getCoalescedLaneId(missWorkersMask);
+          // if miss -> enqueue miss queue
+          MissInput const missInput{.state = kinput.state,
+                                    .rayDirection = kinput.ray.d};
+          int coalescedMask = 0;
+          do {
+            coalescedMask = input.missQueue.push(&missInput);
+            if (!(coalescedMask & (1 << coalescedLaneId))) {
+              pascal_fixed_sleep(64);
+            }
+          } while (!(coalescedMask & (1 << coalescedLaneId)));
         }
+      } else {
+        int const sleepingWorkersMask = __activemask();
+        if (int const leader = __ffs(sleepingWorkersMask) - 1;
+            leader == getLaneId()) {
+          // compute if there's no more work to do
+          finished = (*input.signalTerm) == blockNumPerKernel && !extraLife;
+          extraLife = false;
+#  if 1
+          if (finished)
+            CH_PRINT("[%u %u] ClosestHit Finished\n", blockIdx.x, threadIdx.x);
 #  endif
-        assert(blockTerminated);
-        // this is the last batch
+        }
+        // something to do but queue not ready. Busy sleep (Pascal doesn't
+        // support __nanosleep)
+        pascal_fixed_sleep(64);
+      }
+
+      // did anyone detect finished condition? If so, Die.
+      if (__any_sync(0xFFFF'FFFFU, finished)) {
         break;
       }
-      cg::coalesced_group const g = cg::coalesced_threads();
-
-      // Compute HitResult
-      HitResult const result = closesthit(kinput.ray, input.d_triSoup);
-      if (result.hit) {
-        // if hit -> enqueue anyhitQueue
-        cg::coalesced_group const gHit = cg::coalesced_threads();
-        // TODO SMEM?
-        AnyhitInput const anyHitInput{.state = kinput.state,
-                                      .pos = result.pos,
-                                      .rayD = kinput.ray.d,
-                                      .normal = result.normal,
-                                      .error = result.error,
-                                      .matId = result.matId,
-                                      .t = result.t};
-        int coalescedMask = 0;
-        do {
-          coalescedMask = input.anyhitQueue.push(&anyHitInput);
-          if (!(coalescedMask & (1 << gHit.thread_rank()))) {
-            pascal_fixed_sleep(64);
-          }
-        } while (!(coalescedMask & (1 << gHit.thread_rank())));
-
-        // enqueue shadeQueue (TODO SMEM?)
-        ShadeInput const shadeInput{
-            .state = kinput.state,
-            .pos = result.pos,
-            .rayD = kinput.ray.d,
-            .normal = result.normal,
-            .error = result.error,
-            .matId = result.matId,
-            .t = result.t,
-        };
-        do {
-          coalescedMask = input.shadeQueue.push(&shadeInput);
-          if (!(coalescedMask & (1 << g.thread_rank()))) {
-            pascal_fixed_sleep(64);
-          }
-        } while (!(coalescedMask & (1 << g.thread_rank())));
-
-      } else {
-        // if not hit -> enqueue missQueue
-        cg::coalesced_group const gMiss = cg::coalesced_threads();
-        // TODO SMEM?
-        MissInput const missInput{.state = kinput.state,
-                                  .rayDirection = kinput.ray.d};
-        int coalescedMask = 0;
-        do {
-          coalescedMask = input.missQueue.push(&missInput);
-          if (!(coalescedMask & (1 << gMiss.thread_rank()))) {
-            pascal_fixed_sleep(64);
-          }
-        } while (!(coalescedMask & (1 << gMiss.thread_rank())));
-      }
-      // group sync
-      g.sync();
-    }
+    }  // end of persistent kernel loop
 #endif
   } else if (blockType == WAVEFRONT_KERNEL_ANYHIT_DIVISOR) {
 #if WAVEFRONT_KERNEL_ANYHIT_ACTIVE
@@ -1306,7 +1311,7 @@ void wavefrontMain() {
     CUDA_CHECK(cudaEventSynchronize(ready[0]));
     streamCallbackWriteBuffer(callbackData.get());
 
-#define INSPECT_CLOSEST_HIT 1
+#define INSPECT_CLOSEST_HIT 0
 #if INSPECT_CLOSEST_HIT
     auto const theInput = std::make_unique<ClosestHitInput[]>(
         kinput.closesthitQueue.queueCapacity);

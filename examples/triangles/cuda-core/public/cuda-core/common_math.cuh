@@ -1,7 +1,173 @@
 #ifndef DMT_CUDA_CORE_COMMON_MATH_CUH
 #define DMT_CUDA_CORE_COMMON_MATH_CUH
 
+#include <cooperative_groups.h>
+
 #include <cassert>
+
+// ---------------------------------------------------------------------------
+inline __device__ void pascal_fixed_sleep(uint64_t nanoseconds) {
+  uint64_t start;
+  // Read the 64-bit nanosecond global timer
+  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(start));
+
+  uint64_t now = start;
+  while (now < start + nanoseconds) {
+    asm volatile("mov.u64 %0, %globaltimer;" : "=l"(now));
+  }
+}
+
+inline __device__ __forceinline__ unsigned getWarpId() {
+  unsigned warpId = -1U;
+  asm("mov.u32 %0, %%warpid;" : "=r"(warpId));
+  return warpId;
+}
+inline __device__ __forceinline__ unsigned getLaneId() {
+  unsigned laneId = -1U;
+  asm("mov.u32 %0, %%laneid;" : "=r"(laneId));
+  return laneId;
+}
+
+// this is an alternatives to coalesced groups. Does it make a diff? IDK
+inline __device__ __forceinline__ unsigned getCoalescedLaneId(unsigned mask) {
+  // 1. Create a mask of all lanes _Lower_ than the current lane
+  uint32_t const lower = (1u << getLaneId()) - 1;
+  // 2. Count how many active threads are lower than me
+  int const rank = __popc(mask & lower);
+  return rank;
+}
+
+// TODO how to use?
+inline __device__ float groupedAtomicFetch(float* address) {
+  unsigned const fullwarp = __activemask();
+#if __CUDA_ARCH__ >= 700
+  // 1. Identify all lanes in the wapr hitting same address
+  unsigned const mask = __match_any_sync(fullwarp, (uintptr_t)address);
+  // 2. Elect a leader for each unique address group
+  int const leader = __ffs(mask) - 1;
+  int const laneId = threadIdx.x % 32;  // could use %%laneid;
+  float val = (float)0;
+  // 3. Only leader performs hardware atomic fetch
+  if (laneId == leader) {
+    val = atomicAdd(address, (float)0);
+  }
+  // 4. Broadcast the fetched value from the leader to all lanes in the sam
+  // group. we use the same mask to ensure shuffle stays within the matched
+  // group
+  return __shfl_sync(mask, val, leader);
+#else
+  // loop through all possible groups emulating match with ballot instruction
+  unsigned active = fullwarp;
+  float result = (float)0;
+  while (active > 0) {
+    // 1. Pick the first remaining lane as the leader of the round
+    int const leader = __ffs(active) - 1;
+    // 2. Broadcast the leader's address to se who else matches it
+    float* refAddr = (float*)__shfl_sync(active, (uintptr_t)address, leader);
+    unsigned match = __ballot_sync(active, address == refAddr);
+    // 3. leader performs atomic fetch
+    float fetchedVal = (float)0;
+    if ((threadIdx.x % 32) == leader) {
+      fetchedVal = atomicAdd(refAddr, (float)0);
+    }
+    // 4. Broadcast value to everyone in the current match group from
+    // currently elected leader.
+    float const sharedVal = __shfl_sync(active, fetchedVal, leader);
+    // 5. if current lane was part of group, then save result
+    if (address == refAddr) {
+      result = sharedVal;
+    }
+    // 6. Clear processed lanes
+    active &= ~match;
+  }
+  return result;
+#endif
+}
+
+// TODO: how can We group atomic operation per lanes sharing address
+// __match_any_sync and __match_all_sync perform a broadcast-and-compare
+// operation of a variable between threads within a warp. Supported by
+// devices of compute capability 7.x or higher.
+template <typename T>
+  requires((std::is_floating_point_v<T> || std::is_integral_v<T>) &&
+           sizeof(T) == 4)
+__device__ void groupedAtomicAdd(T* address, T val) {
+  unsigned const fullwarp = __activemask();
+#if __CUDA_ARCH__ >= 700
+  // 1. find all lanes that have the same address
+  unsigned const mask = __match_any_sync(fullwarp, (uintptr_t)address);
+  // 2. Identify the leader (lane with lowest ID in mask)
+  int const leader = __ffs(mask) - 1;
+  int const laneId = threadIdx.x % 32;  // might be %laneid
+  // 3. Intra-warp reduction within group
+  float res = val;  // start with your value
+  for (int i = 0; i < 32; ++i) {
+    // if not leader and active
+    if (i != leader && (mask & (1 << i))) {
+      res += __shfl_sync(mask, val, i);
+    }
+  }
+
+  // 4. leader does the add
+  if (laneId == leader) {
+    atomicAdd(address, res);
+  }
+#else
+  // pascal doesn't have match instructions. iterative ballot approach.
+  // loop through unique addresses present in the warp one by one
+  // 0. mask of lanes which haven't been processed yet
+  unsigned active = fullwarp;
+  while (active > 0) {
+    // 1. Pick a reference address from the first active lane
+    int const leader = __ffs(active) - 1;
+    auto* const refAddr = (T*)__shfl_sync(active, (uintptr_t)address, leader);
+    // 2. Find all other lanes with same address
+    unsigned const matching = __ballot_sync(active, address == refAddr);
+    // 3. reduction within the matching group
+    float res = val;  // start with your value
+    for (int i = 16; i > 0; i >>= 1) {
+      float const temp = __shfl_down_sync(matching, res, i);
+      // if lane is part of match, add value (%laneid might be used here)
+      if (matching & (1 << ((threadIdx.x % 32) + i))) {
+        res += temp;
+      }
+    }
+    // 4. Leader of matching group performs the atomic
+    if ((threadIdx.x % 32) == leader) {
+      atomicAdd(refAddr, res);
+    }
+    // 5. Remove the processed lanes from the active mask
+    active &= ~matching;
+  }
+#endif
+}
+
+// TODO __CUDA_ARCH__ >= 700 version
+inline __device__ int groupedAtomicIncLeaderOnly(int* address) {
+  // pascal doesn't have match instructions. iterative ballot approach.
+  // loop through unique addresses present in the warp one by one
+  // 0. mask of lanes which haven't been processed yet
+  unsigned active = __activemask();
+  int old = 0;
+  while (active > 0) {
+    // 1. Pick a reference address from the first active lane
+    int const leader = __ffs(active) - 1;
+    auto* const refAddr = (int*)__shfl_sync(active, (uintptr_t)address, leader);
+    // 2. Find all other lanes with same address
+    unsigned const matching = __ballot_sync(active, address == refAddr);
+    // 3. Leader of matching group performs the atomic inc
+    if ((threadIdx.x % 32) == leader) {
+      old = atomicAdd(refAddr, 1);
+    }
+    // 4. Leader broadcasts result to members of the current matching group
+    if (address == refAddr) {
+      old = __shfl_sync(active, old, leader);
+    }
+    // 5. Remove the processed lanes from the active mask
+    active &= ~matching;
+  }
+  return old;
+}
 
 struct Transform {
   float m[16];

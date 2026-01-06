@@ -33,171 +33,6 @@ namespace cg = cooperative_groups;
 
 #define PRINT_ASSERT 1
 
-__device__ void pascal_fixed_sleep(uint64_t nanoseconds) {
-  uint64_t start;
-  // Read the 64-bit nanosecond global timer
-  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(start));
-
-  uint64_t now = start;
-  while (now < start + nanoseconds) {
-    asm volatile("mov.u64 %0, %globaltimer;" : "=l"(now));
-  }
-}
-
-__device__ __forceinline__ unsigned getWarpId() {
-  unsigned warpId = -1U;
-  asm("mov.u32 %0, %%warpid;" : "=r"(warpId));
-  return warpId;
-}
-
-__device__ __forceinline__ unsigned getLaneId() {
-  unsigned laneId = -1U;
-  asm("mov.u32 %0, %%laneid;" : "=r"(laneId));
-  return laneId;
-}
-
-// this is an alternatives to coalesced groups. Does it make a diff? IDK
-__device__ __forceinline__ unsigned getCoalescedLaneId(unsigned mask) {
-  // 1. Create a mask of all lanes _Lower_ than the current lane
-  uint32_t const lower = (1u << getLaneId()) - 1;
-  // 2. Count how many active threads are lower than me
-  int const rank = __popc(mask & lower);
-  return rank;
-}
-
-// TODO how to use?
-__device__ float groupedAtomicFetch(float* address) {
-  unsigned const fullwarp = __activemask();
-#if __CUDA_ARCH__ >= 700
-  // 1. Identify all lanes in the wapr hitting same address
-  unsigned const mask = __match_any_sync(fullwarp, (uintptr_t)address);
-  // 2. Elect a leader for each unique address group
-  int const leader = __ffs(mask) - 1;
-  int const laneId = threadIdx.x % 32;  // could use %%laneid;
-  float val = (float)0;
-  // 3. Only leader performs hardware atomic fetch
-  if (laneId == leader) {
-    val = atomicAdd(address, (float)0);
-  }
-  // 4. Broadcast the fetched value from the leader to all lanes in the sam
-  // group. we use the same mask to ensure shuffle stays within the matched
-  // group
-  return __shfl_sync(mask, val, leader);
-#else
-  // loop through all possible groups emulating match with ballot instruction
-  unsigned active = fullwarp;
-  float result = (float)0;
-  while (active > 0) {
-    // 1. Pick the first remaining lane as the leader of the round
-    int const leader = __ffs(active) - 1;
-    // 2. Broadcast the leader's address to se who else matches it
-    float* refAddr = (float*)__shfl_sync(active, (uintptr_t)address, leader);
-    unsigned match = __ballot_sync(active, address == refAddr);
-    // 3. leader performs atomic fetch
-    float fetchedVal = (float)0;
-    if ((threadIdx.x % 32) == leader) {
-      fetchedVal = atomicAdd(refAddr, (float)0);
-    }
-    // 4. Broadcast value to everyone in the current match group from
-    // currently elected leader.
-    float const sharedVal = __shfl_sync(active, fetchedVal, leader);
-    // 5. if current lane was part of group, then save result
-    if (address == refAddr) {
-      result = sharedVal;
-    }
-    // 6. Clear processed lanes
-    active &= ~match;
-  }
-  return result;
-#endif
-}
-
-// TODO: how can We group atomic operation per lanes sharing address
-// __match_any_sync and __match_all_sync perform a broadcast-and-compare
-// operation of a variable between threads within a warp. Supported by
-// devices of compute capability 7.x or higher.
-template <typename T>
-  requires((std::is_floating_point_v<T> || std::is_integral_v<T>) &&
-           sizeof(T) == 4)
-__device__ void groupedAtomicAdd(T* address, T val) {
-  unsigned const fullwarp = __activemask();
-#if __CUDA_ARCH__ >= 700
-  // 1. find all lanes that have the same address
-  unsigned const mask = __match_any_sync(fullwarp, (uintptr_t)address);
-  // 2. Identify the leader (lane with lowest ID in mask)
-  int const leader = __ffs(mask) - 1;
-  int const laneId = threadIdx.x % 32;  // might be %laneid
-  // 3. Intra-warp reduction within group
-  float res = val;  // start with your value
-  for (int i = 0; i < 32; ++i) {
-    // if not leader and active
-    if (i != leader && (mask & (1 << i))) {
-      res += __shfl_sync(mask, val, i);
-    }
-  }
-
-  // 4. leader does the add
-  if (laneId == leader) {
-    atomicAdd(address, res);
-  }
-#else
-  // pascal doesn't have match instructions. iterative ballot approach.
-  // loop through unique addresses present in the warp one by one
-  // 0. mask of lanes which haven't been processed yet
-  unsigned active = fullwarp;
-  while (active > 0) {
-    // 1. Pick a reference address from the first active lane
-    int const leader = __ffs(active) - 1;
-    auto* const refAddr =
-        (float*)__shfl_sync(active, (uintptr_t)address, leader);
-    // 2. Find all other lanes with same address
-    unsigned const matching = __ballot_sync(active, address == refAddr);
-    // 3. reduction within the matching group
-    float res = val;  // start with your value
-    for (int i = 16; i > 0; i >>= 1) {
-      float const temp = __shfl_down_sync(matching, res, i);
-      // if lane is part of match, add value (%laneid might be used here)
-      if (matching & (1 << ((threadIdx.x % 32) + i))) {
-        res += temp;
-      }
-    }
-    // 4. Leader of matching group performs the atomic
-    if ((threadIdx.x % 32) == leader) {
-      atomicAdd(refAddr, res);
-    }
-    // 5. Remove the processed lanes from the active mask
-    active &= ~matching;
-  }
-#endif
-}
-
-// TODO __CUDA_ARCH__ >= 700 version
-__device__ int groupedAtomicIncLeaderOnly(int* address) {
-  // pascal doesn't have match instructions. iterative ballot approach.
-  // loop through unique addresses present in the warp one by one
-  // 0. mask of lanes which haven't been processed yet
-  unsigned active = __activemask();
-  int old = 0;
-  while (active > 0) {
-    // 1. Pick a reference address from the first active lane
-    int const leader = __ffs(active) - 1;
-    auto* const refAddr = (int*)__shfl_sync(active, (uintptr_t)address, leader);
-    // 2. Find all other lanes with same address
-    unsigned const matching = __ballot_sync(active, address == refAddr);
-    // 3. Leader of matching group performs the atomic inc
-    if ((threadIdx.x % 32) == leader) {
-      old = atomicAdd(refAddr, 1);
-    }
-    // 4. Leader broadcasts result to members of the current matching group
-    if (address == refAddr) {
-      old = __shfl_sync(active, old, leader);
-    }
-    // 5. Remove the processed lanes from the active mask
-    active &= ~matching;
-  }
-  return old;
-}
-
 // TODO: Optimize for vectorized load/store instructions
 // ld.global.b128 16
 
@@ -318,46 +153,42 @@ struct WavefrontInput {
 // kernel param size limit (cc < 7.0)
 static_assert(sizeof(WavefrontInput) <= 4096 * 1024);
 
-__device__ ClosestHitInput raygen(RaygenInput const& raygenInput,
-                                  DeviceHaltonOwen& warpRng,
-                                  DeviceHaltonOwenParams const& params) {
+__device__ void raygen(RaygenInput const& raygenInput,
+                       DeviceHaltonOwen& warpRng,
+                       DeviceHaltonOwenParams const& params,
+                       ClosestHitInput& out) {
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
-  ClosestHitInput out{};
   // TODO aligned allocation
-  out.state = static_cast<PathState*>(malloc(sizeof(PathState)));
+  static unsigned constexpr MAX_RETRY = 16;
+  static unsigned constexpr EXP_BACKOFF_SHFT = 1;
+  static unsigned constexpr WAIT_BASE = 3600;
+  static unsigned constexpr WAIT_MAX = 0xFFFF'FFFFU;
+  static_assert(WAIT_BASE * (MAX_RETRY | 1) << EXP_BACKOFF_SHFT != 0U);
+  int attempt = 0;
+  int wait = WAIT_BASE;
+  assert(!out.state);
+  while (!out.state /*&& attempt < MAX_RETRY*/) {
+    out.state = static_cast<PathState*>(malloc(sizeof(PathState)));
+    if (!out.state) {
+      pascal_fixed_sleep(wait);
+      if (wait < WAIT_MAX) {
+        // doesn't saturate though
+        wait = min(WAIT_BASE * ((attempt | 1) << EXP_BACKOFF_SHFT), WAIT_MAX);
+      }
+    }
+    ++attempt;
+  }
   assert(out.state);
+  if (!out.state) {
+    asm volatile("trap;");
+  }
+
   PathState::make(*out.state, raygenInput.px, raygenInput.py,
                   raygenInput.sampleIndex, raygenInput.spp);
   out.ray = getCameraRay(cs, *raygenInput.cameraFromRaster,
                          *raygenInput.renderFromCamera);
-  return out;
 }
-
-// height: 128, width: 128, spp: 4
-// gridDim: 2
-// loop 0:
-// - b0: (x:0,  y:0) - (x:7,    y:3) | s: 0-3
-// - b1: (x:8,  y:0) - (x:15,   y:3) | s: 0-3
-// loop 1:
-// - b0: (x:16,  y:0) - (x:23,  y:3) | s: 0-3
-// - b1: (x:24,  y:3) - (x:31,  y:3) | s: 0-3
-// height: 8, width: 8, spp: 8
-// gridDim: 2
-// loop 0:
-// - b0: (x:0,   y:0) - (x:7,    y:3) | s: 0-3
-// - b1: (x:0,   y:0) - (x:7,    y:3) | s: 4-7
-// loop 1:
-// - b0: (x:0,   y:4) - (x:7,    y:7) | s: 0-3
-// - b1: (x:0,   y:4) - (x:7,    y:7) | s: 4-7
-// inputs: height, width, spp, warpId, blockId, gridDim, warpRayIdx
-// output: xStart, xEnd, yStart, yEnd, sStart, sEnd
-/// \warning sample stride = warpSize
-/*
-    static int constexpr samplesPerGen = 1; // -> Tx
-    static int constexpr pxPerGen = 8;      // -> Ty
-    static int constexpr pyPerGen = 4;      // -> Tz
-*/
 
 inline constexpr int WAVEFRONT_KERNEL_TYPES = 5;
 
@@ -471,18 +302,18 @@ inline constexpr int WAVEFRONT_KERNEL_SHARED_MEM_BYTES = 12;
 #define WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE 1
 #define WAVEFRONT_KERNEL_ANYHIT_ACTIVE 1
 #define WAVEFRONT_KERNEL_MISS_ACTIVE 1
-#define WAVEFRONT_KERNEL_SHADE_ACTIVE 0
+#define WAVEFRONT_KERNEL_SHADE_ACTIVE 1
 
 // #define RG_PRINT(...) printf(__VA_ARGS__)
 // #define CH_PRINT(...) printf(__VA_ARGS__)
 // #define AH_PRINT(...) printf(__VA_ARGS__)
-#define MS_PRINT(...) printf(__VA_ARGS__)
+// #define MS_PRINT(...) printf(__VA_ARGS__)
 #define SH_PRINT(...) printf(__VA_ARGS__)
 
 #define RG_PRINT(...)
 #define CH_PRINT(...)
 #define AH_PRINT(...)
-// #define MS_PRINT(...)
+#define MS_PRINT(...)
 // #define SH_PRINT(...)
 
 // only one of __lanuch_bounds__ and __maxnreg__ can be applied to a kernel
@@ -574,7 +405,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             };
             warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(x, y),
                                      sampleIdx);
-            raygenElem = raygen(raygenInput, warpRng, CMEM_haltonOwenParams);
+            raygen(raygenInput, warpRng, CMEM_haltonOwenParams, raygenElem);
             assert(raygenElem.state);
           }
           // check if 32 available places in queue
@@ -607,9 +438,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       // if warpRemaining zero (not negative),
       // warp leader increments GMEM signalTerm
       if (atomicSub(&warpRemaining, 1) == 1) {
-#  if 0
+#  if 1
         if (atomicInc(input.signalTerm, 1) == blockNumPerKernel - 1) {
-          printf("RG GLOBALLY FINISHED RAYGEN\n");
+          printf("[%u] RG GLOBALLY FINISHED RAYGEN\n", blockIdx.x);
         }
 #  else
         atomicInc(input.signalTerm, 1);
@@ -639,6 +470,15 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           extraLife = true;
           assert(kinput.state);
           // if hit -> enqueue anyhit queue and shade queue
+
+          // 1. Set useCount to 1 implies "One AnyHit worker is active/pending"
+          // We do this BEFORE pushing to queues to prevent Shade from freeing
+          // early.
+          kinput.state->useCount = 1;
+          __threadfence();  // Ensure the write is visible before the push makes
+                            // the pointer visible
+
+          // 2. Queue Pushes
           int const hitWorkersMask = __activemask();
           int const coalescedLaneId = getCoalescedLaneId(hitWorkersMask);
           // TODO SMEM?
@@ -734,13 +574,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       AnyhitInput kinput{};  // TODO SMEM?
       if (int const mask = input.anyhitQueue.pop(&kinput);
           mask & (1 << getLaneId())) {
-        int const activeWorkersMask = __activemask();
-        // preserve sinks to deallocate early the path state
-        if (int const leader = __ffs(activeWorkersMask) - 1;
-            leader == getLaneId()) {
-          atomicAdd(&kinput.state->useCount, 1);
-        }
-        __syncwarp(activeWorkersMask);  // TODO necessary?
+        // useCount on state set to one by closesthit
         // configure RNG
         warpRng.startPixelSample(
             CMEM_haltonOwenParams,
@@ -767,9 +601,13 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                   input.d_triSoup, kinput.normal, input.lightCount,
                   atomicAdd(&kinput.state->lastBounceTransmission, 0),
                   warpRng.get2D(CMEM_haltonOwenParams), &Le);
-        groupedAtomicAdd(reinterpret_cast<float*>(&kinput.state->L) + 0, Le.x);
-        groupedAtomicAdd(reinterpret_cast<float*>(&kinput.state->L) + 1, Le.y);
-        groupedAtomicAdd(reinterpret_cast<float*>(&kinput.state->L) + 2, Le.y);
+        atomicAdd(&kinput.state->L.x, Le.x);
+        atomicAdd(&kinput.state->L.y, Le.y);
+        atomicAdd(&kinput.state->L.z, Le.y);
+
+        // 3. Decrement state useCount when finished
+        // We use atomicSub each thread in the warp works on a diffeent item.
+        atomicSub(&kinput.state->useCount, 1);
 
         AH_PRINT(
             "AH [%u %u] px: [%d %d] d: %d | light: %d BSDF: %d | MIS Weighted "
@@ -844,7 +682,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           groupedAtomicAdd(&kinput.state->L.z, Le.z);
         }
         // 2. sinking management: wait for any-hit of current depth
-        while (kinput.state->useCount) {
+        int volatile* useCount = &kinput.state->useCount;
+        while (*useCount > 0) {
           pascal_fixed_sleep(64);
         }
         float4 color = *reinterpret_cast<float4*>(&kinput.state->L);
@@ -883,158 +722,140 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
 #endif
   } else if (blockType == WAVEFRONT_KERNEL_SHADE_DIVISOR) {
 #if WAVEFRONT_KERNEL_SHADE_ACTIVE
-    // possible optimization:
-    // - warp-loop over BSDF types. First loop search for 32 ready queue, second
-    //   loop anything is fine
-    int& blockTerminated = SMEM[0];
-    if (threadIdx.x == 0) {
-      blockTerminated = 0;
-    }
-    __syncthreads();
+    // Sink: TODO SMEM array to cache PathStates which are still used?
+    // consumer preamble
+    bool extraLife = true;
+
     while (true) {
-#  if PRINT_ASSERT
-      if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
-        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
-               blockIdx.x, threadIdx.x, __LINE__);
-      }
-#  endif
-      assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-      if (input.shadeQueue.consumerUsedCount() < warpSize) {
-#  if PRINT_ASSERT
-        if (!(__activemask() == 0xFFFF'FFFFU || blockTerminated)) {
-          printf(
-              "[%u %u %d] __activemask() == 0xFFFF'FFFFU || blockTerminated\n",
-              blockIdx.x, threadIdx.x, __LINE__);
-        }
-#  endif
-        assert(__activemask() == 0xFFFF'FFFFU || blockTerminated);
-        if (threadIdx.x == 0) {
-          // termination signal (block leader checks atomic var)
-          blockTerminated = atomicAdd(input.signalTerm, 0);
-        }
-        // atomic operations shouldn't need external synchronization. also, this
-        // can cause deadlock
-        // __syncthreads();
-        if (blockTerminated == blockNumPerKernel - 1) {
-          // if there are remainders which are less than warp size, let first
-          // warp of the first block handle that, while everybody else dies
-          uint32_t warpId = -1u;
-          asm volatile("mov.u32 %0, %%warpid;" : "=r"(warpId));
-          if (blockIdx.x == WAVEFRONT_KERNEL_SHADE_DIVISOR && warpId == 0 &&
-              input.shadeQueue.consumerUsedCount() > 0) {
-            // go down
-          } else {
-            break;
-          }
-        } else {
-          // TODO wait N clocks before retrying
-          continue;
-        }
-      }  // exit if-block without continue/break: then execute core function
-#  if PRINT_ASSERT
-      if (__activemask() != 0xFFFF'FFFFU) {
-        printf("[%u %u %d] __activemask() == 0xFFFF'FFFFU\n", blockIdx.x,
-               threadIdx.x, __LINE__);
-      }
-#  endif
+      // used for any vote
+      bool finished = false;
       assert(__activemask() == 0xFFFF'FFFFU);
+
       ShadeInput kinput{};
-      int const mask = input.shadeQueue.pop(&kinput);
-      if (!(mask & (1 << ThisWarp::thread_rank()))) {
-#  if PRINT_ASSERT
-        if (!blockTerminated) {
-          printf("[%u %u %d] blockTerminated\n", blockIdx.x, threadIdx.x,
-                 __LINE__);
-        }
-#  endif
-        assert(blockTerminated);
-        // this is the last batch
-        break;
-      }
-      cg::coalesced_group const g = cg::coalesced_threads();
+      if (int const mask = input.shadeQueue.pop(&kinput);
+          mask & (1 << getLaneId())) {
+        // TODO if malloc aligned, use int4
+        assert(kinput.state);
+        int const px = __ldg(&kinput.state->pixelCoordX);
+        int const py = __ldg(&kinput.state->pixelCoordY);
+        int const sampleIndex = __ldg(&kinput.state->sampleIndex);
+        // initialize RNG
+        warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(px, py),
+                                 sampleIndex);
 
-      // Inside each bsdf
-      // 1. if max depth reached, kill path
-      bool pathDied = false;
-      static int constexpr MAX_DEPTH = 32;
-      int oldDepth = groupedAtomicIncLeaderOnly(&kinput.state->depth);
-      if (oldDepth >= MAX_DEPTH) {
-        pathDied = true;
-      }
-
-      float3 wi{0, 0, 0};
-      if (!pathDied) {
-        // 2. (not dead) BSDF sampling and bounce computation
-        BSDF const bsdf = [&] __device__() {  // TODO copy?
-          BSDF theBsdf = input.d_bsdf[kinput.matId];
-          prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD);
-          return theBsdf;
-        }();
-        BSDFSample bs =
-            sampleBsdf(bsdf, -kinput.rayD, kinput.normal, kinput.normal,
-                       warpRng.get2D(CMEM_haltonOwenParams),
-                       warpRng.get1D(CMEM_haltonOwenParams));
-        if (bs) {
-          wi = bs.wi;
-          // 3. (not dead) update path state
-          atomicAdd(&kinput.state->anySpecularBounces, (int)bs.delta);
-          atomicAdd(&kinput.state->transmissionCount, (int)bs.refract);
-          atomicExch(&kinput.state->lastBounceTransmission, (int)bs.refract);
-          float3 beta = atomicFetchBeta(*kinput.state) * bs.f *
-                        fabsf(dot(bs.wi, kinput.normal)) / bs.pdf;
-          // 4. (not dead) russian roulette. If fails, kill path
-          if (float const rrBeta = maxComponentValue(beta * bs.eta);
-              rrBeta < 1 && oldDepth > 1) {
-            float const q = fmaxf(0.f, 1.f - rrBeta);
-            if (warpRng.get1D(CMEM_haltonOwenParams) < q) {
-              pathDied = true;
-            } else {
-              beta /= 1 - q;
-              atomicExch(&kinput.state->throughput.x, beta.x);
-              atomicExch(&kinput.state->throughput.y, beta.y);
-              atomicExch(&kinput.state->throughput.z, beta.z);
-            }
-          }
-        } else {
+        // Inside each bsdf
+        // 1. if max depth reached, kill path
+        bool pathDied = false;
+        static int constexpr MAX_DEPTH = 3; // dies afterwards
+        int const oldDepth = groupedAtomicIncLeaderOnly(&kinput.state->depth);
+        if (oldDepth >= MAX_DEPTH) {
           pathDied = true;
         }
-      }
 
-      if (pathDied) {
-        // 5. if path killed, sink to output
-        // no need for atomic operation here
-        {
-          int2 const pixel =
-              __ldg(reinterpret_cast<int2*>(&kinput.state->pixelCoordX));
-          int2 const imageRes = CMEM_imageResolution;
-          // don't use ldg, as it's probably cached?
-          float4 color = *reinterpret_cast<float4*>(&kinput.state->L);
-          color.w = 1;  // TODO filter weight?
-          // TODO SMEM?
-          input.d_outBuffer[pixel.y * imageRes.x + pixel.x] += color;
+        float3 wi{0, 0, 0};
+        if (!pathDied) {
+          // 2. (not dead) BSDF sampling and bounce computation
+          BSDF const bsdf = [&] __device__() {  // TODO copy?
+            BSDF theBsdf = input.d_bsdf[kinput.matId];
+            prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD);
+            return theBsdf;
+          }();
+          BSDFSample const bs =
+              sampleBsdf(bsdf, -kinput.rayD, kinput.normal, kinput.normal,
+                         warpRng.get2D(CMEM_haltonOwenParams),
+                         warpRng.get1D(CMEM_haltonOwenParams));
+          if (bs) {
+            wi = bs.wi;
+            // 3. (not dead) update path state
+            atomicAdd(&kinput.state->anySpecularBounces, (int)bs.delta);
+            atomicAdd(&kinput.state->transmissionCount, (int)bs.refract);
+            atomicExch(&kinput.state->lastBounceTransmission, (int)bs.refract);
+            float3 beta = kinput.state->throughput * bs.f *
+                          fabsf(dot(bs.wi, kinput.normal)) / bs.pdf;
+            // 4. (not dead) russian roulette. If fails, kill path
+            if (float const rrBeta = maxComponentValue(beta * bs.eta);
+                rrBeta < 1 && oldDepth > 1) {
+              float const q = fmaxf(0.f, 1.f - rrBeta);
+              if (warpRng.get1D(CMEM_haltonOwenParams) < q) {
+                pathDied = true;
+              } else {
+                beta /= 1 - q;
+                atomicExch(&kinput.state->throughput.x, beta.x);
+                atomicExch(&kinput.state->throughput.y, beta.y);
+                atomicExch(&kinput.state->throughput.z, beta.z);
+              }
+            }
+          } else {
+            pathDied = true;
+          }
         }
-        freeState(kinput.state);
-        kinput.state = nullptr;
-      } else {
-        // 6. if path alive, push to closesthit next bounce
-        ClosestHitInput const closestHitInput{
-            .state = kinput.state,
-            .ray = {
-                .o = offsetRayOrigin(kinput.pos, kinput.error, kinput.normal,
-                                     wi),
-                .d = wi,
-            }};  // TODO SMEM?
+#  define KILL_PATH 0
+#  if KILL_PATH
+        pathDied = true;
+#  endif
 
-        cg::coalesced_group const gAlive = cg::coalesced_threads();
-        int coalescedMask = 0;
-        do {
-          coalescedMask = input.closesthitQueue.push(&closestHitInput);
-          if (!(coalescedMask & (1 << gAlive.thread_rank()))) {
+        if (pathDied) {
+          // 5. if path killed, sink to output
+          // no need for atomic operation here
+
+          // sinking management: wait for any-hit of current depth
+          int volatile* useCount = &kinput.state->useCount;
+          while (*useCount > 0) {
             pascal_fixed_sleep(64);
           }
-        } while (!(coalescedMask & (1 << gAlive.thread_rank())));
+          float4 color = *reinterpret_cast<float4*>(&kinput.state->L);
+          color.w = 1;  // TODO filter weight?
+          freeState(kinput.state);
+          kinput.state = nullptr;
+
+          // 3. sink to output buffer
+          // no need for atomic operation here
+          input.d_outBuffer[py * CMEM_imageResolution.x + px] += color;
+          SH_PRINT("SH [%u %u]  px [%u %u] d: %d | path died\n", blockIdx.x,
+                   threadIdx.x, px, py, oldDepth);
+        } else {
+          // 6. if path alive, push to closesthit next bounce
+          ClosestHitInput const closestHitInput{
+              .state = kinput.state,
+              .ray = {
+                  .o = offsetRayOrigin(kinput.pos, kinput.error, kinput.normal,
+                                       wi),
+                  .d = wi,
+              }};  // TODO SMEM?
+
+          cg::coalesced_group const gAlive = cg::coalesced_threads();
+          int coalescedMask = 0;
+          do {
+            coalescedMask = input.closesthitQueue.push(&closestHitInput);
+            if (!(coalescedMask & (1 << gAlive.thread_rank()))) {
+              pascal_fixed_sleep(64);
+            }
+          } while (!(coalescedMask & (1 << gAlive.thread_rank())));
+          SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit\n",
+                   blockIdx.x, threadIdx.x, px, py, oldDepth);
+        }
+      } else {  // push failed on current lane
+        int const sleepingWorkersMask = __activemask();
+        if (int const leader = __ffs(sleepingWorkersMask) - 1;
+            leader == getLaneId()) {
+          // compute if there's no more work to do
+          finished = (*input.signalTerm) == blockNumPerKernel && !extraLife;
+          extraLife = false;
+#  if 1
+          if (finished) {
+            printf("SH [%u %u] Shade Finished\n", blockIdx.x, threadIdx.x);
+          }
+#  endif
+          // something to do but queue not ready. Busy sleep (Pascal doesn't
+          // support __nanosleep)
+          pascal_fixed_sleep(64);
+        }
       }
-      g.sync();
+
+      // did anyone detect finished condition? If so, Die.
+      if (__any_sync(0xFFFF'FFFFU, finished)) {
+        break;
+      }
     }  // end persistent kernel thread loop
 #endif
   }
@@ -1218,8 +1039,7 @@ void wavefrontMain() {
   std::vector<Light> h_infiniteLights;
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
-  cornellBox(false, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs,
-             &h_camera);
+  cornellBox(true, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
   WavefrontInput kinput{};
   allocateDeviceMemory(threads, blocks, h_scene, h_lights, h_infiniteLights,

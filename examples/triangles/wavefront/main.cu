@@ -181,6 +181,7 @@ struct WavefrontInput {
   uint32_t infiniteLightCount;
   uint32_t sampleOffset;
   uint32_t* signalTerm;
+  uint32_t* closestHitDone;
   // GMEM Queues
   DeviceQueue<ClosestHitInput> closesthitQueue;
   DeviceQueue<AnyhitInput> anyhitQueue;
@@ -593,6 +594,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         break;
       }
     }  // end of persistent kernel loop
+
+    atomicExch(input.closestHitDone, 1u);
 #endif
   } else if (blockType == WAVEFRONT_KERNEL_ANYHIT_DIVISOR) {
 #if WAVEFRONT_KERNEL_ANYHIT_ACTIVE
@@ -649,7 +652,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
 
       } else {
         int const sleepingWorkersMask = __activemask();
-        bool closestHitEmpty = input.closesthitQueue.empty_agg();
+        bool closestHitEmpty = *(volatile uint32_t*)input.closestHitDone;
         if (int const leader = __ffs(sleepingWorkersMask) - 1;
             closestHitEmpty && leader == getLaneId()) {
           // compute if there's no more work to do
@@ -729,7 +732,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                  threadIdx.x, px, py, color.x, color.y, color.z);
       } else {
         int const sleepingWorkersMask = __activemask();
-        bool const closestHitEmpty = input.closesthitQueue.empty_agg();
+        bool closestHitEmpty = *(volatile uint32_t*)input.closestHitDone;
         if (int const leader = __ffs(sleepingWorkersMask) - 1;
             closestHitEmpty && leader == getLaneId()) {
           // compute if there's no more work to do
@@ -1009,6 +1012,10 @@ void allocateDeviceMemory(uint32_t threads, uint32_t blocks,
   CUDA_CHECK(cudaMalloc(&kinput.signalTerm, sizeof(uint32_t)));
   CUDA_CHECK(cudaMemset(kinput.signalTerm, 0, sizeof(uint32_t)));
 
+  kinput.closestHitDone = nullptr;
+  CUDA_CHECK(cudaMalloc(&kinput.closestHitDone, sizeof(uint32_t)));
+  CUDA_CHECK(cudaMemset(kinput.closestHitDone, 0, sizeof(uint32_t)));
+
   // path states
   initDeviceArena(kinput.pathStateSlots, 2048);
 }
@@ -1017,8 +1024,10 @@ void freeDeviceMemory(WavefrontInput& kinput) {
   // path states
   freeDeviceArena(kinput.pathStateSlots);
 
-  // scene
   cudaFree(kinput.signalTerm);
+  cudaFree(kinput.closestHitDone);
+
+  // scene
   cudaFree(kinput.d_haltonOwen);
   cudaFree(kinput.d_triSoup.matId);
   cudaFree(kinput.d_triSoup.xs);
@@ -1100,7 +1109,7 @@ void wavefrontMain() {
     CUDA_CHECK(cudaEventCreate(&ready[i]));
   }
 
-#define ONLY_ONE_EXEC 1
+#define ONLY_ONE_EXEC 0
 
   // TODO small optimization with cuda graphs?
 

@@ -33,6 +33,24 @@ namespace cg = cooperative_groups;
 
 #define PRINT_ASSERT 1
 
+#define WAVEFRONT_KERNEL_RAYGEN_ACTIVE 1
+#define WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE 1
+#define WAVEFRONT_KERNEL_ANYHIT_ACTIVE 1
+#define WAVEFRONT_KERNEL_MISS_ACTIVE 1
+#define WAVEFRONT_KERNEL_SHADE_ACTIVE 1
+
+#define RG_PRINT(...) printf(__VA_ARGS__)
+// #define CH_PRINT(...) printf(__VA_ARGS__)
+// #define AH_PRINT(...) printf(__VA_ARGS__)
+// #define MS_PRINT(...) printf(__VA_ARGS__)
+// #define SH_PRINT(...) printf(__VA_ARGS__)
+
+// #define RG_PRINT(...)
+#define CH_PRINT(...)
+#define AH_PRINT(...)
+#define MS_PRINT(...)
+#define SH_PRINT(...)
+
 // TODO: Optimize for vectorized load/store instructions
 // ld.global.b128 16
 
@@ -47,8 +65,8 @@ namespace cg = cooperative_groups;
 // - any specular bounces
 // - last BSDF PDF
 struct PathState {
-  __device__ static void make(PathState& state, int px, int py, int s,
-                              int spp) {
+  __device__ static void make(PathState& state, int px, int py, int s, int spp,
+                              int slot) {
     state.pixelCoordX = px;
     state.pixelCoordY = py;
     state.sampleIndex = s;
@@ -57,10 +75,21 @@ struct PathState {
     state.throughput = make_float3(1, 1, 1);
     state.L = make_float3(0, 0, 0);
     state.lastBsdfPdf = 0;
-    state.transmissionCount = 0;
     state.lastBounceTransmission = 0;
     state.anySpecularBounces = 0;
     state.useCount = 0;
+    state.bufferSlot = slot;
+  }
+
+  void __forceinline__ __device__ ldg_pxs(int& px, int& py, int& s) {
+    px = __ldg(&pixelCoordX);
+    py = __ldg(&pixelCoordY);
+    s = __ldg(&sampleIndex);
+  }
+
+  void __forceinline__ __device__ ldg_px(int& px, int& py) {
+    px = __ldg(&pixelCoordX);
+    py = __ldg(&pixelCoordY);
   }
 
   int pixelCoordX;
@@ -72,15 +101,23 @@ struct PathState {
   float3 throughput;
   float3 L;
   float lastBsdfPdf;
-  int transmissionCount;
   int lastBounceTransmission;  // TODO cache in SMEM?
   int anySpecularBounces;
   int useCount;
+  int bufferSlot;
 };
-static_assert(sizeof(PathState) == 64);
-static_assert(offsetof(PathState, L) % 16 == 0);
-// TODO preallocated?
-__device__ __forceinline__ void freeState(PathState* state) { free(state); }
+static_assert(sizeof(PathState) % alignof(PathState) == 0);
+
+__device__ __forceinline__ void freeState(
+    DeviceArena<PathState>& pathStateSlots, PathState* state) {
+  if (state) {
+    pathStateSlots.free_slot(state->bufferSlot);
+#ifdef DMT_DEBUG
+    memset(state, 0, sizeof(PathState));
+    __threadfence();
+#endif
+  }
+}
 
 struct RaygenInput {
   int px;
@@ -149,14 +186,17 @@ struct WavefrontInput {
   QueueGMEM<AnyhitInput> anyhitQueue;
   QueueGMEM<MissInput> missQueue;
   QueueGMEM<ShadeInput> shadeQueue;
+
+  // help me
+  DeviceArena<PathState> pathStateSlots;
 };
 // kernel param size limit (cc < 7.0)
 static_assert(sizeof(WavefrontInput) <= 4096 * 1024);
 
-__device__ void raygen(RaygenInput const& raygenInput,
-                       DeviceHaltonOwen& warpRng,
-                       DeviceHaltonOwenParams const& params,
-                       ClosestHitInput& out) {
+inline __device__ __forceinline__ void raygen(
+    RaygenInput const& raygenInput, DeviceArena<PathState>& pathStateSlots,
+    DeviceHaltonOwen& warpRng, DeviceHaltonOwenParams const& params,
+    ClosestHitInput& out) {
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
   // TODO aligned allocation
@@ -168,24 +208,27 @@ __device__ void raygen(RaygenInput const& raygenInput,
   int attempt = 0;
   int wait = WAIT_BASE;
   assert(!out.state);
-  while (!out.state /*&& attempt < MAX_RETRY*/) {
-    out.state = static_cast<PathState*>(malloc(sizeof(PathState)));
-    if (!out.state) {
-      pascal_fixed_sleep(wait);
-      if (wait < WAIT_MAX) {
-        // doesn't saturate though
-        wait = min(WAIT_BASE * ((attempt | 1) << EXP_BACKOFF_SHFT), WAIT_MAX);
-      }
+  int slot = -1;
+  while (slot < 0) {
+    slot = pathStateSlots.allocate();
+    pascal_fixed_sleep(64);
+#if PRINT_ASSERT
+    if (slot < 0) {
+      RG_PRINT("RG [%u %u] slot allocation failed for px %d %d s %d\n",
+               blockIdx.x, threadIdx.x, raygenInput.px, raygenInput.py,
+               raygenInput.sampleIndex);
     }
-    ++attempt;
+#endif
   }
+  out.state = &pathStateSlots.buffer[slot];
   assert(out.state);
   if (!out.state) {
     asm volatile("trap;");
   }
 
   PathState::make(*out.state, raygenInput.px, raygenInput.py,
-                  raygenInput.sampleIndex, raygenInput.spp);
+                  raygenInput.sampleIndex, raygenInput.spp, slot);
+  __threadfence();
   out.ray = getCameraRay(cs, *raygenInput.cameraFromRaster,
                          *raygenInput.renderFromCamera);
 }
@@ -298,24 +341,6 @@ inline constexpr int WAVEFRONT_KERNEL_SHADE_DIVISOR = 4;
 
 inline constexpr int WAVEFRONT_KERNEL_SHARED_MEM_BYTES = 12;
 
-#define WAVEFRONT_KERNEL_RAYGEN_ACTIVE 1
-#define WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE 1
-#define WAVEFRONT_KERNEL_ANYHIT_ACTIVE 1
-#define WAVEFRONT_KERNEL_MISS_ACTIVE 1
-#define WAVEFRONT_KERNEL_SHADE_ACTIVE 1
-
-// #define RG_PRINT(...) printf(__VA_ARGS__)
-// #define CH_PRINT(...) printf(__VA_ARGS__)
-// #define AH_PRINT(...) printf(__VA_ARGS__)
-// #define MS_PRINT(...) printf(__VA_ARGS__)
-#define SH_PRINT(...) printf(__VA_ARGS__)
-
-#define RG_PRINT(...)
-#define CH_PRINT(...)
-#define AH_PRINT(...)
-#define MS_PRINT(...)
-// #define SH_PRINT(...)
-
 // only one of __lanuch_bounds__ and __maxnreg__ can be applied to a kernel
 // (max reg count can be manipulated from nvcc)
 
@@ -405,7 +430,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             };
             warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(x, y),
                                      sampleIdx);
-            raygen(raygenInput, warpRng, CMEM_haltonOwenParams, raygenElem);
+            raygen(raygenInput, input.pathStateSlots, warpRng,
+                   CMEM_haltonOwenParams, raygenElem);
             assert(raygenElem.state);
           }
           // check if 32 available places in queue
@@ -688,7 +714,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         }
         float4 color = *reinterpret_cast<float4*>(&kinput.state->L);
         color.w = 1;  // TODO filter weight?
-        freeState(kinput.state);
+        freeState(input.pathStateSlots, kinput.state);
         kinput.state = nullptr;
 
         // 3. sink to output buffer
@@ -736,9 +762,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           mask & (1 << getLaneId())) {
         // TODO if malloc aligned, use int4
         assert(kinput.state);
-        int const px = __ldg(&kinput.state->pixelCoordX);
-        int const py = __ldg(&kinput.state->pixelCoordY);
-        int const sampleIndex = __ldg(&kinput.state->sampleIndex);
+        int px, py, sampleIndex;
+        kinput.state->ldg_pxs(px, py, sampleIndex);
         // initialize RNG
         warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(px, py),
                                  sampleIndex);
@@ -746,7 +771,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         // Inside each bsdf
         // 1. if max depth reached, kill path
         bool pathDied = false;
-        static int constexpr MAX_DEPTH = 3; // dies afterwards
+        static int constexpr MAX_DEPTH = 3;  // dies afterwards
+        // assumes warps have different states
         int const oldDepth = groupedAtomicIncLeaderOnly(&kinput.state->depth);
         if (oldDepth >= MAX_DEPTH) {
           pathDied = true;
@@ -768,7 +794,6 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             wi = bs.wi;
             // 3. (not dead) update path state
             atomicAdd(&kinput.state->anySpecularBounces, (int)bs.delta);
-            atomicAdd(&kinput.state->transmissionCount, (int)bs.refract);
             atomicExch(&kinput.state->lastBounceTransmission, (int)bs.refract);
             float3 beta = kinput.state->throughput * bs.f *
                           fabsf(dot(bs.wi, kinput.normal)) / bs.pdf;
@@ -805,7 +830,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           }
           float4 color = *reinterpret_cast<float4*>(&kinput.state->L);
           color.w = 1;  // TODO filter weight?
-          freeState(kinput.state);
+          freeState(input.pathStateSlots, kinput.state);
           kinput.state = nullptr;
 
           // 3. sink to output buffer
@@ -976,9 +1001,15 @@ void allocateDeviceMemory(uint32_t threads, uint32_t blocks,
   kinput.signalTerm = nullptr;
   CUDA_CHECK(cudaMalloc(&kinput.signalTerm, sizeof(uint32_t)));
   CUDA_CHECK(cudaMemset(kinput.signalTerm, 0, sizeof(uint32_t)));
+
+  // path states
+  initDeviceArena(kinput.pathStateSlots, 2048);
 }
 
 void freeDeviceMemory(WavefrontInput& kinput) {
+  // path states
+  freeDeviceArena(kinput.pathStateSlots);
+
   // scene
   cudaFree(kinput.signalTerm);
   cudaFree(kinput.d_haltonOwen);

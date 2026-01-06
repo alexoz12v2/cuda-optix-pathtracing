@@ -448,9 +448,13 @@ function(dmt_set_target_warnings target properties_visibility)
   # TODO move to another function
   set_property(TARGET ${target} PROPERTY POSITION_INDEPENDENT_CODE ON)
   set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-  # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON) # default = on for shared, off for static
-  set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Shared)
-  # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlink>)
+  ## shouldn't be necessary if you link against a CUDA:: target
+  # set_property(TARGET ${target} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS OFF) # default = on for shared, off for static
+  # set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Static)
+
+  # Device Link Time optimization necessary to inline device functions in other compilation units
+  target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlto>)
+
   # the commented ones are done by default
   dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
   target_compile_options(
@@ -584,7 +588,7 @@ function(dmt_add_compile_definitions target properties_visibility)
       #  COMMAND_ECHO STDOUT
       #  COMMAND_ERROR_IS_FATAL ANY
       #)
-#
+      #
       ## Typical MSVC include path looks like: <VS_INSTALL_PATH>/VC/Tools/MSVC/<version>/include
       #file(GLOB MSVC_TOOLSET_DIR "${VS_INSTALL_PATH}/VC/Tools/MSVC/*")
       #list(SORT MSVC_TOOLSET_DIR)

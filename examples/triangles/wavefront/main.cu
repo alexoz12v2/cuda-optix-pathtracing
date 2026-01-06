@@ -570,8 +570,10 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         }
       } else {
         int const sleepingWorkersMask = __activemask();
+        // if input queue empty and raygen done
+        bool const shadeEmpty = input.shadeQueue.empty_agg();
         if (int const leader = __ffs(sleepingWorkersMask) - 1;
-            leader == getLaneId()) {
+            shadeEmpty && leader == getLaneId()) {
           // compute if there's no more work to do
           finished = (*input.signalTerm) == blockNumPerKernel && !extraLife;
           extraLife = false;
@@ -647,8 +649,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
 
       } else {
         int const sleepingWorkersMask = __activemask();
+        bool closestHitEmpty = input.closesthitQueue.empty_agg();
         if (int const leader = __ffs(sleepingWorkersMask) - 1;
-            leader == getLaneId()) {
+            closestHitEmpty && leader == getLaneId()) {
           // compute if there's no more work to do
           finished = (*input.signalTerm) == blockNumPerKernel && !extraLife;
           extraLife = false;
@@ -705,9 +708,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           Le = beta * Le * input.infiniteLightCount;
           // TODO: If any specular bounce or depth == 0, don't do MIS
           // TODO: Use last BSDF for MIS
-          groupedAtomicAdd(&kinput.state->L.x, Le.x);
-          groupedAtomicAdd(&kinput.state->L.y, Le.y);
-          groupedAtomicAdd(&kinput.state->L.z, Le.z);
+          atomicAdd(&kinput.state->L.x, Le.x);
+          atomicAdd(&kinput.state->L.y, Le.y);
+          atomicAdd(&kinput.state->L.z, Le.z);
         }
         // 2. sinking management: wait for any-hit of current depth
         int volatile* useCount = &kinput.state->useCount;
@@ -726,8 +729,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                  threadIdx.x, px, py, color.x, color.y, color.z);
       } else {
         int const sleepingWorkersMask = __activemask();
+        bool const closestHitEmpty = input.closesthitQueue.empty_agg();
         if (int const leader = __ffs(sleepingWorkersMask) - 1;
-            leader == getLaneId()) {
+            closestHitEmpty && leader == getLaneId()) {
           // compute if there's no more work to do
           finished = (*input.signalTerm) == blockNumPerKernel && !extraLife;
           extraLife = false;
@@ -863,8 +867,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         }
       } else {  // push failed on current lane
         int const sleepingWorkersMask = __activemask();
+        bool const closestHitEmpty = input.closesthitQueue.empty_agg();
         if (int const leader = __ffs(sleepingWorkersMask) - 1;
-            leader == getLaneId()) {
+            closestHitEmpty && leader == getLaneId()) {
           // compute if there's no more work to do
           finished = (*input.signalTerm) == blockNumPerKernel && !extraLife;
           extraLife = false;

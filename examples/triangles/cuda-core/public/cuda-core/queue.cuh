@@ -9,6 +9,23 @@
 // __threadfence_block() ≈ membar.cta
 // __threadfence_system() ≈ membar.sys
 
+// Helper: Load Cache Volatile (Pascal+)
+// Reads directly from L2/Memory, bypassing potentially stale L1
+template <typename T>
+  requires std::is_same_v<int, T> || std::is_same_v<float, T> ||
+           std::is_same_v<unsigned, T>
+__device__ __forceinline__ T load_cv(T* addr) {
+  T val;
+  if constexpr (std::is_same_v<int, T>) {
+    asm volatile("ld.global.cv.s32 %0, [%1];" : "=r"(val) : "l"(addr));
+  } else if constexpr (std::is_same_v<float, T>) {
+    asm volatile("ld.global.cv.f32 %0, [%1];" : "=f"(val) : "l"(addr));
+  } else if constexpr (std::is_same_v<unsigned, T>) {
+    asm volatile("ld.global.cv.u32 %0, [%1];" : "=r"(val) : "l"(addr));
+  }
+  return val;
+}
+
 inline __forceinline__ __device__ int atomicAggInc(int* ptr) {
   namespace cg = cooperative_groups;
   cg::coalesced_group g = cg::coalesced_threads();
@@ -148,14 +165,6 @@ struct DeviceQueue {
   int* tail;     // Producer index
   int capacity;  // Size of arrays (must be power of 2)
 
-  // Helper: Load Cache Volatile (Pascal+)
-  // Reads directly from L2/Memory, bypassing potentially stale L1
-  __device__ __forceinline__ int load_cv(int* addr) {
-    int val;
-    asm volatile("ld.global.cv.s32 %0, [%1];" : "=r"(val) : "l"(addr));
-    return val;
-  }
-
   // Helper: Nano Sleep (Pascal+)
   // Reduces memory contention during spin-waiting
   __device__ __forceinline__ void sleep_ns(int ns) {
@@ -180,8 +189,8 @@ struct DeviceQueue {
     if (lane == 0) {
       // Retry loop to prevent massive overshoot when queue is full
       while (true) {
-        int h = q.load_cv(q.head);  // Volatile load
-        int t = q.load_cv(q.tail);  // Volatile load
+        int h = load_cv(q.head);  // Volatile load
+        int t = load_cv(q.tail);  // Volatile load
 
         // Check usage using wrapping arithmetic
         // Note: This snapshot might be slightly stale, but prevents
@@ -214,7 +223,7 @@ struct DeviceQueue {
       // A. Spin-wait for slot to be EMPTY
       // We use volatile load (cv) instead of atomicAdd for the check
       int backoff = 32;
-      while (q.load_cv(&q.states[idx]) != SLOT_EMPTY) {
+      while (load_cv(&q.states[idx]) != SLOT_EMPTY) {
         q.sleep_ns(backoff);
         backoff = min(backoff * 2, 1024);  // Exponential backoff
       }
@@ -244,8 +253,8 @@ struct DeviceQueue {
     int count = 0;
 
     if (lane == 0) {
-      int h = q.load_cv(q.head);
-      int t = q.load_cv(q.tail);
+      int h = load_cv(q.head);
+      int t = load_cv(q.tail);
 
       int avail = t - h;
 
@@ -268,7 +277,7 @@ struct DeviceQueue {
 
       // A. Spin-wait for slot to be FULL
       int backoff = 32;
-      while (q.load_cv(&q.states[idx]) != SLOT_FULL) {
+      while (load_cv(&q.states[idx]) != SLOT_FULL) {
         q.sleep_ns(backoff);
         backoff = min(backoff * 2, 1024);
       }
@@ -284,6 +293,25 @@ struct DeviceQueue {
     }
 
     return g.ballot(active);
+  }
+
+  __device__ bool empty_agg() const {
+    namespace cg = cooperative_groups;
+    cg::coalesced_group const g = cg::coalesced_threads();
+    int const lane = g.thread_rank();
+
+    unsigned localOr = 0;
+    // stride over bitmask works
+    for (int i = lane; i < capacity; i += g.size()) {
+      localOr |= load_cv<int>(&states[i]) != SLOT_EMPTY;
+    }
+    // coalesced warp reduction
+    for (int offset = g.size() >> 1; offset > 0; offset >>= 1) {
+      localOr |= g.shfl_down(localOr, offset);
+    }
+    bool empty = localOr == 0;
+    empty = g.shfl(empty, 0);
+    return empty;
   }
 };  // ---------- end class
 
@@ -424,6 +452,25 @@ struct DeviceArena {
 
     // Atomic Clear: bitmask[word_idx] &= ~(1 << bit_offset)
     atomicAnd(&bitmask[word_idx], mask);
+  }
+
+  __device__ bool empty_agg() const {
+    namespace cg = cooperative_groups;
+    cg::coalesced_group const g = cg::coalesced_threads();
+    int const lane = g.thread_rank();
+
+    unsigned localOr = 0;
+    // stride over bitmask works
+    for (int i = lane; i < mask_words; i += g.size()) {
+      localOr |= load_cv((int*)&bitmask[i]);
+    }
+    // coalesced warp reduction
+    for (int offset = g.size() >> 1; offset > 0; offset >>= 1) {
+      localOr |= g.shfl_down(localOr, offset);
+    }
+    bool empty = localOr == 0;
+    empty = g.shfl(empty, 0);
+    return empty;
   }
 };
 

@@ -39,13 +39,13 @@ namespace cg = cooperative_groups;
 #define WAVEFRONT_KERNEL_MISS_ACTIVE 1
 #define WAVEFRONT_KERNEL_SHADE_ACTIVE 1
 
-#define RG_PRINT(...) printf(__VA_ARGS__)
+// #define RG_PRINT(...) printf(__VA_ARGS__)
 // #define CH_PRINT(...) printf(__VA_ARGS__)
 // #define AH_PRINT(...) printf(__VA_ARGS__)
 // #define MS_PRINT(...) printf(__VA_ARGS__)
 // #define SH_PRINT(...) printf(__VA_ARGS__)
 
-// #define RG_PRINT(...)
+#define RG_PRINT(...)
 #define CH_PRINT(...)
 #define AH_PRINT(...)
 #define MS_PRINT(...)
@@ -385,6 +385,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     int const warpsPerBlock = threadsPerBlock / 32;
     if (threadIdx.x == 0) {
       warpRemaining = warpsPerBlock;
+      if (blockIdx.x == 0) {
+        atomicExch(input.signalTerm, 0);
+      }
     }
     __syncthreads();  // bar.sync 0;
 
@@ -479,6 +482,11 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
 #endif
   } else if (blockType == WAVEFRONT_KERNEL_CLOSESTHIT_DIVISOR) {
 #if WAVEFRONT_KERNEL_CLOSESTHIT_ACTIVE
+    if (threadIdx.x == 0 && blockIdx.x == WAVEFRONT_KERNEL_CLOSESTHIT_DIVISOR) {
+      atomicExch(input.closestHitDone, 0);
+    }
+    __syncthreads();
+
     // consumer preamble
     bool extraLife = true;
     while (true) {

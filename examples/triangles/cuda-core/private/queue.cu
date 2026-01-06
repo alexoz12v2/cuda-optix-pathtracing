@@ -107,7 +107,7 @@ __device__ int queueConsumerUsedCount(int* publish_back, int* front,
   // if GMEM, this is a broadcast access
   int const h = *front;
   int const t = *publish_back;
-  return t - h;
+  return (t - h) & (capacity - 1);
 }
 
 // number of available pops (full slots, already published)
@@ -116,5 +116,5 @@ __device__ int queueProducerFreeCount(int* reserve_back, int* front,
   // if GMEM, this is a broadcast access
   int const h = *front;
   int const t = *reserve_back;
-  return capacity - (t - h);
+  return capacity - (t - h) & (capacity - 1);
 }

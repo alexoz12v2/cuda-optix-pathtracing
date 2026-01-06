@@ -99,9 +99,9 @@ struct DeviceHaltonOwenParams {
 struct DeviceCamera {
   float3 dir{0.f, 1.f, 0.f};
   float3 pos{0.f, 0.f, 0.f};
-  int width = 1024;
-  int height = 512;
-  int spp = 32;
+  int width = 16;
+  int height = 16;
+  int spp = 2;
   float focalLength = 20.f;
   float sensorSize = 36.f;
 };

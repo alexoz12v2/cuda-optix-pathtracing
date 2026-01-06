@@ -182,10 +182,10 @@ struct WavefrontInput {
   uint32_t sampleOffset;
   uint32_t* signalTerm;
   // GMEM Queues
-  QueueGMEM<ClosestHitInput> closesthitQueue;
-  QueueGMEM<AnyhitInput> anyhitQueue;
-  QueueGMEM<MissInput> missQueue;
-  QueueGMEM<ShadeInput> shadeQueue;
+  DeviceQueue<ClosestHitInput> closesthitQueue;
+  DeviceQueue<AnyhitInput> anyhitQueue;
+  DeviceQueue<MissInput> missQueue;
+  DeviceQueue<ShadeInput> shadeQueue;
 
   // help me
   DeviceArena<PathState> pathStateSlots;
@@ -438,14 +438,15 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           unsigned active = __activemask();
           while (active) {
             // warp-wide push (push already does __threadfence())
-            active &= ~input.closesthitQueue.push(&raygenElem);
+            active &= ~input.closesthitQueue.queuePush(&raygenElem);
             if (active) {
               pascal_fixed_sleep(64);
               RG_PRINT(
-                  "RG [%u %u] RAYGEN push failed for sample [%d %d] %d. Queue "
-                  "Free: %d\n",
+                  "RG [%u %u] RAYGEN push failed for sample [%d %d] %d. head: "
+                  "%d tail: %d\n",
                   blockIdx.x, threadIdx.x, x, y, sampleIdx,
-                  input.closesthitQueue.producerFreeCount());
+                  *(volatile int*)(&input.closesthitQueue.head),
+                  *(volatile int*)(&input.closesthitQueue.tail));
             }
           }
           RG_PRINT(
@@ -484,7 +485,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       assert(__activemask() == 0xFFFF'FFFFU);
 
       ClosestHitInput kinput{};  // TODO SMEM?
-      if (int const mask = input.closesthitQueue.pop(&kinput);
+      if (int const mask = input.closesthitQueue.queuePop(&kinput);
           mask & (1 << getLaneId())) {
         // TODO optimize GMEM access
         warpRng.startPixelSample(
@@ -520,7 +521,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                                           .t = hitResult.t};
             // Warning: Potential Deadlock
             do {
-              coalescedMask = input.anyhitQueue.push(&anyHitInput);
+              coalescedMask = input.anyhitQueue.queuePush(&anyHitInput);
               if (!(coalescedMask & (1 << coalescedLaneId))) {
                 pascal_fixed_sleep(64);
               }
@@ -541,7 +542,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             };
             // Warning: Potential Deadlock
             do {
-              coalescedMask = input.shadeQueue.push(&shadeInput);
+              coalescedMask = input.shadeQueue.queuePush(&shadeInput);
               if (!(coalescedMask & (1 << coalescedLaneId))) {
                 pascal_fixed_sleep(64);
               }
@@ -560,7 +561,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                                     .rayDirection = kinput.ray.d};
           int coalescedMask = 0;
           do {
-            coalescedMask = input.missQueue.push(&missInput);
+            coalescedMask = input.missQueue.queuePush(&missInput);
             if (!(coalescedMask & (1 << coalescedLaneId))) {
               pascal_fixed_sleep(64);
             }
@@ -598,7 +599,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       bool finished = false;
       assert(__activemask() == 0xFFFF'FFFFU);
       AnyhitInput kinput{};  // TODO SMEM?
-      if (int const mask = input.anyhitQueue.pop(&kinput);
+      if (int const mask = input.anyhitQueue.queuePop(&kinput);
           mask & (1 << getLaneId())) {
         // useCount on state set to one by closesthit
         // configure RNG
@@ -679,7 +680,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       assert(__activemask() == 0xFFFF'FFFFU);
 
       MissInput kinput{};
-      if (int const mask = input.missQueue.pop(&kinput);
+      if (int const mask = input.missQueue.queuePop(&kinput);
           mask & (1 << getLaneId())) {
         // TODO if malloc aligned, use int4
         int const px = __ldg(&kinput.state->pixelCoordX);
@@ -758,7 +759,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       assert(__activemask() == 0xFFFF'FFFFU);
 
       ShadeInput kinput{};
-      if (int const mask = input.shadeQueue.pop(&kinput);
+      if (int const mask = input.shadeQueue.queuePop(&kinput);
           mask & (1 << getLaneId())) {
         // TODO if malloc aligned, use int4
         assert(kinput.state);
@@ -851,7 +852,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           cg::coalesced_group const gAlive = cg::coalesced_threads();
           int coalescedMask = 0;
           do {
-            coalescedMask = input.closesthitQueue.push(&closestHitInput);
+            coalescedMask = input.closesthitQueue.queuePush(&closestHitInput);
             if (!(coalescedMask & (1 << gAlive.thread_rank()))) {
               pascal_fixed_sleep(64);
             }
@@ -982,10 +983,10 @@ void allocateDeviceMemory(uint32_t threads, uint32_t blocks,
                         h_camera.width * h_camera.height * sizeof(float4)));
   // GMEM queues
   static int constexpr QUEUE_CAP = 1024;
-  kinput.anyhitQueue = decltype(kinput.anyhitQueue)::create(QUEUE_CAP);
-  kinput.closesthitQueue = decltype(kinput.closesthitQueue)::create(QUEUE_CAP);
-  kinput.shadeQueue = decltype(kinput.shadeQueue)::create(QUEUE_CAP);
-  kinput.missQueue = decltype(kinput.missQueue)::create(QUEUE_CAP);
+  initQueue(kinput.anyhitQueue, QUEUE_CAP);
+  initQueue(kinput.closesthitQueue, QUEUE_CAP);
+  initQueue(kinput.shadeQueue, QUEUE_CAP);
+  initQueue(kinput.missQueue, QUEUE_CAP);
 
   // scene
   kinput.d_triSoup = triSoupFromTriangles(h_scene, h_bsdfs.size());
@@ -1023,10 +1024,10 @@ void freeDeviceMemory(WavefrontInput& kinput) {
   cudaFree(kinput.d_cam);
 
   // GMEM queues
-  decltype(kinput.anyhitQueue)::free(kinput.anyhitQueue);
-  decltype(kinput.closesthitQueue)::free(kinput.closesthitQueue);
-  decltype(kinput.shadeQueue)::free(kinput.shadeQueue);
-  decltype(kinput.missQueue)::free(kinput.missQueue);
+  freeQueue(kinput.anyhitQueue);
+  freeQueue(kinput.closesthitQueue);
+  freeQueue(kinput.shadeQueue);
+  freeQueue(kinput.missQueue);
 
   // output buffer
   cudaFree(kinput.d_outBuffer);

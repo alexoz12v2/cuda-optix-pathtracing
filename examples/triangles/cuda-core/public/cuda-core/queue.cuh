@@ -166,9 +166,7 @@ struct DeviceQueue {
 #endif
   }
 
-  // -------------------------------------------------------------------------
   // Optimized Push (Producer)
-  // -------------------------------------------------------------------------
   __device__ unsigned queuePush(const T* input) {
     namespace cg = cooperative_groups;
     DeviceQueue<T>& q = *this;
@@ -300,14 +298,15 @@ inline __host__ void freeQueue(DeviceQueue<T>& q) {
 template <typename T>
 void __host__ initQueue(DeviceQueue<T>& q, int capacity) {
   q.capacity = capacity;
-  cudaMalloc(&q.buffer, sizeof(T) * capacity);
-  cudaMalloc(&q.states, sizeof(int) * capacity);
-  cudaMalloc(&q.head, sizeof(int));
-  cudaMalloc(&q.tail, sizeof(int));
+  CUDA_CHECK(cudaMalloc(&q.buffer, sizeof(T) * capacity));
+  CUDA_CHECK(cudaMalloc(&q.states, sizeof(int) * capacity));
+  CUDA_CHECK(cudaMalloc(&q.head, sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&q.tail, sizeof(int)));
 
-  cudaMemset(q.states, 0, sizeof(int) * capacity);  // All SLOT_EMPTY
-  cudaMemset(q.head, 0, sizeof(int));
-  cudaMemset(q.tail, 0, sizeof(int));
+  CUDA_CHECK(
+      cudaMemset(q.states, 0, sizeof(int) * capacity));  // All SLOT_EMPTY
+  CUDA_CHECK(cudaMemset(q.head, 0, sizeof(int)));
+  CUDA_CHECK(cudaMemset(q.tail, 0, sizeof(int)));
 }
 
 // ----------------------------------------------------------------------------

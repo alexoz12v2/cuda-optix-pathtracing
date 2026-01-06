@@ -214,17 +214,18 @@ inline __device__ __forceinline__ void raygen(
     pascal_fixed_sleep(64);
 #if PRINT_ASSERT
     if (slot < 0) {
-      RG_PRINT("RG [%u %u] slot allocation failed for px %d %d s %d\n",
-               blockIdx.x, threadIdx.x, raygenInput.px, raygenInput.py,
-               raygenInput.sampleIndex);
+      if (auto const g = cg::coalesced_threads(); g.thread_rank() == 0) {
+        RG_PRINT(
+            "RG [%u %u] (cg: base: %u count %u) slot allocation failed for px "
+            "%d %d s %d\n",
+            blockIdx.x, threadIdx.x, getLaneId(), g.size(), raygenInput.px,
+            raygenInput.py, raygenInput.sampleIndex);
+      }
     }
 #endif
+    // asm volatile("trap;");
   }
   out.state = &pathStateSlots.buffer[slot];
-  assert(out.state);
-  if (!out.state) {
-    asm volatile("trap;");
-  }
 
   PathState::make(*out.state, raygenInput.px, raygenInput.py,
                   raygenInput.sampleIndex, raygenInput.spp, slot);

@@ -351,61 +351,63 @@ struct DeviceArena {
     cg::coalesced_group g = cg::coalesced_threads();
     int lane = g.thread_rank();
 
-    int my_slot = -1;
+    // 1. Leader finds a candidate word
     int target_word = -1;
-
-    // 1. Leader finds candidate word
     if (lane == 0) {
-      int need = g.size();
       for (int i = 0; i < mask_words; ++i) {
         unsigned int m = load_cv((int*)&bitmask[i]);
-        if ((32 - __popc(m)) >= need) {
+        if (__popc(~m) >= g.size()) {  // Use ~m to count zeros
           target_word = i;
           break;
         }
       }
     }
-
     target_word = g.shfl(target_word, 0);
     if (target_word < 0) return -1;
 
-    // 2. Cooperative claim with bounded retry
+    // 2. Attempt to claim
     for (int attempt = 0; attempt < 8; ++attempt) {
       unsigned int old_mask = load_cv((int*)&bitmask[target_word]);
-      int free = 32 - __popc(old_mask);
-      if (free < g.size()) return -1;
+      unsigned int free_mask = ~old_mask;
+      int total_free = __popc(free_mask);
 
-      // Determine ordinal among allocators
-      int my_ord = g.thread_rank();  // all lanes participate
-
-      // Find my_ord-th zero bit
-      unsigned int my_bit = 0;
-      int seen = 0;
-      for (int b = 0; b < 32; ++b) {
-        if (!(old_mask & (1u << b))) {
-          if (seen == my_ord) {
-            my_bit = 1u << b;
-            break;
-          }
-          ++seen;
-        }
+      if (total_free < g.size()) {
+        // Not enough space in this word anymore, leader pick new word or exit
+        return -1;
       }
 
-      // Build combined mask
+      // Each thread finds ONE unique bit from the free_mask
+      unsigned int my_bit = 0;
+      unsigned int temp_mask = free_mask;
+
+      // This is a common idiom: each thread peels off the 'lane'-th bit
+      for (int i = 0; i < lane; ++i) {
+        temp_mask &= (temp_mask - 1);  // Clear the lowest set bit
+      }
+      my_bit = temp_mask & ~(temp_mask - 1);  // Isolate the new lowest set bit
+
+      // Combine all bits found by all threads in the group
       unsigned int combined = 0;
+      // Optimization: Instead of shfl loop, use the group's internal bitmask
+      // But since bits are positions in the 32-bit word, shfl is necessary
+      // unless you use a different approach.
       for (int i = 0; i < g.size(); ++i) {
         combined |= g.shfl(my_bit, i);
       }
 
-      unsigned int prev =
-          atomicCAS(&bitmask[target_word], old_mask, old_mask | combined);
+      unsigned int prev = -1U;
+      if (g.thread_rank() == 0) {
+        prev = atomicCAS(&bitmask[target_word], old_mask, old_mask | combined);
+      }
+      prev = g.shfl(prev, 0);
 
       if (prev == old_mask) {
-        if (my_bit) {
-          my_slot = target_word * 32 + (__ffs(my_bit) - 1);
-        }
-        return my_slot;
+        return target_word * 32 + (__ffs(my_bit) - 1);
       }
+
+      // If CAS failed, someone else modified the word. Retry.
+      // Bounded sleep to reduce contention
+      sleep_ns(10);
     }
 
     return -1;

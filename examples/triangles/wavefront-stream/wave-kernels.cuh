@@ -210,5 +210,7 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
                             DeviceArena<PathState> pathStateSlots,
                             float4* d_outBuffer, DeviceHaltonOwen* d_haltonOwen,
                             BSDF* d_bsdfs);
+__global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
+                               int* d_done);
 
 #endif  // DMT_WAVEFRONT_STREAM_WAVE_KERNELS_CUH

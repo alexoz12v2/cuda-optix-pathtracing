@@ -50,8 +50,8 @@ __global__ void missKernel(DeviceQueue<MissInput> inQueue,
     // 3. sink to output buffer
     // no need for atomic operation here
     d_outBuffer[py * CMEM_imageResolution.x + px] += color;
-    MS_PRINT("MS [%u %u] px: [%d %d] | c: %f %f %f\n", blockIdx.x, threadIdx.x,
-             px, py, color.x, color.y, color.z);
+    MS_PRINT("MS [%u %u] px: [%d %d] | c: %f %f %f (w: %f)\n", blockIdx.x,
+             threadIdx.x, px, py, color.x, color.y, color.z, color.w);
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
     lane = getCoalescedLaneId(activeWorkers);

@@ -80,8 +80,10 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
       // 3. sink to output buffer
       // no need for atomic operation here
       d_outBuffer[py * CMEM_imageResolution.x + px] += color;
-      SH_PRINT("SH [%u %u]  px [%u %u] d: %d | path died\n", blockIdx.x,
-               threadIdx.x, px, py, oldDepth);
+      SH_PRINT(
+          "SH [%u %u]  px [%u %u] d: %d | path died | L: %f %f %f (w: %f)\n",
+          blockIdx.x, threadIdx.x, px, py, oldDepth, color.x, color.y, color.z,
+          color.w);
     } else {
       // 6. if path alive, push to closesthit next bounce
       ClosestHitInput const closestHitInput{
@@ -92,8 +94,10 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
           }};  // TODO SMEM?
 
       unsigned const pushMask = outQueue.queuePush(&closestHitInput);
+#if 0
       SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
                blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
+#endif
       assert(pushMask == __activemask());
     }
 

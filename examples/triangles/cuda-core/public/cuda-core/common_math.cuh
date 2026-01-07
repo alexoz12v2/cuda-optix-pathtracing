@@ -350,6 +350,7 @@ inline __host__ __device__ __forceinline__ float4& operator+=(float4& a,
   a.x += b.x;
   a.y += b.y;
   a.z += b.z;
+  a.w += b.w;
   return a;
 }
 inline __host__ __device__ __forceinline__ float3 operator+(float3 a, float b) {

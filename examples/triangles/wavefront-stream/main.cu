@@ -148,28 +148,31 @@ void wavefrontMain() {
         kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
     CUDA_CHECK(cudaGetLastError());
 
-    anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->anyhitQueue, kinput->d_haltonOwen, kinput->d_lights,
-        kinput->lightCount, kinput->d_bsdfs, kinput->d_triSoup);
-    CUDA_CHECK(cudaGetLastError());
+    // TODO remove (for now dump the whole path, knowing 3 is max depth)
+    for (uint32_t i = 0; i < 3; ++i) {
+      anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->anyhitQueue, kinput->d_haltonOwen, kinput->d_lights,
+          kinput->lightCount, kinput->d_bsdfs, kinput->d_triSoup);
+      CUDA_CHECK(cudaGetLastError());
 
-    shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->shadeQueue, kinput->closesthitQueue, kinput->pathStateSlots,
-        kinput->d_outBuffer, kinput->d_haltonOwen, kinput->d_bsdfs);
-    CUDA_CHECK(cudaGetLastError());
+      shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->shadeQueue, kinput->closesthitQueue, kinput->pathStateSlots,
+          kinput->d_outBuffer, kinput->d_haltonOwen, kinput->d_bsdfs);
+      CUDA_CHECK(cudaGetLastError());
 
-#if 0
-    closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
-        kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
-    CUDA_CHECK(cudaGetLastError());
+#if 1 // TODO remove
+      closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
+          kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
+      CUDA_CHECK(cudaGetLastError());
 #endif
 
-    missKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
-        kinput->d_haltonOwen, kinput->infiniteLights,
-        kinput->infiniteLightCount);
-    CUDA_CHECK(cudaGetLastError());
+      missKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
+          kinput->d_haltonOwen, kinput->infiniteLights,
+          kinput->infiniteLightCount);
+      CUDA_CHECK(cudaGetLastError());
+    }
 
     CUDA_CHECK(
         cudaMemcpyAsync(hostImage, kinput->d_outBuffer,

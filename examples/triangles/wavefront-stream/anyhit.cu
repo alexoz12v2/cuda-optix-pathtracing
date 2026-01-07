@@ -90,18 +90,13 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue,
               d_triSoup, kinput.normal, lightCount,
               atomicAdd(&kinput.state->lastBounceTransmission, 0),
               warpRng.get2D(CMEM_haltonOwenParams), &Le);
-    // TODO: remove atomics and write normally. State is owned exclusively by k
-    atomicAdd(&kinput.state->L.x, Le.x);
-    atomicAdd(&kinput.state->L.y, Le.y);
-    atomicAdd(&kinput.state->L.z, Le.y);
+    kinput.state->L += Le;
 
     AH_PRINT(
-        "AH [%u %u] px: [%d %d] d: %d | light: %d BSDF: %d | MIS Weighted "
-        "Le: "
-        "%f %f %f\n",
+        "AH [%u %u] px: [%d %d] d: %d | light: %d BSDF: %d | L: %f %f %f\n",
         blockIdx.x, threadIdx.x, kinput.state->pixelCoordX,
         kinput.state->pixelCoordY, kinput.state->depth, lightIdx, kinput.matId,
-        Le.x, Le.y, Le.z);
+        kinput.state->L.x, kinput.state->L.y, kinput.state->L.z);
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
     lane = getCoalescedLaneId(activeWorkers);

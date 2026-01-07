@@ -16,7 +16,7 @@ void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
                        uint32_t const width, uint32_t const height);
 
 void writePixel(uint32_t const width, uint8_t* rowMajorImage,
-                float4 const* mortonHostBuffer, uint32_t i, uint32_t const row,
+                float4 const* floatBuffer, uint32_t i, uint32_t const row,
                 uint32_t const col);
 }  // namespace
 
@@ -164,6 +164,9 @@ void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
   for (uint32_t row = 0; row < height; ++row) {
     for (uint32_t col = 0; col < width; ++col) {
       uint32_t const i = row * width + col;
+      std::cout << "Pixel [" << row << ' ' << col << "] : " << outputBuffer[i].x
+                << ' ' << outputBuffer[i].y << ' ' << outputBuffer[i].z << ' '
+                << outputBuffer[i].w << std::endl;
       writePixel(width, rowMajorImage.get(), outputBuffer, i, row, col);
     }
   }
@@ -350,14 +353,14 @@ void cornellBox(bool megakernel, HostTriangleScene* h_scene,
 namespace {
 
 void writePixel(uint32_t const width, uint8_t* rowMajorImage,
-                float4 const* mortonHostBuffer, uint32_t i, uint32_t const row,
+                float4 const* floatBuffer, uint32_t i, uint32_t const row,
                 uint32_t const col) {
   float const fr = fminf(
-      fmaxf(mortonHostBuffer[i].x / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
+      fmaxf(floatBuffer[i].x / floatBuffer[i].w * 255.f, 0.f), 255.f);
   float const fg = fminf(
-      fmaxf(mortonHostBuffer[i].y / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
+      fmaxf(floatBuffer[i].y / floatBuffer[i].w * 255.f, 0.f), 255.f);
   float const fb = fminf(
-      fmaxf(mortonHostBuffer[i].z / mortonHostBuffer[i].w * 255.f, 0.f), 255.f);
+      fmaxf(floatBuffer[i].z / floatBuffer[i].w * 255.f, 0.f), 255.f);
   uint8_t const u8r = static_cast<uint8_t>(fr);
   uint8_t const u8g = static_cast<uint8_t>(fg);
   uint8_t const u8b = static_cast<uint8_t>(fb);

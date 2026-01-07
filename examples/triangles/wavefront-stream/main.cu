@@ -138,7 +138,7 @@ void wavefrontMain() {
     std::cout << "Launching kernel (" << kinput->sampleOffset << ")"
               << std::endl;
 
-    raygenKernel<<<blocks, threads, sharedBytes, st_main>>>(
+    raygenKernel<<<blocks, max(threads, WARP_SIZE), sharedBytes, st_main>>>(
         kinput->closesthitQueue, kinput->pathStateSlots, kinput->d_haltonOwen,
         kinput->d_cam, kinput->sampleOffset);
     CUDA_CHECK(cudaGetLastError());
@@ -158,10 +158,12 @@ void wavefrontMain() {
         kinput->d_outBuffer, kinput->d_haltonOwen, kinput->d_bsdfs);
     CUDA_CHECK(cudaGetLastError());
 
+#if 0
     closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
         kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
         kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
     CUDA_CHECK(cudaGetLastError());
+#endif
 
     missKernel<<<blocks, threads, sharedBytes, st_main>>>(
         kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,

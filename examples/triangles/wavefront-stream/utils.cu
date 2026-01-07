@@ -17,7 +17,7 @@ WavefrontStreamInput::WavefrontStreamInput(
   CUDA_CHECK(cudaMemset(d_outBuffer, 0,
                         h_camera.width * h_camera.height * sizeof(float4)));
   // GMEM queues
-  static int constexpr QUEUE_CAP = 1024;
+  static int constexpr QUEUE_CAP = 2048;
   initQueue(anyhitQueue, QUEUE_CAP);
   initQueue(closesthitQueue, QUEUE_CAP);
   initQueue(shadeQueue, QUEUE_CAP);

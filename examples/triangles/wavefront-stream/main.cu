@@ -126,6 +126,10 @@ void wavefrontMain() {
   callbackData->hostImage = hostImage;
   callbackData->width = h_camera.width;
   callbackData->height = h_camera.height;
+  int* h_done = nullptr;
+  CUDA_CHECK(cudaHostAlloc(&h_done, sizeof(int), cudaHostAllocMapped));
+  int* d_done = nullptr;
+  CUDA_CHECK(cudaHostGetDevicePointer(&d_done, h_done, 0));
 
   // TODO double buffering
   cudaStream_t st_main;
@@ -142,34 +146,37 @@ void wavefrontMain() {
         kinput->closesthitQueue, kinput->pathStateSlots, kinput->d_haltonOwen,
         kinput->d_cam, kinput->sampleOffset);
     CUDA_CHECK(cudaGetLastError());
+    while (!*h_done) {
+      closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
+          kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
+      CUDA_CHECK(cudaGetLastError());
 
-    closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
-        kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
-    CUDA_CHECK(cudaGetLastError());
+      anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->anyhitQueue, kinput->d_haltonOwen, kinput->d_lights,
+          kinput->lightCount, kinput->d_bsdfs, kinput->d_triSoup);
+      CUDA_CHECK(cudaGetLastError());
 
-    anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->anyhitQueue, kinput->d_haltonOwen, kinput->d_lights,
-        kinput->lightCount, kinput->d_bsdfs, kinput->d_triSoup);
-    CUDA_CHECK(cudaGetLastError());
-
-    shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->shadeQueue, kinput->closesthitQueue, kinput->pathStateSlots,
-        kinput->d_outBuffer, kinput->d_haltonOwen, kinput->d_bsdfs);
-    CUDA_CHECK(cudaGetLastError());
+      shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->shadeQueue, kinput->closesthitQueue, kinput->pathStateSlots,
+          kinput->d_outBuffer, kinput->d_haltonOwen, kinput->d_bsdfs);
+      CUDA_CHECK(cudaGetLastError());
 
 #if 0
-    closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
-        kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
-    CUDA_CHECK(cudaGetLastError());
+            closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+              kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
+              kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
+              CUDA_CHECK(cudaGetLastError());
 #endif
 
-    missKernel<<<blocks, threads, sharedBytes, st_main>>>(
-        kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
-        kinput->d_haltonOwen, kinput->infiniteLights,
-        kinput->infiniteLightCount);
-    CUDA_CHECK(cudaGetLastError());
+      missKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
+          kinput->d_haltonOwen, kinput->infiniteLights,
+          kinput->infiniteLightCount);
+      CUDA_CHECK(cudaGetLastError());
+      checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(kinput->pathStateSlots, d_done);
+      cudaStreamSynchronize(st_main);
+    }
 
     CUDA_CHECK(
         cudaMemcpyAsync(hostImage, kinput->d_outBuffer,

@@ -165,6 +165,22 @@ struct DeviceQueue {
   int* tail;     // Producer index
   int capacity;  // Size of arrays (must be power of 2)
 
+  // Warning: Potential Deadlock
+#ifdef DMT_WAVEFRONT_STREAMS
+  __device__ __forceinline__ void spinPush(const T* input) {
+    bool pushed = false;
+    while (!pushed) {
+      int const pushersMask = __activemask();
+      int const coalescedMask = queuePush(&input);
+      if (!(coalescedMask & (1 << getCoalescedLaneId(pushersMask)))) {
+        pascal_fixed_sleep(64);
+      } else {
+        pushed = true;
+      }
+    }
+  }
+#endif
+
   // Helper: Nano Sleep (Pascal+)
   // Reduces memory contention during spin-waiting
   __device__ __forceinline__ void sleep_ns(int ns) {

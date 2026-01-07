@@ -453,14 +453,8 @@ function(dmt_set_target_warnings target properties_visibility)
   # set_property(TARGET ${target} PROPERTY CUDA_RUNTIME_LIBRARY Static)
 
   # Device Link Time optimization necessary to inline device functions in other compilation units
-  target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlto>)
-
-  # the commented ones are done by default
-  dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
-  target_compile_options(
-    ${target}
-    ${properties_visibility}
-    $<$<COMPILE_LANGUAGE:CUDA>:
+  # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlto>)
+  set(CUDA_COMPILE_ARGS
     # -dlink
     # --cudart
     # shared
@@ -470,10 +464,24 @@ function(dmt_set_target_warnings target properties_visibility)
     --extended-lambda # full C++20 lambda syntax inside device code
     # -dc
     -use_fast_math
-    # --relocatable-device-code true set by cuda separable compilation
     -maxrregcount ${DMT_NVCC_MAXREGCOUNT}
     -Xptxas -v
-    >)
+  )
+
+  dmt_set_option(DMT_DEVICE_LINK_TIME_OPTIMIZATION OFF BOOL "-dlto to nvcc and nvlink")
+  dmt_set_option(DMT_NVCC_ARCHITECTURES "61-real" STRING "physical architecture for gencode when using -dlto to nvcc and nvlink")
+  if (DMT_DEVICE_LINK_TIME_OPTIMIZATION)
+    if (DMT_NVCC_ARCHITECTURES)
+      set_target_properties(${target} PROPERTIES CUDA_ARCHITECTURES "${DMT_NVCC_ARCHITECTURES}")
+      list(APPEND CUDA_COMPILE_ARGS -dlto)
+    else ()
+      message(WARNING "ignoring device link time optimization as DMT_NVCC_ARCHITECTURES not defined")
+    endif ()
+  endif ()
+
+  # the commented ones are done by default
+  dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
+  target_compile_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_COMPILE_ARGS}>)
 endfunction()
 
 function(dmt_set_target_optimization target properties_visibility)

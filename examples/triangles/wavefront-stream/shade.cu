@@ -1,0 +1,104 @@
+#include "wave-kernels.cuh"
+
+__global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
+                            DeviceQueue<ClosestHitInput> outQueue,
+                            DeviceArena<PathState> pathStateSlots,
+                            float4* d_outBuffer, DeviceHaltonOwen* d_haltonOwen,
+                            BSDF* d_bsdfs) {
+  DeviceHaltonOwen& warpRng = d_haltonOwen[globalWarpId()];
+
+  ShadeInput input{};
+  int mask = inQueue.queuePop(&input);
+  int lane = getLaneId();
+  while (mask & (1 << lane)) {
+    int const activeWorkers = __activemask();
+
+    int px, py, sampleIndex;
+    input.state->ldg_pxs(px, py, sampleIndex);
+    warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(px, py),
+                             sampleIndex);
+
+    // Inside each bsdf
+    // 1. if max depth reached, kill path
+    bool pathDied = false;
+    static int constexpr MAX_DEPTH = 3;  // dies afterwards
+    // assumes warps have different states
+    int const oldDepth = groupedAtomicIncLeaderOnly(&input.state->depth);
+    if (oldDepth >= MAX_DEPTH) {
+      pathDied = true;
+    }
+
+    float3 wi{0, 0, 0};
+    if (!pathDied) {
+      // 2. (not dead) BSDF sampling and bounce computation
+      BSDF const bsdf = [&] __device__() {  // TODO copy?
+        BSDF theBsdf = d_bsdfs[input.matId];
+        prepareBSDF(&theBsdf, input.normal, -input.rayD);
+        return theBsdf;
+      }();
+      BSDFSample const bs =
+          sampleBsdf(bsdf, -input.rayD, input.normal, input.normal,
+                     warpRng.get2D(CMEM_haltonOwenParams),
+                     warpRng.get1D(CMEM_haltonOwenParams));
+      if (bs) {
+        wi = bs.wi;
+        // 3. (not dead) update path state
+        atomicAdd(&input.state->anySpecularBounces, (int)bs.delta);
+        atomicExch(&input.state->lastBounceTransmission, (int)bs.refract);
+        float3 beta = input.state->throughput * bs.f *
+                      fabsf(dot(bs.wi, input.normal)) / bs.pdf;
+        // 4. (not dead) russian roulette. If fails, kill path
+        if (float const rrBeta = maxComponentValue(beta * bs.eta);
+            rrBeta < 1 && oldDepth > 1) {
+          float const q = fmaxf(0.f, 1.f - rrBeta);
+          if (warpRng.get1D(CMEM_haltonOwenParams) < q) {
+            pathDied = true;
+          } else {
+            beta /= 1 - q;
+            atomicExch(&input.state->throughput.x, beta.x);
+            atomicExch(&input.state->throughput.y, beta.y);
+            atomicExch(&input.state->throughput.z, beta.z);
+          }
+        }
+      } else {
+        pathDied = true;
+      }
+    }
+
+    if (pathDied) {
+      // 5. if path killed, sink to output
+      // no need for atomic operation here
+      // TODO align
+      //// assert(((uintptr_t)&input.state->L) & 15 == 0);
+      //// float4 color = *reinterpret_cast<float4*>(&input.state->L);
+      //// color.w = 1;  // TODO filter weight?
+      float4 const color =
+          make_float4(input.state->L.x, input.state->L.y, input.state->L.z, 1);
+      freeState(pathStateSlots, input.state);
+      input.state = nullptr;
+
+      // 3. sink to output buffer
+      // no need for atomic operation here
+      d_outBuffer[py * CMEM_imageResolution.x + px] += color;
+      SH_PRINT("SH [%u %u]  px [%u %u] d: %d | path died\n", blockIdx.x,
+               threadIdx.x, px, py, oldDepth);
+    } else {
+      // 6. if path alive, push to closesthit next bounce
+      ClosestHitInput const closestHitInput{
+          .state = input.state,
+          .ray = {
+              .o = offsetRayOrigin(input.pos, input.error, input.normal, wi),
+              .d = wi,
+          }};  // TODO SMEM?
+
+      unsigned const pushMask = outQueue.queuePush(&closestHitInput);
+      SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
+               blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
+      assert(pushMask == __activemask());
+    }
+
+    __syncwarp(activeWorkers);  // TODO is this necessary?
+    lane = getCoalescedLaneId(activeWorkers);
+    mask = inQueue.queuePop(&input);
+  }
+}

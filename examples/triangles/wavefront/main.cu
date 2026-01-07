@@ -9,6 +9,7 @@
 #include "cuda-core/morton.cuh"
 #include "cuda-core/shapes.cuh"
 #include "cuda-core/kernels.cuh"
+#undef DMT_WAVEFRONT_STREAMS
 #include "cuda-core/queue.cuh"
 
 #include <cuda_device_runtime_api.h>
@@ -378,11 +379,10 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     int const raygenGridDim = gridDim.x / WAVEFRONT_KERNEL_TYPES;
 
     // 2. Calculate warp ID and Stride (TODO check PTX)
-    assert(warpSize == 32);
     int const threadsPerBlock = blockDim.x;
-    int const laneId = threadIdx.x % 32;
-    int const warpIdInBlock = threadIdx.x / 32;
-    int const warpsPerBlock = threadsPerBlock / 32;
+    int const laneId = threadIdx.x % warpSize;
+    int const warpIdInBlock = threadIdx.x / warpSize;
+    int const warpsPerBlock = ceilDiv(threadsPerBlock, warpSize);
     if (threadIdx.x == 0) {
       warpRemaining = warpsPerBlock;
       if (blockIdx.x == 0) {
@@ -439,21 +439,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                    CMEM_haltonOwenParams, raygenElem);
             assert(raygenElem.state);
           }
-          // check if 32 available places in queue
-          unsigned active = __activemask();
-          while (active) {
-            // warp-wide push (push already does __threadfence())
-            active &= ~input.closesthitQueue.queuePush(&raygenElem);
-            if (active) {
-              pascal_fixed_sleep(64);
-              RG_PRINT(
-                  "RG [%u %u] RAYGEN push failed for sample [%d %d] %d. head: "
-                  "%d tail: %d\n",
-                  blockIdx.x, threadIdx.x, x, y, sampleIdx,
-                  *(volatile int*)(&input.closesthitQueue.head),
-                  *(volatile int*)(&input.closesthitQueue.tail));
-            }
-          }
+
+          input.closesthitQueue.spinPush(&raygenElem);
           RG_PRINT(
               "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d] %d\n",
               blockIdx.x, threadIdx.x, __activemask(), x, y, sampleIdx);
@@ -516,66 +503,36 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                             // the pointer visible
 
           // 2. Queue Pushes
-          int const hitWorkersMask = __activemask();
-          int const coalescedLaneId = getCoalescedLaneId(hitWorkersMask);
           // TODO SMEM?
-          {
-            // scope for struct
-            int coalescedMask = 0;
-            AnyhitInput const anyHitInput{.state = kinput.state,
-                                          .pos = hitResult.pos,
-                                          .rayD = kinput.ray.d,
-                                          .normal = hitResult.normal,
-                                          .error = hitResult.error,
-                                          .matId = hitResult.matId,
-                                          .t = hitResult.t};
-            // Warning: Potential Deadlock
-            do {
-              coalescedMask = input.anyhitQueue.queuePush(&anyHitInput);
-              if (!(coalescedMask & (1 << coalescedLaneId))) {
-                pascal_fixed_sleep(64);
-              }
-            } while (!(coalescedMask & (1 << coalescedLaneId)));
-          }
-          // TODO SMEM?
-          {
-            int coalescedMask = 0;
-            // scope for struct
-            ShadeInput const shadeInput{
-                .state = kinput.state,
-                .pos = hitResult.pos,
-                .rayD = kinput.ray.d,
-                .normal = hitResult.normal,
-                .error = hitResult.error,
-                .matId = hitResult.matId,
-                .t = hitResult.t,
-            };
-            // Warning: Potential Deadlock
-            do {
-              coalescedMask = input.shadeQueue.queuePush(&shadeInput);
-              if (!(coalescedMask & (1 << coalescedLaneId))) {
-                pascal_fixed_sleep(64);
-              }
-            } while (!(coalescedMask & (1 << coalescedLaneId)));
-          }
+          AnyhitInput const anyHitInput{.state = kinput.state,
+                                        .pos = hitResult.pos,
+                                        .rayD = kinput.ray.d,
+                                        .normal = hitResult.normal,
+                                        .error = hitResult.error,
+                                        .matId = hitResult.matId,
+                                        .t = hitResult.t};
+          input.anyhitQueue.spinPush(&anyHitInput);
+          ShadeInput const shadeInput{
+              .state = kinput.state,
+              .pos = hitResult.pos,
+              .rayD = kinput.ray.d,
+              .normal = hitResult.normal,
+              .error = hitResult.error,
+              .matId = hitResult.matId,
+              .t = hitResult.t,
+          };
+          input.shadeQueue.spinPush(&shadeInput);
 
           CH_PRINT("CH [%u %u] px: [%d %d] d: %d | hit at: %f %f %f\n",
                    blockIdx.x, threadIdx.x, kinput.state->pixelCoordX,
                    kinput.state->pixelCoordY, kinput.state->depth,
                    hitResult.pos.x, hitResult.pos.y, hitResult.pos.z);
         } else {
-          int const missWorkersMask = __activemask();
-          int const coalescedLaneId = getCoalescedLaneId(missWorkersMask);
           // if miss -> enqueue miss queue
           MissInput const missInput{.state = kinput.state,
                                     .rayDirection = kinput.ray.d};
           int coalescedMask = 0;
-          do {
-            coalescedMask = input.missQueue.queuePush(&missInput);
-            if (!(coalescedMask & (1 << coalescedLaneId))) {
-              pascal_fixed_sleep(64);
-            }
-          } while (!(coalescedMask & (1 << coalescedLaneId)));
+          input.missQueue.spinPush(&missInput);
         }
       } else {
         int const sleepingWorkersMask = __activemask();
@@ -865,14 +822,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                   .d = wi,
               }};  // TODO SMEM?
 
-          cg::coalesced_group const gAlive = cg::coalesced_threads();
-          int coalescedMask = 0;
-          do {
-            coalescedMask = input.closesthitQueue.queuePush(&closestHitInput);
-            if (!(coalescedMask & (1 << gAlive.thread_rank()))) {
-              pascal_fixed_sleep(64);
-            }
-          } while (!(coalescedMask & (1 << gAlive.thread_rank())));
+          input.closesthitQueue.spinPush(&closestHitInput);
           SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit\n",
                    blockIdx.x, threadIdx.x, px, py, oldDepth);
         }
@@ -1126,7 +1076,7 @@ void wavefrontMain() {
   dim3 const gridDim{blocks, 1, 1};
   dim3 const blockDim{threads, 1, 1};
   for (int sOffset = 0; sOffset < TOTAL_SAMPLES; sOffset += h_camera.spp) {
-    kinput.sampleOffset += sOffset;
+    kinput.sampleOffset = sOffset;
     callbackData->sample = kinput.sampleOffset;
     std::cout << "Launching kernel (" << kinput.sampleOffset << ")"
               << std::endl;

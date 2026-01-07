@@ -2,29 +2,23 @@
 
 __global__ void missKernel(DeviceQueue<MissInput> inQueue,
                            DeviceArena<PathState> pathStateSlots,
-                           float4* d_outBuffer, DeviceHaltonOwen* d_haltonOwen,
-                           Light* infiniteLights, uint32_t infiniteLightCount) {
+                           float4* d_outBuffer, Light* infiniteLights,
+                           uint32_t infiniteLightCount) {
   // Sink: TODO SMEM array to cache PathStates which are still used?
-  DeviceHaltonOwen& warpRng = d_haltonOwen[globalWarpId()];
   MissInput kinput{};
 
   int lane = getLaneId();
-  int mask = inQueue.queuePop(&kinput);
+  int mask = inQueue.queuePop<false>(&kinput);
   while (mask & (1 << lane)) {
     int const activeWorkers = __activemask();
 
     // TODO if malloc aligned, use int4
     int const px = __ldg(&kinput.state->pixelCoordX);
     int const py = __ldg(&kinput.state->pixelCoordY);
-    int const sampleIndex = __ldg(&kinput.state->sampleIndex);
-    // initialize RNG
-    warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(px, py),
-                             sampleIndex);
 
     // 1. choose an infinite light, fetch last BSDF intersection (TODO)
     int const lightIndex =
-        min(static_cast<int>(warpRng.get1D(CMEM_haltonOwenParams) *
-                             infiniteLightCount),
+        min(static_cast<int>(PcgHash::get1D<float>() * infiniteLightCount),
             infiniteLightCount - 1);
     Light const light = infiniteLights[lightIndex];
     // 2. add to state radiance
@@ -55,6 +49,6 @@ __global__ void missKernel(DeviceQueue<MissInput> inQueue,
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
     lane = getCoalescedLaneId(activeWorkers);
-    mask = inQueue.queuePop(&kinput);
+    mask = inQueue.queuePop<false>(&kinput);
   }
 }

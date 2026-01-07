@@ -89,9 +89,11 @@ extern __constant__ float CMEM_cameraFromRaster[32];
 extern __constant__ float CMEM_renderFromCamera[32];
 extern __constant__ DeviceHaltonOwenParams CMEM_haltonOwenParams;
 extern __constant__ int2 CMEM_imageResolution;
+extern __constant__ int2 CMEM_tileResolution;
 extern __constant__ int CMEM_spp;
 
-__host__ void allocateDeviceConstantMemory(DeviceCamera const& h_camera);
+__host__ void allocateDeviceConstantMemory(DeviceCamera const& h_camera,
+                                           int xTile, int yTile);
 __host__ void freeDeviceConstantMemory();
 
 inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
@@ -192,26 +194,24 @@ struct WavefrontStreamInput {
 __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
                              DeviceArena<PathState> pathStateSlots,
                              DeviceHaltonOwen* d_haltonOwen,
-                             DeviceCamera* d_cam, int sampleOffset);
+                             DeviceCamera* d_cam, int tileIdxX, int tileIdxY,
+                             int tileDimX, int tileDimY, int sampleOffset);
 __global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
                                  DeviceQueue<MissInput> outMissQueue,
                                  DeviceQueue<AnyhitInput> outAnyhitQueue,
                                  DeviceQueue<ShadeInput> outShadeQueue,
-                                 DeviceHaltonOwen* d_haltonOwen,
                                  TriangleSoup d_triSoup);
-__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue,
-                             DeviceHaltonOwen* d_haltonOwen, Light* d_lights,
+__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
                              uint32_t lightCount, BSDF* d_bsdfs,
                              TriangleSoup d_triSoup);
 __global__ void missKernel(DeviceQueue<MissInput> inQueue,
                            DeviceArena<PathState> pathStateSlots,
-                           float4* d_outBuffer, DeviceHaltonOwen* d_haltonOwen,
-                           Light* infiniteLights, uint32_t infiniteLightCount);
+                           float4* d_outBuffer, Light* infiniteLights,
+                           uint32_t infiniteLightCount);
 __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
                             DeviceQueue<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
-                            float4* d_outBuffer, DeviceHaltonOwen* d_haltonOwen,
-                            BSDF* d_bsdfs);
+                            float4* d_outBuffer, BSDF* d_bsdfs);
 __global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
                                int* d_done);
 

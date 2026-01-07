@@ -15,7 +15,7 @@ target_sources(dmt-cuda-core
   ${CORE_HDRS}
   PRIVATE ${CORE_SRCS}
 )
-target_link_libraries(dmt-cuda-core PUBLIC CUDA::cudart)
+target_link_libraries(dmt-cuda-core PUBLIC CUDA::cudart PRIVATE stb)
 target_include_directories(dmt-cuda-core
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/cuda-core/public"
   PRIVATE

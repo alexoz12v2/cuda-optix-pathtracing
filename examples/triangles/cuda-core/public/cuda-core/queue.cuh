@@ -166,12 +166,11 @@ struct DeviceQueue {
   int capacity;  // Size of arrays (must be power of 2)
 
   // Warning: Potential Deadlock
-#ifdef DMT_WAVEFRONT_STREAMS
   __device__ __forceinline__ void spinPush(const T* input) {
     bool pushed = false;
     while (!pushed) {
       int const pushersMask = __activemask();
-      int const coalescedMask = queuePush(&input);
+      int const coalescedMask = queuePush<true>(&input);
       if (!(coalescedMask & (1 << getCoalescedLaneId(pushersMask)))) {
         pascal_fixed_sleep(64);
       } else {
@@ -179,7 +178,6 @@ struct DeviceQueue {
       }
     }
   }
-#endif
 
   // Helper: Nano Sleep (Pascal+)
   // Reduces memory contention during spin-waiting
@@ -192,6 +190,7 @@ struct DeviceQueue {
   }
 
   // Optimized Push (Producer)
+  template <bool Loop>
   __device__ unsigned queuePush(const T* input) {
     namespace cg = cooperative_groups;
     DeviceQueue<T>& q = *this;
@@ -222,6 +221,13 @@ struct DeviceQueue {
           break;
         }
 
+        // if places not available and there's no active consumer (e.g. no
+        // cooperative kernel launch) die immediately
+        if constexpr (!Loop) {
+          count = 0;
+          break;
+        }
+
         // Backoff if full to reduce GMEM contention
         q.sleep_ns(200);
       }
@@ -233,18 +239,23 @@ struct DeviceQueue {
 
     // 2. Write Data
     bool active = lane < count;
+    int const idx = (ticket + lane) & (q.capacity - 1);
     if (active) {
-      int idx = (ticket + lane) & (q.capacity - 1);
-
       // A. Spin-wait for slot to be EMPTY
       // We use volatile load (cv) instead of atomicAdd for the check
       int backoff = 32;
       while (load_cv(&q.states[idx]) != SLOT_EMPTY) {
+        if constexpr (!Loop) {
+          active = false;
+          break;
+        }
         q.sleep_ns(backoff);
         backoff = min(backoff * 2, 1024);  // Exponential backoff
       }
+    }
 
-      // B. Write Payload (Coalesced access now!)
+    if (active) {
+      // B. Write Payload (TODO Coalesced?)
       q.buffer[idx] = *input;
 
       // C. Memory Barrier
@@ -252,13 +263,13 @@ struct DeviceQueue {
       __threadfence();
 
       // D. Release Slot
-      // Use atomicExch (or atomicStore) to publish availability
       atomicExch(&q.states[idx], SLOT_FULL);
     }
 
     return g.ballot(active);
   }
 
+  template <bool Loop>
   __device__ unsigned queuePop(T* output) {
     namespace cg = cooperative_groups;
     DeviceQueue<T>& q = *this;
@@ -277,6 +288,9 @@ struct DeviceQueue {
       // We only reserve what is visibly available in the counters.
       // Even if avail > 0, the slot state might not be FULL yet (producer
       // latency), but that is handled by the spin-wait in step 2.
+      // Note: The above^^^ is valid only in a cooperative kernel or in a
+      // situation in which it is guaranteed that there are consumers active (
+      // specialize warp id within same block)
       count = min((int)g.size(), avail);
 
       if (count > 0) {
@@ -294,6 +308,10 @@ struct DeviceQueue {
       // A. Spin-wait for slot to be FULL
       int backoff = 32;
       while (load_cv(&q.states[idx]) != SLOT_FULL) {
+        if constexpr (!Loop) {
+          active = false;
+          break;
+        }
         q.sleep_ns(backoff);
         backoff = min(backoff * 2, 1024);
       }

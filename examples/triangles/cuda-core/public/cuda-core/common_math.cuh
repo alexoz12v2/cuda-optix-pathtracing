@@ -169,6 +169,11 @@ inline __device__ int groupedAtomicIncLeaderOnly(int* address) {
   return old;
 }
 
+__device__ __forceinline__ float uint_to_float01(unsigned int x) {
+  // Multiply by 1 / 2^32
+  return (float)x * 2.3283064365386963e-10f;
+}
+
 struct Transform {
   float m[16];
   float mInv[16];

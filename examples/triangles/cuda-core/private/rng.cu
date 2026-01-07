@@ -196,6 +196,7 @@ DeviceHaltonOwen::computeParams(int width, int height) {
 __device__ void DeviceHaltonOwen::startPixelSample(
     DeviceHaltonOwenParams const& params, int2 p, int32_t sampleIndex,
     int32_t dim) {
+  // printf("DeviceHaltonOwen::startPixelSample\n");
   int const laneId = cooperative_groups::thread_block_tile<32>::thread_rank();
 
   int const sampleStride = params.baseScales[0] * params.baseScales[1];
@@ -215,9 +216,11 @@ __device__ void DeviceHaltonOwen::startPixelSample(
   dimension[laneId] = max(dim, NUM_FILM_DIMENSION);
   // TODO global debug printing macro control
 #if 0
-  printf("   START PIXEL SAMPLE STATE:\n");
-  printf("     - haltonIndex: %d\n", haltonIndex[laneId]);
-  printf("     - dimension:   %d\n", dimension[laneId]);
+  printf(
+      "   START PIXEL SAMPLE STATE:\n"
+      "     - haltonIndex: %d\n"
+      "     - dimension:   %d\n",
+      haltonIndex[laneId], dimension[laneId]);
 #endif
 }
 

@@ -105,7 +105,7 @@ void megakernelMain() {
     std::cout << "Running CUDA Kernel (" << sTot << ")" << std::endl;
     CUDA_CHECK(cudaDeviceSynchronize());
     std::string const name =
-        "output-" + std::to_string(sTot + h_camera.spp) + ".bmp";
+        "output-" + std::to_string(sTot + h_camera.spp) + ".png";
     std::cout << "Writing to file" << std::endl;
 
     // copy to host and to file

@@ -17,9 +17,9 @@ WavefrontStreamInput::WavefrontStreamInput(
   CUDA_CHECK(cudaMemset(d_outBuffer, 0,
                         h_camera.width * h_camera.height * sizeof(float4)));
   // GMEM queues
-  static int constexpr QUEUE_CAP = 2048;
+  static int constexpr QUEUE_CAP = 1 << 12;
   initQueue(anyhitQueue, QUEUE_CAP);
-  initQueue(closesthitQueue, QUEUE_CAP);
+  initQueue(closesthitQueue, QUEUE_CAP << 2);
   initQueue(shadeQueue, QUEUE_CAP);
   initQueue(missQueue, QUEUE_CAP);
 
@@ -34,7 +34,7 @@ WavefrontStreamInput::WavefrontStreamInput(
   sampleOffset = 0;
 
   // path states
-  initDeviceArena(pathStateSlots, 2048);
+  initDeviceArena(pathStateSlots, QUEUE_CAP << 4);
 }
 
 WavefrontStreamInput::~WavefrontStreamInput() noexcept {

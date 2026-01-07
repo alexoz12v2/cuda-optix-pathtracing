@@ -10,11 +10,11 @@
 #  include <limits.h>
 #endif
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+
 // private translation unit stuff
 namespace {
-void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
-                       uint32_t const width, uint32_t const height);
-
 void writePixel(uint32_t const width, uint8_t* rowMajorImage,
                 float4 const* floatBuffer, uint32_t i, uint32_t const row,
                 uint32_t const col);
@@ -173,7 +173,8 @@ void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
     }
   }
   std::string const theOutPath = (getExecutableDirectory() / name).string();
-  writeGrayscaleBMP(theOutPath.c_str(), rowMajorImage.get(), width, height);
+  stbi_write_png(theOutPath.c_str(), width, height, 3, rowMajorImage.get(),
+                 3 * width);
 }
 
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
@@ -209,7 +210,8 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
   }
 
   std::string const theOutPath = (getExecutableDirectory() / name).string();
-  writeGrayscaleBMP(theOutPath.c_str(), rowMajorImage.get(), width, height);
+  stbi_write_png(theOutPath.c_str(), width, height, 3, rowMajorImage.get(),
+                 3 * width);
 }
 
 BSDF* deviceBSDF(std::vector<BSDF> const& h_bsdfs) {
@@ -342,13 +344,9 @@ void cornellBox(bool megakernel, HostTriangleScene* h_scene,
   }
 
   *h_camera = DeviceCamera();
-#if 0
-  if (!megakernel) {
-    h_camera->width = 16;
-    h_camera->height = 16;
-    h_camera->spp = 4;
-  }
-#endif
+  h_camera->width = 512;
+  h_camera->height = 256;
+  h_camera->spp = 4;
 }
 
 // private stuff impl

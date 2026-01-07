@@ -80,7 +80,7 @@ void CUDART_CB streamCallbackWriteBuffer(void* userData) {
   auto* data = static_cast<CallbackData*>(userData);
   std::cout << "Storing Result (" << data->sample << ")" << std::endl;
   std::string const name =
-      "wave-stream-output-" + std::to_string(data->sample) + ".bmp";
+      "wave-stream-output-" + std::to_string(data->sample) + ".png";
   writeOutputBufferRowMajor(data->hostImage, data->width, data->height,
                             name.c_str());
 }
@@ -95,7 +95,7 @@ void wavefrontMain() {
   CUDA_CHECK(cudaFuncSetCacheConfig(missKernel, cudaFuncCachePreferL1));
   CUDA_CHECK(cudaFuncSetCacheConfig(shadeKernel, cudaFuncCachePreferL1));
 
-  uint32_t threads = 1;
+  uint32_t threads = 32;
   uint32_t blocks = 1;
   uint32_t sharedBytes = 12;
   // optimalBlocksAndThreads(blocks, threads, sharedBytes); // TODO
@@ -112,7 +112,19 @@ void wavefrontMain() {
   DeviceCamera h_camera;
   cornellBox(true, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
-  allocateDeviceConstantMemory(h_camera);
+  static int constexpr TOTAL_SAMPLES = 2048;
+  static int constexpr TILES_PER_WARP = 4;
+  static int constexpr TILE_X = 8 * TILES_PER_WARP;
+  static int constexpr TILE_Y = 4 * TILES_PER_WARP;
+
+  // compute the number of tiles each loop iteration will run on
+  // TODO estimate queue size from tile size, spp, max depth
+  int const numTilesX = ceilDiv(h_camera.width, TILE_X);
+  int const numTilesY = ceilDiv(h_camera.height, TILE_Y);
+  int const tileDimY = TILE_Y;  // TODO tunable with cmdline params
+  int const tileDimX = TILE_X;
+
+  allocateDeviceConstantMemory(h_camera, tileDimX, tileDimY);
 
   auto* kinput = new WavefrontStreamInput(threads, blocks, h_scene, h_lights,
                                           h_infiniteLights, h_bsdfs, h_camera);
@@ -135,45 +147,47 @@ void wavefrontMain() {
   cudaStream_t st_main;
   CUDA_CHECK(cudaStreamCreate(&st_main));
 
-  static int constexpr TOTAL_SAMPLES = 2048;
   for (int sOffset = 0; sOffset < TOTAL_SAMPLES; sOffset += h_camera.spp) {
     kinput->sampleOffset = sOffset;
     callbackData->sample = kinput->sampleOffset;
     std::cout << "Launching kernel (" << kinput->sampleOffset << ")"
               << std::endl;
+    for (int tileY = 0; tileY < numTilesY; tileY++) {
+      for (int tileX = 0; tileX < numTilesX; tileX++) {
+        raygenKernel<<<1, WARP_SIZE, sharedBytes, st_main>>>(
+            kinput->closesthitQueue, kinput->pathStateSlots,
+            kinput->d_haltonOwen, kinput->d_cam, tileX, tileY, tileDimX,
+            tileDimY, kinput->sampleOffset);
+        CUDA_CHECK(cudaGetLastError());
 
-    raygenKernel<<<blocks, max(threads, WARP_SIZE), sharedBytes, st_main>>>(
-        kinput->closesthitQueue, kinput->pathStateSlots, kinput->d_haltonOwen,
-        kinput->d_cam, kinput->sampleOffset);
-    CUDA_CHECK(cudaGetLastError());
+        *h_done = false;
+        while (!*h_done) {
+          closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+              kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
+              kinput->shadeQueue, kinput->d_triSoup);
+          CUDA_CHECK(cudaGetLastError());
 
-    *h_done = false;
-    while (!*h_done) {
-      closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-          kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
-          kinput->shadeQueue, kinput->d_haltonOwen, kinput->d_triSoup);
-      CUDA_CHECK(cudaGetLastError());
+          anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+              kinput->anyhitQueue, kinput->d_lights, kinput->lightCount,
+              kinput->d_bsdfs, kinput->d_triSoup);
+          CUDA_CHECK(cudaGetLastError());
 
-      anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
-          kinput->anyhitQueue, kinput->d_haltonOwen, kinput->d_lights,
-          kinput->lightCount, kinput->d_bsdfs, kinput->d_triSoup);
-      CUDA_CHECK(cudaGetLastError());
+          shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
+              kinput->shadeQueue, kinput->closesthitQueue,
+              kinput->pathStateSlots, kinput->d_outBuffer, kinput->d_bsdfs);
+          CUDA_CHECK(cudaGetLastError());
 
-      shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
-          kinput->shadeQueue, kinput->closesthitQueue, kinput->pathStateSlots,
-          kinput->d_outBuffer, kinput->d_haltonOwen, kinput->d_bsdfs);
-      CUDA_CHECK(cudaGetLastError());
+          missKernel<<<blocks, threads, sharedBytes, st_main>>>(
+              kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
+              kinput->infiniteLights, kinput->infiniteLightCount);
+          CUDA_CHECK(cudaGetLastError());
 
-      missKernel<<<blocks, threads, sharedBytes, st_main>>>(
-          kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
-          kinput->d_haltonOwen, kinput->infiniteLights,
-          kinput->infiniteLightCount);
-      CUDA_CHECK(cudaGetLastError());
-
-      checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(
-          kinput->pathStateSlots, d_done);
-      CUDA_CHECK(cudaGetLastError());
-      CUDA_CHECK(cudaStreamSynchronize(st_main));
+          checkDoneDepth<<<1, WARP_SIZE, sharedBytes, st_main>>>(
+              kinput->pathStateSlots, d_done);
+          CUDA_CHECK(cudaGetLastError());
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+        }
+      }
     }
 
     CUDA_CHECK(

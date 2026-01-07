@@ -52,29 +52,19 @@ __device__ __forceinline__ void anyhitNEE(
   }
 }
 
-__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue,
-                             DeviceHaltonOwen* d_haltonOwen, Light* d_lights,
+__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
                              uint32_t lightCount, BSDF* d_bsdfs,
                              TriangleSoup d_triSoup) {
-  DeviceHaltonOwen& warpRng = d_haltonOwen[globalWarpId()];
-
   AnyhitInput kinput{};  // TODO SMEM?
-  int mask = inQueue.queuePop(&kinput);
+  int mask = inQueue.queuePop<false>(&kinput);
   int lane = getLaneId();
   while (mask & (1 << lane)) {
     int const activeWorkers = __activemask();
 
-    // useCount on state set to one by closesthit
-    // configure RNG
-    warpRng.startPixelSample(
-        CMEM_haltonOwenParams,
-        make_int2(kinput.state->pixelCoordX, kinput.state->pixelCoordY),
-        kinput.state->sampleIndex);
     // choose a light and prepare BSDF data from intersection
     // TODO maybe: readonly function to fetch 32 bytes with __ldg?
-    int const lightIdx =
-        min(static_cast<int>(warpRng.get1D(CMEM_haltonOwenParams) * lightCount),
-            lightCount - 1);
+    int const lightIdx = min(
+        static_cast<int>(PcgHash::get1D<float>() * lightCount), lightCount - 1);
     Light const light = d_lights[lightIdx];
     BSDF const bsdf = [&] __device__() {  // TODO copy?
       BSDF theBsdf = d_bsdfs[kinput.matId];
@@ -89,7 +79,7 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue,
     anyhitNEE(-kinput.rayD, beta, kinput.pos, kinput.error, bsdf, light,
               d_triSoup, kinput.normal, lightCount,
               atomicAdd(&kinput.state->lastBounceTransmission, 0),
-              warpRng.get2D(CMEM_haltonOwenParams), &Le);
+              PcgHash::get2D<float2>(), &Le);
     kinput.state->L += Le;
 
     AH_PRINT(
@@ -100,6 +90,6 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue,
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
     lane = getCoalescedLaneId(activeWorkers);
-    mask = inQueue.queuePop(&kinput);
+    mask = inQueue.queuePop<false>(&kinput);
   }
 }

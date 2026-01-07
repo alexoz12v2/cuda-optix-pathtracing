@@ -2,6 +2,8 @@
 
 #include "cuda-core/shapes.cuh"
 
+// anonymous namespace for static/internal linkage (applies to __device__ too)
+namespace {
 // TODO compare __ldg with .cv pascal PTX Access with normal access
 __device__ __forceinline__ HitResult closesthit(
     Ray const& __restrict__ ray, TriangleSoup const& __restrict__ triSoup) {
@@ -38,8 +40,17 @@ __device__ __forceinline__ void handleHit(
                                 .error = hitResult.error,
                                 .matId = hitResult.matId,
                                 .t = hitResult.t};
-  mask = outAnyHitQueue.queuePush(&anyHitInput);
-  assert(mask == __activemask());
+#ifdef DMT_DEBUG
+  int const coalescedLane = getCoalescedLaneId(__activemask());
+#endif
+  mask = outAnyHitQueue.queuePush<false>(&anyHitInput);
+#ifdef DMT_DEBUG
+  assert(1u << coalescedLane & mask);
+#else
+  if (!(1u << coalescedLane & mask)) {
+    asm volatile("trap;");
+  }
+#endif
   ShadeInput const shadeInput{
       .state = kinput.state,
       .pos = hitResult.pos,
@@ -49,8 +60,14 @@ __device__ __forceinline__ void handleHit(
       .matId = hitResult.matId,
       .t = hitResult.t,
   };
-  mask = outShadeQueue.queuePush(&shadeInput);
-  assert(mask == __activemask());
+  mask = outShadeQueue.queuePush<false>(&shadeInput);
+#ifdef DMT_DEBUG
+  assert(1u << coalescedLane & mask);
+#else
+  if (!(1u << coalescedLane & mask)) {
+    asm volatile("trap;");
+  }
+#endif
 
   CH_PRINT("CH [%u %u] px: [%d %d] d: %d | hit at: %f %f %f\n", blockIdx.x,
            threadIdx.x, kinput.state->pixelCoordX, kinput.state->pixelCoordY,
@@ -63,27 +80,32 @@ __device__ __forceinline__ void handleMiss(
   // if miss -> enqueue miss queue
   MissInput const missInput{.state = kinput.state,
                             .rayDirection = kinput.ray.d};
-  unsigned const mask = outMissQueue.queuePush(&missInput);
-  assert(mask == __activemask());
+#ifdef DMT_DEBUG
+  int const coalescedLane = getCoalescedLaneId(__activemask());
+#endif
+  unsigned const mask = outMissQueue.queuePush<false>(&missInput);
+#ifdef DMT_DEBUG
+  assert(1u << coalescedLane & mask);
+#else
+  if (!(1u << coalescedLane & mask)) {
+    asm volatile("trap;");
+  }
+#endif
 }
+
+}  // namespace
 
 __global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
                                  DeviceQueue<MissInput> outMissQueue,
                                  DeviceQueue<AnyhitInput> outAnyhitQueue,
                                  DeviceQueue<ShadeInput> outShadeQueue,
-                                 DeviceHaltonOwen* d_haltonOwen,
                                  TriangleSoup d_triSoup) {
   ClosestHitInput kinput{};  // TODO SMEM?
-  DeviceHaltonOwen& warpRng = d_haltonOwen[globalWarpId()];
 
   int lane = getLaneId();
-  int mask = inQueue.queuePop(&kinput);
+  int mask = inQueue.queuePop<false>(&kinput);
   while (mask & (1 << lane)) {
     int const activeWorkers = __activemask();
-    warpRng.startPixelSample(
-        CMEM_haltonOwenParams,
-        make_int2(kinput.state->pixelCoordX, kinput.state->pixelCoordY),
-        kinput.state->sampleIndex);
 
     if (auto const hitResult = closesthit(kinput.ray, d_triSoup);
         hitResult.hit) {
@@ -92,8 +114,9 @@ __global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
       handleMiss(kinput, outMissQueue);
     }
 
-    __syncwarp(activeWorkers);  // TODO is this necessary?
+    // we want a coalesced pop, hence join hit lanes and miss lanes
+    __syncwarp(activeWorkers);
     lane = getCoalescedLaneId(activeWorkers);
-    mask = inQueue.queuePop(&kinput);
+    mask = inQueue.queuePop<false>(&kinput);
   }
 }

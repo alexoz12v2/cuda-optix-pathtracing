@@ -3,20 +3,15 @@
 __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
                             DeviceQueue<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
-                            float4* d_outBuffer, DeviceHaltonOwen* d_haltonOwen,
-                            BSDF* d_bsdfs) {
-  DeviceHaltonOwen& warpRng = d_haltonOwen[globalWarpId()];
-
+                            float4* d_outBuffer, BSDF* d_bsdfs) {
   ShadeInput input{};
-  int mask = inQueue.queuePop(&input);
+  int mask = inQueue.queuePop<false>(&input);
   int lane = getLaneId();
   while (mask & (1 << lane)) {
     int const activeWorkers = __activemask();
 
-    int px, py, sampleIndex;
-    input.state->ldg_pxs(px, py, sampleIndex);
-    warpRng.startPixelSample(CMEM_haltonOwenParams, make_int2(px, py),
-                             sampleIndex);
+    int px, py;
+    input.state->ldg_px(px, py);
 
     // Inside each bsdf
     // 1. if max depth reached, kill path
@@ -38,8 +33,7 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
       }();
       BSDFSample const bs =
           sampleBsdf(bsdf, -input.rayD, input.normal, input.normal,
-                     warpRng.get2D(CMEM_haltonOwenParams),
-                     warpRng.get1D(CMEM_haltonOwenParams));
+                     PcgHash::get2D<float2>(), PcgHash::get1D<float>());
       if (bs) {
         wi = bs.wi;
         // 3. (not dead) update path state
@@ -51,7 +45,7 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
         if (float const rrBeta = maxComponentValue(beta * bs.eta);
             rrBeta < 1 && oldDepth > 1) {
           float const q = fmaxf(0.f, 1.f - rrBeta);
-          if (warpRng.get1D(CMEM_haltonOwenParams) < q) {
+          if (PcgHash::get1D<float>() < q) {
             pathDied = true;
           } else {
             beta /= 1 - q;
@@ -93,16 +87,25 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
               .d = wi,
           }};  // TODO SMEM?
 
-      unsigned const pushMask = outQueue.queuePush(&closestHitInput);
+#ifdef DMT_DEBUG
+      int const coalescedLane = getCoalescedLaneId(__activemask());
+#endif
+      unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
 #if 0
       SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
                blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
 #endif
-      assert(pushMask == __activemask());
+#ifdef DMT_DEBUG
+      assert(1u << coalescedLane & pushMask);
+#else
+      if (!(1u << coalescedLane & pushMask)) {
+        asm volatile("trap;");
+      }
+#endif
     }
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
     lane = getCoalescedLaneId(activeWorkers);
-    mask = inQueue.queuePop(&input);
+    mask = inQueue.queuePop<false>(&input);
   }
 }

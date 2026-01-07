@@ -482,7 +482,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       assert(__activemask() == 0xFFFF'FFFFU);
 
       ClosestHitInput kinput{};  // TODO SMEM?
-      if (int const mask = input.closesthitQueue.queuePop(&kinput);
+      if (int const mask = input.closesthitQueue.queuePop<true>(&kinput);
           mask & (1 << getLaneId())) {
         // TODO optimize GMEM access
         warpRng.startPixelSample(
@@ -570,7 +570,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       bool finished = false;
       assert(__activemask() == 0xFFFF'FFFFU);
       AnyhitInput kinput{};  // TODO SMEM?
-      if (int const mask = input.anyhitQueue.queuePop(&kinput);
+      if (int const mask = input.anyhitQueue.queuePop<true>(&kinput);
           mask & (1 << getLaneId())) {
         // useCount on state set to one by closesthit
         // configure RNG
@@ -652,7 +652,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       assert(__activemask() == 0xFFFF'FFFFU);
 
       MissInput kinput{};
-      if (int const mask = input.missQueue.queuePop(&kinput);
+      if (int const mask = input.missQueue.queuePop<true>(&kinput);
           mask & (1 << getLaneId())) {
         // TODO if malloc aligned, use int4
         int const px = __ldg(&kinput.state->pixelCoordX);
@@ -732,7 +732,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
       assert(__activemask() == 0xFFFF'FFFFU);
 
       ShadeInput kinput{};
-      if (int const mask = input.shadeQueue.queuePop(&kinput);
+      if (int const mask = input.shadeQueue.queuePop<true>(&kinput);
           mask & (1 << getLaneId())) {
         // TODO if malloc aligned, use int4
         assert(kinput.state);

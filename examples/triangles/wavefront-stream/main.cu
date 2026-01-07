@@ -147,6 +147,7 @@ void wavefrontMain() {
         kinput->d_cam, kinput->sampleOffset);
     CUDA_CHECK(cudaGetLastError());
 
+    *h_done = false;
     while (!*h_done) {
       closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
           kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
@@ -169,7 +170,8 @@ void wavefrontMain() {
           kinput->infiniteLightCount);
       CUDA_CHECK(cudaGetLastError());
 
-      checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(kinput->pathStateSlots, d_done);
+      checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(
+          kinput->pathStateSlots, d_done);
       CUDA_CHECK(cudaGetLastError());
       CUDA_CHECK(cudaStreamSynchronize(st_main));
     }

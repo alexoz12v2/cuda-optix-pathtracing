@@ -370,14 +370,6 @@ struct DeviceArena {
     return __ffs(~mask) - 1;
   }
 
-  // Helper: Load Cache Volatile (Pascal+)
-  // Reads directly from L2/Memory, bypassing potentially stale L1
-  __device__ __forceinline__ int load_cv(int* addr) {
-    int val;
-    asm volatile("ld.global.cv.s32 %0, [%1];" : "=r"(val) : "l"(addr));
-    return val;
-  }
-
   // Helper: Nano Sleep (Pascal+)
   // Reduces memory contention during spin-waiting
   __device__ __forceinline__ void sleep_ns(int ns) {
@@ -411,7 +403,7 @@ struct DeviceArena {
 
     // 2. Attempt to claim
     for (int attempt = 0; attempt < 8; ++attempt) {
-      unsigned int old_mask = load_cv((int*)&bitmask[target_word]);
+      unsigned int old_mask = load_cv(&bitmask[target_word]);
       unsigned int free_mask = ~old_mask;
       int total_free = __popc(free_mask);
 

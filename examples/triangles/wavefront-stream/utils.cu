@@ -62,11 +62,12 @@ WavefrontStreamInput::~WavefrontStreamInput() noexcept {
   cudaFree(d_outBuffer);
 }
 
-__global__  void checkDoneDepth(DeviceArena<PathState> pathStateSlots, int* d_done)
-{
+__global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
+                               int* d_done) {
   int const res = pathStateSlots.empty_agg();
-  
-  if(threadIdx.x == 0){
-    *d_done = res; 
+
+  if (threadIdx.x == 0) {
+    UTILS_PRINT("UTILS: done depth | %d\n", res);
+    *d_done = res;
   }
-} 
+}

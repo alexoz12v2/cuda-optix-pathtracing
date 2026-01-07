@@ -16,7 +16,7 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
     // Inside each bsdf
     // 1. if max depth reached, kill path
     bool pathDied = false;
-    static int constexpr MAX_DEPTH = 3;  // dies afterwards
+    static int constexpr MAX_DEPTH = 32;  // dies afterwards (TODO cmdline)
     // assumes warps have different states
     int const oldDepth = groupedAtomicIncLeaderOnly(&input.state->depth);
     if (oldDepth >= MAX_DEPTH) {
@@ -28,7 +28,8 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
       // 2. (not dead) BSDF sampling and bounce computation
       BSDF const bsdf = [&] __device__() {  // TODO copy?
         BSDF theBsdf = d_bsdfs[input.matId];
-        prepareBSDF(&theBsdf, input.normal, -input.rayD);
+        prepareBSDF(&theBsdf, input.normal, -input.rayD,
+                    load_cv(&input.state->transmissionCount));
         return theBsdf;
       }();
       BSDFSample const bs =
@@ -36,9 +37,16 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
                      PcgHash::get2D<float2>(), PcgHash::get1D<float>());
       if (bs) {
         wi = bs.wi;
+#if 0
+        if (bs.refract)
+          printf("SH [%u %u] px: %d %d | d %d | refract %d | woNext %f %f %f\n",
+                 blockIdx.x, threadIdx.x, px, py, oldDepth, bs.refract,
+                 -bs.wi.x, -bs.wi.y, -bs.wi.z);
+#endif
         // 3. (not dead) update path state
         atomicAdd(&input.state->anySpecularBounces, (int)bs.delta);
         atomicExch(&input.state->lastBounceTransmission, (int)bs.refract);
+        atomicAdd(&input.state->transmissionCount, (int)bs.refract);
         float3 beta = input.state->throughput * bs.f *
                       fabsf(dot(bs.wi, input.normal)) / bs.pdf;
         // 4. (not dead) russian roulette. If fails, kill path
@@ -91,10 +99,8 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
       int const coalescedLane = getCoalescedLaneId(__activemask());
 #endif
       unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
-#if 0
       SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
                blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
-#endif
 #ifdef DMT_DEBUG
       assert(1u << coalescedLane & pushMask);
 #else

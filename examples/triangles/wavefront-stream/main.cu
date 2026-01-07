@@ -95,6 +95,15 @@ void wavefrontMain() {
   CUDA_CHECK(cudaFuncSetCacheConfig(missKernel, cudaFuncCachePreferL1));
   CUDA_CHECK(cudaFuncSetCacheConfig(shadeKernel, cudaFuncCachePreferL1));
 
+  // TODO DEADLOCK with these
+  // uint32_t threads = 512; // or 32 (probably missing threadfences)
+  // uint32_t blocks = 10; // or 2
+  // uint32_t threads = 512; // or 32 (probably missing threadfences)
+  // uint32_t blocks = 1; // or 2
+  // uint32_t threads = 32; // or 32 (probably missing threadfences)
+  // uint32_t blocks = 2; // or 2
+  // uint32_t threads = 64;
+  // uint32_t blocks = 1;
   uint32_t threads = 32;
   uint32_t blocks = 1;
   uint32_t sharedBytes = 12;
@@ -110,7 +119,7 @@ void wavefrontMain() {
   std::vector<Light> h_infiniteLights;
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
-  cornellBox(true, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+  cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
   static int constexpr TOTAL_SAMPLES = 2048;
   static int constexpr TILES_PER_WARP = 4;

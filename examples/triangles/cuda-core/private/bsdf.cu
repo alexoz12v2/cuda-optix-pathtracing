@@ -479,7 +479,6 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
   } else {
     // make tangent-space frame. Consider BSDF tangent if anisotropic
     float3 X{}, Y{};
-    // TODO remove branch
     if (isotropic) {
       gramSchmidt(ns, &X, &Y);
     } else {
@@ -566,12 +565,6 @@ __host__ __device__ BSDFSample sampleGGX(BSDF const& bsdf, float3 wo, float3 ns,
     sample.pdf *= common / (1.f + lambdaO);
     sample.f *= common / (1.f + lambdaO + lambdaI);
   }
-#ifdef __CUDA_ARCH__
-  cg::coalesced_group g = cg::coalesced_threads();
-  if (g.thread_rank() == 0)
-    printf("f: %f %f %f, pdf %f\n", sample.f.x, sample.f.y, sample.f.z,
-           sample.pdf);
-#endif
   return sample;
 }
 
@@ -611,6 +604,7 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   if (cos_NO <= 0.f || (cos_NgI < 0) != isTransmission ||
       (effectivelySpecular) || (!hasReflection && cos_NgI > 0.f) ||
       (!hasTransmission && cos_NgI < 0.f)) {
+#if 0
     printf(
         "Invalid Material:\n\t"
         "  outgoing (input) dir not same hemi: cos_NO: %f\n\t"
@@ -619,26 +613,27 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
         "%d\n\n",
         cos_NO, cos_NgI, isTransmission, effectivelySpecular, hasReflection,
         hasTransmission);
+#endif
     *pdf = 0.f;
     return make_float3(0, 0, 0);
   }
   // half vector
-#if 1
-  if (float theDot = dot(wi, wo); !(isTransmission ^ theDot > 0)) {
-    printf(
-        "wi: %f %f %f wo: %f %f %f\n"
-        "  Conductor ? %d | No Transmission (%d) but dot is %f\n",
-        wi.x, wi.y, wi.z, wo.x, wo.y, wo.z, conductor, isTransmission, theDot);
-  }
-#endif
-  assert(isTransmission ^ dot(wi, wo) > 0);
-  float3 H = isTransmission ? -(ior * wi + wo) : (wi + wo);
-  float const invLen_H = rsqrtf(dot(H, H));  // TODO safe division for zero
+  assert(isTransmission ^ (dot(wi, ng) > 0 && dot(wi, ng) > 0));
+  float3 H = isTransmission ? (ior * wi + wo) : (wi + wo);
+  float invLen_H = rsqrtf(dot(H, H));  // TODO safe division for zero
   H *= invLen_H;
   assert(fabsf(length2(H) - 1.f) < 1e-3f && "micronormal unit");
 
   // fresnel
   float const cos_HO = dot(H, wo);
+#if 0
+  printf(
+      "\n\tH: %f %f %f | ior: %f | cos_NO %f cos_NI %f cos_HO %f\n"
+      "\tns: %f %f %f | ng: %f %f %f \n\t wo %f %f %f | wi %f %f %f\n",
+      H.x, H.y, H.z, ior, cos_NO, cos_NI, cos_HO, ns.x, ns.y, ns.z, ng.x, ng.y,
+      ng.z, wo.x, wo.y, wo.z, wi.x, wi.y, wi.z);
+#endif
+
   float unused{};
   float3 reflectance{};
   float3 transmittance{};
@@ -684,13 +679,7 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
       average(reflectance) / average(reflectance + transmittance);
   float const lobePdf = isTransmission ? 1.f - pdfReflect : pdfReflect;
   *pdf = lobePdf * common / (1.f + lambdaO);
-#if 0
-  printf(
-      "\t*pdf = lobePdf * common / (1.f + lambdaO);\n\t\t%f = %f * %f / (1 + "
-      "%f)\n",
-      *pdf, lobePdf, common, lambdaO);
-#endif
-#if defined(__CUDA_ARCH__) && 1
+#if defined(__CUDA_ARCH__) && 0
   if (cg::coalesced_threads().thread_rank() == 0 && isTransmission) {
     printf(
         "energyScale * (isTransmission ? transmittance : reflectance) * common/"
@@ -704,7 +693,20 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   float3 const eval = energyScale *
                       (isTransmission ? transmittance : reflectance) * common /
                       (1.f + lambdaO + lambdaI);
-  assert(maxComponentValue(eval) > 0.f && allStrictlyPositive(eval));
+#if 0
+  printf(
+      "\n\tH: %f %f %f | \n"
+      "\n\tns: %f %f %f | ng: %f %f %f \n\t wo %f %f %f | wi %f %f %f\n"
+      "\n\treflectance: %f %f %f | Trasmittance: %f %f %f | pdfReflect: %f\n"
+      "\t*pdf = lobePdf * common / (1.f + lambdaO);\n\t\t%f = %f * %f / (1 + "
+      "%f)\n\teval: %f %f %f\n",
+      H.x, H.y, H.z, ns.x, ns.y, ns.z, ng.x, ng.y, ng.z, wo.x, wo.y, wo.z, wi.x,
+      wi.y, wi.z, reflectance.x, reflectance.y, reflectance.z, transmittance.x,
+      transmittance.y, transmittance.z, pdfReflect, *pdf, lobePdf, common,
+      lambdaO, eval.x, eval.y, eval.z);
+#endif
+  assert(*pdf == 0 ||
+         (maxComponentValue(eval) > 0.f && allStrictlyPositive(eval)));
   return eval;
 }
 
@@ -923,6 +925,7 @@ __host__ __device__ BSDFSample sampleBsdf(BSDF const& bsdf, float3 wo,
 
 __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
                                     float3 ns, float3 ng, float* pdf) {
+  assert(dot(wo, ng) > 0 && dot(ng, ns) > 0);
   float3 f = make_float3(0, 0, 0);
   *pdf = 0;
 #ifdef __CUDA_ARCH__
@@ -947,7 +950,8 @@ __host__ __device__ float3 evalBsdf(BSDF const& bsdf, float3 wo, float3 wi,
   return f;
 }
 
-__host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
+__host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo,
+                                     int transmissionCount) {
 #ifdef __CUDA_ARCH__
   cg::coalesced_group const theWarp = cg::coalesced_threads();
 #endif
@@ -1005,6 +1009,16 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo) {
 
       float3 Fss{};
       if (type == EBSDFType::eGGXDielectric) {
+#if 0  // _Shadow rays have no history, cannot flip eta_
+       // if transmission count is odd?, flip eta
+        if (transmissionCount & 1) {
+          assert(bsdf->data.ggx.mat.dielectric.eta > 0);
+          // need to wrap around to avoid implicit conversions!
+          bsdf->data.ggx.mat.dielectric.eta = __half_as_ushort(
+              flip_fp16(__ushort_as_half(bsdf->data.ggx.mat.dielectric.eta)));
+          assert(bsdf->data.ggx.mat.dielectric.eta > 0);
+        }
+#endif
         // assume dielectric tint = transmission tint
         Fss =
             half_vec_to_float3(bsdf->data.ggx.mat.dielectric.transmittanceTint);

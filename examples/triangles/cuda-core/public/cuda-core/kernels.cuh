@@ -16,7 +16,7 @@
 
 __global__ void __launch_bounds__(/*max threads per block*/ 256,
                                   /*min blocks per SM*/ 10)
-    basicIntersectionMegakernel(
+    pathTraceMegakernel(
         DeviceCamera* d_cam, TriangleSoup d_triSoup, Light const* d_lights,
         uint32_t const lightCount, Light const* d_infiniteLights,
         uint32_t const infiniteLightCount, BSDF const* d_bsdf,

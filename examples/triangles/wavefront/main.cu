@@ -77,6 +77,7 @@ struct PathState {
     state.L = make_float3(0, 0, 0);
     state.lastBsdfPdf = 0;
     state.lastBounceTransmission = 0;
+    state.transmissionCount = 0;
     state.anySpecularBounces = 0;
     state.useCount = 0;
     state.bufferSlot = slot;
@@ -98,11 +99,11 @@ struct PathState {
   int sampleIndex;
   int spp;
   int depth;
-  // TODO padding around for vector atomic exchange?
   float3 throughput;
   float3 L;
   float lastBsdfPdf;
-  int lastBounceTransmission;  // TODO cache in SMEM?
+  int lastBounceTransmission;
+  int transmissionCount;
   int anySpecularBounces;
   int useCount;
   int bufferSlot;
@@ -587,7 +588,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         Light const light = input.d_lights[lightIdx];
         BSDF const bsdf = [&] __device__() {  // TODO copy?
           BSDF theBsdf = input.d_bsdf[kinput.matId];
-          prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD);
+          prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD,
+                      load_cv(&kinput.state->transmissionCount));
           return theBsdf;
         }();
 
@@ -757,7 +759,8 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
           // 2. (not dead) BSDF sampling and bounce computation
           BSDF const bsdf = [&] __device__() {  // TODO copy?
             BSDF theBsdf = input.d_bsdf[kinput.matId];
-            prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD);
+            prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD,
+                        load_cv(&kinput.state->transmissionCount));
             return theBsdf;
           }();
           BSDFSample const bs =
@@ -769,6 +772,7 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
             // 3. (not dead) update path state
             atomicAdd(&kinput.state->anySpecularBounces, (int)bs.delta);
             atomicExch(&kinput.state->lastBounceTransmission, (int)bs.refract);
+            atomicAdd(&kinput.state->transmissionCount, (int)bs.refract);
             float3 beta = kinput.state->throughput * bs.f *
                           fabsf(dot(bs.wi, kinput.normal)) / bs.pdf;
             // 4. (not dead) russian roulette. If fails, kill path
@@ -1044,7 +1048,7 @@ void wavefrontMain() {
   std::vector<Light> h_infiniteLights;
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
-  cornellBox(true, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+  cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
   WavefrontInput kinput{};
   allocateDeviceMemory(threads, blocks, h_scene, h_lights, h_infiniteLights,

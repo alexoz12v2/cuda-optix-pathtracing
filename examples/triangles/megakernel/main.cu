@@ -80,7 +80,7 @@ void megakernelMain() {
   std::vector<Light> h_infiniteLights;
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
-  cornellBox(true, &h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+  cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
   TriangleSoup d_scene = triSoupFromTriangles(h_scene, h_bsdfs.size());
   BSDF* d_bsdfs = deviceBSDF(h_bsdfs);
@@ -97,7 +97,7 @@ void megakernelMain() {
   std::cout << "Running CUDA Kernel" << std::endl;
   // TODO stream based write back
   for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {
-    basicIntersectionMegakernel<<<blocks, threads>>>(
+    pathTraceMegakernel<<<blocks, threads>>>(
         d_camera, d_scene, d_lights, h_lights.size(), d_infiniteLights,
         h_infiniteLights.size(), d_bsdfs, h_bsdfs.size(), sTot, d_rng,
         d_outputBuffer);

@@ -13,12 +13,12 @@ namespace cg = cooperative_groups;
 
 __global__ void __launch_bounds__(/*max threads per block*/ 512,
                                   /*min blocks per SM*/ 10)
-    basicIntersectionMegakernel(
-        DeviceCamera* d_cam, TriangleSoup d_triSoup, Light const* d_lights,
-        uint32_t const lightCount, Light const* d_infiniteLights,
-        uint32_t const infiniteLightCount, BSDF const* d_bsdf,
-        uint32_t const bsdfCount, uint32_t const sampleOffset,
-        DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer) {
+    pathTraceMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
+                        Light const* d_lights, uint32_t const lightCount,
+                        Light const* d_infiniteLights,
+                        uint32_t const infiniteLightCount, BSDF const* d_bsdf,
+                        uint32_t const bsdfCount, uint32_t const sampleOffset,
+                        DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer) {
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t const spp = d_cam->spp;
   // constant memory?
@@ -69,6 +69,13 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
             hitResult = result;
             // TODO better? Coalescing?
             hitResult.matId = d_triSoup.matId[tri];
+#if 0
+            hitResult.normal = flipIfOdd(hitResult.normal, transmissionCount);
+#else
+            if (dot(ray.d, hitResult.normal) > 0) {
+              hitResult.normal *= -1;
+            }
+#endif
           }
         }
         // if not intersected, contribution is zero (eliminates branch later)
@@ -90,6 +97,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           break;
         }
 
+        // TODO
         static int constexpr MAX_DEPTH = 32;
         if (depth >= MAX_DEPTH) {
           PRINT("Max depth reached\n");
@@ -102,7 +110,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
               hitResult.pos.z, hitResult.normal.x, hitResult.normal.y,
               hitResult.normal.z);
         bsdf = d_bsdf[hitResult.matId];
-        prepareBSDF(&bsdf, hitResult.normal, -ray.d);
+        prepareBSDF(&bsdf, hitResult.normal, -ray.d, transmissionCount);
         PRINT("    - [%d %d:%d] Prepared BSDF.\n", pixel.x, pixel.y, depth);
 
         // - choose light for Next Event Estimation (direct lighting)
@@ -138,7 +146,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
               hitResult.pos,
 #endif
               ls.direction};
-          // - trace ray
+          // - trace ray (TODO flip normal on odd tranmission count)
           bool doNextEventEstimation = true;
           for (int tri = 0; tri < d_triSoup.count; ++tri) {
             float4 const x = reinterpret_cast<float4 const*>(d_triSoup.xs)[tri];

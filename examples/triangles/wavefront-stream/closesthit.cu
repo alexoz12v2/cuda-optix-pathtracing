@@ -5,8 +5,9 @@
 // anonymous namespace for static/internal linkage (applies to __device__ too)
 namespace {
 // TODO compare __ldg with .cv pascal PTX Access with normal access
-__device__ __forceinline__ HitResult closesthit(
-    Ray const& __restrict__ ray, TriangleSoup const& __restrict__ triSoup) {
+__device__ __forceinline__ HitResult
+closesthit(Ray const& __restrict__ ray,
+           TriangleSoup const& __restrict__ triSoup, int transmissionCount) {
   HitResult result;
   for (int tri = 0; tri < triSoup.count; ++tri) {
     assert((((uintptr_t)triSoup.xs) & 15) == 0);
@@ -20,6 +21,16 @@ __device__ __forceinline__ HitResult closesthit(
       result = other;
       // TODO better? Coalescing?
       result.matId = triSoup.matId[tri];
+      // _Important_ Our convention: Geometric and Shading Normals should be
+      // directed accordingly to input (outgoing) direction
+#if 0
+      result.normal = flipIfOdd(result.normal, transmissionCount);
+#else
+      if (dot(ray.d, result.normal) > 0) {
+        // inside surface, flip normal
+        result.normal *= -1;
+      }
+#endif
     }
   }
   return result;
@@ -107,7 +118,9 @@ __global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
   while (mask & (1 << lane)) {
     int const activeWorkers = __activemask();
 
-    if (auto const hitResult = closesthit(kinput.ray, d_triSoup);
+    // TODO check GMEM accesses here
+    if (auto const hitResult = closesthit(
+            kinput.ray, d_triSoup, __ldg(&kinput.state->transmissionCount));
         hitResult.hit) {
       handleHit(kinput, hitResult, outAnyhitQueue, outShadeQueue);
     } else {

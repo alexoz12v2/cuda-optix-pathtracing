@@ -26,17 +26,19 @@ std::vector<T> concat(const std::vector<T>& first, const Vectors&... rest) {
 struct HostTriangleScene {
   std::vector<Triangle> triangles;
   std::vector<uint32_t> nextMeshIndices;
+  std::vector<uint32_t> meshMatIds;
 
   uint32_t meshCount() const {
     return static_cast<uint32_t>(nextMeshIndices.size());
   }
 
-  void addModel(std::vector<Triangle> const& mesh) {
+  void addModel(std::vector<Triangle> const& mesh, uint32_t materialIndex) {
     triangles.insert(triangles.end(), mesh.begin(), mesh.end());
     if (!nextMeshIndices.empty())
       nextMeshIndices.push_back(nextMeshIndices.back() + mesh.size());
     else
       nextMeshIndices.push_back(mesh.size());
+    meshMatIds.push_back(materialIndex);
   }
 };
 

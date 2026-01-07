@@ -2,6 +2,7 @@
 #define DMT_CUDA_CORE_COMMON_MATH_CUH
 
 #include <cooperative_groups.h>
+#include <cuda_fp16.h>
 
 #include <cassert>
 
@@ -190,6 +191,16 @@ struct Transform {
   __host__ __device__ float3 applyInverseTranspose(float3 n) const;
 };
 
+__host__ __device__ __forceinline__ __half flip_fp16(__half x) {
+#if defined(__CUDA_ARCH__)
+  // GPU optimized path
+  return hrcp(x);
+#else
+  // CPU fallback path
+  return __float2half(1.0f / __half2float(x));
+#endif
+}
+
 inline __host__ __device__ __forceinline__ int ceilDiv(int num, int den) {
   return (num + den - 1) / den;
 }
@@ -199,6 +210,30 @@ inline __host__ __device__ __forceinline__ uint32_t ceilDiv(uint32_t num,
   return (num + den - 1) / den;
 }
 
+// (SEL or CSEL in PTX/SASS assembly) rather than actual branching logic
+// TODO check generated PTX:  should be
+// and.b32
+// shl.b32
+// xor.b32
+inline __host__ __device__ __forceinline__ float flipIfOdd(float v, int b) {
+  // Flip sign bit if b is odd
+  int mask = (b & 1) << 31;
+#ifdef __CUDA_ARCH__
+  return __int_as_float(__float_as_int(v) ^ mask);
+#else
+  union {
+    unsigned b32;
+    float f32;
+  } val;
+  val.f32 = v;
+  val.b32 = val.b32 ^ mask;
+  return val.f32;
+#endif
+}
+
+inline __host__ __device__ __forceinline__ float3 flipIfOdd(float3 v, int b) {
+  return make_float3(flipIfOdd(v.x, b), flipIfOdd(v.y, b), flipIfOdd(v.z, b));
+}
 // While the reinterpret_cast approach feels more "efficient" because it looks
 // like direct memory access, it can actually hinder the compiler's ability to
 // optimize registers in a CUDA kernel. The CUDA compiler (nvcc) is highly
@@ -411,8 +446,8 @@ inline __host__ __device__ __forceinline__ float3 lerp(float3 a, float3 b,
   return _1mt * a + t * b;
 }
 inline __host__ __device__ __forceinline__ bool allStrictlyPositive(float3 a) {
-  return a.x > 1e-4f && isfinite(a.x) && a.y > 1e-4f && isfinite(a.y) &&
-         a.z > 1e-4f && isfinite(a.z);
+  return a.x > FLT_MIN && isfinite(a.x) && a.y > FLT_MIN && isfinite(a.y) &&
+         a.z > FLT_MIN && isfinite(a.z);
 }
 inline __host__ __device__ __forceinline__ bool componentWiseNear(float3 a,
                                                                   float3 b) {

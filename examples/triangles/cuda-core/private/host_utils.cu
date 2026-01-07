@@ -77,7 +77,7 @@ TriangleSoup triSoupFromTriangles(const HostTriangleScene& hostScene,
           base + i >= nextIncrement) {
         ++meshIdx;
         nextIncrement = hostScene.nextMeshIndices[meshIdx];
-        matIdx = (matIdx + 1) % bsdfCount;
+        matIdx = hostScene.meshMatIds[meshIdx];
       }
 
       const Triangle& t = hostScene.triangles[base + i];
@@ -250,102 +250,72 @@ DeviceCamera* deviceCamera(DeviceCamera const& h_camera) {
 // Gold:
 // eta:   {.r = 0.18299f, .g = 0.42108f, .b = 1.37340f};
 // kappa: {.r = 3.42420f, .g = 2.34590f, .b = 1.77040f};
-void cornellBox(bool megakernel, HostTriangleScene* h_scene,
-                std::vector<Light>* h_lights,
+void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
                 std::vector<Light>* h_infiniteLights,
                 std::vector<BSDF>* h_bsdfs, DeviceCamera* h_camera) {
+  float3 const white = make_float3(0.9f, 170.f / 204.f, 160.f / 204.f);
+
   *h_scene = {};
-  // TODO test only with walls, as crash is there
-  // TODO complete scene for both megakernel and wavefront
+  *h_bsdfs = {};
+  // ball left
+  h_scene->addModel(generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 2, 4),
+                    0);
+  h_bsdfs->push_back(makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
+                                      {3.42420f, 2.34590f, 1.77040f}, 0.f, .9f,
+                                      .9f));
+  // h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
+
+  // ball right
   h_scene->addModel(
-      generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 2, 4));
-  // h_scene->addModel(generateCube(make_float3(0, 2, 0), make_float3(1, 1,
-  // 1)));
-  if (megakernel) {
-    // far plane
-    h_scene->addModel(
-        generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4));
-  }
+      generateSphereMesh(make_float3(1.2, 2.4, -0.25), 0.5f, 2, 4), 1);
+  h_bsdfs->push_back(makeGGXDielectric({0.02f, 0.07f, 0.01f},
+                                       {0.2f, 0.7f, 0.1f}, 1.f /*~26 deg*/,
+                                       1.44f, .5f, .7f));
+
+  // far plane
+  h_scene->addModel(
+      generatePlane(make_float3(0, 4, 0), make_float3(0, -1, 0), 4, 4), 2);
+  h_bsdfs->push_back(makeOrenNayar(white, .5f));
+
   // floor plane
   h_scene->addModel(
-      generatePlane(make_float3(0, 2, -.5f), make_float3(0, 0, 1), 4, 4));
+      generatePlane(make_float3(0, 2, -.5f), make_float3(0, 0, 1), 4, 4), 3);
+  h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
+
   // ceiling plane
   h_scene->addModel(
-      generatePlane(make_float3(0, 2, 2), make_float3(0, 0, -1), 4, 4));
-  if (megakernel) {
-    // left plane
-    h_scene->addModel(
-        generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4));
-  }
+      generatePlane(make_float3(0, 2, 2), make_float3(0, 0, -1), 4, 4), 4);
+  h_bsdfs->push_back(makeOrenNayar(white, .5f));
+
+  // left plane
+  h_scene->addModel(
+      generatePlane(make_float3(-2, 2, 0), make_float3(1, 0, 0), 4, 4), 5);
+  h_bsdfs->push_back(makeOrenNayar({1.f, 0.01f, 0.01f}, .6f));
+
   // right plane
   h_scene->addModel(
-      generatePlane(make_float3(2, 2, 0), make_float3(-1, 0, 0), 4, 4));
+      generatePlane(make_float3(2, 2, 0), make_float3(-1, 0, 0), 4, 4), 6);
+  h_bsdfs->push_back(makeOrenNayar({0.01f, 1.f, 0.01f}, .6f));
 
   *h_lights = {};
-  // TODO spot light broken
-  if (megakernel) {
-#define SPOT_LIGHT 1
-#if SPOT_LIGHT
-    h_lights->push_back(makeSpotLight(
-        2.f * make_float3(1, 1, 1), make_float3(0, 1.8f, 1.7f),
-        make_float3(0, 0, -1), cosf(std::numbers::pi_v<float> / 6),
-        cosf(std::numbers::pi_v<float> / 3), 0.01f));
-#else
-    h_lights->push_back(makePointLight(2.7 * make_float3(1, 1, 1),
-                                       make_float3(0, 0.7f, 1.5f), 0.01f));
-#endif
-  } else {
-    h_lights->push_back(makePointLight(4 * make_float3(1, 1, 1),
-                                       make_float3(0, 0.7f, 1.5f), 0.01f));
-  }
+  h_lights->push_back(
+      makeSpotLight(2.f * make_float3(1, 1, 1), make_float3(0, 1.8f, 1.7f),
+                    make_float3(0, 0, -1), cosf(std::numbers::pi_v<float> / 6),
+                    cosf(std::numbers::pi_v<float> / 3), 0.01f));
   *h_infiniteLights = {};
   h_infiniteLights->push_back(
       makeEnvironmentalLight(make_float3(0.1f, 0.1f, 0.1f)));
 
-  *h_bsdfs = {};
-  if (megakernel) {
-#define ONLY_OREN_NAYAR 1
-#define ONLY_LAMBERT 0
-#define ONLY_CONDUCTOR 0
-#define ONLY_DIELECTRIC 0
-#define BSDF_ALL 0
-
-#if BSDF_ALL || ONLY_LAMBERT
-    h_bsdfs->push_back(makeLambert());
-#endif
-#if BSDF_ALL || ONLY_OREN_NAYAR
-    // ball
-    h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
-#endif
-#if ONLY_OREN_NAYAR
-    float3 const white = make_float3(0.9f, 170.f / 204.f, 160.f / 204.f);
-    // far
-    h_bsdfs->push_back(makeOrenNayar(white, .5f));
-    // floor
-    h_bsdfs->push_back(makeOrenNayar(white, .5f));
-    // ceiling
-    h_bsdfs->push_back(makeOrenNayar(white, .5f));
-    // left
-    h_bsdfs->push_back(makeOrenNayar({1.f, 0.01f, 0.01f}, .6f));
-    // right
-    h_bsdfs->push_back(makeOrenNayar({0.01f, 1.f, 0.01f}, .6f));
-#endif
-#if BSDF_ALL || ONLY_DIELECTRIC
-    h_bsdfs->push_back(makeGGXDielectric({0.2f, 0.7, 0.1f}, {0.2f, 0.7, 0.1f},
-                                         1.f /*~26 deg*/, 1.44f, .5f, .7f));
-#endif
-#if BSDF_ALL || ONLY_CONDUCTOR
+#if 0
     h_bsdfs->push_back(makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
                                         {3.42420f, 2.34590f, 1.77040f}, 0.f,
                                         .9f, .9f));
-#endif
-  } else {
     h_bsdfs->push_back(makeLambert());
-  }
+#endif
 
   *h_camera = DeviceCamera();
-  h_camera->width = 512;
-  h_camera->height = 256;
+  h_camera->width = 256;
+  h_camera->height = 128;
   h_camera->spp = 4;
 }
 
@@ -368,51 +338,6 @@ void writePixel(uint32_t const width, uint8_t* rowMajorImage,
   rowMajorImage[3 * (col + row * width) + 1] = u8g;
   rowMajorImage[3 * (col + row * width) + 2] = u8b;
   // printf("[%u %u]: %f %f %f\n", col, row, fr, fg, fb);
-}
-
-void writeGrayscaleBMP(char const* fileName, const uint8_t* input,
-                       uint32_t const width, uint32_t const height) {
-  // 24-bit BMP row padding
-  uint32_t const rowStride = (width * 3 + 3) & ~3u;
-  uint32_t const pixelDataSize = rowStride * height;
-  uint32_t const fileSize = 54 + pixelDataSize;
-
-  uint8_t header[54] = {};
-  header[0] = 'B';
-  header[1] = 'M';
-
-  memcpy(&header[2], &fileSize, 4);
-  uint32_t val = 54;
-  memcpy(&header[10], &val, 4);
-  val = 40;
-  memcpy(&header[14], &val, 4);
-  memcpy(&header[18], &width, 4);
-  memcpy(&header[22], &height, 4);
-  uint16_t val16 = 1;
-  memcpy(&header[26], &val16, 2);
-  val16 = 24;
-  memcpy(&header[28], &val16, 2);
-
-  std::ofstream out(fileName, std::ios::binary);
-  out.write(reinterpret_cast<char*>(header), sizeof(header));
-
-  // Write pixels bottom-up (BMP convention)
-  std::vector<uint8_t> row(rowStride, 0);
-
-  for (uint32_t y = 0; y < height; ++y) {
-    uint32_t const srcY = height - 1 - y;  // flip vertically
-    const uint8_t* src = input + srcY * width * 3;
-    uint8_t* dst = row.data();
-
-    for (uint32_t x = 0; x < width; ++x) {
-      dst[0] = src[3 * x + 2];  // B
-      dst[1] = src[3 * x + 1];  // G
-      dst[2] = src[3 * x + 0];  // R
-      dst += 3;
-    }
-
-    out.write(reinterpret_cast<char*>(row.data()), rowStride);
-  }
 }
 
 }  // namespace

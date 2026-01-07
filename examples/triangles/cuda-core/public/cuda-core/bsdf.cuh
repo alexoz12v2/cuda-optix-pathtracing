@@ -140,7 +140,8 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
                                    float3 ns, float3 ng, float* pdf);
 __host__ __device__ float3 evalOrenNayar(BSDF const& bsdf, float3 wo, float3 wi,
                                          float3 ns, float3 ng, float* pdf);
-__host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo);
+__host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo,
+                                     int transmissionCount);
 
 // ---------------------------------------------------------------------------
 // BSDF Bits and Pieces
@@ -181,11 +182,16 @@ inline __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
 inline __host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
     float cosThetaI, float eta, float* r_cosThetaT) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
+  // _warning_ normal and eta should have been flipped by intersection procedure
+#if 0
+  assert(cosThetaI > 0);
+#else
   bool const entering = cosThetaI > 0.f;
   if (!entering) {
     eta = 1.f / eta;
     cosThetaI = fabsf(cosThetaI);
   }
+#endif
   float const sinThetaI = safeSqrt(fmaxf(0.f, 1.f - cosThetaI * cosThetaI));
   float const sinThetaT = sinThetaI / eta;
   if (sinThetaT >= 1.f) {

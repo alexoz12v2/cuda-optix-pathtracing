@@ -41,6 +41,7 @@ struct PathState {
     state.L = make_float3(0, 0, 0);
     state.lastBsdfPdf = 0;
     state.lastBounceTransmission = 0;
+    state.transmissionCount = 0;
     state.anySpecularBounces = 0;
     state.bufferSlot = slot;
   }
@@ -61,11 +62,11 @@ struct PathState {
   int sampleIndex;
   int spp;
   int depth;
-  // TODO padding around for vector atomic exchange?
   float3 throughput;
   float3 L;
   float lastBsdfPdf;
   int lastBounceTransmission;  // TODO cache in SMEM?
+  int transmissionCount;
   int anySpecularBounces;
   int bufferSlot;
 };

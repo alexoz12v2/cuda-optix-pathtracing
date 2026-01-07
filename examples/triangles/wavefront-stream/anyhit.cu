@@ -68,7 +68,8 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
     Light const light = d_lights[lightIdx];
     BSDF const bsdf = [&] __device__() {  // TODO copy?
       BSDF theBsdf = d_bsdfs[kinput.matId];
-      prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD);
+      prepareBSDF(&theBsdf, kinput.normal, -kinput.rayD,
+                  __ldg(&kinput.state->transmissionCount));
       return theBsdf;
     }();
 

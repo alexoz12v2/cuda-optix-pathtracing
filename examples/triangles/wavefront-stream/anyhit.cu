@@ -52,13 +52,23 @@ __device__ __forceinline__ void anyhitNEE(
   }
 }
 
-__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
+__global__ void anyhitKernel(QueueType<AnyhitInput> inQueue, Light* d_lights,
                              uint32_t lightCount, BSDF* d_bsdfs,
                              TriangleSoup d_triSoup) {
   AnyhitInput kinput{};  // TODO SMEM?
-  int mask = inQueue.queuePop<false>(&kinput);
+#if USE_SIMPLE_QUEUE
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x;
+       idx < inQueue.queueSize(); idx += blockDim.x * gridDim.x) {
+    if (!inQueue.marked[idx]) {
+      continue;
+    }
+    inQueue.marked[idx] = 0;
+    kinput = inQueue.buffer[idx];
+#else
   int lane = getLaneId();
+  int mask = inQueue.queuePop<false>(&kinput);
   while (mask & (1 << lane)) {
+#endif
     int const activeWorkers = __activemask();
 
     // choose a light and prepare BSDF data from intersection
@@ -90,7 +100,10 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
         kinput.state->L.x, kinput.state->L.y, kinput.state->L.z);
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
+#if USE_SIMPLE_QUEUE
+#else
     lane = getCoalescedLaneId(activeWorkers);
     mask = inQueue.queuePop<false>(&kinput);
+#endif
   }
 }

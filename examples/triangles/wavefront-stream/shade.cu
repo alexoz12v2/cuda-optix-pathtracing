@@ -1,13 +1,23 @@
 #include "wave-kernels.cuh"
 
-__global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
-                            DeviceQueue<ClosestHitInput> outQueue,
+__global__ void shadeKernel(QueueType<ShadeInput> inQueue,
+                            QueueType<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
                             float4* d_outBuffer, BSDF* d_bsdfs) {
   ShadeInput input{};
+#if USE_SIMPLE_QUEUE
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x;
+       idx < inQueue.queueSize(); idx += blockDim.x * gridDim.x) {
+    if (!inQueue.marked[idx]) {
+      continue;
+    }
+    inQueue.marked[idx] = 0;
+    input = inQueue.buffer[idx];
+#else
   int mask = inQueue.queuePop<false>(&input);
   int lane = getLaneId();
   while (mask & (1 << lane)) {
+#endif
     int const activeWorkers = __activemask();
 
     int px, py;
@@ -95,23 +105,39 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
               .d = wi,
           }};  // TODO SMEM?
 
-#ifdef DMT_DEBUG
-      int const coalescedLane = getCoalescedLaneId(__activemask());
-#endif
-      unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
-      SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
-               blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
-#ifdef DMT_DEBUG
-      assert(1u << coalescedLane & pushMask);
+#if USE_SIMPLE_QUEUE
+      bool const pushed = outQueue.queuePush<false>(closestHitInput);
+#  ifdef DMT_DEBUG
+      assert(pushed);
+#  else
+      if (getLaneId() == __ffs(__activemask) - 1) {
+        printf("SH Failed: closest hit queue full (cap: %d)\n",
+               outQueue.capacity);
+      }
+      asm volatile("trap;");
+#  endif
 #else
+#  ifdef DMT_DEBUG
+      int const coalescedLane = getCoalescedLaneId(__activemask());
+#  endif
+      unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
+      // SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
+      //          blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
+#  ifdef DMT_DEBUG
+      assert(1u << coalescedLane & pushMask);
+#  else
       if (!(1u << coalescedLane & pushMask)) {
         asm volatile("trap;");
       }
+#  endif
 #endif
     }
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
+#if USE_SIMPLE_QUEUE
+#else
     lane = getCoalescedLaneId(activeWorkers);
     mask = inQueue.queuePop<false>(&input);
+#endif
   }
 }

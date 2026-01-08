@@ -30,7 +30,7 @@ inline __device__ __forceinline__ void raygen(
                          *raygenInput.renderFromCamera);
 }
 
-__global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
+__global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
                              DeviceArena<PathState> pathStateSlots,
                              DeviceHaltonOwen* d_haltonOwen,
                              DeviceCamera* d_cam, int tileIdxX, int tileIdxY,
@@ -108,16 +108,30 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
 #endif
 
         // check if 32 available places in queue
-#ifdef DMT_DEBUG
+#if USE_SIMPLE_QUEUE
+        bool const pushed = outQueue.queuePush<false>(raygenElem);
+#  ifdef DMT_DEBUG
+        assert(pushed);
+#  else
+        if (!pushed) {
+          int const deadWorkers = __activemask();
+          if (getLaneId() == __ffs(deadWorkers) - 1) {
+            printf("RG Error: Queue Full (cap: %d)\n", outQueue.capacity);
+          }
+          asm volatile("trap;");
+        }
+#  endif
+#else
+#  ifdef DMT_DEBUG
         int const coalescedLane = getCoalescedLaneId(__activemask());
-#endif
+#  endif
         unsigned const succ = outQueue.queuePush<false>(&raygenElem);
         // RG_PRINT(
         //     "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d] %d |
         //     " "ks: %d %d | laneid: %d\n", blockIdx.x, threadIdx.x, succ, x,
         //     y, sampleIdx, i, totalWorkUnits, laneId);
         // simplicity: queues are appropriately sized for CMEM_spp
-#ifdef DMT_DEBUG
+#  ifdef DMT_DEBUG
         if (!((1u << coalescedLane) & succ)) {
           int volatile head = *outQueue.head & (outQueue.capacity - 1);
           int volatile tail = *outQueue.tail & (outQueue.capacity - 1);
@@ -135,6 +149,7 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
               outQueue.capacity - (tail - head));
         }
         assert((1u << coalescedLane) & succ);
+#  endif
 #endif
       }
     }

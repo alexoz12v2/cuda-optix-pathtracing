@@ -13,18 +13,30 @@
 // #define RG_PRINT(...) printf(__VA_ARGS__)
 // #define CH_PRINT(...) printf(__VA_ARGS__)
 // #define AH_PRINT(...) printf(__VA_ARGS__)
-// #define MS_PRINT(...) printf(__VA_ARGS__)
-// #define SH_PRINT(...) printf(__VA_ARGS__)
-// #define UTILS_PRINT(...) printf(__VA_ARGS__)
+#define MS_PRINT(...) printf(__VA_ARGS__)
+#define SH_PRINT(...) printf(__VA_ARGS__)
+#define UTILS_PRINT(...) printf(__VA_ARGS__)
 
 #define RG_PRINT(...)
 #define CH_PRINT(...)
 #define AH_PRINT(...)
-#define MS_PRINT(...)
-#define SH_PRINT(...)
-#define UTILS_PRINT(...)
+// #define MS_PRINT(...)
+// #define SH_PRINT(...)
+// #define UTILS_PRINT(...)
 
 struct HostTriangleScene;
+
+// ----------------------------------------------------------------------------
+// Compile time config
+// ----------------------------------------------------------------------------
+#define USE_SIMPLE_QUEUE 1
+#if USE_SIMPLE_QUEUE
+template <typename T>
+using QueueType = SimpleDeviceQueue<T>;
+#else
+template <typename T>
+using QueueType = DeviceQueue<T>;
+#endif
 
 // ----------------------------------------------------------------------------
 // Path State
@@ -170,10 +182,19 @@ struct WavefrontStreamInput {
   WavefrontStreamInput& operator=(WavefrontStreamInput&&) noexcept = delete;
   ~WavefrontStreamInput() noexcept;
 
-  DeviceQueue<ClosestHitInput> closesthitQueue;
-  DeviceQueue<MissInput> missQueue;
-  DeviceQueue<AnyhitInput> anyhitQueue;
-  DeviceQueue<ShadeInput> shadeQueue;
+  __host__ void swapBuffersAllQueues(cudaStream_t stream) {
+#if USE_SIMPLE_QUEUE
+    closesthitQueue.swapBuffers(stream);
+    missQueue.swapBuffers(stream);
+    anyhitQueue.swapBuffers(stream);
+    shadeQueue.swapBuffers(stream);
+#endif
+  }
+
+  QueueType<ClosestHitInput> closesthitQueue;
+  QueueType<MissInput> missQueue;
+  QueueType<AnyhitInput> anyhitQueue;
+  QueueType<ShadeInput> shadeQueue;
   DeviceArena<PathState> pathStateSlots;
   DeviceHaltonOwen* d_haltonOwen;
   DeviceCamera* d_cam;
@@ -192,28 +213,31 @@ struct WavefrontStreamInput {
 // ----------------------------------------------------------------------------
 
 // len(d_haltonOwen) = warp count
-__global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
+__global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
                              DeviceArena<PathState> pathStateSlots,
                              DeviceHaltonOwen* d_haltonOwen,
                              DeviceCamera* d_cam, int tileIdxX, int tileIdxY,
                              int tileDimX, int tileDimY, int sampleOffset);
-__global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
-                                 DeviceQueue<MissInput> outMissQueue,
-                                 DeviceQueue<AnyhitInput> outAnyhitQueue,
-                                 DeviceQueue<ShadeInput> outShadeQueue,
+__global__ void closesthitKernel(QueueType<ClosestHitInput> inQueue,
+                                 QueueType<MissInput> outMissQueue,
+                                 QueueType<AnyhitInput> outAnyhitQueue,
+                                 QueueType<ShadeInput> outShadeQueue,
                                  TriangleSoup d_triSoup);
-__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
+__global__ void anyhitKernel(QueueType<AnyhitInput> inQueue, Light* d_lights,
                              uint32_t lightCount, BSDF* d_bsdfs,
                              TriangleSoup d_triSoup);
-__global__ void missKernel(DeviceQueue<MissInput> inQueue,
+__global__ void missKernel(QueueType<MissInput> inQueue,
                            DeviceArena<PathState> pathStateSlots,
                            float4* d_outBuffer, Light* infiniteLights,
                            uint32_t infiniteLightCount);
-__global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
-                            DeviceQueue<ClosestHitInput> outQueue,
+__global__ void shadeKernel(QueueType<ShadeInput> inQueue,
+                            QueueType<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
                             float4* d_outBuffer, BSDF* d_bsdfs);
 __global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
-                               int* d_done);
+                               QueueType<ClosestHitInput> closesthitQueue,
+                               QueueType<MissInput> missQueue,
+                               QueueType<AnyhitInput> anyhitQueue,
+                               QueueType<ShadeInput> shadeQueue, int* d_done);
 
 #endif  // DMT_WAVEFRONT_STREAM_WAVE_KERNELS_CUH

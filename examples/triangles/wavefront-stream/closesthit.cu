@@ -39,8 +39,8 @@ closesthit(Ray const& __restrict__ ray,
 __device__ __forceinline__ void handleHit(
     ClosestHitInput const& __restrict__ kinput,
     HitResult const& __restrict__ hitResult,
-    DeviceQueue<AnyhitInput>& outAnyHitQueue,
-    DeviceQueue<ShadeInput>& outShadeQueue) {
+    QueueType<AnyhitInput>& outAnyHitQueue,
+    QueueType<ShadeInput>& outShadeQueue) {
   // 2. Queue Pushes
   unsigned mask = __activemask();
   // TODO SMEM?
@@ -51,16 +51,32 @@ __device__ __forceinline__ void handleHit(
                                 .error = hitResult.error,
                                 .matId = hitResult.matId,
                                 .t = hitResult.t};
-#ifdef DMT_DEBUG
-  int const coalescedLane = getCoalescedLaneId(__activemask());
-#endif
-  mask = outAnyHitQueue.queuePush<false>(&anyHitInput);
-#ifdef DMT_DEBUG
-  assert(1u << coalescedLane & mask);
+#if USE_SIMPLE_QUEUE
+  bool pushed = outAnyHitQueue.queuePush<false>(anyHitInput);
+#  ifdef DMT_DEBUG
+  assert(pushed);
+#  else
+  if (!pushed) {
+    int const deadWorkers = __activemask();
+    if (getLaneId() == __ffs(deadWorkers) - 1) {
+      printf("CH Failed: AnyHit queue Full\n (cap: %d)\n",
+             outAnyHitQueue.capacity);
+    }
+    asm volatile("trap;");
+  }
+#  endif
 #else
+#  ifdef DMT_DEBUG
+  int const coalescedLane = getCoalescedLaneId(__activemask());
+#  endif
+  mask = outAnyHitQueue.queuePush<false>(&anyHitInput);
+#  ifdef DMT_DEBUG
+  assert(1u << coalescedLane & mask);
+#  else
   if (!(1u << coalescedLane & mask)) {
     asm volatile("trap;");
   }
+#  endif
 #endif
   ShadeInput const shadeInput{
       .state = kinput.state,
@@ -71,13 +87,29 @@ __device__ __forceinline__ void handleHit(
       .matId = hitResult.matId,
       .t = hitResult.t,
   };
-  mask = outShadeQueue.queuePush<false>(&shadeInput);
-#ifdef DMT_DEBUG
-  assert(1u << coalescedLane & mask);
+#if USE_SIMPLE_QUEUE
+  pushed = outShadeQueue.queuePush<false>(shadeInput);
+#  ifdef DMT_DEBUG
+  assert(pushed);
+#  else
+  if (!pushed) {
+    int const deadWorkers = __activemask();
+    if (getLaneId() == __ffs(deadWorkers) - 1) {
+      printf("CH Failed: Shade queue Full\n (cap: %d)\n",
+             outShadeQueue.capacity);
+    }
+    asm volatile("trap;");
+  }
+#  endif
 #else
+  mask = outShadeQueue.queuePush<false>(&shadeInput);
+#  ifdef DMT_DEBUG
+  assert(1u << coalescedLane & mask);
+#  else
   if (!(1u << coalescedLane & mask)) {
     asm volatile("trap;");
   }
+#  endif
 #endif
 
   CH_PRINT("CH [%u %u] px: [%d %d] d: %d | hit at: %f %f %f\n", blockIdx.x,
@@ -86,36 +118,61 @@ __device__ __forceinline__ void handleHit(
            hitResult.pos.z);
 }
 
-__device__ __forceinline__ void handleMiss(
-    ClosestHitInput const& kinput, DeviceQueue<MissInput>& outMissQueue) {
+__device__ __forceinline__ void handleMiss(ClosestHitInput const& kinput,
+                                           QueueType<MissInput>& outMissQueue) {
   // if miss -> enqueue miss queue
   MissInput const missInput{.state = kinput.state,
                             .rayDirection = kinput.ray.d};
-#ifdef DMT_DEBUG
-  int const coalescedLane = getCoalescedLaneId(__activemask());
-#endif
-  unsigned const mask = outMissQueue.queuePush<false>(&missInput);
-#ifdef DMT_DEBUG
-  assert(1u << coalescedLane & mask);
+#if USE_SIMPLE_QUEUE
+  bool const pushed = outMissQueue.queuePush<false>(missInput);
+#  ifdef DMT_DEBUG
+  assert(pushed);
+#  else
+  if (!pushed) {
+    int const deadWorkers = __activemask();
+    if (getLaneId() == __ffs(deadWorkers) - 1) {
+      printf("CH Failed: Miss queue Full\n (cap: %d)\n", outMissQueue.capacity);
+    }
+    asm volatile("trap;");
+  }
+#  endif
 #else
+#  ifdef DMT_DEBUG
+  int const coalescedLane = getCoalescedLaneId(__activemask());
+#  endif
+  unsigned const mask = outMissQueue.queuePush<false>(&missInput);
+#  ifdef DMT_DEBUG
+  assert(1u << coalescedLane & mask);
+#  else
   if (!(1u << coalescedLane & mask)) {
     asm volatile("trap;");
   }
+#  endif
 #endif
 }
 
 }  // namespace
 
-__global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
-                                 DeviceQueue<MissInput> outMissQueue,
-                                 DeviceQueue<AnyhitInput> outAnyhitQueue,
-                                 DeviceQueue<ShadeInput> outShadeQueue,
+__global__ void closesthitKernel(QueueType<ClosestHitInput> inQueue,
+                                 QueueType<MissInput> outMissQueue,
+                                 QueueType<AnyhitInput> outAnyhitQueue,
+                                 QueueType<ShadeInput> outShadeQueue,
                                  TriangleSoup d_triSoup) {
   ClosestHitInput kinput{};  // TODO SMEM?
 
+#if USE_SIMPLE_QUEUE
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x;
+       idx < inQueue.queueSize(); idx += blockDim.x * gridDim.x) {
+    if (!inQueue.marked[idx]) {
+      continue;
+    }
+    inQueue.marked[idx] = 0;
+    kinput = inQueue.buffer[idx];
+#else
   int lane = getLaneId();
   int mask = inQueue.queuePop<false>(&kinput);
   while (mask & (1 << lane)) {
+#endif
     int const activeWorkers = __activemask();
 
     // TODO check GMEM accesses here
@@ -129,7 +186,10 @@ __global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
 
     // we want a coalesced pop, hence join hit lanes and miss lanes
     __syncwarp(activeWorkers);
+#if USE_SIMPLE_QUEUE
+#else
     lane = getCoalescedLaneId(activeWorkers);
     mask = inQueue.queuePop<false>(&kinput);
+#endif
   }
 }

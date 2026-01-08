@@ -372,6 +372,107 @@ void __host__ initQueue(DeviceQueue<T>& q, int capacity) {
 }
 
 // ----------------------------------------------------------------------------
+// Device Queue with order
+// ----------------------------------------------------------------------------
+template <typename T>
+struct SimpleDeviceQueue {
+  T* buffer;
+  T* backBuffer;
+  int* marked;
+  int* backMarked;
+  int* count;
+  int* backCount;
+  int capacity;
+
+  // not written atomically, cannot work on a cooperative kernel
+  template <bool glSync = false>
+  __device__ bool queuePush(T const& v) {
+    // 1. Claim the slot.
+    int const laneIdx = atomicAggInc(count);
+
+    // 2. Bounds check
+    if (laneIdx >= capacity) {
+      return false;
+    }
+
+    // 3. BLIND WRITE (The Fix)
+    // We ignore whatever 'marked' value was left over from the previous frame.
+    buffer[laneIdx] = v;
+    marked[laneIdx] = 1;  // Assert validity for the consumer step
+
+#ifdef DMT_DEBUG
+    // This warning was false because it assumed clean memory.
+    // In a reuse scenario, finding 'marked==1' is expected behavior.
+#endif
+
+    if constexpr (glSync) {
+      int const pushers = __activemask();
+      if (getLaneId() == __ffs(pushers) - 1) {
+        __threadfence();
+      }
+      __syncwarp(pushers);
+    }
+    return true;
+  }
+
+  // use this. no pop
+  __device__ bool queueSize() const { return min(load_cv(count), capacity); }
+  __host__ void swapBuffers(cudaStream_t stream) {
+    T* temp = buffer;
+    int* mTemp = marked;
+    marked = backMarked;
+    buffer = backBuffer;
+    backMarked = mTemp;
+    backBuffer = temp;
+    CUDA_CHECK(cudaMemcpyAsync(count, backCount, sizeof(int),
+                               cudaMemcpyDeviceToDevice, stream));
+    CUDA_CHECK(cudaMemsetAsync(backCount, 0, sizeof(int), stream));
+  }
+};
+
+// TODO batched allocations of counts
+template <typename T>
+void __host__ allocSimpleQueue(SimpleDeviceQueue<T>& q, int cap) {
+  q.capacity = cap;
+
+  CUDA_CHECK(cudaMalloc(&q.buffer, sizeof(T) * cap));
+  CUDA_CHECK(cudaMalloc(&q.marked, sizeof(int) * cap));
+  CUDA_CHECK(cudaMemset(q.buffer, 0, sizeof(T) * cap));
+  CUDA_CHECK(cudaMemset(q.marked, 0, sizeof(int) * cap));
+
+  CUDA_CHECK(cudaMalloc(&q.backBuffer, sizeof(T) * cap));
+  CUDA_CHECK(cudaMalloc(&q.backMarked, sizeof(int) * cap));
+  CUDA_CHECK(cudaMemset(q.backBuffer, 0, sizeof(T) * cap));
+  CUDA_CHECK(cudaMemset(q.backMarked, 0, sizeof(int) * cap));
+
+  CUDA_CHECK(cudaMalloc(&q.count, sizeof(int)));
+  CUDA_CHECK(cudaMemset(q.count, 0, sizeof(int)));
+
+  CUDA_CHECK(cudaMalloc(&q.backCount, sizeof(int)));
+  CUDA_CHECK(cudaMemset(q.backCount, 0, sizeof(int)));
+}
+
+template <typename T>
+void __host__ freeSimpleQueue(SimpleDeviceQueue<T>& q) {
+  CUDA_CHECK(cudaFree(q.buffer));
+  CUDA_CHECK(cudaFree(q.marked));
+  CUDA_CHECK(cudaFree(q.backBuffer));
+  CUDA_CHECK(cudaFree(q.backMarked));
+  CUDA_CHECK(cudaFree(q.count));
+  CUDA_CHECK(cudaFree(q.backCount));
+
+  q.buffer = nullptr;
+  q.marked = nullptr;
+  q.count = 0;
+
+  q.backBuffer = nullptr;
+  q.backMarked = nullptr;
+  q.backCount = 0;
+
+  q.capacity = 0;
+}
+
+// ----------------------------------------------------------------------------
 // Device Arena
 // ----------------------------------------------------------------------------
 

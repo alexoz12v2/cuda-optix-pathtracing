@@ -104,8 +104,8 @@ void wavefrontMain() {
   // uint32_t blocks = 2; // or 2
   // uint32_t threads = 64;
   // uint32_t blocks = 1;
-  uint32_t threads = 32;
-  uint32_t blocks = 1;
+  uint32_t threads = 512;
+  uint32_t blocks = 100;
   uint32_t sharedBytes = 12;
   // optimalBlocksAndThreads(blocks, threads, sharedBytes); // TODO
   std::cout << "Computed Optimal Occupancy for wavefront kernels: " << blocks
@@ -191,9 +191,13 @@ void wavefrontMain() {
               kinput->infiniteLights, kinput->infiniteLightCount);
           CUDA_CHECK(cudaGetLastError());
 
-          checkDoneDepth<<<1, WARP_SIZE, sharedBytes, st_main>>>(
-              kinput->pathStateSlots, d_done);
+          checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(
+              kinput->pathStateSlots, kinput->closesthitQueue,
+              kinput->missQueue, kinput->anyhitQueue, kinput->shadeQueue,
+              d_done);
           CUDA_CHECK(cudaGetLastError());
+
+          kinput->swapBuffersAllQueues(st_main);
           CUDA_CHECK(cudaStreamSynchronize(st_main));
         }
       }

@@ -4,6 +4,8 @@
 #include "common_math.cuh"
 #include "cuda-core/types.cuh"
 
+#define DMT_DEBUG_MANAGED_ALLOCATIONS 0
+
 // Synchronization → PTX instruction mapping
 // __threadfence() ≈ membar.gl
 // __threadfence_block() ≈ membar.cta
@@ -416,6 +418,9 @@ struct SimpleDeviceQueue {
   }
 
   // use this. no pop
+  __device__ int nextQueueSize() const {
+    return min(load_cv(backCount), capacity);
+  }
   __device__ int queueSize() const { return min(load_cv(count), capacity); }
   __host__ void swapBuffers(cudaStream_t stream) {
     T* temp = buffer;
@@ -430,26 +435,32 @@ struct SimpleDeviceQueue {
   }
 };
 
+#if DMT_DEBUG_MANAGED_ALLOCATIONS
+#  define CUDA_ALLOC(...) cudaMallocManaged(__VA_ARGS__)
+#else
+#  define CUDA_ALLOC(...) cudaMalloc(__VA_ARGS__)
+#endif
+
 // TODO batched allocations of counts
 template <typename T>
 void __host__ allocSimpleQueue(SimpleDeviceQueue<T>& q, int cap) {
   q.capacity = cap;
 
   // TODO remove managed
-  CUDA_CHECK(cudaMallocManaged(&q.buffer, sizeof(T) * cap));
-  CUDA_CHECK(cudaMallocManaged(&q.marked, sizeof(int) * cap));
+  CUDA_CHECK(CUDA_ALLOC(&q.buffer, sizeof(T) * cap));
+  CUDA_CHECK(CUDA_ALLOC(&q.marked, sizeof(int) * cap));
   CUDA_CHECK(cudaMemset(q.buffer, 0, sizeof(T) * cap));
   CUDA_CHECK(cudaMemset(q.marked, 0, sizeof(int) * cap));
 
-  CUDA_CHECK(cudaMallocManaged(&q.backBuffer, sizeof(T) * cap));
-  CUDA_CHECK(cudaMallocManaged(&q.backMarked, sizeof(int) * cap));
+  CUDA_CHECK(CUDA_ALLOC(&q.backBuffer, sizeof(T) * cap));
+  CUDA_CHECK(CUDA_ALLOC(&q.backMarked, sizeof(int) * cap));
   CUDA_CHECK(cudaMemset(q.backBuffer, 0, sizeof(T) * cap));
   CUDA_CHECK(cudaMemset(q.backMarked, 0, sizeof(int) * cap));
 
-  CUDA_CHECK(cudaMallocManaged(&q.count, sizeof(int)));
+  CUDA_CHECK(CUDA_ALLOC(&q.count, sizeof(int)));
   CUDA_CHECK(cudaMemset(q.count, 0, sizeof(int)));
 
-  CUDA_CHECK(cudaMallocManaged(&q.backCount, sizeof(int)));
+  CUDA_CHECK(CUDA_ALLOC(&q.backCount, sizeof(int)));
   CUDA_CHECK(cudaMemset(q.backCount, 0, sizeof(int)));
 }
 
@@ -502,6 +513,7 @@ struct DeviceArena {
 
   // Note: Every time you write to a occupied slot, __threadfence()
   // Arena Allocate (Warp Aggregated)
+#if 0
   __device__ int allocate() {
     namespace cg = cooperative_groups;
     cg::coalesced_group g = cg::coalesced_threads();
@@ -568,6 +580,84 @@ struct DeviceArena {
 
     return -1;
   }
+#else
+  __device__ int allocate() {
+    namespace cg = cooperative_groups;
+    cg::coalesced_group g = cg::coalesced_threads();
+    int const lane = g.thread_rank();
+
+    // 1. Randomized Start Offset
+    // Spreads 50k threads across the arena instead of hammering word[0].
+    // Using global thread ID or a simple hash.
+    int const global_tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int const start_word = (global_tid / 32 * 1664525) % mask_words;
+
+    // 2. Linear Probe (Grid Stride style logic)
+    // We loop through ALL words starting from start_word.
+    for (int i = 0; i < mask_words; ++i) {
+      int const word_idx = (start_word + i) % mask_words;
+
+      // A. Peek at the mask (Leader loads, then broadcast)
+      // Standard volatile load to prevent caching stale values
+      unsigned int current_mask;
+      if (lane == 0) {
+        current_mask =
+            atomicOr(&bitmask[word_idx], 0);  // Atomic Read ensures consistency
+      }
+      current_mask = g.shfl(current_mask, 0);
+
+      // B. Early Exit: If this word is full or can't fit our group
+      if (__popc(~current_mask) < g.size()) {
+        continue;  // Try next word immediately
+      }
+
+      // C. Calculate Claim Bits
+      // Invert mask: 1 = Free, 0 = Occupied
+      unsigned int free_mask = ~current_mask;
+      unsigned int my_bit = 0;
+
+      // Peel off 'lane' number of bits to find my specific bit
+      // (This logic is fine for warp size <= 32)
+      unsigned int temp_mask = free_mask;
+      for (int k = 0; k < lane; ++k) {
+        temp_mask &= (temp_mask - 1);
+      }
+      // Isolate the lowest set bit
+      my_bit = temp_mask & ~(temp_mask - 1);
+
+      // D. Aggregate the claim
+      unsigned int combined_claim = 0;
+      for (int k = 0; k < g.size(); ++k) {
+        combined_claim |= g.shfl(my_bit, k);
+      }
+
+      // E. Attempt CAS (Leader only)
+      unsigned int prev_mask = 0;
+      if (lane == 0) {
+        // We are changing 0s (Free) to 1s (Occupied) -> Use OR
+        // target: current_mask | combined_claim
+        prev_mask = atomicCAS(&bitmask[word_idx], current_mask,
+                              current_mask | combined_claim);
+      }
+      prev_mask = g.shfl(prev_mask, 0);
+
+      // F. Check Success
+      if (prev_mask == current_mask) {
+        // CAS Succeeded: Calculate result index
+        // __ffs returns 1-based index (1..32), so subtract 1.
+        return word_idx * 32 + (__ffs(my_bit) - 1);
+      }
+
+      // G. CAS Failed (Contention)
+      // Someone modified the word while we were calculating.
+      // Instead of spinning on this word (which might now be full),
+      // we just loop to the next word. This reduces contention naturally.
+    }
+
+    // 3. Buffer Full
+    return -1;
+  }
+#endif
 
   // Arena Free
   __device__ void free_slot(int slot_idx) {
@@ -609,11 +699,10 @@ void initDeviceArena(DeviceArena<T>& arena, int capacity) {
   arena.capacity = capacity;
   arena.mask_words = capacity / 32;
 
-  // TODO remove managed
-  CUDA_CHECK(cudaMallocManaged(&arena.buffer, capacity * sizeof(T)));
+  CUDA_CHECK(CUDA_ALLOC(&arena.buffer, capacity * sizeof(T)));
   CUDA_CHECK(cudaMemset(arena.buffer, 0, capacity * sizeof(T)));
-  CUDA_CHECK(cudaMallocManaged(&arena.bitmask,
-                               arena.mask_words * sizeof(unsigned int)));
+  CUDA_CHECK(
+      CUDA_ALLOC(&arena.bitmask, arena.mask_words * sizeof(unsigned int)));
   CUDA_CHECK(
       cudaMemset(arena.bitmask, 0, arena.mask_words * sizeof(unsigned int)));
 }
@@ -629,5 +718,7 @@ void freeDeviceArena(DeviceArena<T>& arena) {
   arena.buffer = nullptr;
   arena.bitmask = nullptr;
 }
+
+#undef CUDA_ALLOC
 
 #endif

@@ -11,18 +11,18 @@
 #include "cuda-core/queue.cuh"
 
 // #define RG_PRINT(...) printf(__VA_ARGS__)
-#define CH_PRINT(...) printf(__VA_ARGS__)
-#define AH_PRINT(...) printf(__VA_ARGS__)
-#define MS_PRINT(...) printf(__VA_ARGS__)
-#define SH_PRINT(...) printf(__VA_ARGS__)
-#define UTILS_PRINT(...) printf(__VA_ARGS__)
+// #define CH_PRINT(...) printf(__VA_ARGS__)
+// #define AH_PRINT(...) printf(__VA_ARGS__)
+// #define MS_PRINT(...) printf(__VA_ARGS__)
+// #define SH_PRINT(...) printf(__VA_ARGS__)
+//' #define UTILS_PRINT(...) printf(__VA_ARGS__)
 
 #define RG_PRINT(...)
-// #define CH_PRINT(...)
-// #define AH_PRINT(...)
-// #define MS_PRINT(...)
-// #define SH_PRINT(...)
-// #define UTILS_PRINT(...)
+#define CH_PRINT(...)
+#define AH_PRINT(...)
+#define MS_PRINT(...)
+#define SH_PRINT(...)
+#define UTILS_PRINT(...)
 
 struct HostTriangleScene;
 
@@ -86,12 +86,11 @@ static_assert(sizeof(PathState) % alignof(PathState) == 0);
 
 __device__ __forceinline__ void freeState(
     DeviceArena<PathState>& pathStateSlots, PathState* state) {
+  assert(state);
   if (state) {
     pathStateSlots.free_slot(state->bufferSlot);
-#ifdef DMT_DEBUG
-    memset(state, 0, sizeof(PathState));
-    __threadfence();
-#endif
+    // memset(state, 0, sizeof(PathState));
+    // __threadfence();
   }
 }
 

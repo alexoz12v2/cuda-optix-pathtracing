@@ -156,6 +156,7 @@ void wavefrontMain() {
   cudaStream_t st_main;
   CUDA_CHECK(cudaStreamCreate(&st_main));
 
+  // TODO if occupancy allows, process more tiles of the image?
   for (int sOffset = 0; sOffset < TOTAL_SAMPLES; sOffset += h_camera.spp) {
     kinput->sampleOffset = sOffset;
     callbackData->sample = kinput->sampleOffset;
@@ -176,40 +177,38 @@ void wavefrontMain() {
               kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
               kinput->shadeQueue, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
-          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          // CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->anyhitQueue, kinput->d_lights, kinput->lightCount,
               kinput->d_bsdfs, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
-          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          // CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->shadeQueue, kinput->closesthitQueue,
               kinput->pathStateSlots, kinput->d_outBuffer, kinput->d_bsdfs);
           CUDA_CHECK(cudaGetLastError());
-          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          // CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           missKernel<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
               kinput->infiniteLights, kinput->infiniteLightCount);
           CUDA_CHECK(cudaGetLastError());
-          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          // CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           // Jflsdfjsdlj
-          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          // CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->pathStateSlots, kinput->closesthitQueue,
               kinput->missQueue, kinput->anyhitQueue, kinput->shadeQueue,
               d_done);
           CUDA_CHECK(cudaGetLastError());
-          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          // CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           kinput->swapBuffersAllQueues(st_main);
           CUDA_CHECK(cudaStreamSynchronize(st_main));
-
-          std::cout << "fjdilfjsldifjsdlfjslfjsdkl" << std::endl;
         }
       }
     }

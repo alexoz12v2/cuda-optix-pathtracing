@@ -166,8 +166,9 @@ __global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
   if (res) {
     if (blockIdx.x == 0 && threadIdx.x == 0) {
       *d_done = 0;
-      if (closesthitQueue.queueSize() == 0 && missQueue.queueSize() == 0 &&
-          anyhitQueue.queueSize() == 0 && shadeQueue.queueSize() == 0) {
+      if (closesthitQueue.nextQueueSize() == 0 &&
+          missQueue.nextQueueSize() == 0 && anyhitQueue.nextQueueSize() == 0 &&
+          shadeQueue.nextQueueSize() == 0) {
 #  ifdef DMT_DEBUG
         UTILS_PRINT("UTILS: done depth | %d\n", res);
 #  endif

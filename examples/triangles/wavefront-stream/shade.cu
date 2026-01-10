@@ -9,6 +9,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x;
        idx < inQueue.queueSize(); idx += blockDim.x * gridDim.x) {
     if (!inQueue.marked[idx]) {
+      SH_PRINT("SH [%u %u] Queue not marked. Skipping\n", blockIdx.x,
+               threadIdx.x);
       continue;
     }
     inQueue.marked[idx] = 0;
@@ -29,6 +31,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
     static int constexpr MAX_DEPTH = 32;  // dies afterwards (TODO cmdline)
     // assumes warps have different states
     int const oldDepth = groupedAtomicIncLeaderOnly(&input.state->depth);
+    SH_PRINT("SH [%u %u] px: %d %d | d %d | Received object\n", blockIdx.x,
+             threadIdx.x, px, py, oldDepth);
     if (oldDepth >= MAX_DEPTH) {
       pathDied = true;
     }
@@ -46,6 +50,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
           sampleBsdf(bsdf, -input.rayD, input.normal, input.normal,
                      PcgHash::get2D<float2>(), PcgHash::get1D<float>());
       if (bs) {
+        SH_PRINT("SH [%u %u] px: %d %d | d %d | Sampled BSDF\n", blockIdx.x,
+                 threadIdx.x, px, py, oldDepth);
         wi = bs.wi;
 #if 0
         if (bs.refract)
@@ -59,6 +65,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
         atomicAdd(&input.state->transmissionCount, (int)bs.refract);
         float3 beta = input.state->throughput * bs.f *
                       fabsf(dot(bs.wi, input.normal)) / bs.pdf;
+        SH_PRINT("SH [%u %u] px: %d %d | d %d | Atomic Ops Done\n", blockIdx.x,
+                 threadIdx.x, px, py, oldDepth);
         // 4. (not dead) russian roulette. If fails, kill path
         if (float const rrBeta = maxComponentValue(beta * bs.eta);
             rrBeta < 1 && oldDepth > 1) {
@@ -104,6 +112,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
               .o = offsetRayOrigin(input.pos, input.error, input.normal, wi),
               .d = wi,
           }};  // TODO SMEM?
+      SH_PRINT("SH [%u %u] px: %d %d | d %d | Path Survived. Pushing\n",
+               blockIdx.x, threadIdx.x, px, py, oldDepth);
 
 #if USE_SIMPLE_QUEUE
       bool const pushed = outQueue.queuePush<false>(closestHitInput);
@@ -133,6 +143,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
 #endif
     }
 
+    SH_PRINT("SH [%u %u] Sync with warp %d | mask %x | actual %x\n", blockIdx.x,
+             threadIdx.x, getWarpId(), activeWorkers, __activemask());
     __syncwarp(activeWorkers);  // TODO is this necessary?
 #if USE_SIMPLE_QUEUE
 #else

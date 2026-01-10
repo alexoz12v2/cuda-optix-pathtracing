@@ -168,6 +168,7 @@ void wavefrontMain() {
             kinput->d_haltonOwen, kinput->d_cam, tileX, tileY, tileDimX,
             tileDimY, kinput->sampleOffset);
         CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaStreamSynchronize(st_main));
 
         *h_done = false;
         while (!*h_done) {
@@ -175,30 +176,40 @@ void wavefrontMain() {
               kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
               kinput->shadeQueue, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->anyhitQueue, kinput->d_lights, kinput->lightCount,
               kinput->d_bsdfs, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->shadeQueue, kinput->closesthitQueue,
               kinput->pathStateSlots, kinput->d_outBuffer, kinput->d_bsdfs);
           CUDA_CHECK(cudaGetLastError());
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           missKernel<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
               kinput->infiniteLights, kinput->infiniteLightCount);
           CUDA_CHECK(cudaGetLastError());
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+
+          // Jflsdfjsdlj
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           checkDoneDepth<<<blocks, threads, sharedBytes, st_main>>>(
               kinput->pathStateSlots, kinput->closesthitQueue,
               kinput->missQueue, kinput->anyhitQueue, kinput->shadeQueue,
               d_done);
           CUDA_CHECK(cudaGetLastError());
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
 
           kinput->swapBuffersAllQueues(st_main);
           CUDA_CHECK(cudaStreamSynchronize(st_main));
+
+          std::cout << "fjdilfjsldifjsdlfjslfjsdkl" << std::endl;
         }
       }
     }

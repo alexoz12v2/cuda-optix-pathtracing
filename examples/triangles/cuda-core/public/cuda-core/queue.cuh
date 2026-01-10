@@ -416,7 +416,7 @@ struct SimpleDeviceQueue {
   }
 
   // use this. no pop
-  __device__ bool queueSize() const { return min(load_cv(count), capacity); }
+  __device__ int queueSize() const { return min(load_cv(count), capacity); }
   __host__ void swapBuffers(cudaStream_t stream) {
     T* temp = buffer;
     int* mTemp = marked;
@@ -435,20 +435,21 @@ template <typename T>
 void __host__ allocSimpleQueue(SimpleDeviceQueue<T>& q, int cap) {
   q.capacity = cap;
 
-  CUDA_CHECK(cudaMalloc(&q.buffer, sizeof(T) * cap));
-  CUDA_CHECK(cudaMalloc(&q.marked, sizeof(int) * cap));
+  // TODO remove managed
+  CUDA_CHECK(cudaMallocManaged(&q.buffer, sizeof(T) * cap));
+  CUDA_CHECK(cudaMallocManaged(&q.marked, sizeof(int) * cap));
   CUDA_CHECK(cudaMemset(q.buffer, 0, sizeof(T) * cap));
   CUDA_CHECK(cudaMemset(q.marked, 0, sizeof(int) * cap));
 
-  CUDA_CHECK(cudaMalloc(&q.backBuffer, sizeof(T) * cap));
-  CUDA_CHECK(cudaMalloc(&q.backMarked, sizeof(int) * cap));
+  CUDA_CHECK(cudaMallocManaged(&q.backBuffer, sizeof(T) * cap));
+  CUDA_CHECK(cudaMallocManaged(&q.backMarked, sizeof(int) * cap));
   CUDA_CHECK(cudaMemset(q.backBuffer, 0, sizeof(T) * cap));
   CUDA_CHECK(cudaMemset(q.backMarked, 0, sizeof(int) * cap));
 
-  CUDA_CHECK(cudaMalloc(&q.count, sizeof(int)));
+  CUDA_CHECK(cudaMallocManaged(&q.count, sizeof(int)));
   CUDA_CHECK(cudaMemset(q.count, 0, sizeof(int)));
 
-  CUDA_CHECK(cudaMalloc(&q.backCount, sizeof(int)));
+  CUDA_CHECK(cudaMallocManaged(&q.backCount, sizeof(int)));
   CUDA_CHECK(cudaMemset(q.backCount, 0, sizeof(int)));
 }
 
@@ -608,10 +609,11 @@ void initDeviceArena(DeviceArena<T>& arena, int capacity) {
   arena.capacity = capacity;
   arena.mask_words = capacity / 32;
 
-  CUDA_CHECK(cudaMalloc(&arena.buffer, capacity * sizeof(T)));
+  // TODO remove managed
+  CUDA_CHECK(cudaMallocManaged(&arena.buffer, capacity * sizeof(T)));
   CUDA_CHECK(cudaMemset(arena.buffer, 0, capacity * sizeof(T)));
-  CUDA_CHECK(
-      cudaMalloc(&arena.bitmask, arena.mask_words * sizeof(unsigned int)));
+  CUDA_CHECK(cudaMallocManaged(&arena.bitmask,
+                               arena.mask_words * sizeof(unsigned int)));
   CUDA_CHECK(
       cudaMemset(arena.bitmask, 0, arena.mask_words * sizeof(unsigned int)));
 }

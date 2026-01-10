@@ -104,6 +104,9 @@ __device__ void compact(SimpleDeviceQueue<T>& q) {
   // - note: Still requires intervention fron host side to swap buffers
 
   // count is left untouched by all blocks
+  // Note: count here is stale information, as each thread which processes the
+  // values put marked[i] = 0 without touching count. it is to be interpreted
+  // as the maximum values pushed in this iteration
   int const elementCount = q.queueSize();
 
   // Warning: global count. Should have been already reset
@@ -149,28 +152,27 @@ __global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
                                QueueType<AnyhitInput> anyhitQueue,
                                QueueType<ShadeInput> shadeQueue, int* d_done) {
 #if USE_SIMPLE_QUEUE
+  int res = 0;
+  if (getWarpId() == 0) {
+    res = pathStateSlots.empty_agg();
+  }
+  res = __shfl_sync(0xFFFF'FFFFU, res, 0);
+
   compact(closesthitQueue);
   compact(missQueue);
   compact(anyhitQueue);
   compact(shadeQueue);
 
+  if (res) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+      *d_done = 0;
+      if (closesthitQueue.queueSize() == 0 && missQueue.queueSize() == 0 &&
+          anyhitQueue.queueSize() == 0 && shadeQueue.queueSize() == 0) {
 #  ifdef DMT_DEBUG
-  int res = 0;
-
-  if (blockIdx.x == 0 && getWarpId() == 0) {
-    res = pathStateSlots.empty_agg();
-  }
+        UTILS_PRINT("UTILS: done depth | %d\n", res);
 #  endif
-
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    *d_done = 0;
-    if (closesthitQueue.queueSize() == 0 && missQueue.queueSize() == 0 &&
-        anyhitQueue.queueSize() == 0 && shadeQueue.queueSize() == 0) {
-#  ifdef DMT_DEBUG
-      assert(res == 1);
-      UTILS_PRINT("UTILS: done depth | %d\n", res);
-#  endif
-      *d_done = 1;
+        *d_done = 1;
+      }
     }
   }
 

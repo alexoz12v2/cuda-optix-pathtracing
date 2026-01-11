@@ -66,6 +66,7 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
                  blockIdx.x, threadIdx.x, px, py, oldDepth, bs.refract,
                  -bs.wi.x, -bs.wi.y, -bs.wi.z);
 #endif
+        // TODO: if 1 thread per path, atomics are not necessary
         // 3. (not dead) update path state
         atomicAdd(&input.state->anySpecularBounces, (int)bs.delta);
         atomicExch(&input.state->lastBounceTransmission, (int)bs.refract);
@@ -73,7 +74,8 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
         float3 beta = input.state->throughput * bs.f *
                       fabsf(dot(bs.wi, input.normal)) / bs.pdf;
         // 4. (not dead) russian roulette. If fails, kill path
-        if (float const rrBeta = maxComponentValue(beta * bs.eta);
+        if (float const rrBeta =
+                fminf(0.95f, maxComponentValue(beta * bs.eta * bs.eta));
             rrBeta < 1 && oldDepth > 1) {
           float const q = fmaxf(0.f, 1.f - rrBeta);
           if (PcgHash::get1D<float>() < q) {
@@ -100,15 +102,15 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
       float4 const color =
           make_float4(input.state->L.x, input.state->L.y, input.state->L.z, 1);
       // SH_PRINT(
-      //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask before died %x\n",
-      //     blockIdx.x, threadIdx.x, px, py, oldDepth,
+      //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask before died
+      //     %x\n", blockIdx.x, threadIdx.x, px, py, oldDepth,
       //     pathStateSlots.bitmask[input.state->bufferSlot / 32]);
       assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
               (1 << (input.state->bufferSlot % 32))) != 0);
       freeState(pathStateSlots, input.state);
       // SH_PRINT(
-      //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask after died %x\n",
-      //     blockIdx.x, threadIdx.x, px, py, oldDepth,
+      //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask after died
+      //     %x\n", blockIdx.x, threadIdx.x, px, py, oldDepth,
       //     pathStateSlots.bitmask[input.state->bufferSlot / 32]);
       assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
               (1 << (input.state->bufferSlot % 32))) == 0);

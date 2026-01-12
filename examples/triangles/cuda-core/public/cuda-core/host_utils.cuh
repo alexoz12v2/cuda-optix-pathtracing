@@ -121,7 +121,8 @@ float4* deviceOutputBuffer(uint32_t const width, uint32_t const height);
 
 std::filesystem::path getExecutableDirectory();
 
-template <bool PreferHighTPB = false>
+// MinBlocks used when preferring TPB
+template <bool PreferHighTPB = false, int MinBlocks = 1>
 __host__ void optimalOccupancyFromBlock(void* krnl, uint32_t smemBytes,
                                         bool residentOnly, uint32_t& blocks,
                                         uint32_t& threads) {
@@ -148,18 +149,27 @@ __host__ void optimalOccupancyFromBlock(void* krnl, uint32_t smemBytes,
     CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
         &current.blocks, krnl, current.threads, smemBytes));
     // round down to multiple of number of SMs
-    current.blocks = (current.blocks / deviceProp.multiProcessorCount) *
-                     deviceProp.multiProcessorCount;
+    if (current.blocks >= MinBlocks) {
+      current.blocks = max((current.blocks / deviceProp.multiProcessorCount) *
+                               deviceProp.multiProcessorCount,
+                           MinBlocks);
+    }
     // account for current only if we don't care about residency of threads
     // or blocks per multiprocessor fits inside SM
-    if (!residentOnly ||
-        deviceProp.maxThreadsPerMultiProcessor >=
-            current.blocks / deviceProp.multiProcessorCount * current.threads) {
+    if (current.blocks >= MinBlocks &&
+        (!residentOnly || deviceProp.maxThreadsPerMultiProcessor >=
+                              current.blocks / deviceProp.multiProcessorCount *
+                                  current.threads)) {
       occupancies.emplace(current);
     }
   }
-  blocks = occupancies.top().blocks;
-  threads = occupancies.top().threads;
+  if (multiples.empty()) {
+    blocks = 0;
+    threads = 0;
+  } else {
+    blocks = occupancies.top().blocks;
+    threads = occupancies.top().threads;
+  }
 }
 
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,

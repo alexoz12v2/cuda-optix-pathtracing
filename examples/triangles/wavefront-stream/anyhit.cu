@@ -22,12 +22,14 @@ __device__ __forceinline__ void anyhitNEE(
       return;
     }
 
-#if PRINT_ASSERT
+#if DMT_ENABLE_ASSERTS
+#  if PRINT_ASSERT
     if (isZero(bsdf_f)) {
       printf("[%u %u %d] !isZero(bsdf_f)\n", blockIdx.x, threadIdx.x, __LINE__);
     }
-#endif
+#  endif
     assert(!isZero(bsdf_f));
+#endif
 
     for (int tri = 0; tri < triSoup.count; ++tri) {
       float4 const x = __ldg(reinterpret_cast<float4 const*>(triSoup.xs) + tri);

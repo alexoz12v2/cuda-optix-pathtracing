@@ -86,7 +86,9 @@ static_assert(sizeof(PathState) % alignof(PathState) == 0);
 
 __device__ __forceinline__ void freeState(
     DeviceArena<PathState>& pathStateSlots, PathState* state) {
+#if DMT_ENABLE_ASSERTS
   assert(state);
+#endif
   if (state) {
     pathStateSlots.free_slot(state->bufferSlot);
     // memset(state, 0, sizeof(PathState));

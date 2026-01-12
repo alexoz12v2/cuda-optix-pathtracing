@@ -59,10 +59,12 @@ __global__ void pathTraceMegakernel(
   // grid-stride loop start
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
 
+  // fetch rng
+  DeviceHaltonOwen& warpRng = d_haltonOwen[mortonStart / warpSize];
+
   // constant memory aliases
   uint32_t const& spp = CMEM_spp;
   MortonLayout2D const& layout = CMEM_mortonLayout;
-  DeviceHaltonOwen& warpRng = d_haltonOwen[mortonStart / warpSize];
   DeviceHaltonOwenParams const& params = CMEM_haltonOwenParams;
   Transform const& cameraFromRaster = *arrayAsTransform(CMEM_cameraFromRaster);
   Transform const& renderFromCamera = *arrayAsTransform(CMEM_renderFromCamera);
@@ -166,6 +168,7 @@ __global__ void pathTraceMegakernel(
           PRINT("    [%d %d:%d] Sampled Light. Evaluating shadow ray.\n",
                 pixel.x, pixel.y, depth);
           // - create shadow ray (offset origin to avoid self intersection)
+#if DMT_ENABLE_ASSERTS
           if (float3 diff = normalize(ls.pLight - hitResult.pos);
               !componentWiseNear(diff, ls.direction)) {
             printf(
@@ -177,6 +180,7 @@ __global__ void pathTraceMegakernel(
           }
           assert(componentWiseNear(normalize(ls.pLight - hitResult.pos),
                                    ls.direction));
+#endif
           Ray const shadowRay{
 #if OFFSET_RAY_ORIGIN
               offsetRayOrigin(hitResult.pos, hitResult.error, hitResult.normal,
@@ -243,7 +247,7 @@ __global__ void pathTraceMegakernel(
         transmissionCount += bs.refract;
         lastBounceTransmission = bs.refract;
         // next ray
-        // TODO remove
+#if DMT_ENABLE_ASSERTS
         if (!bs.refract && dot(bs.wi, hitResult.normal) <= 0) {
           printf(
               "%d %d %d refract: %d, wi: %f %f %f, n: %f %f %f\n"
@@ -253,6 +257,7 @@ __global__ void pathTraceMegakernel(
               hitResult.pos.x, hitResult.pos.y, hitResult.pos.z);
         }
         assert(bs.refract || dot(bs.wi, hitResult.normal) > 0);
+#endif
 #if OFFSET_RAY_ORIGIN
         ray.o = offsetRayOrigin(hitResult.pos, hitResult.error,
                                 hitResult.normal, bs.wi);

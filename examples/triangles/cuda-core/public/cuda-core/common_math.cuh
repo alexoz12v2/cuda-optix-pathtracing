@@ -1,6 +1,8 @@
 #ifndef DMT_CUDA_CORE_COMMON_MATH_CUH
 #define DMT_CUDA_CORE_COMMON_MATH_CUH
 
+#include "cuda-core/debug.cuh"
+
 #include <cooperative_groups.h>
 #include <cuda_fp16.h>
 
@@ -234,39 +236,25 @@ __host__ __device__ __forceinline__ float flipIfOdd(float v, int b) {
 __host__ __device__ __forceinline__ float3 flipIfOdd(float3 v, int b) {
   return make_float3(flipIfOdd(v.x, b), flipIfOdd(v.y, b), flipIfOdd(v.z, b));
 }
-// While the reinterpret_cast approach feels more "efficient" because it looks
-// like direct memory access, it can actually hinder the compiler's ability to
-// optimize registers in a CUDA kernel. The CUDA compiler (nvcc) is highly
-// optimized for small, fixed-size switches. Because float3 only has three
-// members, the compiler can often resolve this into a simple conditional move
-// (SEL or CSEL in PTX/SASS assembly) rather than actual branching logic
-// TODO check generated PTX
-__host__ __device__ __forceinline__ float& float3_at(float3& v, int i) {
-  switch (i) {
-    case 0:
-      return v.x;
-    case 1:
-      return v.y;
-    case 2:
-      return v.z;
-    default:
-      assert(false);
-      return v.x;
-  }
+
+__forceinline__ __host__ __device__ float& float3_at(float3& v, int i) {
+#ifdef __CUDA_ARCH__
+  __builtin_assume(i >= 0 && i < 3);
+#endif
+#if DMT_ENABLE_ASSERTS
+  assert(i >= 0 && i < 3);
+#endif
+  return reinterpret_cast<float*>(&v.x)[i];
 }
-__host__ __device__ __forceinline__ float const& float3_at(float3 const& v,
+__forceinline__ __host__ __device__ float const& float3_at(float3 const& v,
                                                            int i) {
-  switch (i) {
-    case 0:
-      return v.x;
-    case 1:
-      return v.y;
-    case 2:
-      return v.z;
-    default:
-      assert(false);
-      return v.x;
-  }
+#ifdef __CUDA_ARCH__
+  __builtin_assume(i >= 0 && i < 3);
+#endif
+#if DMT_ENABLE_ASSERTS
+  assert(i >= 0 && i < 3);
+#endif
+  return reinterpret_cast<float const*>(&v.x)[i];
 }
 
 __host__ __device__ __forceinline__ float sqrf(float const f) { return f * f; }
@@ -463,7 +451,9 @@ __host__ __device__ __forceinline__ float length2(float2 v) {
 }
 __host__ __device__ __forceinline__ void gramSchmidt(float3 n, float3* a,
                                                      float3* b) {
+#if DMT_ENABLE_ASSERTS
   assert(a && b && abs(length(n) - 1.f) < 1e-5f);
+#endif
   if (fabsf(n.x - n.y) > 1e-3f || fabsf(n.x - n.z) > 1e-3f)
     *a = {n.z - n.y, n.x - n.z, n.y - n.x};  //(1,1,1)x N
   else

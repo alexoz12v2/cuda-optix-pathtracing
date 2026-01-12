@@ -7,18 +7,9 @@ namespace cg = cooperative_groups;
 __device__ CameraSample getCameraSample(int2 pPixel, DeviceHaltonOwen& rng,
                                         DeviceHaltonOwenParams const& params) {
   CameraSample cs{};
-
-  // TODO filter result from getPixel2D
   float2 const pixelShift = rng.getPixel2D(params) - make_float2(0.5f, 0.5f);
-#if 0
-  printf("  pixelShift: %f %f\n", pixelShift.x, pixelShift.y);
-#endif
-
   cs.pFilm =
       pixelShift + make_float2(0.5, 0.5) + make_float2(pPixel.x, pPixel.y);
-#if 0
-  printf("  pFilm: %f %f\n", cs.pFilm.x, cs.pFilm.y);
-#endif
   cs.filterWeight = 1.f;  // TODO filtering
   return cs;
 }

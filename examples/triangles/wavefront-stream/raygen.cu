@@ -6,7 +6,9 @@ inline __device__ __forceinline__ void raygen(
     ClosestHitInput& out) {
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
+#if DMT_ENABLE_ASSERTS
   assert(!out.state);
+#endif
   int slot = -1;
   // RG_PRINT(
   //     "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d]. "
@@ -61,7 +63,9 @@ __global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
   // specific sample)
   for (int i = theGlobalWarpId; i < totalWorkUnits; i += totalWarps) {
     // Decode 1D index into (Tile, Sample)
+#if DMT_ENABLE_ASSERTS
     assert(i / totalSubTiles < CMEM_spp);
+#endif
     int const sampleIdx = i / totalSubTiles + sampleOffset;
     int const subTileIdx = i % totalSubTiles;
 
@@ -96,7 +100,9 @@ __global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
                                    sampleIdx);
           raygen(raygenInput, pathStateSlots, warpRng, CMEM_haltonOwenParams,
                  raygenElem);
+#if DMT_ENABLE_ASSERTS
           assert(raygenElem.state);
+#endif
         }
 #if 0
         RG_PRINT(
@@ -114,10 +120,6 @@ __global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
         assert(pushed);
 #  else
         if (!pushed) {
-          int const deadWorkers = __activemask();
-          if (getLaneId() == __ffs(deadWorkers) - 1) {
-            printf("RG Error: Queue Full (cap: %d)\n", outQueue.capacity);
-          }
           asm volatile("trap;");
         }
 #  endif

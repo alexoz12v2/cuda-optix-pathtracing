@@ -64,7 +64,9 @@ __host__ void optimalBlocksAndThreads(uint32_t& blocks, uint32_t& threads,
     exit(1);
   }
 
+#  if DMT_ENABLE_ASSERTS
   assert(desiredThreads % WARP_SIZE == 0);
+#  endif
   threads = desiredThreads;
 }
 #endif

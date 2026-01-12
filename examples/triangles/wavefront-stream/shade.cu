@@ -16,6 +16,7 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
     inQueue.marked[idx] = 0;
     input = inQueue.buffer[idx];
 
+#  if DMT_ENABLE_ASSERTS
     if ((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
          (1 << (input.state->bufferSlot % 32))) == 0) {
       printf("SH [%u %u] bitmask %x selecting %d\n", blockIdx.x, threadIdx.x,
@@ -24,6 +25,7 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
     }
     assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
             (1 << (input.state->bufferSlot % 32))) != 0);
+#  endif
 #else
   int mask = inQueue.queuePop<false>(&input);
   int lane = getLaneId();
@@ -60,12 +62,7 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
                      PcgHash::get2D<float2>(), PcgHash::get1D<float>());
       if (bs) {
         wi = bs.wi;
-#if 0
-        if (bs.refract)
-          printf("SH [%u %u] px: %d %d | d %d | refract %d | woNext %f %f %f\n",
-                 blockIdx.x, threadIdx.x, px, py, oldDepth, bs.refract,
-                 -bs.wi.x, -bs.wi.y, -bs.wi.z);
-#endif
+
         // TODO: if 1 thread per path, atomics are not necessary
         // 3. (not dead) update path state
         atomicAdd(&input.state->anySpecularBounces, (int)bs.delta);
@@ -105,15 +102,19 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
       //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask before died
       //     %x\n", blockIdx.x, threadIdx.x, px, py, oldDepth,
       //     pathStateSlots.bitmask[input.state->bufferSlot / 32]);
+#if DMT_ENABLE_ASSERTS
       assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
               (1 << (input.state->bufferSlot % 32))) != 0);
+#endif
       freeState(pathStateSlots, input.state);
       // SH_PRINT(
       //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask after died
       //     %x\n", blockIdx.x, threadIdx.x, px, py, oldDepth,
       //     pathStateSlots.bitmask[input.state->bufferSlot / 32]);
+#if DMT_ENABLE_ASSERTS
       assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
               (1 << (input.state->bufferSlot % 32))) == 0);
+#endif
       input.state = nullptr;
 
       // 3. sink to output buffer
@@ -139,11 +140,9 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
 #  ifdef DMT_DEBUG
       assert(pushed);
 #  else
-      if (getLaneId() == __ffs(__activemask) - 1) {
-        printf("SH Failed: closest hit queue full (cap: %d)\n",
-               outQueue.capacity);
+      if (!pushed) {
+        asm volatile("trap;");
       }
-      asm volatile("trap;");
 #  endif
 #else
 #  ifdef DMT_DEBUG

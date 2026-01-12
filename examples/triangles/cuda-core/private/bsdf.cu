@@ -604,16 +604,6 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   if (cos_NO <= 0.f || (cos_NgI < 0) != isTransmission ||
       (effectivelySpecular) || (!hasReflection && cos_NgI > 0.f) ||
       (!hasTransmission && cos_NgI < 0.f)) {
-#if 0
-    printf(
-        "Invalid Material:\n\t"
-        "  outgoing (input) dir not same hemi: cos_NO: %f\n\t"
-        "  incoming (output) dir under and not T: cos_NgI: %f, T? %d\n\t"
-        "  effectivelySpecular? %d | hasReflection? %d | hasTransmission? "
-        "%d\n\n",
-        cos_NO, cos_NgI, isTransmission, effectivelySpecular, hasReflection,
-        hasTransmission);
-#endif
     *pdf = 0.f;
     return make_float3(0, 0, 0);
   }
@@ -626,13 +616,6 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
 
   // fresnel
   float const cos_HO = dot(H, wo);
-#if 0
-  printf(
-      "\n\tH: %f %f %f | ior: %f | cos_NO %f cos_NI %f cos_HO %f\n"
-      "\tns: %f %f %f | ng: %f %f %f \n\t wo %f %f %f | wi %f %f %f\n",
-      H.x, H.y, H.z, ior, cos_NO, cos_NI, cos_HO, ns.x, ns.y, ns.z, ng.x, ng.y,
-      ng.z, wo.x, wo.y, wo.z, wi.x, wi.y, wi.z);
-#endif
 
   float unused{};
   float3 reflectance{};
@@ -641,10 +624,6 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
   if (nearZeroPos(reflectance, throughputEps) &&
       nearZeroPos(transmittance, throughputEps)) {
     *pdf = 0.f;
-#ifdef __CUDA_ARCH__
-    if (cg::coalesced_threads().thread_rank() == 0)
-      printf("Dying without energy\n");
-#endif
     return make_float3(0, 0, 0);
   }
   // D and lambda
@@ -679,32 +658,9 @@ __host__ __device__ float3 evalGGX(BSDF const& bsdf, float3 wo, float3 wi,
       average(reflectance) / average(reflectance + transmittance);
   float const lobePdf = isTransmission ? 1.f - pdfReflect : pdfReflect;
   *pdf = lobePdf * common / (1.f + lambdaO);
-#if defined(__CUDA_ARCH__) && 0
-  if (cg::coalesced_threads().thread_rank() == 0 && isTransmission) {
-    printf(
-        "energyScale * (isTransmission ? transmittance : reflectance) * common/"
-        "(1.f + lambdaO + lambdaI):\n\t%f * (%d ? %f %f %f : %f %f %f) * %f / "
-        "(1 + %f + %f)\n\n",
-        energyScale, isTransmission, transmittance.x, transmittance.y,
-        transmittance.z, reflectance.x, reflectance.y, reflectance.z, common,
-        lambdaO, lambdaI);
-  }
-#endif
   float3 const eval = energyScale *
                       (isTransmission ? transmittance : reflectance) * common /
                       (1.f + lambdaO + lambdaI);
-#if 0
-  printf(
-      "\n\tH: %f %f %f | \n"
-      "\n\tns: %f %f %f | ng: %f %f %f \n\t wo %f %f %f | wi %f %f %f\n"
-      "\n\treflectance: %f %f %f | Trasmittance: %f %f %f | pdfReflect: %f\n"
-      "\t*pdf = lobePdf * common / (1.f + lambdaO);\n\t\t%f = %f * %f / (1 + "
-      "%f)\n\teval: %f %f %f\n",
-      H.x, H.y, H.z, ns.x, ns.y, ns.z, ng.x, ng.y, ng.z, wo.x, wo.y, wo.z, wi.x,
-      wi.y, wi.z, reflectance.x, reflectance.y, reflectance.z, transmittance.x,
-      transmittance.y, transmittance.z, pdfReflect, *pdf, lobePdf, common,
-      lambdaO, eval.x, eval.y, eval.z);
-#endif
   assert(*pdf == 0 ||
          (maxComponentValue(eval) > 0.f && allStrictlyPositive(eval)));
   return eval;

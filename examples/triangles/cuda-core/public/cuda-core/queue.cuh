@@ -694,7 +694,9 @@ struct DeviceArena {
 
 template <typename T>
 void initDeviceArena(DeviceArena<T>& arena, int capacity) {
+#if DMT_ENABLE_ASSERTS
   assert((capacity % 32) == 0);
+#endif
 
   arena.capacity = capacity;
   arena.mask_words = capacity / 32;

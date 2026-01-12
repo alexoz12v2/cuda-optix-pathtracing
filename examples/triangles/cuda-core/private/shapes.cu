@@ -45,18 +45,11 @@ __device__ HitResult triangleIntersect(float4 x, float4 y, float4 z, Ray ray) {
     result.hit = 1;
     result.t = t;
     result.pos = p0 + u * e0 + v * e1;
-    // TODO indexed computation of normal. now gamble on counter-clockwise
     result.normal = normalize(cross(e1, e0));
-#if 0
-    if (result.pos.x <= -2.f && result.pos.y > 0.f) {
-      printf("      - Intersection at %f %f %f | normal %x %x %x\n",
-             result.pos.x, result.pos.y, result.pos.z,
-             *(uint32_t*)(&result.normal.x), *(uint32_t*)(&result.normal.y),
-             *(uint32_t*)(&result.normal.z));
-    }
-#endif
+#if DMT_ENABLE_ASSERTS
     assert(fabsf(length2(result.normal) - 1.f) < 1e-3f &&
            "Expected unit vector");
+#endif
     result.error = errorFromTriangleIntersection(u, v, p0, p1, p2);
   }
 

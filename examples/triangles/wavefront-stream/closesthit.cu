@@ -10,9 +10,11 @@ closesthit(Ray const& __restrict__ ray,
            TriangleSoup const& __restrict__ triSoup, int transmissionCount) {
   HitResult result;
   for (int tri = 0; tri < triSoup.count; ++tri) {
+#if DMT_ENABLE_ASSERTS
     assert((((uintptr_t)triSoup.xs) & 15) == 0);
     assert((((uintptr_t)triSoup.ys) & 15) == 0);
     assert((((uintptr_t)triSoup.zs) & 15) == 0);
+#endif
     float4 const x = __ldg(reinterpret_cast<float4 const*>(triSoup.xs) + tri);
     float4 const y = __ldg(reinterpret_cast<float4 const*>(triSoup.ys) + tri);
     float4 const z = __ldg(reinterpret_cast<float4 const*>(triSoup.zs) + tri);
@@ -58,10 +60,6 @@ __device__ __forceinline__ void handleHit(
 #  else
   if (!pushed) {
     int const deadWorkers = __activemask();
-    if (getLaneId() == __ffs(deadWorkers) - 1) {
-      printf("CH Failed: AnyHit queue Full\n (cap: %d)\n",
-             outAnyHitQueue.capacity);
-    }
     asm volatile("trap;");
   }
 #  endif
@@ -94,10 +92,6 @@ __device__ __forceinline__ void handleHit(
 #  else
   if (!pushed) {
     int const deadWorkers = __activemask();
-    if (getLaneId() == __ffs(deadWorkers) - 1) {
-      printf("CH Failed: Shade queue Full\n (cap: %d)\n",
-             outShadeQueue.capacity);
-    }
     asm volatile("trap;");
   }
 #  endif
@@ -129,10 +123,6 @@ __device__ __forceinline__ void handleMiss(ClosestHitInput const& kinput,
   assert(pushed);
 #  else
   if (!pushed) {
-    int const deadWorkers = __activemask();
-    if (getLaneId() == __ffs(deadWorkers) - 1) {
-      printf("CH Failed: Miss queue Full\n (cap: %d)\n", outMissQueue.capacity);
-    }
     asm volatile("trap;");
   }
 #  endif

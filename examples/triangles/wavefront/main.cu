@@ -210,7 +210,9 @@ inline __device__ __forceinline__ void raygen(
   static_assert(WAIT_BASE * (MAX_RETRY | 1) << EXP_BACKOFF_SHFT != 0U);
   int attempt = 0;
   int wait = WAIT_BASE;
+#if DMT_ENABLE_ASSERTS
   assert(!out.state);
+#endif
   int slot = -1;
   while (slot < 0) {
     slot = pathStateSlots.allocate();
@@ -303,12 +305,14 @@ __device__ void anyhitNEE(
       return;
     }
 
-#if PRINT_ASSERT
+#if DMT_ENABLE_ASSERTS
+#  if PRINT_ASSERT
     if (isZero(bsdf_f)) {
       printf("[%u %u %d] !isZero(bsdf_f)\n", blockIdx.x, threadIdx.x, __LINE__);
     }
-#endif
+#  endif
     assert(!isZero(bsdf_f));
+#endif
 
     for (int tri = 0; tri < triSoup.count; ++tri) {
       float4 const x = __ldg(reinterpret_cast<float4 const*>(triSoup.xs) + tri);
@@ -358,13 +362,15 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
   int const blockType = blockIdx.x % WAVEFRONT_KERNEL_TYPES;
   int const blockNumPerKernel = gridDim.x / WAVEFRONT_KERNEL_TYPES;
   // assumes 1D block
-#if PRINT_ASSERT
+#if DMT_ENABLE_ASSERTS
+#  if PRINT_ASSERT
   if (blockDim.x % warpSize != 0) {
     printf("[%u %u %d] blockDim.x %% warpSize == 0\n", blockIdx.x, threadIdx.x,
            __LINE__);
   }
-#endif
+#  endif
   assert(blockDim.x % warpSize == 0);
+#endif
 
   DeviceHaltonOwen& warpRng =
       input.d_haltonOwen[(blockIdx.x * blockDim.x + threadIdx.x) / warpSize];
@@ -406,7 +412,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     // specific sample)
     for (int i = globalWarpId; i < totalWorkUnits; i += totalWarps) {
       // Decode 1D index into (Tile, Sample)
+#  if DMT_ENABLE_ASSERTS
       assert(i / totalTiles < CMEM_spp);
+#  endif
       int const sampleIdx = i / totalTiles + input.sampleOffset;
       int const tileIdx = i % totalTiles;
 
@@ -438,7 +446,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
                                      sampleIdx);
             raygen(raygenInput, input.pathStateSlots, warpRng,
                    CMEM_haltonOwenParams, raygenElem);
+#  if DMT_ENABLE_ASSERTS
             assert(raygenElem.state);
+#  endif
           }
 
           input.closesthitQueue.spinPush(&raygenElem);
@@ -480,7 +490,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     while (true) {
       // used for any vote
       bool finished = false;
+#  if DMT_ENABLE_ASSERTS
       assert(__activemask() == 0xFFFF'FFFFU);
+#  endif
 
       ClosestHitInput kinput{};  // TODO SMEM?
       if (int const mask = input.closesthitQueue.queuePop<true>(&kinput);
@@ -493,7 +505,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
         if (auto const hitResult = closesthit(kinput.ray, input.d_triSoup);
             hitResult.hit) {
           extraLife = true;
+#  if DMT_ENABLE_ASSERTS
           assert(kinput.state);
+#  endif
           // if hit -> enqueue anyhit queue and shade queue
 
           // 1. Set useCount to 1 implies "One AnyHit worker is active/pending"
@@ -569,7 +583,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     while (true) {
       // used for any vote
       bool finished = false;
+#  if DMT_ENABLE_ASSERTS
       assert(__activemask() == 0xFFFF'FFFFU);
+#  endif
       AnyhitInput kinput{};  // TODO SMEM?
       if (int const mask = input.anyhitQueue.queuePop<true>(&kinput);
           mask & (1 << getLaneId())) {
@@ -651,7 +667,9 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     while (true) {
       // used for any vote
       bool finished = false;
+#  if DMT_ENABLE_ASSERTS
       assert(__activemask() == 0xFFFF'FFFFU);
+#  endif
 
       MissInput kinput{};
       if (int const mask = input.missQueue.queuePop<true>(&kinput);
@@ -731,13 +749,17 @@ __global__ __launch_bounds__(512, WAVEFRONT_KERNEL_TYPES)
     while (true) {
       // used for any vote
       bool finished = false;
+#  if DMT_ENABLE_ASSERTS
       assert(__activemask() == 0xFFFF'FFFFU);
+#  endif
 
       ShadeInput kinput{};
       if (int const mask = input.shadeQueue.queuePop<true>(&kinput);
           mask & (1 << getLaneId())) {
         // TODO if malloc aligned, use int4
+#  if DMT_ENABLE_ASSERTS
         assert(kinput.state);
+#  endif
         int px, py, sampleIndex;
         kinput.state->ldg_pxs(px, py, sampleIndex);
         // initialize RNG
@@ -906,7 +928,9 @@ __host__ void optimalBlocksAndThreads(uint32_t& blocks, uint32_t& threads,
     exit(1);
   }
 
+#if DMT_ENABLE_ASSERTS
   assert(desiredThreads % WARP_SIZE == 0);
+#endif
   threads = desiredThreads;
 }
 

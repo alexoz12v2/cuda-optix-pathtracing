@@ -122,7 +122,7 @@ void megakernelMain() {
   // timing
   AvgAndTotalTimer timer;
 
-  static int constexpr MAX_SPP = 2048;  // 4 * 20;  //
+  static int constexpr MAX_SPP = 2048;  //
   std::cout << "Running CUDA Kernel" << std::endl;
   // TODO stream based write back
   for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {
@@ -214,5 +214,7 @@ int main() {
     }
   }
 #endif
+  CUDA_CHECK(cudaInitDevice(0, 0, 0));
+  CUDA_CHECK(cudaSetDevice(0));
   megakernelMain();
 }

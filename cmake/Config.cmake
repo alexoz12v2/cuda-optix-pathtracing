@@ -466,7 +466,7 @@ function(dmt_set_target_warnings target properties_visibility)
     # -dc # implied through POSITION_INDEPENDENT_CODE
     -use_fast_math
     -maxrregcount ${DMT_NVCC_MAXREGCOUNT}
-    "-Xptxas" "-v,-warn-double-usage"
+    "-Xptxas" "-v,-warn-double-usage,-lineinfo"
   )
 
   if (DMT_DEVICE_LINK_TIME_OPTIMIZATION)

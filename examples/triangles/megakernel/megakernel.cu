@@ -68,6 +68,11 @@ __global__ void pathTraceMegakernel(
   // fetch rng
   DeviceHaltonOwen& warpRng = d_haltonOwen[mortonStart / warpSize];
 
+  // Declare extern SMEM
+#if DMT_ENABLE_MSE
+  auto& SMEM = SMEMLayout<64>::get();
+#endif
+
   // constant memory aliases
   uint32_t const& spp = CMEM_spp;
   MortonLayout2D const& layout = CMEM_mortonLayout;
@@ -84,9 +89,15 @@ __global__ void pathTraceMegakernel(
       continue;
     }
     int2 const pixel = make_int2(upixel.x, upixel.y);
+    float4* meanPtr = d_out.meanPtr + pixel.x + pixel.y * imageRes.x;
+    float4* M2Ptr = d_out.m2Ptr + pixel.x + pixel.y * imageRes.x;
 
 #define OFFSET_RAY_ORIGIN 1
 #define FIRST_BOUNCE_ONLY 0
+
+#if DMT_ENABLE_MSE
+    SMEM.startSample(meanPtr, M2Ptr);
+#endif
 
     for (int sbase = 0; sbase < spp; ++sbase) {
       int const s = sbase + sampleOffset;
@@ -114,15 +125,10 @@ __global__ void pathTraceMegakernel(
           HitResult const result = triangleIntersect(x, y, z, ray);
           if (result.hit && result.t < hitResult.t) {
             hitResult = result;
-            // TODO better? Coalescing?
             hitResult.matId = d_triSoup.matId[tri];
-#if 0
-            hitResult.normal = flipIfOdd(hitResult.normal, transmissionCount);
-#else
             if (dot(ray.d, hitResult.normal) > 0) {
               hitResult.normal *= -1;
             }
-#endif
           }
         }
         // if not intersected, contribution is zero (eliminates branch later)
@@ -226,8 +232,8 @@ __global__ void pathTraceMegakernel(
               } else {
                 // MIS if not delta (and not BSDF Delta TODO)
                 // power heuristic
-                float const w = sqrf(10 * lightPMF * ls.pdf) /
-                                sqrf(10 * lightPMF * ls.pdf + bsdfPdf);
+                float const w =
+                    sqrf(lightPMF * ls.pdf) / sqrf(lightPMF * ls.pdf + bsdfPdf);
                 L += Le * bsdf_f * beta * w;
               }
             }
@@ -291,29 +297,26 @@ __global__ void pathTraceMegakernel(
       theWarp.sync();
 
       // add to output buffer: Read-Modify-Update procedure
-      float4* meanPtr = d_out.meanPtr + pixel.x + pixel.y * imageRes.x;
-      float4* M2Ptr = d_out.m2Ptr + pixel.x + pixel.y * imageRes.x;
-
+#if DMT_ENABLE_MSE
+      SMEM.updateSample(L);
+#else
       float3 mean = make_float3(meanPtr->x, meanPtr->y, meanPtr->z);
-      float3 M2 = make_float3(M2Ptr->x, M2Ptr->y, M2Ptr->z);
-      float N = M2Ptr->w;
+      float N = meanPtr->w;
 
-      // Welford update
       N += 1.0f;
       float3 delta = L - mean;
       mean += delta / N;
-      float3 delta2 = L - mean;
-      M2 += delta * delta2;
 
       // write back
       meanPtr->x = mean.x;
       meanPtr->y = mean.y;
       meanPtr->z = mean.z;
-
-      M2Ptr->x = M2.x;
-      M2Ptr->y = M2.y;
-      M2Ptr->z = M2.z;
-      M2Ptr->w = N;
+      meanPtr->w = N;
+#endif
     }
+
+#if DMT_ENABLE_MSE
+    SMEM.endSample(meanPtr, M2Ptr);
+#endif
   }
 }

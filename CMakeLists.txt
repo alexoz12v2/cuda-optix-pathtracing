@@ -75,7 +75,7 @@ dmt_set_option(DMT_GENERATE_TRAINING OFF BOOL "Generate Training Targets")
 
 ## Device Link Time Optimization not supported on Windows. not nice.
 ## https://forums.developer.nvidia.com/t/is-clang-cl-officially-supported-as-a-host-compiler-on-windows/278397/3
-if (DMT_DEVICE_LINK_TIME_OPTIMIZATION AND DMT_OS_LINUX)
+if (DMT_DEVICE_LINK_TIME_OPTIMIZATION)
   message(STATUS
     "CMAKE_CXX_COMPILER_FRONTEND_VARIANT: ${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}\n"
     "and compiler is ID: ${CMAKE_CXX_COMPILER_ID}\n"
@@ -85,6 +85,8 @@ if (DMT_DEVICE_LINK_TIME_OPTIMIZATION AND DMT_OS_LINUX)
   check_ipo_supported(RESULT YES_OR_NO OUTPUT THE_OUTPUT LANGUAGES CXX CUDA)
   if (NOT YES_OR_NO STREQUAL "YES")
     message(FATAL_ERROR "check_ipo_supported: ${THE_OUTPUT}")
+  else ()
+    message(STATUS "check_ipo_supported: ${THE_OUTPUT}")
   endif ()
   set(CMAKE_CUDA_ARCHITECTURES ${DMT_NVCC_LTO_VERSION})
   set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)

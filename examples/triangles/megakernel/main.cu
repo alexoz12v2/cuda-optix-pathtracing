@@ -103,8 +103,10 @@ void megakernelMain() {
   // stream
   cudaStream_t st_main = nullptr;
   CUDA_CHECK(cudaStreamCreate(&st_main));
+  // timing
+  AvgAndTotalTimer timer;
 
-  static int constexpr MAX_SPP = 2048;
+  static int constexpr MAX_SPP = 4 * 20;  // 2048;
   std::cout << "Running CUDA Kernel" << std::endl;
   // TODO stream based write back
   for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {
@@ -121,10 +123,17 @@ void megakernelMain() {
     std::string const name =
         "output-" + std::to_string(sTot + h_camera.spp) + ".png";
     std::cout << "Writing to file" << std::endl;
-    // copy to host and to file
+    timer.tick();
+
+    // copy to host and to file (reset timer to not account for write to file)
     writeOutputBufferRowMajor(h_outputBuffer, h_camera.width, h_camera.height,
                               name.c_str());
+    // timer.reset();
   }
+  std::cout << "Done! Total Execution Time(excl write file): "
+            << timer.elapsedMillis()
+            << " ms | Average Execution per Kernel launch (" << h_camera.spp
+            << " spp): " << timer.avgMillis() << " ms" << std::endl;
 
   // cleanup
   std::cout << "Cleanup..." << std::endl;

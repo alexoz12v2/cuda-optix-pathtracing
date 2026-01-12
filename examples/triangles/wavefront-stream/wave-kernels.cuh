@@ -108,14 +108,6 @@ __host__ void allocateDeviceConstantMemory(DeviceCamera const& h_camera,
                                            int xTile, int yTile);
 __host__ void freeDeviceConstantMemory();
 
-inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
-    float const* arr) {
-  static_assert(sizeof(Transform) == 32 * sizeof(float) &&
-                alignof(Transform) <= 16);
-  // 16-byte aligned and at least 32 elements
-  return reinterpret_cast<Transform const*>(arr);
-}
-
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------

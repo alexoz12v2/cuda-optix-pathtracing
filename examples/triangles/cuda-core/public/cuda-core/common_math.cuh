@@ -39,7 +39,7 @@ __device__ __forceinline__ unsigned getCoalescedLaneId(unsigned mask) {
 }
 
 // TODO how to use?
-__device__ float groupedAtomicFetch(float* address) {
+__device__ __forceinline__ float groupedAtomicFetch(float* address) {
   unsigned const fullwarp = __activemask();
 #if __CUDA_ARCH__ >= 700
   // 1. Identify all lanes in the wapr hitting same address
@@ -92,7 +92,7 @@ __device__ float groupedAtomicFetch(float* address) {
 template <typename T>
   requires((std::is_floating_point_v<T> || std::is_integral_v<T>) &&
            sizeof(T) == 4)
-__device__ void groupedAtomicAdd(T* address, T val) {
+__device__ __forceinline__ void groupedAtomicAdd(T* address, T val) {
   unsigned const fullwarp = __activemask();
 #if __CUDA_ARCH__ >= 700
   // 1. find all lanes that have the same address
@@ -452,17 +452,17 @@ __host__ __device__ __forceinline__ float sin_sqr_to_one_minus_cos(
   // Using second-order Taylor expansion at small angles for better accuracy.
   return s_sq > 0.0004f ? 1.0f - safeSqrt(1.0f - s_sq) : 0.5f * s_sq;
 }
-inline __host__ __device__ __forceinline__ float safeacos(float v) {
+__host__ __device__ __forceinline__ float safeacos(float v) {
   return acosf(fminf(fmaxf(v, -1.f), 1.f));
 }
-inline __host__ __device__ __forceinline__ float length2(float3 v) {
+__host__ __device__ __forceinline__ float length2(float3 v) {
   return dot(v, v);
 }
-inline __host__ __device__ __forceinline__ float length2(float2 v) {
+__host__ __device__ __forceinline__ float length2(float2 v) {
   return dot(v, v);
 }
-inline __host__ __device__ __forceinline__ void gramSchmidt(float3 n, float3* a,
-                                                            float3* b) {
+__host__ __device__ __forceinline__ void gramSchmidt(float3 n, float3* a,
+                                                     float3* b) {
   assert(a && b && abs(length(n) - 1.f) < 1e-5f);
   if (fabsf(n.x - n.y) > 1e-3f || fabsf(n.x - n.z) > 1e-3f)
     *a = {n.z - n.y, n.x - n.z, n.y - n.x};  //(1,1,1)x N
@@ -472,34 +472,35 @@ inline __host__ __device__ __forceinline__ void gramSchmidt(float3 n, float3* a,
   *a = normalize(*a);
   *b = cross(n, *a);
 }
-inline __host__ __device__ __forceinline__ void orthonormalTangent(
-    const float3 n, float3 const t, float3* a, float3* b) {
+__host__ __device__ __forceinline__ void orthonormalTangent(const float3 n,
+                                                            float3 const t,
+                                                            float3* a,
+                                                            float3* b) {
   *b = normalize(cross(n, t));
   *a = cross(*b, n);
 }
-inline __host__ __device__ __forceinline__ float2
-cartesianFromPolar(float rho, float phi) {
+__host__ __device__ __forceinline__ float2 cartesianFromPolar(float rho,
+                                                              float phi) {
   return {rho * cosf(phi), rho * sinf(phi)};
 }
 
-inline __host__ __device__ __forceinline__ float smoothstep(float x) {
+__host__ __device__ __forceinline__ float smoothstep(float x) {
   if (x <= 0.f) return 0.f;
   if (x >= 1.f) return 1.f;
   float const x2 = x * x;
   return 3.f * x2 - 2.f * x2 * x;
 }
-inline __host__ __device__ __forceinline__ float smoothstep(float a, float b,
-                                                            float x) {
+__host__ __device__ __forceinline__ float smoothstep(float a, float b,
+                                                     float x) {
   float const t = fmaxf(fminf((x - a) / (b - a), 0.f), 1.f);
 
   return smoothstep(t);
 }
-inline __host__ __device__ __forceinline__ float sin_from_cos(
-    float const cosine) {
+__host__ __device__ __forceinline__ float sin_from_cos(float const cosine) {
   return safeSqrt(1.f - sqrf(cosine));
 }
 
-inline __host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
+__host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
   if (x == 0) return 1;
   --x;
   x |= x >> 1;
@@ -508,6 +509,14 @@ inline __host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
   x |= x >> 8;
   x |= x >> 16;
   return x + 1;
+}
+
+inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
+    float const* arr) {
+  static_assert(sizeof(Transform) == 32 * sizeof(float) &&
+                alignof(Transform) <= 16);
+  // 16-byte aligned and at least 32 elements
+  return reinterpret_cast<Transform const*>(arr);
 }
 
 #endif

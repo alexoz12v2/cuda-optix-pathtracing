@@ -1,9 +1,9 @@
-#include "kernels.cuh"
+#include "megakernel.cuh"
 
-#include "debug.cuh"
-#include "types.cuh"
-#include "morton.cuh"
-#include "extra_math.cuh"
+#include "cuda-core/debug.cuh"
+#include "cuda-core/types.cuh"
+#include "cuda-core/morton.cuh"
+#include "cuda-core/extra_math.cuh"
 
 #include <cooperative_groups.h>
 
@@ -11,29 +11,68 @@
 
 namespace cg = cooperative_groups;
 
-__global__ void __launch_bounds__(/*max threads per block*/ 512,
-                                  /*min blocks per SM*/ 10)
-    pathTraceMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
-                        Light const* d_lights, uint32_t const lightCount,
-                        Light const* d_infiniteLights,
-                        uint32_t const infiniteLightCount, BSDF const* d_bsdf,
-                        uint32_t const bsdfCount, uint32_t const sampleOffset,
-                        DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer) {
+__constant__ float CMEM_cameraFromRaster[32];
+__constant__ float CMEM_renderFromCamera[32];
+__constant__ DeviceHaltonOwenParams CMEM_haltonOwenParams;
+__constant__ int2 CMEM_imageResolution;
+__constant__ int CMEM_spp;
+__constant__ MortonLayout2D CMEM_mortonLayout;
+
+__host__ void allocateDeviceConstantMemory(DeviceCamera const& h_camera) {
+  {
+    Transform t =
+        cameraFromRaster_Perspective(h_camera.focalLength, h_camera.sensorSize,
+                                     h_camera.width, h_camera.height);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_cameraFromRaster, &t, sizeof(Transform),
+                                  0, cudaMemcpyHostToDevice));
+    t = worldFromCamera(h_camera.dir, h_camera.pos);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_renderFromCamera, &t, sizeof(Transform),
+                                  0, cudaMemcpyHostToDevice));
+  }
+  int2 const res = make_int2(h_camera.width, h_camera.height);
+  CUDA_CHECK(cudaMemcpyToSymbol(CMEM_imageResolution, &res, sizeof(int2), 0,
+                                cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpyToSymbol(CMEM_spp, &h_camera.spp, sizeof(int), 0,
+                                cudaMemcpyHostToDevice));
+  {
+    DeviceHaltonOwenParams const rngParams =
+        DeviceHaltonOwen::computeParams(h_camera.width, h_camera.height);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_haltonOwenParams, &rngParams,
+                                  sizeof(DeviceHaltonOwenParams), 0,
+                                  cudaMemcpyHostToDevice));
+  }
+  {
+    MortonLayout2D const morton = mortonLayout(h_camera.width, h_camera.height);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_mortonLayout, &morton,
+                                  sizeof(MortonLayout2D), 0,
+                                  cudaMemcpyHostToDevice));
+  }
+  allocateDeviceGGXEnergyPreservingTables();
+}
+
+__global__ void pathTraceMegakernel(
+    DeviceCamera* d__cam, TriangleSoup d_triSoup, Light const* d_lights,
+    uint32_t const lightCount, Light const* d_infiniteLights,
+    uint32_t const infiniteLightCount, BSDF const* d_bsdf,
+    uint32_t const bsdfCount, uint32_t const sampleOffset,
+    DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer) {
+  // grid-stride loop start
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
-  uint32_t const spp = d_cam->spp;
-  // constant memory?
-  MortonLayout2D const layout = mortonLayout(d_cam->width, d_cam->height);
+
+  // constant memory aliases
+  uint32_t const& spp = CMEM_spp;
+  MortonLayout2D const& layout = CMEM_mortonLayout;
   DeviceHaltonOwen& warpRng = d_haltonOwen[mortonStart / warpSize];
-  DeviceHaltonOwenParams const params =
-      warpRng.computeParams(layout.cols, layout.rows);
-  Transform const cameraFromRaster = cameraFromRaster_Perspective(
-      d_cam->focalLength, d_cam->sensorSize, d_cam->width, d_cam->height);
-  Transform const renderFromCamera = worldFromCamera(d_cam->dir, d_cam->pos);
+  DeviceHaltonOwenParams const& params = CMEM_haltonOwenParams;
+  Transform const& cameraFromRaster = *arrayAsTransform(CMEM_cameraFromRaster);
+  Transform const& renderFromCamera = *arrayAsTransform(CMEM_renderFromCamera);
+  int2 const& imageRes = CMEM_imageResolution;
+
   for (uint32_t mortonIndex = mortonStart; mortonIndex < layout.mortonCount;
        mortonIndex += gridDim.x * blockDim.x) {
     uint2 upixel{};
     decodeMorton2D(mortonIndex, &upixel.x, &upixel.y);
-    if (upixel.x >= d_cam->width || upixel.y >= d_cam->height) {
+    if (upixel.x >= imageRes.x || upixel.y >= imageRes.y) {
       continue;
     }
     int2 const pixel = make_int2(upixel.x, upixel.y);
@@ -241,17 +280,12 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
       theWarp.sync();
 
       // add to output buffer ( assumes max distance is 2)
-      // TODO the rest (this is a branch BTW)
-      float4* target = d_outBuffer + mortonIndex;
-#if 1  // each pixel now is associated to a thread, no atomic
-       // TODO: better coalescing?
+      float4* target = d_outBuffer + pixel.x + pixel.y * imageRes.x;
+      // TODO: better coalescing?
       target->x += L.x;
       target->y += L.y;
       target->z += L.z;
       target->w += 1;  // TODO: sum of weights
-#else
-      atomicAdd(target, toAdd);
-#endif
     }
   }
 }

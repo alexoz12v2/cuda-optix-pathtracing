@@ -454,22 +454,21 @@ function(dmt_set_target_warnings target properties_visibility)
 
   # Device Link Time optimization necessary to inline device functions in other compilation units
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlto>)
+  dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
+  dmt_set_option(DMT_DEVICE_LINK_TIME_OPTIMIZATION OFF BOOL "-dlto to nvcc and nvlink")
+  dmt_set_option(DMT_NVCC_ARCHITECTURES "61-real" STRING "physical architecture for gencode when using -dlto to nvcc and nvlink")
   set(CUDA_COMPILE_ARGS
     # -dlink
-    # --cudart
-    # shared
-    # --cudadevrt
-    # static
+    # --cudart shared # implied through target linking or CUDA_RUNTIME_LIBRARY
+    # --cudadevrt static # not used
     --expt-relaxed-constexpr # constexpr functions inside device code
     --extended-lambda # full C++20 lambda syntax inside device code
-    # -dc
+    # -dc # implied through POSITION_INDEPENDENT_CODE
     -use_fast_math
     -maxrregcount ${DMT_NVCC_MAXREGCOUNT}
     -Xptxas -v
   )
 
-  dmt_set_option(DMT_DEVICE_LINK_TIME_OPTIMIZATION OFF BOOL "-dlto to nvcc and nvlink")
-  dmt_set_option(DMT_NVCC_ARCHITECTURES "61-real" STRING "physical architecture for gencode when using -dlto to nvcc and nvlink")
   if (DMT_DEVICE_LINK_TIME_OPTIMIZATION)
     if (DMT_NVCC_ARCHITECTURES)
       set_target_properties(${target} PROPERTIES CUDA_ARCHITECTURES "${DMT_NVCC_ARCHITECTURES}")
@@ -478,9 +477,11 @@ function(dmt_set_target_warnings target properties_visibility)
       message(WARNING "ignoring device link time optimization as DMT_NVCC_ARCHITECTURES not defined")
     endif ()
   endif ()
+  if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    list(APPEND CUDA_COMPILE_ARGS "-dopt=on")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
+  endif ()
 
-  # the commented ones are done by default
-  dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
   target_compile_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_COMPILE_ARGS}>)
 endfunction()
 

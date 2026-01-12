@@ -260,16 +260,16 @@ void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
   // ball left
   h_scene->addModel(generateSphereMesh(make_float3(-1.2, 2, -0.25), 0.5f, 2, 4),
                     0);
-  h_bsdfs->push_back(makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
-                                      {3.42420f, 2.34590f, 1.77040f}, 0.f, .9f,
-                                      .9f));
-  // h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
+  // h_bsdfs->push_back(makeGGXConductor({0.18299f, 0.42108f, 1.37340f},
+  //                                     {3.42420f, 2.34590f, 1.77040f}, 0.f,
+  //                                     .9f, .9f));
+  h_bsdfs->push_back(makeOrenNayar({1.f, .7f, .3f}, .7f));
 
   // ball right
   h_scene->addModel(
       generateSphereMesh(make_float3(1.2, 2.4, -0.25), 0.5f, 2, 4), 1);
   h_bsdfs->push_back(makeGGXDielectric({0.02f, 0.07f, 0.01f},
-                                       {0.2f, 0.7f, 0.1f}, 1.f /*~26 deg*/,
+                                       {0.95f, 0.95f, 0.87f}, 1.f /*~26 deg*/,
                                        1.44f, .5f, .7f));
 
   // far plane
@@ -314,8 +314,8 @@ void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
 #endif
 
   *h_camera = DeviceCamera();
-  h_camera->width = 256;
-  h_camera->height = 128;
+  h_camera->width = 2560;
+  h_camera->height = 1440;
   h_camera->spp = 4;
 }
 

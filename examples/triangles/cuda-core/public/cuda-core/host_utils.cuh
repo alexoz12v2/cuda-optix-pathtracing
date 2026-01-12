@@ -14,6 +14,8 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <queue>
+#include <ranges>
 
 // TODO cornell box builder
 
@@ -40,7 +42,47 @@ float4* deviceOutputBuffer(uint32_t const width, uint32_t const height);
 
 std::filesystem::path getExecutableDirectory();
 
-// TODO Use stbi to encoding in PNG
+template <bool PreferHighTPB = false>
+__host__ void optimalOccupancyFromBlock(void* krnl, uint32_t smemBytes,
+                                        bool residentOnly, uint32_t& blocks,
+                                        uint32_t& threads) {
+  cudaDeviceProp deviceProp{};
+  CUDA_CHECK(cudaGetDeviceProperties(&deviceProp, 0));
+
+  struct OccupancyMeasure {
+    int blocks, threads;
+    bool operator<(OccupancyMeasure const& other) const {
+      if constexpr (PreferHighTPB)
+        return threads < other.threads;
+      else
+        return blocks < other.blocks;
+    }
+  };
+  std::priority_queue<OccupancyMeasure> occupancies;
+  // instead of using cudaDeviceProp.maxThreadsPerBlock, cap it to 512 as
+  // it would hurt occupancy due to register pressure
+  auto multiples = std::views::iota(1, 16) |
+                   std::views::transform([](int i) { return i * 32; }) |
+                   std::views::reverse;  // 512, 480, 448 ... 32
+  for (uint32_t t : multiples) {
+    OccupancyMeasure current{.blocks = 0, .threads = (int)t};
+    CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+        &current.blocks, krnl, current.threads, smemBytes));
+    // round down to multiple of number of SMs
+    current.blocks = (current.blocks / deviceProp.multiProcessorCount) *
+                     deviceProp.multiProcessorCount;
+    // account for current only if we don't care about residency of threads
+    // or blocks per multiprocessor fits inside SM
+    if (!residentOnly ||
+        deviceProp.maxThreadsPerMultiProcessor >=
+            current.blocks / deviceProp.multiProcessorCount * current.threads) {
+      occupancies.emplace(current);
+    }
+  }
+  blocks = occupancies.top().blocks;
+  threads = occupancies.top().threads;
+}
+
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
                        uint32_t const height, char const* name = "output.bmp",
                        bool isHost = false);

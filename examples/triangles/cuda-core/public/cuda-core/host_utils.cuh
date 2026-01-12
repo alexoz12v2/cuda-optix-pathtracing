@@ -168,6 +168,11 @@ void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
 void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
                                uint32_t const height,
                                char const* name = "output.bmp");
+#if DMT_ENABLE_MSE
+__host__ void writeMeanAndMSERowMajor(float4 const* mean,
+                                      float4 const* deltaSqr, uint32_t width,
+                                      uint32_t height, std::string baseName);
+#endif
 
 // --------------------------------------------------------------------------
 // Scenes

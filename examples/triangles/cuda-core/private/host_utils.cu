@@ -18,6 +18,10 @@ namespace {
 void writePixel(uint32_t const width, uint8_t* rowMajorImage,
                 float4 const* floatBuffer, uint32_t i, uint32_t const row,
                 uint32_t const col);
+#if DMT_ENABLE_MSE
+void pixelFromMean(uint8_t* pixel, float4 mean);
+void pixelFromDelta2(uint8_t* pixel, float4 d2);
+#endif
 }  // namespace
 
 DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
@@ -164,11 +168,6 @@ void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
   for (uint32_t row = 0; row < height; ++row) {
     for (uint32_t col = 0; col < width; ++col) {
       uint32_t const i = row * width + col;
-#if 0
-      std::cout << "Pixel [" << row << ' ' << col << "] : " << outputBuffer[i].x
-                << ' ' << outputBuffer[i].y << ' ' << outputBuffer[i].z << ' '
-                << outputBuffer[i].w << std::endl;
-#endif
       writePixel(width, rowMajorImage.get(), outputBuffer, i, row, col);
     }
   }
@@ -176,6 +175,31 @@ void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
   stbi_write_png(theOutPath.c_str(), width, height, 3, rowMajorImage.get(),
                  3 * width);
 }
+#if DMT_ENABLE_MSE
+__host__ void writeMeanAndMSERowMajor(float4 const* mean,
+                                      float4 const* deltaSqr, uint32_t width,
+                                      uint32_t height, std::string baseName) {
+  const auto rowMajorImage = std::make_unique<uint8_t[]>(width * height * 3);
+  const auto rowMajorMSE = std::make_unique<uint8_t[]>(width * height * 3);
+  std::string const meanName =
+      (getExecutableDirectory() / (baseName + ".png")).string();
+  std::string const MSEName =
+      (getExecutableDirectory() / (baseName + "_sqrt_mse.png")).string();
+  for (uint32_t row = 0; row < height; ++row) {
+    for (uint32_t col = 0; col < width; ++col) {
+      uint32_t const i = row * width + col;
+      uint8_t* meanPx = rowMajorImage.get() + i * 3;
+      uint8_t* MSEPx = rowMajorMSE.get() + i * 3;
+      pixelFromMean(meanPx, mean[i]);
+      pixelFromDelta2(MSEPx, deltaSqr[i]);
+    }
+  }
+  stbi_write_png(meanName.c_str(), width, height, 3, rowMajorImage.get(),
+                 3 * width);
+  stbi_write_png(MSEName.c_str(), width, height, 3, rowMajorMSE.get(),
+                 3 * width);
+}
+#endif
 
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,
                        uint32_t const height, char const* name, bool isHost) {
@@ -321,6 +345,32 @@ void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
 
 // private stuff impl
 namespace {
+
+#if DMT_ENABLE_MSE
+void pixelFromMean(uint8_t* pixel, float4 mean) {
+  float const fr = fminf(fmaxf(mean.x, 0.f) * 255.f, 255.f);
+  float const fg = fminf(fmaxf(mean.y, 0.f) * 255.f, 255.f);
+  float const fb = fminf(fmaxf(mean.z, 0.f) * 255.f, 255.f);
+  uint8_t const u8r = static_cast<uint8_t>(fr);
+  uint8_t const u8g = static_cast<uint8_t>(fg);
+  uint8_t const u8b = static_cast<uint8_t>(fb);
+  pixel[0] = u8r;
+  pixel[1] = u8g;
+  pixel[2] = u8b;
+}
+void pixelFromDelta2(uint8_t* pixel, float4 d2) {
+  // Actually, take sqrt so that we visualize Standard Error, not MSE
+  float const fr = fminf(fmaxf(safeSqrt(d2.x) / d2.w, 0.f) * 255.f, 255.f);
+  float const fg = fminf(fmaxf(safeSqrt(d2.y) / d2.w, 0.f) * 255.f, 255.f);
+  float const fb = fminf(fmaxf(safeSqrt(d2.z) / d2.w, 0.f) * 255.f, 255.f);
+  uint8_t const u8r = static_cast<uint8_t>(fr);
+  uint8_t const u8g = static_cast<uint8_t>(fg);
+  uint8_t const u8b = static_cast<uint8_t>(fb);
+  pixel[0] = u8r;
+  pixel[1] = u8g;
+  pixel[2] = u8b;
+}
+#endif
 
 void writePixel(uint32_t const width, uint8_t* rowMajorImage,
                 float4 const* floatBuffer, uint32_t i, uint32_t const row,

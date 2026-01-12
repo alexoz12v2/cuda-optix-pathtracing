@@ -33,6 +33,12 @@ pathTraceMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
                     Light const* d_infiniteLights,
                     uint32_t const infiniteLightCount, BSDF const* d_bsdf,
                     uint32_t const bsdfCount, uint32_t const sampleOffset,
-                    DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer);
+                    DeviceHaltonOwen* d_haltonOwen,
+#if DMT_ENABLE_MSE
+                    DeviceOutputBuffer d_out
+#else
+                    float4* d_outBuffer
+#endif
+);
 
 #endif

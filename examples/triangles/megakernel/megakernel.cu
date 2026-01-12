@@ -55,7 +55,13 @@ __global__ void pathTraceMegakernel(
     uint32_t const lightCount, Light const* d_infiniteLights,
     uint32_t const infiniteLightCount, BSDF const* d_bsdf,
     uint32_t const bsdfCount, uint32_t const sampleOffset,
-    DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer) {
+    DeviceHaltonOwen* d_haltonOwen,
+#if DMT_ENABLE_MSE
+    DeviceOutputBuffer d_out
+#else
+    float4* d_outBuffer
+#endif
+) {
   // grid-stride loop start
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -284,13 +290,30 @@ __global__ void pathTraceMegakernel(
       }  // end while
       theWarp.sync();
 
-      // add to output buffer ( assumes max distance is 2)
-      float4* target = d_outBuffer + pixel.x + pixel.y * imageRes.x;
-      // TODO: better coalescing?
-      target->x += L.x;
-      target->y += L.y;
-      target->z += L.z;
-      target->w += 1;  // TODO: sum of weights
+      // add to output buffer: Read-Modify-Update procedure
+      float4* meanPtr = d_out.meanPtr + pixel.x + pixel.y * imageRes.x;
+      float4* M2Ptr = d_out.m2Ptr + pixel.x + pixel.y * imageRes.x;
+
+      float3 mean = make_float3(meanPtr->x, meanPtr->y, meanPtr->z);
+      float3 M2 = make_float3(M2Ptr->x, M2Ptr->y, M2Ptr->z);
+      float N = M2Ptr->w;
+
+      // Welford update
+      N += 1.0f;
+      float3 delta = L - mean;
+      mean += delta / N;
+      float3 delta2 = L - mean;
+      M2 += delta * delta2;
+
+      // write back
+      meanPtr->x = mean.x;
+      meanPtr->y = mean.y;
+      meanPtr->z = mean.z;
+
+      M2Ptr->x = M2.x;
+      M2Ptr->y = M2.y;
+      M2Ptr->z = M2.z;
+      M2Ptr->w = N;
     }
   }
 }

@@ -13,6 +13,8 @@
 #include <numbers>
 #include <vector>
 
+#define DMT_ENABLE_MSE 1
+
 inline constexpr int WARP_SIZE = 32;
 
 #define CUDA_CHECK(call)                                                   \
@@ -155,5 +157,40 @@ struct HitResult {
   uint32_t matId;  // bsdf index
   float t;
 };
+
+#if DMT_ENABLE_MSE
+struct HostPinnedOutputBuffer {
+  __host__ void allocate(int width, int height) {
+    size_t const bytes = width * height * sizeof(float4);
+    CUDA_CHECK(cudaMallocHost(&meanPtr, bytes));
+    CUDA_CHECK(cudaMallocHost(&m2Ptr, bytes));
+  }
+  __host__ void free() {
+    cudaFree(meanPtr);
+    cudaFree(m2Ptr);
+  }
+  float4* meanPtr;
+  float4* m2Ptr;  // array of delta squared
+};
+struct DeviceOutputBuffer {
+  __host__ void allocate(int width, int height) {
+#  ifdef DMT_ENABLE_ASSERTS
+    assert(!meanPtr && !m2Ptr);
+#  endif
+    size_t const bytes = width * height * sizeof(float4);
+    CUDA_CHECK(cudaMalloc(&meanPtr, bytes));
+    CUDA_CHECK(cudaMemset(meanPtr, 0, bytes));
+    CUDA_CHECK(cudaMalloc(&m2Ptr, bytes));
+    CUDA_CHECK(cudaMemset(m2Ptr, 0, bytes));
+  }
+  __host__ void free() {
+    cudaFree(meanPtr);
+    cudaFree(m2Ptr);
+  }
+
+  float4* meanPtr;
+  float4* m2Ptr;  // array of delta squared
+};
+#endif
 
 #endif  // DMT_CUDA_CORE_TYPES_H

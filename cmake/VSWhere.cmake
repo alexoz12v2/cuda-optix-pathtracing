@@ -35,7 +35,7 @@ include_guard()
     If the folder or files are missing, then a FATAL_ERROR is reported.
 ====================================================================================================================]]
 #
-function (toolchain_validate_vs_files)
+function(toolchain_validate_vs_files)
   set(OPTIONS)
   set(ONE_VALUE_KEYWORDS FOLDER DESCRIPTION)
   set(MULTI_VALUE_KEYWORDS FILES)
@@ -45,18 +45,18 @@ function (toolchain_validate_vs_files)
   if (NOT EXISTS ${VS_FOLDER})
     message(
       FATAL_ERROR
-        "Folder not present - ${VS_FOLDER} - ensure that the ${VS_DESCRIPTION} are installed with Visual Studio.")
+      "Folder not present - ${VS_FOLDER} - ensure that the ${VS_DESCRIPTION} are installed with Visual Studio.")
   endif ()
 
   foreach (FILE ${VS_FILES})
     if (NOT EXISTS "${VS_FOLDER}/${FILE}")
       message(
         FATAL_ERROR
-          "File not present - ${VS_FOLDER}/${FILE} - ensure that the ${VS_DESCRIPTION} are installed with Visual Studio."
+        "File not present - ${VS_FOLDER}/${FILE} - ensure that the ${VS_DESCRIPTION} are installed with Visual Studio."
       )
     endif ()
   endforeach ()
-endfunction ()
+endfunction()
 
 #[[====================================================================================================================
     findVisualStudio
@@ -74,7 +74,7 @@ endfunction ()
             )
 ====================================================================================================================]]
 #
-function (findVisualStudio)
+function(findVisualStudio)
   set(OPTIONS)
   set(ONE_VALUE_KEYWORDS VERSION PRERELEASE PRODUCTS)
   set(MULTI_VALUE_KEYWORDS REQUIRES PROPERTIES)
@@ -112,24 +112,24 @@ function (findVisualStudio)
 
   execute_process(COMMAND ${VSWHERE_COMMAND} OUTPUT_VARIABLE VSWHERE_OUTPUT)
 
-  message(STATUS "findVisualStudio: VSWHERE_OUTPUT = ${VSWHERE_OUTPUT}")
+  # message(STATUS "findVisualStudio: VSWHERE_OUTPUT = ${VSWHERE_OUTPUT}")
 
   # Matches `VSWHERE_PROPERTY` in the `VSWHERE_OUTPUT` text in the format written by vswhere. The matched value is
   # assigned to the variable `VARIABLE_NAME` in the parent scope.
-  function (getVSWhereProperty VSWHERE_OUTPUT VSWHERE_PROPERTY VARIABLE_NAME)
+  function(getVSWhereProperty VSWHERE_OUTPUT VSWHERE_PROPERTY VARIABLE_NAME)
     string(REGEX MATCH "${VSWHERE_PROPERTY}: [^\r\n]*" VSWHERE_VALUE "${VSWHERE_OUTPUT}")
     string(REPLACE "${VSWHERE_PROPERTY}: " "" VSWHERE_VALUE "${VSWHERE_VALUE}")
     set(${VARIABLE_NAME}
-        "${VSWHERE_VALUE}"
-        PARENT_SCOPE)
-  endfunction ()
+      "${VSWHERE_VALUE}"
+      PARENT_SCOPE)
+  endfunction()
 
   while (FIND_VS_PROPERTIES)
     list(POP_FRONT FIND_VS_PROPERTIES VSWHERE_PROPERTY)
     list(POP_FRONT FIND_VS_PROPERTIES VSWHERE_CMAKE_VARIABLE)
     getvswhereproperty("${VSWHERE_OUTPUT}" ${VSWHERE_PROPERTY} VSWHERE_VALUE)
     set(${VSWHERE_CMAKE_VARIABLE}
-        ${VSWHERE_VALUE}
-        PARENT_SCOPE)
+      ${VSWHERE_VALUE}
+      PARENT_SCOPE)
   endwhile ()
-endfunction ()
+endfunction()

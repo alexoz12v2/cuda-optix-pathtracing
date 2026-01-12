@@ -72,7 +72,7 @@ void megakernelMain() {
 #else
 #endif
   uint32_t threads = -1;
-  uint32_t blocks = -1;
+  uint32_t blocks = -2;
   uint32_t const sharedBytes = OPTIMAL_SMEM_BYTES;
   optimalOccupancyFromBlock(pathTraceMegakernel, sharedBytes, true, blocks,
                             threads);

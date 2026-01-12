@@ -323,3 +323,16 @@ if ((CMAKE_GENERATOR MATCHES "^Ninja")
   AND (TOOLCHAIN_ADD_VS_NINJA_PATH))
   list(APPEND CMAKE_SYSTEM_PROGRAM_PATH "${VS_INSTALLATION_PATH}/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja")
 endif ()
+
+##############################################################
+### CUDA
+##############################################################
+
+include("${CMAKE_CURRENT_LIST_DIR}/CUDA.toolchain.cmake")
+dmt_setup_cuda_toolkit_12_8()
+
+# Enable CUDA After including toolkit
+if (WIN32)
+  message(STATUS "Printing Include environemnt variable")
+  message(STATUS "$ENV{INCLUDE}")
+endif ()

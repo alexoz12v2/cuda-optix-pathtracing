@@ -191,13 +191,6 @@ __host__ void writeMeanAndMSERowMajor(float4 const* mean,
       uint8_t* meanPx = rowMajorImage.get() + i * 3;
       uint8_t* MSEPx = rowMajorMSE.get() + i * 3;
 
-      // TODO remove
-      std::cout << "L[" << row << ", " << col << "]: " << mean[i].x << " "
-                << mean[i].y << " " << mean[i].z << std::endl;
-      std::cout << "V[" << row << ", " << col << "]: " << deltaSqr[i].x << " "
-                << deltaSqr[i].y << " " << deltaSqr[i].z << std::endl;
-      std::cout << "N: " << deltaSqr[i].w << std::endl;
-
       pixelFromMean(meanPx, mean[i]);
       pixelFromDelta2(MSEPx, deltaSqr[i]);
     }

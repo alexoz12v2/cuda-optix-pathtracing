@@ -117,22 +117,26 @@ void wavefrontMain() {
   uint32_t const sharedBytes = 0;
 
   // minimum TPB tweakable
-  optimalOccupancyFromBlock<false, 1, 128>((void*)closesthitKernel, sharedBytes, true,
-                                           blocks[0], threads[0]);
-  optimalOccupancyFromBlock<false, 1, 64>((void*)anyhitKernel, sharedBytes, true,
-                                          blocks[1], threads[1]);
+  optimalOccupancyFromBlock<false, 1, 128>((void*)closesthitKernel, sharedBytes,
+                                           true, blocks[0], threads[0]);
+  optimalOccupancyFromBlock<false, 1, 64>((void*)anyhitKernel, sharedBytes,
+                                          true, blocks[1], threads[1]);
   optimalOccupancyFromBlock<false, 1, 64>((void*)shadeKernel, sharedBytes, true,
                                           blocks[2], threads[2]);
   optimalOccupancyFromBlock<false, 1, 64>((void*)missKernel, sharedBytes, true,
                                           blocks[3], threads[3]);
-  optimalOccupancyFromBlock<false, 1, 256>((void*)checkDoneDepth, sharedBytes, true, blocks[4], threads[4]);
+  optimalOccupancyFromBlock<false, 1, 256>((void*)checkDoneDepth, sharedBytes,
+                                           true, blocks[4], threads[4]);
 
   std::cout << "Computed Optimal Occupancy for wavefront kernels: ";
   {
-    std::vector<std::string> names{"closesthitKernel","anyhitKernel", "shadeKernel","missKernel","checkDoneDepth"};
+    std::vector<std::string> names{"closesthitKernel", "anyhitKernel",
+                                   "shadeKernel", "missKernel",
+                                   "checkDoneDepth"};
     uint32_t count = 0;
     for (auto const& sk : names) {
-      std::cout << " - " << sk << ": blocks " << blocks[count] << " threads: " << threads[count] << '\n';
+      std::cout << " - " << sk << ": blocks " << blocks[count]
+                << " threads: " << threads[count] << '\n';
       ++count;
     }
     std::cout << std::flush;
@@ -197,6 +201,8 @@ void wavefrontMain() {
   // timing
   AvgAndTotalTimer timer;
 
+#define KERNEL_DEBUG 0
+
   // TODO if occupancy allows, process more tiles of the image?
   for (int sOffset = 0; sOffset < TOTAL_SAMPLES; sOffset += h_camera.spp) {
     kinput->sampleOffset = sOffset;
@@ -211,6 +217,12 @@ void wavefrontMain() {
             tileDimY, kinput->sampleOffset);
         CUDA_CHECK(cudaGetLastError());
 
+#if KERNEL_DEBUG
+        CUDA_CHECK(cudaStreamSynchronize(st_main));
+        std::cout << "[raygenKernel] " << "s: " << callbackData->sample
+                  << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
         *h_done = false;
         while (!*h_done) {
           closesthitKernel<<<blocks[0], threads[0], sharedBytes, st_main>>>(
@@ -218,10 +230,22 @@ void wavefrontMain() {
               kinput->shadeQueue, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
 
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[closesthitKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
           anyhitKernel<<<blocks[1], threads[1], sharedBytes, st_main>>>(
               kinput->anyhitQueue, kinput->d_lights, kinput->lightCount,
               kinput->d_bsdfs, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
+
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[anyhitKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
 
           shadeKernel<<<blocks[2], threads[2], sharedBytes, st_main>>>(
               kinput->shadeQueue, kinput->closesthitQueue,
@@ -234,6 +258,12 @@ void wavefrontMain() {
               kinput->d_bsdfs);
           CUDA_CHECK(cudaGetLastError());
 
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[shadeKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
           missKernel<<<blocks[3], threads[3], sharedBytes, st_main>>>(
               kinput->missQueue, kinput->pathStateSlots,
 #if DMT_ENABLE_MSE
@@ -244,7 +274,14 @@ void wavefrontMain() {
               kinput->infiniteLights, kinput->infiniteLightCount);
           CUDA_CHECK(cudaGetLastError());
 
-          checkDoneDepth<<<blocks[4], threads[4], sharedBytes, st_main>>>(
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[missKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
+          // checkDoneDepth<<<blocks[4], threads[4], sharedBytes, st_main>>>(
+          checkDoneDepth<<<100, WARP_SIZE, 12, st_main>>>(
               kinput->pathStateSlots, kinput->closesthitQueue,
               kinput->missQueue, kinput->anyhitQueue, kinput->shadeQueue,
               d_done);
@@ -252,6 +289,12 @@ void wavefrontMain() {
 
           kinput->swapBuffersAllQueues(st_main);
           CUDA_CHECK(cudaStreamSynchronize(st_main));
+
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[checkDoneDepth] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
         }
       }
     }

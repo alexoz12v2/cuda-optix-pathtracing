@@ -15,14 +15,14 @@
 // #define AH_PRINT(...) printf(__VA_ARGS__)
 // #define MS_PRINT(...) printf(__VA_ARGS__)
 // #define SH_PRINT(...) printf(__VA_ARGS__)
-//#define UTILS_PRINT(...) printf(__VA_ARGS__)
+// #define UTILS_PRINT(...) printf(__VA_ARGS__)
 
 #define RG_PRINT(...)
 #define CH_PRINT(...)
 #define AH_PRINT(...)
 #define MS_PRINT(...)
 #define SH_PRINT(...)
- #define UTILS_PRINT(...)
+#define UTILS_PRINT(...)
 
 struct HostTriangleScene;
 

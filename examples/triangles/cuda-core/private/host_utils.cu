@@ -190,6 +190,71 @@ __host__ void writeMeanAndMSERowMajor(float4 const* mean,
       uint32_t const i = row * width + col;
       uint8_t* meanPx = rowMajorImage.get() + i * 3;
       uint8_t* MSEPx = rowMajorMSE.get() + i * 3;
+
+      // TODO remove
+      std::cout << "L[" << row << ", " << col << "]: " << mean[i].x << " "
+                << mean[i].y << " " << mean[i].z << std::endl;
+      std::cout << "V[" << row << ", " << col << "]: " << deltaSqr[i].x << " "
+                << deltaSqr[i].y << " " << deltaSqr[i].z << std::endl;
+      std::cout << "N: " << deltaSqr[i].w << std::endl;
+
+      pixelFromMean(meanPx, mean[i]);
+      pixelFromDelta2(MSEPx, deltaSqr[i]);
+    }
+  }
+  stbi_write_png(meanName.c_str(), width, height, 3, rowMajorImage.get(),
+                 3 * width);
+  stbi_write_png(MSEName.c_str(), width, height, 3, rowMajorMSE.get(),
+                 3 * width);
+}
+
+static void sumAndVariance(float4& sum, float4& sum2, uint32_t N) {
+  if (N == 0) {
+    sum = make_float4(0, 0, 0, 0);
+    sum2 = make_float4(0, 0, 0, 1);
+    return;
+  }
+
+  float3 S(sum.x, sum.y, sum.z);
+  float3 Q(sum2.x, sum.y, sum.y);
+
+  float3 m = S / float(N);
+  sum = make_float4(m.x, m.y, m.z, 0);
+
+  // Biased variance (recommended)
+  float3 v = Q / float(N) - m * m;
+
+  // Clamp for numerical noise
+  sum2.x = fmaxf(v.x, 0.0f);
+  sum2.y = fmaxf(v.y, 0.0f);
+  sum2.z = fmaxf(v.z, 0.0f);
+  sum2.w = float(N);
+}
+
+__host__ void writeMeanAndMSERowMajorCompHost(float4* mean, float4* deltaSqr,
+                                              uint32_t width, uint32_t height,
+                                              std::string baseName,
+                                              uint32_t num) {
+  const auto rowMajorImage = std::make_unique<uint8_t[]>(width * height * 3);
+  const auto rowMajorMSE = std::make_unique<uint8_t[]>(width * height * 3);
+  std::string const meanName =
+      (getExecutableDirectory() / (baseName + ".png")).string();
+  std::string const MSEName =
+      (getExecutableDirectory() / (baseName + "_sqrt_mse.png")).string();
+  for (uint32_t row = 0; row < height; ++row) {
+    for (uint32_t col = 0; col < width; ++col) {
+      uint32_t const i = row * width + col;
+      uint8_t* meanPx = rowMajorImage.get() + i * 3;
+      uint8_t* MSEPx = rowMajorMSE.get() + i * 3;
+      sumAndVariance(mean[i], deltaSqr[i], num);
+
+      // TODO remove
+      std::cout << "L[" << row << ", " << col << "]: " << mean[i].x << " "
+                << mean[i].y << " " << mean[i].z << std::endl;
+      std::cout << "V[" << row << ", " << col << "]: " << deltaSqr[i].x << " "
+                << deltaSqr[i].y << " " << deltaSqr[i].z << std::endl;
+      std::cout << "N: " << deltaSqr[i].w << std::endl;
+
       pixelFromMean(meanPx, mean[i]);
       pixelFromDelta2(MSEPx, deltaSqr[i]);
     }

@@ -15,14 +15,14 @@
 // #define AH_PRINT(...) printf(__VA_ARGS__)
 // #define MS_PRINT(...) printf(__VA_ARGS__)
 // #define SH_PRINT(...) printf(__VA_ARGS__)
-//' #define UTILS_PRINT(...) printf(__VA_ARGS__)
+//#define UTILS_PRINT(...) printf(__VA_ARGS__)
 
 #define RG_PRINT(...)
 #define CH_PRINT(...)
 #define AH_PRINT(...)
 #define MS_PRINT(...)
 #define SH_PRINT(...)
-#define UTILS_PRINT(...)
+ #define UTILS_PRINT(...)
 
 struct HostTriangleScene;
 
@@ -37,6 +37,8 @@ using QueueType = SimpleDeviceQueue<T>;
 template <typename T>
 using QueueType = DeviceQueue<T>;
 #endif
+
+#define FORCE_ATOMIC_OPS 0
 
 // ----------------------------------------------------------------------------
 // Path State
@@ -195,11 +197,17 @@ struct WavefrontStreamInput {
   Light* d_lights;
   Light* infiniteLights;
   BSDF* d_bsdfs;
+#if !DMT_ENABLE_MSE
   float4* d_outBuffer;
+#endif
   int sampleOffset;
   uint32_t lightCount;
   uint32_t infiniteLightCount;
 };
+
+__device__ __forceinline__ float3& fp4to3(float4& f) {
+  return *reinterpret_cast<float3*>(&f);
+}
 
 // ----------------------------------------------------------------------------
 // Kernels
@@ -221,12 +229,21 @@ __global__ void anyhitKernel(QueueType<AnyhitInput> inQueue, Light* d_lights,
                              TriangleSoup d_triSoup);
 __global__ void missKernel(QueueType<MissInput> inQueue,
                            DeviceArena<PathState> pathStateSlots,
-                           float4* d_outBuffer, Light* infiniteLights,
-                           uint32_t infiniteLightCount);
+#if DMT_ENABLE_MSE
+                           DeviceOutputBuffer d_out,
+#else
+                           float4* d_outBuffer,
+#endif
+                           Light* infiniteLights, uint32_t infiniteLightCount);
 __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
                             QueueType<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
-                            float4* d_outBuffer, BSDF* d_bsdfs);
+#if DMT_ENABLE_MSE
+                            DeviceOutputBuffer d_out,
+#else
+                            float4* d_outBuffer,
+#endif
+                            BSDF* d_bsdfs);
 __global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
                                QueueType<ClosestHitInput> closesthitQueue,
                                QueueType<MissInput> missQueue,

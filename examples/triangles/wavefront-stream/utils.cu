@@ -11,11 +11,13 @@ WavefrontStreamInput::WavefrontStreamInput(
     std::vector<Light> const& h_infiniteLights,
     std::vector<BSDF> const& h_bsdfs, DeviceCamera const& h_camera) {
   // output buffer
+#if !DMT_ENABLE_MSE
   d_outBuffer = nullptr;
   CUDA_CHECK(cudaMalloc(&d_outBuffer,
                         h_camera.width * h_camera.height * sizeof(float4)));
   CUDA_CHECK(cudaMemset(d_outBuffer, 0,
                         h_camera.width * h_camera.height * sizeof(float4)));
+#endif
   // GMEM queues
   static int constexpr QUEUE_CAP = 1 << 12;
 #if USE_SIMPLE_QUEUE
@@ -72,8 +74,10 @@ WavefrontStreamInput::~WavefrontStreamInput() noexcept {
   freeQueue(missQueue);
 #endif
 
+#if !DMT_ENABLE_MSE
   // output buffer
   cudaFree(d_outBuffer);
+#endif
 }
 
 #if USE_SIMPLE_QUEUE

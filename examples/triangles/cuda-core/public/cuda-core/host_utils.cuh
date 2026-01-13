@@ -192,6 +192,10 @@ void writeOutputBufferRowMajor(float4 const* outputBuffer, uint32_t const width,
 __host__ void writeMeanAndMSERowMajor(float4 const* mean,
                                       float4 const* deltaSqr, uint32_t width,
                                       uint32_t height, std::string baseName);
+__host__ void writeMeanAndMSERowMajorCompHost(float4* sum, float4* sum2,
+                                              uint32_t width, uint32_t height,
+                                              std::string baseName,
+                                              uint32_t num);
 #endif
 
 // --------------------------------------------------------------------------

@@ -3,7 +3,12 @@
 __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
                             QueueType<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
-                            float4* d_outBuffer, BSDF* d_bsdfs) {
+#if DMT_ENABLE_MSE
+                            DeviceOutputBuffer d_out,
+#else
+                            float4* d_outBuffer,
+#endif
+                            BSDF* d_bsdfs) {
   ShadeInput input{};
 #if USE_SIMPLE_QUEUE
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -41,7 +46,11 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
     bool pathDied = false;
     static int constexpr MAX_DEPTH = 32;  // dies afterwards (TODO cmdline)
     // assumes threads have different states
+#if FORCE_ATOMIC_OPS
     int const oldDepth = atomicAdd(&input.state->depth, 1);
+#else
+    int const oldDepth = input.state->depth++;
+#endif
     // SH_PRINT("SH [%u %u] px: %d %d | d %d | Received object\n", blockIdx.x,
     //          threadIdx.x, px, py, oldDepth);
     if (oldDepth >= MAX_DEPTH) {
@@ -63,11 +72,16 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
       if (bs) {
         wi = bs.wi;
 
-        // TODO: if 1 thread per path, atomics are not necessary
         // 3. (not dead) update path state
+#if FORCE_ATOMIC_OPS
         atomicAdd(&input.state->anySpecularBounces, (int)bs.delta);
         atomicExch(&input.state->lastBounceTransmission, (int)bs.refract);
         atomicAdd(&input.state->transmissionCount, (int)bs.refract);
+#else
+        input.state->anySpecularBounces += (int)bs.delta;
+        input.state->lastBounceTransmission = (int)bs.refract;
+        input.state->transmissionCount += (int)bs.refract;
+#endif
         float3 beta = input.state->throughput * bs.f *
                       fabsf(dot(bs.wi, input.normal)) / bs.pdf;
         // 4. (not dead) russian roulette. If fails, kill path
@@ -79,9 +93,15 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
             pathDied = true;
           } else {
             beta /= 1 - q;
+#if FORCE_ATOMIC_OPS
             atomicExch(&input.state->throughput.x, beta.x);
             atomicExch(&input.state->throughput.y, beta.y);
             atomicExch(&input.state->throughput.z, beta.z);
+#else
+            input.state->throughput.x = beta.x;
+            input.state->throughput.y = beta.y;
+            input.state->throughput.z = beta.z;
+#endif
           }
         }
       } else {
@@ -90,40 +110,69 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
     }
 
     if (pathDied) {
-      // 5. if path killed, sink to output
-      // no need for atomic operation here
+      // 5. if path killed, sink to output. need for atomic operation here
       // TODO align
       //// assert(((uintptr_t)&input.state->L) & 15 == 0);
       //// float4 color = *reinterpret_cast<float4*>(&input.state->L);
       //// color.w = 1;  // TODO filter weight?
+#if DMT_ENABLE_MSE
+      float3 const color(input.state->L.x, input.state->L.y, input.state->L.z);
+      SH_PRINT("SH [%u %u] px: %d %d | d %d | color %f %f %f\n", blockIdx.x,
+               threadIdx.x, px, py, oldDepth, color.x, color.y, color.z);
+#else
       float4 const color =
           make_float4(input.state->L.x, input.state->L.y, input.state->L.z, 1);
-      // SH_PRINT(
-      //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask before died
-      //     %x\n", blockIdx.x, threadIdx.x, px, py, oldDepth,
-      //     pathStateSlots.bitmask[input.state->bufferSlot / 32]);
+#endif
 #if DMT_ENABLE_ASSERTS
       assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
               (1 << (input.state->bufferSlot % 32))) != 0);
 #endif
-      freeState(pathStateSlots, input.state);
-      // SH_PRINT(
-      //     "SH [%u %u]  px [%u %u] d: %d | path died | Bitmask after died
-      //     %x\n", blockIdx.x, threadIdx.x, px, py, oldDepth,
-      //     pathStateSlots.bitmask[input.state->bufferSlot / 32]);
-#if DMT_ENABLE_ASSERTS
-      assert((pathStateSlots.bitmask[input.state->bufferSlot / 32] &
-              (1 << (input.state->bufferSlot % 32))) == 0);
-#endif
-      input.state = nullptr;
+      // 3. sink to output buffer. no need for atomic operation here
+#if DMT_ENABLE_MSE
+#  if 1
+      float const num = input.state->sampleIndex + 1;
+      float4 L = d_out.meanPtr[py * CMEM_imageResolution.x + px];
+      float4 d2 = d_out.m2Ptr[py * CMEM_imageResolution.x + px];
 
-      // 3. sink to output buffer
-      // no need for atomic operation here
+      // welford update
+      float3 mean(L.x, L.y, L.z);
+      float3 m2(d2.x, d2.y, d2.z);
+
+      float3 delta = color - mean;
+      mean += delta / num;
+      float3 delta2 = color - mean;
+      m2 += delta * delta2;
+
+      L.x = mean.x;
+      L.y = mean.y;
+      L.z = mean.z;
+      d2.x = m2.x;
+      d2.y = m2.y;
+      d2.z = m2.z;
+      d2.w = num;
+
+      // write back (TODO: Switch to sum and sum2, host does variance
+      // computation (miss and shade might race)?)
+      d_out.meanPtr[py * CMEM_imageResolution.x + px] = L;
+      d_out.m2Ptr[py * CMEM_imageResolution.x + px] = d2;
+#  else
+      float3 const color4(color.x, color.y, color.z, 1);
+      atomicAdd(d_out.meanPtr + py * CMEM_imageResolution.x + px, color4);
+      atomicAdd(d_out.m2Ptr + py * CMEM_imageResolution.x + px,
+                color4 * color4);
+#  endif
+#else
       d_outBuffer[py * CMEM_imageResolution.x + px] += color;
+#endif
+#if !DMT_ENABLE_MSE
       SH_PRINT(
           "SH [%u %u]  px [%u %u] d: %d | path died | L: %f %f %f (w: %f)\n",
           blockIdx.x, threadIdx.x, px, py, oldDepth, color.x, color.y, color.z,
           color.w);
+#endif
+
+      freeState(pathStateSlots, input.state);
+      input.state = nullptr;
     } else {
       // 6. if path alive, push to closesthit next bounce
       ClosestHitInput const closestHitInput{

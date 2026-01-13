@@ -91,7 +91,11 @@ __global__ void anyhitKernel(QueueType<AnyhitInput> inQueue, Light* d_lights,
     float3 const beta = kinput.state->throughput;
     anyhitNEE(-kinput.rayD, beta, kinput.pos, kinput.error, bsdf, light,
               d_triSoup, kinput.normal, lightCount,
+#if FORCE_ATOMIC_OPS
               atomicAdd(&kinput.state->lastBounceTransmission, 0),
+#else
+              kinput.state->lastBounceTransmission,
+#endif
               PcgHash::get2D<float2>(), &Le);
     kinput.state->L += Le;
 

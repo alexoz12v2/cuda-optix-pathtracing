@@ -74,8 +74,8 @@ void megakernelMain() {
   uint32_t threads = -1;
   uint32_t blocks = -2;
   uint32_t const sharedBytes = OPTIMAL_SMEM_BYTES;
-  optimalOccupancyFromBlock(pathTraceMegakernel, sharedBytes, true, blocks,
-                            threads);
+  optimalOccupancyFromBlock((void*)pathTraceMegakernel, sharedBytes, true,
+                            blocks, threads);
   // ensure we cap threads to 64 (2048 -> 8 floats per thread)
   threads = min(64, threads);
   std::cout << "Computed ccupancy for pathTraceMegakernel SMEM: " << sharedBytes

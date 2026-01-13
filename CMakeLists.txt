@@ -25,6 +25,8 @@ if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
 endif ()
 
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
 project(
   DumbTracer
   VERSION 1.0.0
@@ -36,6 +38,10 @@ enable_language(CUDA)
 ##   "C++ linker executable:  ${CMAKE_CXX_LINK_EXECUTABLE} \n"
 ##   "CUDA compiler driver : ${CMAKE_CUDA_COMPILER}"
 ## )
+if (NOT TARGET CUDA::cudart)
+  include("cmake/CUDA.toolchain.cmake")
+  dmt_setup_cuda_toolkit_12_8()
+endif()
 
 # ######################################################################################################################
 # Project wide Properties and C++ Global Options
@@ -95,7 +101,6 @@ else ()
   set(DMT_DEVICE_LINK_TIME_OPTIMIZATION OFF CACHE BOOL "" FORCE)
 endif ()
 
-set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(cmake/Config.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/SetupDoxygen.cmake)

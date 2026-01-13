@@ -28,7 +28,7 @@ __device__ __forceinline__ T load_cv(T* addr) {
   return val;
 }
 
-inline __forceinline__ __device__ int atomicAggInc(int* ptr) {
+__forceinline__ __device__ int atomicAggInc(int* ptr) {
   namespace cg = cooperative_groups;
   cg::coalesced_group g = cg::coalesced_threads();
   int prev = 0;
@@ -44,7 +44,7 @@ inline __forceinline__ __device__ int atomicAggInc(int* ptr) {
   return prev;
 }
 
-inline __forceinline__ __device__ int atomicAggDec(int* ptr) {
+__forceinline__ __device__ int atomicAggDec(int* ptr) {
   namespace cg = cooperative_groups;
   cg::coalesced_group g = cg::coalesced_threads();
   int prev = 0;
@@ -60,7 +60,7 @@ inline __forceinline__ __device__ int atomicAggDec(int* ptr) {
   return prev;
 }
 
-inline __forceinline__ __device__ int atomicAggDecSaturate(int* ptr) {
+__forceinline__ __device__ int atomicAggDecSaturate(int* ptr) {
   namespace cg = cooperative_groups;
   cg::coalesced_group g = cg::coalesced_threads();
   int prev = 0;
@@ -352,7 +352,7 @@ struct DeviceQueue {
 };  // ---------- end class
 
 template <typename T>
-inline __host__ void freeQueue(DeviceQueue<T>& q) {
+__host__ void freeQueue(DeviceQueue<T>& q) {
   CUDA_CHECK(cudaFree(q.buffer));
   CUDA_CHECK(cudaFree(q.states));
   CUDA_CHECK(cudaFree(q.head));

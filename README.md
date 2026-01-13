@@ -56,9 +56,10 @@ So, when all repositories are properly setup (LLVM: <https://apt.llvm.org/>, kit
 sudo apt-get install cmake clang clang-format clang-tidy lldb lld doxygen graphviz ninja-build patchelf
 ```
 
-### Install the clang++ 18 compiler
+### Install the clang++ 18/14 compiler
 
-This is the maximum version supported by nvcc 13
+- clang-18 This is the maximum version supported by nvcc 13
+- clang-14 This is the maximum version supported by nvcc 12 (use unsupported compiler flag to raise this)
 
 ```sh
 wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 18
@@ -127,51 +128,15 @@ bash # enter a nested console process, such that exit can clean up the environme
 source scripts/setup_env.sh --optix-dir $path --autodesk-fbx-sdk-dir $anotherPath
 ```
 
-### Install Optix 8.0
-
-From this link <https://developer.nvidia.com/designworks/optix/downloads/legacy> pick Optix 8.0
-
-Then move into the directory you want to install optix in, eg `~/optix/optix8.0`
-
-Example:
-
-```sh
-chmod 755 ~/Downloads/NVIDIA-OptiX-SDK-8.0.0-linux64-x86_64.sh
-cd ~/optix/optix8.0 # --optix-dir for the setup_env.sh script
-~/Downloads/NVIDIA-OptiX-SDK-8.0.0-linux64-x86_64.sh --exclude-subdir
-```
-
-### Install Autodesk FBX
-
-Follow procedure from <https://help.autodesk.com/cloudhelp/2018/ENU/FBX-Developer-Help/getting_started/installing_and_configuring/configuring_the_fbx_sdk_for_linux.html>
-
-Choose version **2020.3.7**, then extract it to destination. Example:
-
-```sh
-mkdir -p ~/autodesk-fbx-sdk/2020.3.7
-mkdir -p ~/autodesk-fbx-sdk/installer/2020.3.7
-tar -xzf ~/Downloads/fbx202037_fbxsdk_gcc_linux.tar.gz -C  ~/autodesk-fbx-sdk/installer/2020.3.7
-chmod +x ~/autodesk-fbx-sdk/installer/2020.3.7/fbx202037_fbxsdk_linux
-~/autodesk-fbx-sdk/installer/2020.3.7/fbx202037_fbxsdk_linux ~/autodesk-fbx-sdk/2020.3.7/
-# if you want lib files to be read write by owner
-cd ~/autodesk-fbx-sdk/202.3.7
-chmod 644 lib/release/*.a lib/release/*.so lib/debug/*.a lib/debug/*.so
-```
 
 ### Setup environment Script
 
-```sh
-bash # enter new terminal
-source scripts/setup_env.sh --optix-dir ~/optix/optix8.0/ --autodesk-fbx-sdk-dir ~/autodesk-fbx-sdk/2020.3.7 # example
-exit # when you're finished or want to change something
-```
-
-### Graphics packages for GLFW
-
-The simplest solution is to just install them system-wide with `apt` (more difficult to maintain than building them from source)
+Note: `--optix-dir` and `--autodesk-fbx-sdk-dir` are to be removed
 
 ```sh
-sudo apt install libwayland-dev libxkbcommon-dev xorg-dev
+bash
+source scripts/setup_env.sh --optix-dir ~/optix/optix8.0/ --autodesk-fbx-sdk-dir ~/autodesk-fbx-sdk/2020.3.7/ --pre-turing
+exit
 ```
 
 ### Configure Command Linux
@@ -189,19 +154,15 @@ At the start of every terminal session
 source scripts/setup_env.sh --optix-dir ~/optix/optix8.0/ --autodesk-fbx-sdk-dir ~/autodesk-fbx-sdk/2020.3.7 # example
 ```
 
-### Ninja Requirements
-
-We require `ninja` with version >= 1.11 (C++20 module support)
-
 ### Linux CMake configure command line 
 
 ```shell
 # within the environment
-cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/path/to/ninja -DCMAKE_C_COMPILER=/usr/bin/clang-18 \ 
-  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
-  -CMAKE_CUDA_HOST_COMPILER=/usr/bin/clang++-18 \
-  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-  -G Ninja -S /this/dir -B /your/binary/dir
+export CUDAHOSTCXX=/usr/bin/clang++-18
+cmake -G Ninja -S . -B cmake-build-rel-lto -DCMAKE_MAKE_PROGRAM=ninja \ 
+  -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CUDA_HOST_COMPILER=clang++-18 \
+  -DDMT_NVCC_MAXREGCOUNT=64 -DDMT_DEVICE_LINK_TIME_OPTIMIZATION=ON -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc
 ```
 
 ## Linux deal with corrupted coverage files

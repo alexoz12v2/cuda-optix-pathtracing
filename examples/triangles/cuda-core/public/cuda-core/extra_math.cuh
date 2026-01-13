@@ -18,7 +18,7 @@ __host__ __device__ Transform cameraFromRaster_Perspective(float focalLength,
                                                            uint32_t xRes,
                                                            uint32_t yRes);
 
-inline __host__ __device__ __forceinline__ float gamma(int32_t n) {
+__host__ __device__ __forceinline__ float gamma(int32_t n) {
 #ifdef __CUDA_ARCH__
   float const f = static_cast<float>(n) * FLT_EPSILON * 0.5f;
 #else
@@ -28,7 +28,7 @@ inline __host__ __device__ __forceinline__ float gamma(int32_t n) {
   return f / (1 - f);
 }
 
-inline __host__ __device__ __forceinline__ float3 errorFromTriangleIntersection(
+__host__ __device__ __forceinline__ float3 errorFromTriangleIntersection(
     float u, float v, float3 p0, float3 p1, float3 p2) {
   return gamma(7) * (abs(u * p0) + abs(v * p1) + abs((1 - u - v) * p2));
 }

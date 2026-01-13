@@ -6,6 +6,7 @@
 #include <cooperative_groups.h>
 #include <cuda_fp16.h>
 
+#include <float.h>
 #include <cassert>
 
 // ---------------------------------------------------------------------------
@@ -297,7 +298,7 @@ __host__ __device__ __forceinline__ float3 normalize(float3 a) {
   float const invMag = rsqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
   return make_float3(a.x * invMag, a.y * invMag, a.z * invMag);
 }
-__host__ __device__ __forceinline__ float lerp(float a, float b, float t) {
+__host__ __device__ __forceinline__ float lerpf(float a, float b, float t) {
   // (1 - t) a + t b =  a - ta + tb = a + t ( b - a )
   float const _1mt = 1.f - t;
   return _1mt * a + t * b;
@@ -501,7 +502,7 @@ __host__ __device__ __forceinline__ uint32_t nextPow2(uint32_t x) {
   return x + 1;
 }
 
-inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
+__host__ __device__ __forceinline__ Transform const* arrayAsTransform(
     float const* arr) {
   static_assert(sizeof(Transform) == 32 * sizeof(float) &&
                 alignof(Transform) <= 16);

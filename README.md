@@ -172,3 +172,19 @@ find build/ -name "*.gcda" -delete
 ```
 
 Then use `cmake --build` with flag `--clean-first`
+
+## Profiling Commands
+
+On linux, `nvprof` requires `CAP_SYS_ADMIN` from [driver version 418.43+](https://developer.nvidia.com/nvidia-development-tools-solutions-err_nvgpuctrperm-permission-issue-performance-counters)
+
+```shell
+sudo setpriv --inh-caps +SYS_ADMIN \
+  nvprof -m branch_efficiency -m warp_execution_efficency -m cf_executed -m local_load_transactions_per_request  \
+         -m local_store_transactions_per_request -m local_load_transactions -m local_store_transactions \
+         -m gld_transactions_per_request -m gst_transactions_per_request -m gld_efficiency \
+         -m gst_efficiency -m flop_count_dp -m achieved_occupancy -m sm_efficiency -m ldst_fu_utilization \
+         -m flop_sp_efficiency -m single_precision_fu_utilization \
+         ./cmake-build-rel-lto/bin/dmt-megakernel 
+
+```
+

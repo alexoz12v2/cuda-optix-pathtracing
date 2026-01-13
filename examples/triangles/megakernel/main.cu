@@ -74,8 +74,8 @@ void megakernelMain() {
   uint32_t threads = -1;
   uint32_t blocks = -2;
   uint32_t const sharedBytes = OPTIMAL_SMEM_BYTES;
-  optimalOccupancyFromBlock((void*)pathTraceMegakernel, sharedBytes, true,
-                            blocks, threads);
+  optimalOccupancyFromBlock<false, 1, 64>((void*)pathTraceMegakernel,
+                                          sharedBytes, true, blocks, threads);
   // ensure we cap threads to 64 (2048 -> 8 floats per thread)
   threads = min(64, threads);
   std::cout << "Computed ccupancy for pathTraceMegakernel SMEM: " << sharedBytes
@@ -122,7 +122,7 @@ void megakernelMain() {
   // timing
   AvgAndTotalTimer timer;
 
-  static int constexpr MAX_SPP = 2048;  //
+  static int constexpr MAX_SPP = 80;  // 2048;  //
   std::cout << "Running CUDA Kernel" << std::endl;
   // TODO stream based write back
   for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {

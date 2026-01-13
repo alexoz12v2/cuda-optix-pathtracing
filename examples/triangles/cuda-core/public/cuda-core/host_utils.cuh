@@ -122,54 +122,64 @@ float4* deviceOutputBuffer(uint32_t const width, uint32_t const height);
 std::filesystem::path getExecutableDirectory();
 
 // MinBlocks used when preferring TPB
-template <bool PreferHighTPB = false, int MinBlocks = 1>
+template <bool PreferHighTPB = false, int MinBlocksPerSM = 1,
+          int MinThreads = 32>
 __host__ void optimalOccupancyFromBlock(void* krnl, uint32_t smemBytes,
-                                        bool residentOnly, uint32_t& blocks,
-                                        uint32_t& threads) {
-  cudaDeviceProp deviceProp{};
-  CUDA_CHECK(cudaGetDeviceProperties(&deviceProp, 0));
+                                        bool residentOnly,
+                                        uint32_t& totalBlocks,
+                                        uint32_t& threadsPerBlock) {
+  static_assert(MinThreads % 32 == 0, "MinThreads must be a multiple of 32");
 
-  struct OccupancyMeasure {
-    int blocks, threads;
-    bool operator<(OccupancyMeasure const& other) const {
-      if constexpr (PreferHighTPB)
-        return threads < other.threads;
-      else
-        return blocks < other.blocks;
+  cudaDeviceProp prop{};
+  CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+
+  struct Measure {
+    int blocksPerSM;
+    int threads;
+
+    bool operator<(Measure const& o) const {
+      if constexpr (PreferHighTPB) {
+        if (threads != o.threads) return threads < o.threads;
+        return blocksPerSM < o.blocksPerSM;
+      } else {
+        if (blocksPerSM != o.blocksPerSM) return blocksPerSM < o.blocksPerSM;
+        return threads < o.threads;
+      }
     }
   };
-  std::priority_queue<OccupancyMeasure> occupancies;
-  // instead of using cudaDeviceProp.maxThreadsPerBlock, cap it to 512 as
-  // it would hurt occupancy due to register pressure
-  auto multiples = std::views::iota(1, 16) |
-                   std::views::transform([](int i) { return i * 32; }) |
-                   std::views::reverse;  // 512, 480, 448 ... 32
-  for (uint32_t t : multiples) {
-    OccupancyMeasure current{.blocks = 0, .threads = (int)t};
+
+  std::priority_queue<Measure> pq;
+
+  for (int threads = 512; threads >= 32; threads -= 32) {
+    // 🔹 Enforce minimum threads only when optimizing for blocks
+    if constexpr (!PreferHighTPB) {
+      if (threads < MinThreads) continue;
+    }
+
+    Measure m{};
+    m.threads = threads;
+
     CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-        &current.blocks, krnl, current.threads, smemBytes));
-    // round down to multiple of number of SMs
-    if (current.blocks >= MinBlocks) {
-      current.blocks = max((current.blocks / deviceProp.multiProcessorCount) *
-                               deviceProp.multiProcessorCount,
-                           MinBlocks);
+        &m.blocksPerSM, krnl, threads, smemBytes));
+
+    if (m.blocksPerSM < MinBlocksPerSM) continue;
+
+    if (residentOnly) {
+      if (m.blocksPerSM * threads > prop.maxThreadsPerMultiProcessor) continue;
     }
-    // account for current only if we don't care about residency of threads
-    // or blocks per multiprocessor fits inside SM
-    if (current.blocks >= MinBlocks &&
-        (!residentOnly || deviceProp.maxThreadsPerMultiProcessor >=
-                              current.blocks / deviceProp.multiProcessorCount *
-                                  current.threads)) {
-      occupancies.emplace(current);
-    }
+
+    pq.push(m);
   }
-  if (multiples.empty()) {
-    blocks = 0;
-    threads = 0;
-  } else {
-    blocks = occupancies.top().blocks;
-    threads = occupancies.top().threads;
+
+  if (pq.empty()) {
+    totalBlocks = 0;
+    threadsPerBlock = 0;
+    return;
   }
+
+  auto best = pq.top();
+  threadsPerBlock = best.threads;
+  totalBlocks = best.blocksPerSM * prop.multiProcessorCount;
 }
 
 void writeOutputBuffer(float4 const* d_outputBuffer, uint32_t const width,

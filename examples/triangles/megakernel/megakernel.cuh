@@ -90,7 +90,7 @@ struct SMEMLayout {
   float delta2Y[BLOCK_SIZE + PAD];
   float meanZ[BLOCK_SIZE + PAD];
   float delta2Z[BLOCK_SIZE + PAD];
-  float N[BLOCK_SIZE + PAD];
+  float N[BLOCK_SIZE + PAD];  // 1998 byte mark
   uint32_t _padding[BLOCK_SIZE - 7 * PAD];
 };
 static_assert(sizeof(SMEMLayout<64>) == 2048);

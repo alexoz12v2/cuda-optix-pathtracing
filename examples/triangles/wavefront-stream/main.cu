@@ -9,7 +9,6 @@
 #include "cuda-core/light.cuh"
 #include "cuda-core/morton.cuh"
 #include "cuda-core/shapes.cuh"
-#include "cuda-core/kernels.cuh"
 #include "cuda-core/queue.cuh"
 
 #include <cuda_device_runtime_api.h>
@@ -97,15 +96,6 @@ void wavefrontMain() {
   CUDA_CHECK(cudaFuncSetCacheConfig(missKernel, cudaFuncCachePreferL1));
   CUDA_CHECK(cudaFuncSetCacheConfig(shadeKernel, cudaFuncCachePreferL1));
 
-  // TODO DEADLOCK with these
-  // uint32_t threads = 512; // or 32 (probably missing threadfences)
-  // uint32_t blocks = 10; // or 2
-  // uint32_t threads = 512; // or 32 (probably missing threadfences)
-  // uint32_t blocks = 1; // or 2
-  // uint32_t threads = 32; // or 32 (probably missing threadfences)
-  // uint32_t blocks = 2; // or 2
-  // uint32_t threads = 64;
-  // uint32_t blocks = 1;
   uint32_t threads = 512;
   uint32_t blocks = 100;
   uint32_t sharedBytes = 12;

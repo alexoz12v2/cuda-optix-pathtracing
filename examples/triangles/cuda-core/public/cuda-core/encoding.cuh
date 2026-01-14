@@ -1,6 +1,11 @@
 #ifndef DMT_CUDA_CORE_ENCODING_CUH
 #define DMT_CUDA_CORE_ENCODING_CUH
 
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+
+#include <cstdint>
+
 // ---------------------------------------------------------------------------
 // Octahedral mapping (normal buffer, light direction)
 // ---------------------------------------------------------------------------
@@ -17,7 +22,7 @@ __host__ __device__ float3 dirFromOcta(uint32_t const octa);
 __host__ __device__ uint16_t float_to_half_bits(float f);
 __host__ __device__ float half_bits_to_float(uint16_t h);
 
-inline __host__ __device__ __forceinline__ float3
+__host__ __device__ __forceinline__ float3
 half_vec_to_float3(uint16_t const h[3]) {
   return make_float3(half_bits_to_float(h[0]), half_bits_to_float(h[1]),
                      half_bits_to_float(h[2]));

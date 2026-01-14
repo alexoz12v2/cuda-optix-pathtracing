@@ -74,7 +74,7 @@ struct LightSample {
 __host__ __device__ Ray spotLightToLocal(float3 lightPos, float3 lightDirection,
                                          Ray globalSpaceRay);
 // compute angular attenuation
-inline __host__ __device__ __forceinline__ float spotLightAttenuation(
+__host__ __device__ __forceinline__ float spotLightAttenuation(
     float const cosTheta, float const cosTheta0, float const cosThetaE) {
   // you can multiply cosTheta to customize falloff
   return smoothstep(cosThetaE, cosTheta0, cosTheta);

@@ -186,8 +186,8 @@ static constexpr float table_ggx_Eavg[GGX_EAVG_TABLE_COUNT] = {
 static cudaArray_t array_ggx_E;
 static cudaArray_t array_ggx_Eavg;
 
-static cudaTextureObject_t tex_ggx_E = 0;
-static cudaTextureObject_t tex_ggx_Eavg = 0;
+cudaTextureObject_t tex_ggx_E = 0;
+cudaTextureObject_t tex_ggx_Eavg = 0;
 
 static __constant__ cudaTextureObject_t d_tex_ggx_E = 0;
 static __constant__ cudaTextureObject_t d_tex_ggx_Eavg = 0;
@@ -318,7 +318,7 @@ __host__ __device__ __forceinline__ float3 sampleGGX_VNDF(float3 wo, float2 u,
 
   // sample disk
   float2 t = sampleUniformDisk(u);
-  t.y = lerp(safeSqrt(1.f - t.x * t.x), t.y, 0.5f * (1.f + V.z));
+  t.y = lerpf(safeSqrt(1.f - t.x * t.x), t.y, 0.5f * (1.f + V.z));
 
   // recombine and unstretch (disk_to_hemisphere + to_global)
   float3 Nh = t.x * T1 + t.y * T2 + safeSqrt(1.f - dot(t, t)) * V;

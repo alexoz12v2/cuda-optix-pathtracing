@@ -56,7 +56,7 @@ __device__ __forceinline__ T get1D() {
   if constexpr (std::is_same_v<T, float>) {
     return uint_to_float01(pcgHash(seedFromClockAnd1DGlobalTid()));
   } else {
-    static_assert(false, "not implemented");
+    return pcgHash(seedFromClockAnd1DGlobalTid());
   }
 }
 
@@ -71,7 +71,9 @@ __device__ __forceinline__ T get2D() {
     unsigned const h2 = pcgHash(h1 ^ 0X85EBCA6B);
     return make_float2(uint_to_float01(h1), uint_to_float01(h2));
   } else {
-    static_assert(false, "not implemented");
+    unsigned const h1 = pcgHash(seedFromClockAnd1DGlobalTid());
+    unsigned const h2 = pcgHash(h1 ^ 0X85EBCA6B);
+    return make_int2(h1, h2);
   }
 }
 

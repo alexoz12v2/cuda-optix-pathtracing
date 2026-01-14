@@ -196,10 +196,11 @@ struct WavefrontInput {
 // kernel param size limit (cc < 7.0)
 static_assert(sizeof(WavefrontInput) <= 4096 * 1024);
 
-inline __device__ __forceinline__ void raygen(
-    RaygenInput const& raygenInput, DeviceArena<PathState>& pathStateSlots,
-    DeviceHaltonOwen& warpRng, DeviceHaltonOwenParams const& params,
-    ClosestHitInput& out) {
+__device__ __forceinline__ void raygen(RaygenInput const& raygenInput,
+                                       DeviceArena<PathState>& pathStateSlots,
+                                       DeviceHaltonOwen& warpRng,
+                                       DeviceHaltonOwenParams const& params,
+                                       ClosestHitInput& out) {
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
   // TODO aligned allocation
@@ -245,7 +246,7 @@ __constant__ DeviceHaltonOwenParams CMEM_haltonOwenParams;
 __constant__ int2 CMEM_imageResolution;
 __constant__ int CMEM_spp;
 
-inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
+__host__ __device__ __forceinline__ Transform const* arrayAsTransform(
     float const* arr) {
   static_assert(sizeof(Transform) == 32 * sizeof(float) &&
                 alignof(Transform) <= 16);

@@ -146,13 +146,13 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo,
 // ---------------------------------------------------------------------------
 // BSDF Bits and Pieces
 // ---------------------------------------------------------------------------
-inline __device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
+__device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
   return 2.f * dot(wo, n) * n - wo;
 }
 
 // eta = eta_i / eta_t
-inline __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
-                                               float* etap, float3* wt) {
+__device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
+                                        float* etap, float3* wt) {
   float cosThetai = dot(wi, n);
   if (cosThetai < 0)  // inside -> outside
   {
@@ -179,7 +179,7 @@ inline __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
 }
 
 // eta should be flipped accordingly to direction (transmission i->o => 1/eta)
-inline __host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
+__host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
     float cosThetaI, float eta, float* r_cosThetaT) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
   // _warning_ normal and eta should have been flipped by intersection procedure
@@ -208,7 +208,7 @@ inline __host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
   return (rParl * rParl + rPerp * rPerp) * 0.5f;
 }
 
-inline __host__ __device__ __forceinline__ float3
+__host__ __device__ __forceinline__ float3
 reflectanceFresnelConductor(float cosThetaI, float3 eta, float3 k) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
   float const cosThetaI2 = cosThetaI * cosThetaI;

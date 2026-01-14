@@ -1,9 +1,10 @@
 #include "wave-kernels.cuh"
 
-inline __device__ __forceinline__ void raygen(
-    RaygenInput const& raygenInput, DeviceArena<PathState>& pathStateSlots,
-    DeviceHaltonOwen& warpRng, DeviceHaltonOwenParams const& params,
-    ClosestHitInput& out) {
+__device__ __forceinline__ void raygen(RaygenInput const& raygenInput,
+                                       DeviceArena<PathState>& pathStateSlots,
+                                       DeviceHaltonOwen& warpRng,
+                                       DeviceHaltonOwenParams const& params,
+                                       ClosestHitInput& out) {
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
   assert(!out.state);

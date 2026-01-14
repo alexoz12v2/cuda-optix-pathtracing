@@ -180,40 +180,40 @@ add_custom_target(
 set(dmt_cuda_toolkit_include_dir $ENV{CUDA_HOME}/include)
 
 # add library code
-add_subdirectory(src)
+## add_subdirectory(src)
 
 # possible todo: PCH
 
 # build examples
 add_subdirectory(examples)
-add_subdirectory(cli)
+## add_subdirectory(cli)
 
-dmt_set_option(DMT_ENABLE_TESTS OFF BOOL "ON To turn on tests, OFF to disable them")
-if (DMT_ENABLE_TESTS)
-  enable_testing()
-  add_subdirectory(test)
-endif ()
+## dmt_set_option(DMT_ENABLE_TESTS OFF BOOL "ON To turn on tests, OFF to disable them")
+## if (DMT_ENABLE_TESTS)
+##   enable_testing()
+##   add_subdirectory(test)
+## endif ()
 
 dmt_set_option(CLANG_FORMAT_EXECUTABLE clang-format STRING "clang-format executable program")
 include(cmake/ClangFormat.cmake)
 
-if (DMT_GENERATE_DOCS)
-  dmt_setup_doxygen()
-endif ()
-
-foreach (lang CXX CUDA)
-  set(CMAKE_${lang}_FLAGS "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_DEBUG "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_DEBUG_INIT "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_INIT "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_MINSIZEREL "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_MINSIZEREL_INIT "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_RELEASE "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_RELEASE_INIT "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO "" CACHE STRING "nothing" FORCE)
-  set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO_INIT "" CACHE STRING "nothing" FORCE)
-endforeach ()
-
-if (DMT_GENERATE_TRAINING)
-  add_subdirectory(training)
-endif ()
+## if (DMT_GENERATE_DOCS)
+##   dmt_setup_doxygen()
+## endif ()
+## 
+## foreach (lang CXX CUDA)
+##   set(CMAKE_${lang}_FLAGS "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_DEBUG "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_DEBUG_INIT "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_INIT "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_MINSIZEREL "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_MINSIZEREL_INIT "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_RELEASE "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_RELEASE_INIT "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO "" CACHE STRING "nothing" FORCE)
+##   set(CMAKE_${lang}_FLAGS_RELWITHDEBINFO_INIT "" CACHE STRING "nothing" FORCE)
+## endforeach ()
+## 
+## if (DMT_GENERATE_TRAINING)
+##   add_subdirectory(training)
+## endif ()

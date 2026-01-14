@@ -9,7 +9,6 @@
 #include "cuda-core/light.cuh"
 #include "cuda-core/morton.cuh"
 #include "cuda-core/shapes.cuh"
-#include "cuda-core/kernels.cuh"
 #include "cuda-core/queue.cuh"
 
 #include <cuda_device_runtime_api.h>
@@ -64,13 +63,19 @@ __host__ void optimalBlocksAndThreads(uint32_t& blocks, uint32_t& threads,
     exit(1);
   }
 
+#  if DMT_ENABLE_ASSERTS
   assert(desiredThreads % WARP_SIZE == 0);
+#  endif
   threads = desiredThreads;
 }
 #endif
 
 struct CallbackData {
+#if DMT_ENABLE_MSE
+  HostPinnedOutputBuffer h_out;
+#else
   float4* hostImage;
+#endif
   uint32_t width;
   uint32_t height;
   uint32_t sample;
@@ -79,10 +84,22 @@ struct CallbackData {
 void CUDART_CB streamCallbackWriteBuffer(void* userData) {
   auto* data = static_cast<CallbackData*>(userData);
   std::cout << "Storing Result (" << data->sample << ")" << std::endl;
+#if DMT_ENABLE_MSE
+  std::string const name = "wave-stream-output-" + std::to_string(data->sample);
+#  if 0
+  writeMeanAndMSERowMajorCompHost(data->h_out.meanPtr, data->h_out.m2Ptr,
+                                  data->width, data->height, name,
+                                  data->sample);
+#  else
+  writeMeanAndMSERowMajor(data->h_out.meanPtr, data->h_out.m2Ptr, data->width,
+                          data->height, name);
+#  endif
+#else
   std::string const name =
       "wave-stream-output-" + std::to_string(data->sample) + ".png";
   writeOutputBufferRowMajor(data->hostImage, data->width, data->height,
                             name.c_str());
+#endif
 }
 
 void wavefrontMain() {
@@ -95,22 +112,35 @@ void wavefrontMain() {
   CUDA_CHECK(cudaFuncSetCacheConfig(missKernel, cudaFuncCachePreferL1));
   CUDA_CHECK(cudaFuncSetCacheConfig(shadeKernel, cudaFuncCachePreferL1));
 
-  // TODO DEADLOCK with these
-  // uint32_t threads = 512; // or 32 (probably missing threadfences)
-  // uint32_t blocks = 10; // or 2
-  // uint32_t threads = 512; // or 32 (probably missing threadfences)
-  // uint32_t blocks = 1; // or 2
-  // uint32_t threads = 32; // or 32 (probably missing threadfences)
-  // uint32_t blocks = 2; // or 2
-  // uint32_t threads = 64;
-  // uint32_t blocks = 1;
-  uint32_t threads = 32;
-  uint32_t blocks = 1;
-  uint32_t sharedBytes = 12;
-  // optimalBlocksAndThreads(blocks, threads, sharedBytes); // TODO
-  std::cout << "Computed Optimal Occupancy for wavefront kernels: " << blocks
-            << " blocks. " << threads << " threads. " << sharedBytes
-            << " SMEM Bytes" << std::endl;
+  uint32_t threads[5]{512};
+  uint32_t blocks[5]{100};
+  uint32_t const sharedBytes = 0;
+
+  // minimum TPB tweakable
+  optimalOccupancyFromBlock<false, 1, 128>((void*)closesthitKernel, sharedBytes,
+                                           true, blocks[0], threads[0]);
+  optimalOccupancyFromBlock<false, 1, 64>((void*)anyhitKernel, sharedBytes,
+                                          true, blocks[1], threads[1]);
+  optimalOccupancyFromBlock<false, 1, 64>((void*)shadeKernel, sharedBytes, true,
+                                          blocks[2], threads[2]);
+  optimalOccupancyFromBlock<false, 1, 64>((void*)missKernel, sharedBytes, true,
+                                          blocks[3], threads[3]);
+  optimalOccupancyFromBlock<false, 1, 256>((void*)checkDoneDepth, sharedBytes,
+                                           true, blocks[4], threads[4]);
+
+  std::cout << "Computed Optimal Occupancy for wavefront kernels: ";
+  {
+    std::vector<std::string> names{"closesthitKernel", "anyhitKernel",
+                                   "shadeKernel", "missKernel",
+                                   "checkDoneDepth"};
+    uint32_t count = 0;
+    for (auto const& sk : names) {
+      std::cout << " - " << sk << ": blocks " << blocks[count]
+                << " threads: " << threads[count] << '\n';
+      ++count;
+    }
+    std::cout << std::flush;
+  }
 
   // init scene
   std::cout << "Allocating host and device resources" << std::endl;
@@ -135,18 +165,30 @@ void wavefrontMain() {
 
   allocateDeviceConstantMemory(h_camera, tileDimX, tileDimY);
 
-  auto* kinput = new WavefrontStreamInput(threads, blocks, h_scene, h_lights,
+  auto* kinput = new WavefrontStreamInput(1, WARP_SIZE, h_scene, h_lights,
                                           h_infiniteLights, h_bsdfs, h_camera);
   kinput->sampleOffset = 0;
 
   // TODO double buffering
+  size_t const outputBytes = h_camera.width * h_camera.height * sizeof(float4);
+#if DMT_ENABLE_MSE
+  DeviceOutputBuffer d_out{};
+  d_out.allocate(h_camera.width, h_camera.height);
+#else
   float4* hostImage = nullptr;
   CUDA_CHECK(cudaMallocHost(&hostImage,
                             sizeof(float4) * h_camera.width * h_camera.height));
+#endif
+
   auto const callbackData = std::make_unique<CallbackData>();
+#if DMT_ENABLE_MSE
+  callbackData->h_out.allocate(h_camera.width, h_camera.height);
+#else
   callbackData->hostImage = hostImage;
+#endif
   callbackData->width = h_camera.width;
   callbackData->height = h_camera.height;
+
   int* h_done = nullptr;
   CUDA_CHECK(cudaHostAlloc(&h_done, sizeof(int), cudaHostAllocMapped));
   int* d_done = nullptr;
@@ -156,9 +198,15 @@ void wavefrontMain() {
   cudaStream_t st_main;
   CUDA_CHECK(cudaStreamCreate(&st_main));
 
+  // timing
+  AvgAndTotalTimer timer;
+
+#define KERNEL_DEBUG 0
+
+  // TODO if occupancy allows, process more tiles of the image?
   for (int sOffset = 0; sOffset < TOTAL_SAMPLES; sOffset += h_camera.spp) {
     kinput->sampleOffset = sOffset;
-    callbackData->sample = kinput->sampleOffset;
+    callbackData->sample = kinput->sampleOffset + h_camera.spp;
     std::cout << "Launching kernel (" << kinput->sampleOffset << ")"
               << std::endl;
     for (int tileY = 0; tileY < numTilesY; tileY++) {
@@ -169,52 +217,119 @@ void wavefrontMain() {
             tileDimY, kinput->sampleOffset);
         CUDA_CHECK(cudaGetLastError());
 
+#if KERNEL_DEBUG
+        CUDA_CHECK(cudaStreamSynchronize(st_main));
+        std::cout << "[raygenKernel] " << "s: " << callbackData->sample
+                  << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
         *h_done = false;
         while (!*h_done) {
-          closesthitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+          closesthitKernel<<<blocks[0], threads[0], sharedBytes, st_main>>>(
               kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
               kinput->shadeQueue, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
 
-          anyhitKernel<<<blocks, threads, sharedBytes, st_main>>>(
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[closesthitKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
+          anyhitKernel<<<blocks[1], threads[1], sharedBytes, st_main>>>(
               kinput->anyhitQueue, kinput->d_lights, kinput->lightCount,
               kinput->d_bsdfs, kinput->d_triSoup);
           CUDA_CHECK(cudaGetLastError());
 
-          shadeKernel<<<blocks, threads, sharedBytes, st_main>>>(
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[anyhitKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
+          shadeKernel<<<blocks[2], threads[2], sharedBytes, st_main>>>(
               kinput->shadeQueue, kinput->closesthitQueue,
-              kinput->pathStateSlots, kinput->d_outBuffer, kinput->d_bsdfs);
+              kinput->pathStateSlots,
+#if DMT_ENABLE_MSE
+              d_out,
+#else
+              kinput->d_outBuffer,
+#endif
+              kinput->d_bsdfs);
           CUDA_CHECK(cudaGetLastError());
 
-          missKernel<<<blocks, threads, sharedBytes, st_main>>>(
-              kinput->missQueue, kinput->pathStateSlots, kinput->d_outBuffer,
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[shadeKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
+          missKernel<<<blocks[3], threads[3], sharedBytes, st_main>>>(
+              kinput->missQueue, kinput->pathStateSlots,
+#if DMT_ENABLE_MSE
+              d_out,
+#else
+              kinput->d_outBuffer,
+#endif
               kinput->infiniteLights, kinput->infiniteLightCount);
           CUDA_CHECK(cudaGetLastError());
 
-          checkDoneDepth<<<1, WARP_SIZE, sharedBytes, st_main>>>(
-              kinput->pathStateSlots, d_done);
-          CUDA_CHECK(cudaGetLastError());
+#if KERNEL_DEBUG
           CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[missKernel] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
+
+          // checkDoneDepth<<<blocks[4], threads[4], sharedBytes, st_main>>>(
+          checkDoneDepth<<<100, WARP_SIZE, 12, st_main>>>(
+              kinput->pathStateSlots, kinput->closesthitQueue,
+              kinput->missQueue, kinput->anyhitQueue, kinput->shadeQueue,
+              d_done);
+          CUDA_CHECK(cudaGetLastError());
+
+          kinput->swapBuffersAllQueues(st_main);
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+
+#if KERNEL_DEBUG
+          CUDA_CHECK(cudaStreamSynchronize(st_main));
+          std::cout << "[checkDoneDepth] " << "s: " << callbackData->sample
+                    << " tileX: " << tileX << " tileY: " << tileY << std::endl;
+#endif
         }
       }
     }
 
-    CUDA_CHECK(
-        cudaMemcpyAsync(hostImage, kinput->d_outBuffer,
-                        h_camera.width * h_camera.height * sizeof(float4),
-                        cudaMemcpyDeviceToHost, st_main));
+#if DMT_ENABLE_MSE
+    CUDA_CHECK(cudaMemcpyAsync(callbackData->h_out.m2Ptr, d_out.m2Ptr,
+                               outputBytes, cudaMemcpyDeviceToHost, st_main));
+    CUDA_CHECK(cudaMemcpyAsync(callbackData->h_out.meanPtr, d_out.meanPtr,
+                               outputBytes, cudaMemcpyDeviceToHost, st_main));
+#else
+    CUDA_CHECK(cudaMemcpyAsync(hostImage, kinput->d_outBuffer, outputBytes,
+                               cudaMemcpyDeviceToHost, st_main));
+#endif
 
     CUDA_CHECK(cudaStreamSynchronize(st_main));
+    timer.tick();
+
     streamCallbackWriteBuffer(callbackData.get());
+    timer.reset();
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
+  std::cout << "Done! Total Execution Time(excl write file): "
+            << timer.elapsedMillis()
+            << " ms | Average Execution per Kernel launch (" << h_camera.spp
+            << " spp): " << timer.avgMillis() << " ms" << std::endl;
 
   std::cout << "Cleanup..." << std::endl;
 
   CUDA_CHECK(cudaStreamDestroy(st_main));
 
+#if DMT_ENABLE_MSE
+#else
   CUDA_CHECK(cudaFreeHost(hostImage));
+#endif
   delete kinput;
   freeDeviceConstantMemory();
 }

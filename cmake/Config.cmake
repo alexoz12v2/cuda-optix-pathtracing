@@ -158,8 +158,11 @@ macro(dmt_define_environment)
   endif ()
 
   # -- compiler detection
-  message(STATUS "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-  if (MSVC)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(DMT_COMPILER_CLANG 1)
+    set(DMT_COMPILER "DMT_COMPILER_CLANG")
+    message(STATUS "Compiler Found: clang++")
+  elseif (MSVC)
     set(DMT_COMPILER_MSVC 1)
     set(DMT_COMPILER "DMT_COMPILER_MSVC")
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -168,10 +171,6 @@ macro(dmt_define_environment)
     else ()
       message(STATUS "Compiler Found: cl.exe")
     endif ()
-  elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(DMT_COMPILER_CLANG 1)
-    set(DMT_COMPILER "DMT_COMPILER_CLANG")
-    message(STATUS "Compiler Found: clang++")
   elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     set(DMT_COMPILER_GCC 1)
     set(DMT_COMPILER "DMT_COMPILER_GCC")
@@ -294,16 +293,20 @@ function(dmt_set_linux_specific_compile_options target properties_visibility)
         set(UBSAN_LIB_DIR "/usr/lib/llvm-20/lib/clang/20/lib/linux")
 
         target_compile_options(${target} PRIVATE
+          $<HOST_LINK:
           $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize-recover=all>
           $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fsanitize=undefined -Xcompiler=-fno-omit-frame-pointer -Xcompiler=-fno-sanitize-recover=all>
+          >
         )
 
         target_link_options(${target} PRIVATE
+          $<HOST_LINK:
           $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=undefined -shared-libsan -Wl,--no-undefined -Wl,-rpath,${UBSAN_LIB_DIR} -Wl,-rpath-link,${UBSAN_LIB_DIR}>
           $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fsanitize=undefined -Xcompiler="-shared-libsan -Wl,--no-undefined -Wl,-rpath,${UBSAN_LIB_DIR} -Wl,-rpath-link,${UBSAN_LIB_DIR}">
+          >
         )
       else ()
-        target_link_options(${target} PRIVATE $<$<LINK_LANGUAGE:CXX>:-Wl,--no-undefined>)
+        target_link_options(${target} PRIVATE $<HOST_LINK:$<$<LINK_LANGUAGE:CXX>:-Wl,--no-undefined>>)
       endif ()
     endif ()
 
@@ -335,25 +338,26 @@ function(dmt_set_cpu_architecture_features target properties_visibility)
         $<$<COMPILE_LANGUAGE:CXX>:-mavx -msse3 -mfma -mavx2>
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mavx -Xcompiler=-msse3 -Xcompiler=-mfma -Xcompiler=-mavx2>
       )
-    elseif (DMT_COMPILER_MSVC)
+    elseif (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
       target_compile_options(${target} ${properties_visibility}
-        $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2 /arch:AVX /arch:SSE4.2 /EHsc>
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/arch:AVX2 -Xcompiler=/arch:AVX -Xcompiler=/arch:SSE4.2 -Xcompiler=/EHsc>
+        $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2 /EHsc>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/arch:AVX2,/EHsc>
       )
     endif ()
   else ()
     message(FATAL_ERROR "HELLO")
   endif ()
-  set_target_properties(${target} PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-  )
+  ## CUDA Handled Elsewhere
+  ## set_target_properties(${target} PROPERTIES
+  ##   CUDA_SEPARABLE_COMPILATION ON
+  ##   CUDA_RESOLVE_DEVICE_SYMBOLS ON
+  ## )
 endfunction()
 
 
 function(dmt_set_target_warnings target properties_visibility)
   option(DMT_WARNINGS_AS_ERRORS "Treat Compiler Warnings as errors" OFF)
-  if (DMT_COMPILER_MSVC)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     if (DMT_WARNINGS_AS_ERRORS)
       target_compile_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:/WX>)
     endif ()
@@ -389,9 +393,7 @@ function(dmt_set_target_warnings target properties_visibility)
       # stuff for C++ versioning
       /Zc:__cplusplus
       >)
-  endif ()
-
-  if (DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
+  elseif (DMT_COMPILER_GCC OR DMT_COMPILER_CLANG)
     if (DMT_WARNINGS_AS_ERRORS)
       target_compile_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
     endif ()
@@ -445,7 +447,6 @@ function(dmt_set_target_warnings target properties_visibility)
     )
   endif ()
 
-  # TODO move to another function
   set_property(TARGET ${target} PROPERTY POSITION_INDEPENDENT_CODE ON)
   set_property(TARGET ${target} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   ## shouldn't be necessary if you link against a CUDA:: target
@@ -456,49 +457,74 @@ function(dmt_set_target_warnings target properties_visibility)
   # target_link_options(${target} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:-dlto>)
   set(CUDA_COMPILE_ARGS
     # -dlink
-    # --cudart
-    # shared
-    # --cudadevrt
-    # static
+    # --cudart shared # implied through target linking or CUDA_RUNTIME_LIBRARY
+    # --cudadevrt static # not used, but still included in target CUDA::cudart
     --expt-relaxed-constexpr # constexpr functions inside device code
     --extended-lambda # full C++20 lambda syntax inside device code
-    # -dc
+    # -dc # implied through POSITION_INDEPENDENT_CODE
     -use_fast_math
     -maxrregcount ${DMT_NVCC_MAXREGCOUNT}
-    -Xptxas -v
+    --nvlink-options -v
   )
+  set(PTXAS_OPTIONS "-v,-warn-double-usage,-lineinfo")
 
-  dmt_set_option(DMT_DEVICE_LINK_TIME_OPTIMIZATION OFF BOOL "-dlto to nvcc and nvlink")
-  dmt_set_option(DMT_NVCC_ARCHITECTURES "61-real" STRING "physical architecture for gencode when using -dlto to nvcc and nvlink")
   if (DMT_DEVICE_LINK_TIME_OPTIMIZATION)
-    if (DMT_NVCC_ARCHITECTURES)
-      set_target_properties(${target} PROPERTIES CUDA_ARCHITECTURES "${DMT_NVCC_ARCHITECTURES}")
-      list(APPEND CUDA_COMPILE_ARGS -dlto)
-    else ()
-      message(WARNING "ignoring device link time optimization as DMT_NVCC_ARCHITECTURES not defined")
+    if (NOT CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.2)
+      message(FATAL_ERROR "Nah")
     endif ()
+    set_target_properties(${target} PROPERTIES
+      CUDA_ARCHITECTURES ${DMT_NVCC_LTO_VERSION}
+      CUDA_SEPARABLE_COMPILATION ON
+      INTERPROCEDURAL_OPTIMIZATION TRUE)
+    ##### list(APPEND CUDA_COMPILE_ARGS -dlto)
+    ##### string(APPEND PTXAS_OPTIONS ",-arch=lto_${DMT_NVCC_LTO_VERSION}")
+    ##### if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    #####   string(APPEND PTXAS_OPTIONS ",-gen-opt-lto")
+    ##### endif ()
+    ##### set_target_properties(${target} PROPERTIES CUDA_ARCHITECTURES "OFF")
+    ##### list(APPEND CUDA_COMPILE_ARGS
+    #####   --gpu-architecture=compute_${DMT_NVCC_LTO_VERSION}
+    #####   --gpu-code=lto_${DMT_NVCC_LTO_VERSION}
+    ##### )
+
+    ##### # nvlink must be aligned with ptxas! all consumers need to use DLTO!
+    ##### # Configure Device vs host link: https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#genex:DEVICE_LINK
+    ##### # might also be done manually through passing to --nvlink-options -dlto? Who cares
+    ##### target_link_options(${target} ${properties_visibility} $<DEVICE_LINK:-dlto>)
+  else ()
+    set_target_properties(${target} PROPERTIES CUDA_ARCHITECTURES "${DMT_NVCC_ARCHITECTURES}")
+  endif ()
+  if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    list(APPEND CUDA_COMPILE_ARGS "-dopt=on")
+    target_compile_definitions(${target} PRIVATE NDEBUG)
   endif ()
 
-  # the commented ones are done by default
-  dmt_set_option(DMT_NVCC_MAXREGCOUNT "32" "STRING" "nvcc --maxregcount")
+  list(APPEND CUDA_COMPILE_ARGS "-Xptxas" ${PTXAS_OPTIONS})
+
   target_compile_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_COMPILE_ARGS}>)
 endfunction()
 
 function(dmt_set_target_optimization target properties_visibility)
   if (NOT properties_visibility MATCHES "INTERFACE")
     # https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/linker-tools-warning-lnk4098?view=msvc-170
-    if (DEFINED DMT_OS_WINDOWS AND DEFINED DMT_COMPILER_MSVC)
+    if (DEFINED DMT_OS_WINDOWS AND (CMAKE_CXX_COMPILER_LINKER_FRONTEND_VARIANT STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
       if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
         # Debug Multithreaded DLL (/MDd)
         message(STATUS "(${target}) debug compilation detected on Windows MSVC. Linking to /MDd")
-        target_link_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib
-          /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrt.lib>)
+        target_link_options(${target} ${properties_visibility}
+          $<HOST_LINK:
+          $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrt.lib>
+          >
+        )
         target_link_libraries(${target} ${properties_visibility} msvcrtd.lib) # Explicitly link to msvcrtd.lib
       else ()
         # Release Multithreaded DLL (/MD)
         message(STATUS "(${target}) release compilation detected on Windows MSVC. Linking to /MD")
-        target_link_options(${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib
-          /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib>)
+        target_link_options(${target} ${properties_visibility}
+          $<HOST_LINK:
+          $<$<COMPILE_LANGUAGE:CXX>:/NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:msvcrtd.lib>
+          >
+        )
         target_link_libraries(${target} ${properties_visibility} msvcrt.lib) # Explicitly link to msvcrt.lib
       endif ()
     endif ()
@@ -515,41 +541,38 @@ function(dmt_set_target_optimization target properties_visibility)
     if (CMAKE_BUILD_TYPE STREQUAL "Debug") # you can also use the CONFIG generator expression
       # NRVO has an issue with visual studio debugger, you cannot inspect the returned struct, hence disabling it
       # https://developercommunity.visualstudio.com/t/When-a-custom-function-returns-a-custom-/10422600
-      target_compile_options(
-        ${target}
-        ${properties_visibility}
-        $<$<COMPILE_LANGUAGE:CXX>:
-        $<$<BOOL:${DMT_COMPILER_MSVC}>:/Od
-        /Zi
-        /Zc:nrvo->
-        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O0
-        -g
-        -fprofile-arcs
-        -ftest-coverage>
-        >
-        $<$<COMPILE_LANGUAGE:CUDA>:
-        ${default_cuda_nvcc_flags}
-        -O0>)
-      target_link_options(${target} PUBLIC
-        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:--coverage>)
-    elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
-      target_compile_options(
-        ${target} ${properties_visibility} $<$<COMPILE_LANGUAGE:CXX>: $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2>
-        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O3> >)
-    elseif (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-      target_compile_options(
-        ${target}
-        ${properties_visibility}
-        $<$<COMPILE_LANGUAGE:CXX>:
-        $<$<BOOL:${DMT_COMPILER_MSVC}>:/O2
-        /Zi>
-        $<$<OR:$<BOOL:${DMT_COMPILER_GCC}>,$<BOOL:${DMT_COMPILER_CLANG}>>:-O2
-        -g>
-        >
-        $<$<COMPILE_LANGUAGE:CUDA>:
-        ${default_cuda_nvcc_flags}
-        -g>)
-    elseif (CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+      if (DEFINED DMT_OS_WINDOWS AND (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
+        target_compile_options(${target} ${properties_visibility}
+          $<$<COMPILE_LANGUAGE:CXX>: /Od /Zi /Zc:nrvo- >
+          $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags} -O0>)
+      else ()
+        target_compile_options(${target} ${properties_visibility}
+          $<$<COMPILE_LANGUAGE:CXX>: -g>
+          $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags} -Xcompiler=-g>)
+      endif ()
+    endif ()
+  elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
+    if (DEFINED DMT_OS_WINDOWS AND (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>: /O2>
+        $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags} -Xcompiler=/O2>)
+    else ()
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>: -O3>
+        $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags} -Xcompiler=-O3>)
+    endif ()
+  elseif (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    if (DEFINED DMT_OS_WINDOWS AND (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>: /O2 /Zi>
+        $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags} -Xcompiler=/O2,/Zi>)
+    else ()
+      target_compile_options(${target} ${properties_visibility}
+        $<$<COMPILE_LANGUAGE:CXX>: -O2 -g>
+        $<$<COMPILE_LANGUAGE:CUDA>: ${default_cuda_nvcc_flags} -Xcompiler=-O2,-g>)
+    endif ()
+  elseif (CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    if (DEFINED DMT_OS_WINDOWS AND (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
       target_compile_options(
         ${target} ${properties_visibility}
         $<$<COMPILE_LANGUAGE:CXX>:
@@ -661,7 +684,7 @@ function(dmt_set_target_compiler_versions name property_visibility)
   # modules require C++20 support
   target_compile_features(${name} ${property_visibility} cxx_std_20 cuda_std_20)
 
-  if (MSVC)
+  if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     target_compile_options(${name} ${property_visibility} $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>)
   endif ()
 endfunction()

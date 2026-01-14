@@ -18,4 +18,10 @@
 #  define ISECT_PRINT(...) printf(__VA_ARGS__)
 #endif
 
+#ifdef DMT_DEBUG
+#  define DMT_ENABLE_ASSERTS 1
+#else
+#  define DMT_ENABLE_ASSERTS 0
+#endif
+
 #endif

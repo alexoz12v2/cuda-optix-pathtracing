@@ -1,6 +1,7 @@
 #ifndef DMT_CUDA_CORE_BSDF_CUH
 #define DMT_CUDA_CORE_BSDF_CUH
 
+#include "cuda-core/debug.cuh"
 #include "cuda-core/types.cuh"
 #include "cuda-core/common_math.cuh"
 #include "cuda-core/encoding.cuh"
@@ -59,14 +60,6 @@ struct BSDF {
     weightStorage[0] = float_to_half_bits(w.x);
     weightStorage[1] = float_to_half_bits(w.y);
     weightStorage[2] = float_to_half_bits(w.z);
-#if 0  // first 3 decimal digits from mantissa are preserved
-    if (!isZero(w)) {
-      float3 decoded = weight();
-      printf("  -> setWeight(%f %f %f)->[%hx %hx %hx] %f %f %f\n", w.x, w.y,
-             w.z, weightStorage[0], weightStorage[1], weightStorage[2],
-             decoded.x, decoded.y, decoded.z);
-    }
-#endif
   }
   __host__ __device__ float3 weight() const {
     return make_float3(half_bits_to_float(weightStorage[0]),
@@ -146,13 +139,13 @@ __host__ __device__ void prepareBSDF(BSDF* bsdf, float3 ns, float3 wo,
 // ---------------------------------------------------------------------------
 // BSDF Bits and Pieces
 // ---------------------------------------------------------------------------
-inline __device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
+__device__ __forceinline__ float3 reflect(float3 wo, float3 n) {
   return 2.f * dot(wo, n) * n - wo;
 }
 
 // eta = eta_i / eta_t
-inline __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
-                                               float* etap, float3* wt) {
+__device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
+                                        float* etap, float3* wt) {
   float cosThetai = dot(wi, n);
   if (cosThetai < 0)  // inside -> outside
   {
@@ -179,11 +172,11 @@ inline __device__ __forceinline__ bool refract(float3 wi, float3 n, float eta,
 }
 
 // eta should be flipped accordingly to direction (transmission i->o => 1/eta)
-inline __host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
+__host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
     float cosThetaI, float eta, float* r_cosThetaT) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
   // _warning_ normal and eta should have been flipped by intersection procedure
-#if 0
+#if DMT_ENABLE_ASSERTS
   assert(cosThetaI > 0);
 #else
   bool const entering = cosThetaI > 0.f;
@@ -208,7 +201,7 @@ inline __host__ __device__ __forceinline__ float reflectanceFresnelDielectric(
   return (rParl * rParl + rPerp * rPerp) * 0.5f;
 }
 
-inline __host__ __device__ __forceinline__ float3
+__host__ __device__ __forceinline__ float3
 reflectanceFresnelConductor(float cosThetaI, float3 eta, float3 k) {
   cosThetaI = fmaxf(-1.f, fminf(1.f, cosThetaI));
   float const cosThetaI2 = cosThetaI * cosThetaI;

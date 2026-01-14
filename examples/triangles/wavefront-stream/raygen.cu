@@ -1,12 +1,15 @@
 #include "wave-kernels.cuh"
 
-inline __device__ __forceinline__ void raygen(
-    RaygenInput const& raygenInput, DeviceArena<PathState>& pathStateSlots,
-    DeviceHaltonOwen& warpRng, DeviceHaltonOwenParams const& params,
-    ClosestHitInput& out) {
+__device__ __forceinline__ void raygen(RaygenInput const& raygenInput,
+                                       DeviceArena<PathState>& pathStateSlots,
+                                       DeviceHaltonOwen& warpRng,
+                                       DeviceHaltonOwenParams const& params,
+                                       ClosestHitInput& out) {
   int2 const pixel = make_int2(raygenInput.px, raygenInput.py);
   CameraSample const cs = getCameraSample(pixel, warpRng, params);
+#if DMT_ENABLE_ASSERTS
   assert(!out.state);
+#endif
   int slot = -1;
   //RG_PRINT(
   //    "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d]. "
@@ -20,8 +23,14 @@ inline __device__ __forceinline__ void raygen(
 #ifdef DMT_DEBUG
   assert(slot >= 0);
 #else
+<<<<<<< HEAD
     if(slot < 0)
       asm volatile("trap;");
+=======
+  if (slot < 0) {
+    asm volatile("trap;");
+  }
+>>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
 #endif
   out.state = &pathStateSlots.buffer[slot];
 
@@ -31,7 +40,7 @@ inline __device__ __forceinline__ void raygen(
                          *raygenInput.renderFromCamera);
 }
 
-__global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
+__global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
                              DeviceArena<PathState> pathStateSlots,
                              DeviceHaltonOwen* d_haltonOwen,
                              DeviceCamera* d_cam, int tileIdxX, int tileIdxY,
@@ -61,7 +70,9 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
   // specific sample)
   for (int i = theGlobalWarpId; i < totalWorkUnits; i += totalWarps) {
     // Decode 1D index into (Tile, Sample)
+#if DMT_ENABLE_ASSERTS
     assert(i / totalSubTiles < CMEM_spp);
+#endif
     int const sampleIdx = i / totalSubTiles + sampleOffset;
     int const subTileIdx = i % totalSubTiles;
 
@@ -96,7 +107,9 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
                                    sampleIdx);
           raygen(raygenInput, pathStateSlots, warpRng, CMEM_haltonOwenParams,
                  raygenElem);
+#if DMT_ENABLE_ASSERTS
           assert(raygenElem.state);
+#endif
         }
 #if 0
         RG_PRINT(
@@ -108,9 +121,19 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
 #endif
 
         // check if 32 available places in queue
-#ifdef DMT_DEBUG
+#if USE_SIMPLE_QUEUE
+        bool const pushed = outQueue.queuePush<false>(raygenElem);
+#  ifdef DMT_DEBUG
+        assert(pushed);
+#  else
+        if (!pushed) {
+          asm volatile("trap;");
+        }
+#  endif
+#else
+#  ifdef DMT_DEBUG
         int const coalescedLane = getCoalescedLaneId(__activemask());
-#endif
+#  endif
         unsigned const succ = outQueue.queuePush<false>(&raygenElem);
         RG_PRINT(
             "--------------------------------- RG [%u %u] RAYGEN activemask "
@@ -121,7 +144,7 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
         //     " "ks: %d %d | laneid: %d\n", blockIdx.x, threadIdx.x, succ, x,
         //     y, sampleIdx, i, totalWorkUnits, laneId);
         // simplicity: queues are appropriately sized for CMEM_spp
-#ifdef DMT_DEBUG
+#  ifdef DMT_DEBUG
         if (!((1u << coalescedLane) & succ)) {
           int volatile head = *outQueue.head & (outQueue.capacity - 1);
           int volatile tail = *outQueue.tail & (outQueue.capacity - 1);
@@ -139,6 +162,7 @@ __global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
               outQueue.capacity - (tail - head));
         }
         assert((1u << coalescedLane) & succ);
+#  endif
 #endif
       }
     }

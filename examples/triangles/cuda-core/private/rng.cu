@@ -67,35 +67,36 @@ __device__ __forceinline__ uint32_t mixBits32(uint32_t v) {
   return v;
 }
 
-// TODO Warp Uniform Version
 __device__ __forceinline__ float radicalInverse(uint32_t primeIndex,
                                                 uint32_t index) {
   const uint32_t base = primes[primeIndex];
-  const float invBase = __frcp_rn(static_cast<float>(base));
-  const uint32_t limit = ~0u / base - base;
+  const float invBase = __frcp_rn(__uint2float_rn(base));
+  float result = 0.0f;
 
-  uint32_t result = 0;
-  float factor = invBase;
+  float invBasePow = invBase;
 
-  // TODO is it necessary to sync?
-  const cooperative_groups::coalesced_group theGroup =
-      cooperative_groups::coalesced_threads();
-  while (index && result < limit) {
-    uint32_t next = index / base;
-    uint32_t digit = index - next * base;
+  // Loop depends on index magnitude, but removed the sync() and limit checks
+  // which causes unnecessary overhead.
+  while (index > 0) {
+    // Fast integer division/modulo
+    uint32_t const next = index / base;
+    uint32_t const digit = index - next * base;
 
-    result = result * base + digit;
-    factor *= invBase;
+    // Fused Multiply Add: result += digit * invBasePow
+    result = __fmaf_rn(__uint2float_rn(digit), invBasePow, result);
+
+    invBasePow *= invBase;
     index = next;
   }
-  theGroup.sync();
 
-  return fminf(result * factor, 0.99999994f);
+  // Clamp to avoid 1.0f inclusive
+  return fminf(result, 0.99999994f);
 }
 
 __device__ __forceinline__ uint32_t permutationElement(uint32_t digit,
                                                        uint32_t base,
                                                        uint32_t seed) {
+#if 0  // while this rejection sampling strategy works, it's not device friendly
   // identical to PBRT's "permute"
   uint32_t w = base - 1;
   w |= w >> 1;
@@ -126,36 +127,49 @@ __device__ __forceinline__ uint32_t permutationElement(uint32_t digit,
   } while (digit >= base);
 
   return digit;
+#else
+  // Simple randomized shift (Cranley-Patterson rotation on the digit)
+  // This is strictly non-divergent and O(1).
+  return (digit + seed) % base;
+#endif
 }
 
-// TODO Warp Uniform version
 __device__ __forceinline__ float owenScrambledRadicalInverse32(int primeIndex,
                                                                uint32_t index,
                                                                uint32_t seed) {
   const uint32_t base = primes[primeIndex];
-  double invBase = 1.0 / double(base);
-  double invBaseM = 1.0;
+  const float invBase = __frcp_rn(__uint2float_rn(base));
 
-  uint64_t reversed = 0;
-  PRINT("      - Requested Halton Owen RNG: pi: %d, i: %u, s: %u | Base: %u\n",
-        primeIndex, index, seed, base);
-  while (index) {
-    uint32_t next = index / base;
-    uint32_t digit = index - next * base;
+  float result = 0.0f;
+  float invBasePow = invBase;
 
-    uint32_t scramble = mixBits32(seed ^ uint32_t(reversed));
-    digit = permutationElement(digit, base, scramble);
+  // We use reversed_int just for hash generation, not for accumulation
+  // to avoid 64-bit integer requirements.
+  uint32_t reversed_hash_input = 0;
 
-    reversed = reversed * base + digit;
-    invBaseM *= invBase;
+  while (index > 0) {
+    uint32_t const next = index / base;
+    uint32_t const digit = index - next * base;
+
+    // Mix the bits based on depth (reversed) to scramble the seed
+    uint32_t const scramble = mixBits32(seed ^ reversed_hash_input);
+
+    // Get permuted digit (branchless)
+    uint32_t const permuted_digit = permutationElement(digit, base, scramble);
+
+    // Accumulate directly in float
+    result = __fmaf_rn(__uint2float_rn(permuted_digit), invBasePow, result);
+
+    // Update state for next iteration
+    // Note: We don't need a full integer reverse, just a changing hash input.
+    // Standard accumulation is sufficient for the hash noise.
+    reversed_hash_input = reversed_hash_input * base + digit;
+
+    invBasePow *= invBase;
     index = next;
-    PRINT("         - Halton Owen RNG update: index: %u digit: %u\n", index,
-          digit);
   }
-  PRINT("      - Halton Owen RNG: finished\n");
 
-  const double result = static_cast<double>(reversed) * invBaseM;
-  return static_cast<float>(fmin(result, 0.999999999999));
+  return fminf(result, 0.99999994f);
 }
 
 __device__ __forceinline__ float sampleDim(int dimension, int haltonIndex) {
@@ -214,14 +228,6 @@ __device__ void DeviceHaltonOwen::startPixelSample(
   haltonIndex[laneId] %= sampleStride;
   haltonIndex[laneId] += sampleIndex * sampleStride;
   dimension[laneId] = max(dim, NUM_FILM_DIMENSION);
-  // TODO global debug printing macro control
-#if 0
-  printf(
-      "   START PIXEL SAMPLE STATE:\n"
-      "     - haltonIndex: %d\n"
-      "     - dimension:   %d\n",
-      haltonIndex[laneId], dimension[laneId]);
-#endif
 }
 
 __device__ float DeviceHaltonOwen::get1D(DeviceHaltonOwenParams const& params) {
@@ -230,11 +236,6 @@ __device__ float DeviceHaltonOwen::get1D(DeviceHaltonOwenParams const& params) {
   if (dimension[laneId] >= NUM_PRIMES) dimension[laneId] = 2;
   int const dim = dimension[laneId]++;
   float const result = sampleDim(dim, haltonIndex[laneId]);
-#if 0
-  printf("dim: %d halton index: %d exp: %d result: %f\n", dimension[laneId],
-         haltonIndex[laneId],
-         params.baseExponents[max(dim, NUM_FILM_DIMENSION - 1)], result);
-#endif
   return result;
 }
 
@@ -257,8 +258,5 @@ DeviceHaltonOwen::getPixel2D(DeviceHaltonOwenParams const& params) {
   float2 const result = make_float2(
       radicalInverse(0, haltonIndex[laneId] >> params.baseExponents[0]),
       radicalInverse(1, haltonIndex[laneId] / params.baseScales[1]));
-#if 0
-  printf("  Sampled: %f %f\n", result.x, result.y);
-#endif
   return result;
 }

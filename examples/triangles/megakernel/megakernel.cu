@@ -1,9 +1,9 @@
-#include "kernels.cuh"
+#include "megakernel.cuh"
 
-#include "debug.cuh"
-#include "types.cuh"
-#include "morton.cuh"
-#include "extra_math.cuh"
+#include "cuda-core/debug.cuh"
+#include "cuda-core/types.cuh"
+#include "cuda-core/morton.cuh"
+#include "cuda-core/extra_math.cuh"
 
 #include <cooperative_groups.h>
 
@@ -11,35 +11,93 @@
 
 namespace cg = cooperative_groups;
 
-__global__ void __launch_bounds__(/*max threads per block*/ 512,
-                                  /*min blocks per SM*/ 10)
-    pathTraceMegakernel(DeviceCamera* d_cam, TriangleSoup d_triSoup,
-                        Light const* d_lights, uint32_t const lightCount,
-                        Light const* d_infiniteLights,
-                        uint32_t const infiniteLightCount, BSDF const* d_bsdf,
-                        uint32_t const bsdfCount, uint32_t const sampleOffset,
-                        DeviceHaltonOwen* d_haltonOwen, float4* d_outBuffer) {
+__constant__ float CMEM_cameraFromRaster[32];
+__constant__ float CMEM_renderFromCamera[32];
+__constant__ DeviceHaltonOwenParams CMEM_haltonOwenParams;
+__constant__ int2 CMEM_imageResolution;
+__constant__ int CMEM_spp;
+__constant__ MortonLayout2D CMEM_mortonLayout;
+
+__host__ void allocateDeviceConstantMemory(DeviceCamera const& h_camera) {
+  {
+    Transform t =
+        cameraFromRaster_Perspective(h_camera.focalLength, h_camera.sensorSize,
+                                     h_camera.width, h_camera.height);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_cameraFromRaster, &t, sizeof(Transform),
+                                  0, cudaMemcpyHostToDevice));
+    t = worldFromCamera(h_camera.dir, h_camera.pos);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_renderFromCamera, &t, sizeof(Transform),
+                                  0, cudaMemcpyHostToDevice));
+  }
+  int2 const res = make_int2(h_camera.width, h_camera.height);
+  CUDA_CHECK(cudaMemcpyToSymbol(CMEM_imageResolution, &res, sizeof(int2), 0,
+                                cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpyToSymbol(CMEM_spp, &h_camera.spp, sizeof(int), 0,
+                                cudaMemcpyHostToDevice));
+  {
+    DeviceHaltonOwenParams const rngParams =
+        DeviceHaltonOwen::computeParams(h_camera.width, h_camera.height);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_haltonOwenParams, &rngParams,
+                                  sizeof(DeviceHaltonOwenParams), 0,
+                                  cudaMemcpyHostToDevice));
+  }
+  {
+    MortonLayout2D const morton = mortonLayout(h_camera.width, h_camera.height);
+    CUDA_CHECK(cudaMemcpyToSymbol(CMEM_mortonLayout, &morton,
+                                  sizeof(MortonLayout2D), 0,
+                                  cudaMemcpyHostToDevice));
+  }
+  allocateDeviceGGXEnergyPreservingTables();
+}
+
+__global__ void pathTraceMegakernel(
+    DeviceCamera* d__cam, TriangleSoup d_triSoup, Light const* d_lights,
+    uint32_t const lightCount, Light const* d_infiniteLights,
+    uint32_t const infiniteLightCount, BSDF const* d_bsdf,
+    uint32_t const bsdfCount, uint32_t const sampleOffset,
+    DeviceHaltonOwen* d_haltonOwen,
+#if DMT_ENABLE_MSE
+    DeviceOutputBuffer d_out
+#else
+    float4* d_outBuffer
+#endif
+) {
+  // grid-stride loop start
   uint32_t const mortonStart = blockIdx.x * blockDim.x + threadIdx.x;
-  uint32_t const spp = d_cam->spp;
-  // constant memory?
-  MortonLayout2D const layout = mortonLayout(d_cam->width, d_cam->height);
+
+  // fetch rng
   DeviceHaltonOwen& warpRng = d_haltonOwen[mortonStart / warpSize];
-  DeviceHaltonOwenParams const params =
-      warpRng.computeParams(layout.cols, layout.rows);
-  Transform const cameraFromRaster = cameraFromRaster_Perspective(
-      d_cam->focalLength, d_cam->sensorSize, d_cam->width, d_cam->height);
-  Transform const renderFromCamera = worldFromCamera(d_cam->dir, d_cam->pos);
+
+  // Declare extern SMEM
+#if DMT_ENABLE_MSE
+  auto& SMEM = SMEMLayout<64>::get();
+#endif
+
+  // constant memory aliases
+  uint32_t const& spp = CMEM_spp;
+  MortonLayout2D const& layout = CMEM_mortonLayout;
+  DeviceHaltonOwenParams const& params = CMEM_haltonOwenParams;
+  Transform const& cameraFromRaster = *arrayAsTransform(CMEM_cameraFromRaster);
+  Transform const& renderFromCamera = *arrayAsTransform(CMEM_renderFromCamera);
+  int2 const& imageRes = CMEM_imageResolution;
+
   for (uint32_t mortonIndex = mortonStart; mortonIndex < layout.mortonCount;
        mortonIndex += gridDim.x * blockDim.x) {
     uint2 upixel{};
     decodeMorton2D(mortonIndex, &upixel.x, &upixel.y);
-    if (upixel.x >= d_cam->width || upixel.y >= d_cam->height) {
+    if (upixel.x >= imageRes.x || upixel.y >= imageRes.y) {
       continue;
     }
     int2 const pixel = make_int2(upixel.x, upixel.y);
+    float4* meanPtr = d_out.meanPtr + pixel.x + pixel.y * imageRes.x;
+    float4* M2Ptr = d_out.m2Ptr + pixel.x + pixel.y * imageRes.x;
 
 #define OFFSET_RAY_ORIGIN 1
 #define FIRST_BOUNCE_ONLY 0
+
+#if DMT_ENABLE_MSE
+    SMEM.startSample(meanPtr, M2Ptr);
+#endif
 
     for (int sbase = 0; sbase < spp; ++sbase) {
       int const s = sbase + sampleOffset;
@@ -67,15 +125,10 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           HitResult const result = triangleIntersect(x, y, z, ray);
           if (result.hit && result.t < hitResult.t) {
             hitResult = result;
-            // TODO better? Coalescing?
             hitResult.matId = d_triSoup.matId[tri];
-#if 0
-            hitResult.normal = flipIfOdd(hitResult.normal, transmissionCount);
-#else
             if (dot(ray.d, hitResult.normal) > 0) {
               hitResult.normal *= -1;
             }
-#endif
           }
         }
         // if not intersected, contribution is zero (eliminates branch later)
@@ -127,6 +180,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           PRINT("    [%d %d:%d] Sampled Light. Evaluating shadow ray.\n",
                 pixel.x, pixel.y, depth);
           // - create shadow ray (offset origin to avoid self intersection)
+#if DMT_ENABLE_ASSERTS
           if (float3 diff = normalize(ls.pLight - hitResult.pos);
               !componentWiseNear(diff, ls.direction)) {
             printf(
@@ -138,6 +192,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
           }
           assert(componentWiseNear(normalize(ls.pLight - hitResult.pos),
                                    ls.direction));
+#endif
           Ray const shadowRay{
 #if OFFSET_RAY_ORIGIN
               offsetRayOrigin(hitResult.pos, hitResult.error, hitResult.normal,
@@ -177,8 +232,8 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
               } else {
                 // MIS if not delta (and not BSDF Delta TODO)
                 // power heuristic
-                float const w = sqrf(10 * lightPMF * ls.pdf) /
-                                sqrf(10 * lightPMF * ls.pdf + bsdfPdf);
+                float const w =
+                    sqrf(lightPMF * ls.pdf) / sqrf(lightPMF * ls.pdf + bsdfPdf);
                 L += Le * bsdf_f * beta * w;
               }
             }
@@ -204,7 +259,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
         transmissionCount += bs.refract;
         lastBounceTransmission = bs.refract;
         // next ray
-        // TODO remove
+#if DMT_ENABLE_ASSERTS
         if (!bs.refract && dot(bs.wi, hitResult.normal) <= 0) {
           printf(
               "%d %d %d refract: %d, wi: %f %f %f, n: %f %f %f\n"
@@ -214,6 +269,7 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
               hitResult.pos.x, hitResult.pos.y, hitResult.pos.z);
         }
         assert(bs.refract || dot(bs.wi, hitResult.normal) > 0);
+#endif
 #if OFFSET_RAY_ORIGIN
         ray.o = offsetRayOrigin(hitResult.pos, hitResult.error,
                                 hitResult.normal, bs.wi);
@@ -240,18 +296,27 @@ __global__ void __launch_bounds__(/*max threads per block*/ 512,
       }  // end while
       theWarp.sync();
 
-      // add to output buffer ( assumes max distance is 2)
-      // TODO the rest (this is a branch BTW)
-      float4* target = d_outBuffer + mortonIndex;
-#if 1  // each pixel now is associated to a thread, no atomic
-       // TODO: better coalescing?
-      target->x += L.x;
-      target->y += L.y;
-      target->z += L.z;
-      target->w += 1;  // TODO: sum of weights
+      // add to output buffer: Read-Modify-Update procedure
+#if DMT_ENABLE_MSE
+      SMEM.updateSample(L);
 #else
-      atomicAdd(target, toAdd);
+      float3 mean = make_float3(meanPtr->x, meanPtr->y, meanPtr->z);
+      float N = meanPtr->w;
+
+      N += 1.0f;
+      float3 delta = L - mean;
+      mean += delta / N;
+
+      // write back
+      meanPtr->x = mean.x;
+      meanPtr->y = mean.y;
+      meanPtr->z = mean.z;
+      meanPtr->w = N;
 #endif
     }
+
+#if DMT_ENABLE_MSE
+    SMEM.endSample(meanPtr, M2Ptr);
+#endif
   }
 }

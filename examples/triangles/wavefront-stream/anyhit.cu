@@ -22,12 +22,14 @@ __device__ __forceinline__ void anyhitNEE(
       return;
     }
 
-#if PRINT_ASSERT
+#if DMT_ENABLE_ASSERTS
+#  if PRINT_ASSERT
     if (isZero(bsdf_f)) {
       printf("[%u %u %d] !isZero(bsdf_f)\n", blockIdx.x, threadIdx.x, __LINE__);
     }
-#endif
+#  endif
     assert(!isZero(bsdf_f));
+#endif
 
     for (int tri = 0; tri < triSoup.count; ++tri) {
       float4 const x = __ldg(reinterpret_cast<float4 const*>(triSoup.xs) + tri);
@@ -52,13 +54,23 @@ __device__ __forceinline__ void anyhitNEE(
   }
 }
 
-__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
+__global__ void anyhitKernel(QueueType<AnyhitInput> inQueue, Light* d_lights,
                              uint32_t lightCount, BSDF* d_bsdfs,
                              TriangleSoup d_triSoup) {
   AnyhitInput kinput{};  // TODO SMEM?
-  int mask = inQueue.queuePop<false>(&kinput);
+#if USE_SIMPLE_QUEUE
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x;
+       idx < inQueue.queueSize(); idx += blockDim.x * gridDim.x) {
+    if (!inQueue.marked[idx]) {
+      continue;
+    }
+    inQueue.marked[idx] = 0;
+    kinput = inQueue.buffer[idx];
+#else
   int lane = getLaneId();
+  int mask = inQueue.queuePop<false>(&kinput);
   while (mask & (1 << lane)) {
+#endif
     int const activeWorkers = __activemask();
 
     // choose a light and prepare BSDF data from intersection
@@ -79,7 +91,11 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
     float3 const beta = kinput.state->throughput;
     anyhitNEE(-kinput.rayD, beta, kinput.pos, kinput.error, bsdf, light,
               d_triSoup, kinput.normal, lightCount,
+#if FORCE_ATOMIC_OPS
               atomicAdd(&kinput.state->lastBounceTransmission, 0),
+#else
+              kinput.state->lastBounceTransmission,
+#endif
               PcgHash::get2D<float2>(), &Le);
     kinput.state->L += Le;
 
@@ -90,7 +106,10 @@ __global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
         kinput.state->L.x, kinput.state->L.y, kinput.state->L.z);
 
     __syncwarp(activeWorkers);  // TODO is this necessary?
+#if USE_SIMPLE_QUEUE
+#else
     lane = getCoalescedLaneId(activeWorkers);
     mask = inQueue.queuePop<false>(&kinput);
+#endif
   }
 }

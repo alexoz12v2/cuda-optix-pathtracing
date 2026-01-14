@@ -74,6 +74,7 @@ if (-not (Test-Path $cudaPath))
 # Step 5: Build PATH, INCLUDE, LIB manually
 # ----------------------------
 $paths = @(
+    Join-Path $env:ProgramFiles "LLVM\bin";
     Join-Path $cudaPath "bin";
     Join-Path $msvcRoot "bin\Hostx64\x64";
     Join-Path $msvcRoot "lib\x64";

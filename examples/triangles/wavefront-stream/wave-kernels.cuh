@@ -27,6 +27,20 @@
 struct HostTriangleScene;
 
 // ----------------------------------------------------------------------------
+// Compile time config
+// ----------------------------------------------------------------------------
+#define USE_SIMPLE_QUEUE 1
+#if USE_SIMPLE_QUEUE
+template <typename T>
+using QueueType = SimpleDeviceQueue<T>;
+#else
+template <typename T>
+using QueueType = DeviceQueue<T>;
+#endif
+
+#define FORCE_ATOMIC_OPS 0
+
+// ----------------------------------------------------------------------------
 // Path State
 // ----------------------------------------------------------------------------
 struct PathState {
@@ -74,12 +88,13 @@ static_assert(sizeof(PathState) % alignof(PathState) == 0);
 
 __device__ __forceinline__ void freeState(
     DeviceArena<PathState>& pathStateSlots, PathState* state) {
+#if DMT_ENABLE_ASSERTS
+  assert(state);
+#endif
   if (state) {
     pathStateSlots.free_slot(state->bufferSlot);
-#ifdef DMT_DEBUG
-    memset(state, 0, sizeof(PathState));
-    __threadfence();
-#endif
+    // memset(state, 0, sizeof(PathState));
+    // __threadfence();
   }
 }
 
@@ -96,14 +111,6 @@ extern __constant__ int CMEM_spp;
 __host__ void allocateDeviceConstantMemory(DeviceCamera const& h_camera,
                                            int xTile, int yTile);
 __host__ void freeDeviceConstantMemory();
-
-inline __host__ __device__ __forceinline__ Transform const* arrayAsTransform(
-    float const* arr) {
-  static_assert(sizeof(Transform) == 32 * sizeof(float) &&
-                alignof(Transform) <= 16);
-  // 16-byte aligned and at least 32 elements
-  return reinterpret_cast<Transform const*>(arr);
-}
 
 // ----------------------------------------------------------------------------
 // Types
@@ -170,10 +177,19 @@ struct WavefrontStreamInput {
   WavefrontStreamInput& operator=(WavefrontStreamInput&&) noexcept = delete;
   ~WavefrontStreamInput() noexcept;
 
-  DeviceQueue<ClosestHitInput> closesthitQueue;
-  DeviceQueue<MissInput> missQueue;
-  DeviceQueue<AnyhitInput> anyhitQueue;
-  DeviceQueue<ShadeInput> shadeQueue;
+  __host__ void swapBuffersAllQueues(cudaStream_t stream) {
+#if USE_SIMPLE_QUEUE
+    closesthitQueue.swapBuffers(stream);
+    missQueue.swapBuffers(stream);
+    anyhitQueue.swapBuffers(stream);
+    shadeQueue.swapBuffers(stream);
+#endif
+  }
+
+  QueueType<ClosestHitInput> closesthitQueue;
+  QueueType<MissInput> missQueue;
+  QueueType<AnyhitInput> anyhitQueue;
+  QueueType<ShadeInput> shadeQueue;
   DeviceArena<PathState> pathStateSlots;
   DeviceHaltonOwen* d_haltonOwen;
   DeviceCamera* d_cam;
@@ -181,39 +197,57 @@ struct WavefrontStreamInput {
   Light* d_lights;
   Light* infiniteLights;
   BSDF* d_bsdfs;
+#if !DMT_ENABLE_MSE
   float4* d_outBuffer;
+#endif
   int sampleOffset;
   uint32_t lightCount;
   uint32_t infiniteLightCount;
 };
+
+__device__ __forceinline__ float3& fp4to3(float4& f) {
+  return *reinterpret_cast<float3*>(&f);
+}
 
 // ----------------------------------------------------------------------------
 // Kernels
 // ----------------------------------------------------------------------------
 
 // len(d_haltonOwen) = warp count
-__global__ void raygenKernel(DeviceQueue<ClosestHitInput> outQueue,
+__global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
                              DeviceArena<PathState> pathStateSlots,
                              DeviceHaltonOwen* d_haltonOwen,
                              DeviceCamera* d_cam, int tileIdxX, int tileIdxY,
                              int tileDimX, int tileDimY, int sampleOffset);
-__global__ void closesthitKernel(DeviceQueue<ClosestHitInput> inQueue,
-                                 DeviceQueue<MissInput> outMissQueue,
-                                 DeviceQueue<AnyhitInput> outAnyhitQueue,
-                                 DeviceQueue<ShadeInput> outShadeQueue,
+__global__ void closesthitKernel(QueueType<ClosestHitInput> inQueue,
+                                 QueueType<MissInput> outMissQueue,
+                                 QueueType<AnyhitInput> outAnyhitQueue,
+                                 QueueType<ShadeInput> outShadeQueue,
                                  TriangleSoup d_triSoup);
-__global__ void anyhitKernel(DeviceQueue<AnyhitInput> inQueue, Light* d_lights,
+__global__ void anyhitKernel(QueueType<AnyhitInput> inQueue, Light* d_lights,
                              uint32_t lightCount, BSDF* d_bsdfs,
                              TriangleSoup d_triSoup);
-__global__ void missKernel(DeviceQueue<MissInput> inQueue,
+__global__ void missKernel(QueueType<MissInput> inQueue,
                            DeviceArena<PathState> pathStateSlots,
-                           float4* d_outBuffer, Light* infiniteLights,
-                           uint32_t infiniteLightCount);
-__global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
-                            DeviceQueue<ClosestHitInput> outQueue,
+#if DMT_ENABLE_MSE
+                           DeviceOutputBuffer d_out,
+#else
+                           float4* d_outBuffer,
+#endif
+                           Light* infiniteLights, uint32_t infiniteLightCount);
+__global__ void shadeKernel(QueueType<ShadeInput> inQueue,
+                            QueueType<ClosestHitInput> outQueue,
                             DeviceArena<PathState> pathStateSlots,
-                            float4* d_outBuffer, BSDF* d_bsdfs);
+#if DMT_ENABLE_MSE
+                            DeviceOutputBuffer d_out,
+#else
+                            float4* d_outBuffer,
+#endif
+                            BSDF* d_bsdfs);
 __global__ void checkDoneDepth(DeviceArena<PathState> pathStateSlots,
-                               int* d_done);
+                               QueueType<ClosestHitInput> closesthitQueue,
+                               QueueType<MissInput> missQueue,
+                               QueueType<AnyhitInput> anyhitQueue,
+                               QueueType<ShadeInput> shadeQueue, int* d_done);
 
 #endif  // DMT_WAVEFRONT_STREAM_WAVE_KERNELS_CUH

@@ -23,8 +23,14 @@ __device__ __forceinline__ void raygen(RaygenInput const& raygenInput,
 #ifdef DMT_DEBUG
   assert(slot >= 0);
 #else
+<<<<<<< HEAD
     if(slot < 0)
       asm volatile("trap;");
+=======
+  if (slot < 0) {
+    asm volatile("trap;");
+  }
+>>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
 #endif
   out.state = &pathStateSlots.buffer[slot];
 

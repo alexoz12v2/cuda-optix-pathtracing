@@ -194,9 +194,7 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
       }
 #  endif
 #else
-#  ifdef DMT_DEBUG
       int const coalescedLane = getCoalescedLaneId(__activemask());
-#  endif
       unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
       // SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
       //          blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);

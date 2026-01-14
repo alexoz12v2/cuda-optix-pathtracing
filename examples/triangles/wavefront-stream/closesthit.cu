@@ -64,9 +64,7 @@ __device__ __forceinline__ void handleHit(
   }
 #  endif
 #else
-#  ifdef DMT_DEBUG
   int const coalescedLane = getCoalescedLaneId(__activemask());
-#  endif
   mask = outAnyHitQueue.queuePush<false>(&anyHitInput);
 #  ifdef DMT_DEBUG
   assert(1u << coalescedLane & mask);
@@ -127,9 +125,7 @@ __device__ __forceinline__ void handleMiss(ClosestHitInput const& kinput,
   }
 #  endif
 #else
-#  ifdef DMT_DEBUG
   int const coalescedLane = getCoalescedLaneId(__activemask());
-#  endif
   unsigned const mask = outMissQueue.queuePush<false>(&missInput);
 #  ifdef DMT_DEBUG
   assert(1u << coalescedLane & mask);

@@ -18,7 +18,7 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
     bool pathDied = false;
     static int constexpr MAX_DEPTH = 32;  // dies afterwards (TODO cmdline)
     // assumes warps have different states
-    int const oldDepth = groupedAtomicIncLeaderOnly(&input.state->depth);
+    int const oldDepth = input.state->depth++;
     if (oldDepth >= MAX_DEPTH) {
       pathDied = true;
     }
@@ -95,9 +95,7 @@ __global__ void shadeKernel(DeviceQueue<ShadeInput> inQueue,
               .d = wi,
           }};  // TODO SMEM?
 
-#ifdef DMT_DEBUG
       int const coalescedLane = getCoalescedLaneId(__activemask());
-#endif
       unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
       SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
                blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);

@@ -45,11 +45,6 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
     // 1. if max depth reached, kill path
     bool pathDied = false;
     static int constexpr MAX_DEPTH = 32;  // dies afterwards (TODO cmdline)
-<<<<<<< HEAD
-    // assumes warps have different states
-    // int const oldDepth = groupedAtomicIncLeaderOnly(&input.state->depth);
-    int const oldDepth = atomicAdd(&input.state->depth, 1);
-=======
     // assumes threads have different states
 #if FORCE_ATOMIC_OPS
     int const oldDepth = atomicAdd(&input.state->depth, 1);
@@ -58,7 +53,6 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
 #endif
     // SH_PRINT("SH [%u %u] px: %d %d | d %d | Received object\n", blockIdx.x,
     //          threadIdx.x, px, py, oldDepth);
->>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
     if (oldDepth >= MAX_DEPTH) {
       pathDied = true;
     }
@@ -190,14 +184,6 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
       // SH_PRINT("SH [%u %u] px: %d %d | d %d | Path Survived. Pushing\n",
       //          blockIdx.x, threadIdx.x, px, py, oldDepth);
 
-<<<<<<< HEAD
-      int const coalescedLane = getCoalescedLaneId(__activemask());
-      unsigned const pushMask = outQueue.queuePush<false>(&closestHitInput);
-      SH_PRINT("SH [%u %u]  px [%u %u] d: %d | pushed to closesthit 0x%x\n",
-               blockIdx.x, threadIdx.x, px, py, oldDepth, pushMask);
-#ifdef DMT_DEBUG
-      assert(1u << coalescedLane & pushMask);
-=======
 #if USE_SIMPLE_QUEUE
       bool const pushed = outQueue.queuePush<false>(closestHitInput);
 #  ifdef DMT_DEBUG
@@ -207,7 +193,6 @@ __global__ void shadeKernel(QueueType<ShadeInput> inQueue,
         asm volatile("trap;");
       }
 #  endif
->>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
 #else
 #  ifdef DMT_DEBUG
       int const coalescedLane = getCoalescedLaneId(__activemask());

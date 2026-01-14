@@ -53,12 +53,6 @@ __device__ __forceinline__ void handleHit(
                                 .error = hitResult.error,
                                 .matId = hitResult.matId,
                                 .t = hitResult.t};
-<<<<<<< HEAD
-  int const coalescedLane = getCoalescedLaneId(__activemask());
-  mask = outAnyHitQueue.queuePush<false>(&anyHitInput);
-#ifdef DMT_DEBUG
-  assert(1u << coalescedLane & mask);
-=======
 #if USE_SIMPLE_QUEUE
   bool pushed = outAnyHitQueue.queuePush<false>(anyHitInput);
 #  ifdef DMT_DEBUG
@@ -69,7 +63,6 @@ __device__ __forceinline__ void handleHit(
     asm volatile("trap;");
   }
 #  endif
->>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
 #else
 #  ifdef DMT_DEBUG
   int const coalescedLane = getCoalescedLaneId(__activemask());
@@ -124,12 +117,6 @@ __device__ __forceinline__ void handleMiss(ClosestHitInput const& kinput,
   // if miss -> enqueue miss queue
   MissInput const missInput{.state = kinput.state,
                             .rayDirection = kinput.ray.d};
-<<<<<<< HEAD
-  int const coalescedLane = getCoalescedLaneId(__activemask());
-  unsigned const mask = outMissQueue.queuePush<false>(&missInput);
-#ifdef DMT_DEBUG
-  assert(1u << coalescedLane & mask);
-=======
 #if USE_SIMPLE_QUEUE
   bool const pushed = outMissQueue.queuePush<false>(missInput);
 #  ifdef DMT_DEBUG
@@ -139,7 +126,6 @@ __device__ __forceinline__ void handleMiss(ClosestHitInput const& kinput,
     asm volatile("trap;");
   }
 #  endif
->>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
 #else
 #  ifdef DMT_DEBUG
   int const coalescedLane = getCoalescedLaneId(__activemask());

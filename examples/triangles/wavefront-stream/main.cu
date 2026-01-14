@@ -151,7 +151,7 @@ void wavefrontMain() {
   DeviceCamera h_camera;
   cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
 
-  static int constexpr TOTAL_SAMPLES = 80;
+  static int constexpr TOTAL_SAMPLES = 2048;
   static int constexpr TILES_PER_WARP = 4;
   static int constexpr TILE_X = 8 * TILES_PER_WARP;
   static int constexpr TILE_Y = 4 * TILES_PER_WARP;

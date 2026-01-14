@@ -11,26 +11,21 @@ __device__ __forceinline__ void raygen(RaygenInput const& raygenInput,
   assert(!out.state);
 #endif
   int slot = -1;
-  //RG_PRINT(
-  //    "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d]. "
-  //    "ALlocating\n",
-  //    blockIdx.x, threadIdx.x, __activemask(), pixel.x, pixel.y);
+  // RG_PRINT(
+  //     "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d]. "
+  //     "ALlocating\n",
+  //     blockIdx.x, threadIdx.x, __activemask(), pixel.x, pixel.y);
   slot = pathStateSlots.allocate();
-  //RG_PRINT(
-  //    "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d]. "
-  //    "---------------------------\n",
-  //    blockIdx.x, threadIdx.x, __activemask(), pixel.x, pixel.y);
+  // RG_PRINT(
+  //     "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d]. "
+  //     "---------------------------\n",
+  //     blockIdx.x, threadIdx.x, __activemask(), pixel.x, pixel.y);
 #ifdef DMT_DEBUG
   assert(slot >= 0);
 #else
-<<<<<<< HEAD
-    if(slot < 0)
-      asm volatile("trap;");
-=======
   if (slot < 0) {
     asm volatile("trap;");
   }
->>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
 #endif
   out.state = &pathStateSlots.buffer[slot];
 
@@ -66,6 +61,7 @@ __global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
   int const numSubTilesY = ceilDiv(CMEM_tileResolution.y, py);
   int const totalSubTiles = numSubTilesX * numSubTilesY;
   int const totalWorkUnits = totalSubTiles * CMEM_spp;
+
   // 4. Grid-Stride loop: each warp grabs a work unit (8x4 tile for _1_
   // specific sample)
   for (int i = theGlobalWarpId; i < totalWorkUnits; i += totalWarps) {
@@ -135,10 +131,6 @@ __global__ void raygenKernel(QueueType<ClosestHitInput> outQueue,
         int const coalescedLane = getCoalescedLaneId(__activemask());
 #  endif
         unsigned const succ = outQueue.queuePush<false>(&raygenElem);
-        RG_PRINT(
-            "--------------------------------- RG [%u %u] RAYGEN activemask "
-            "0x%x push succ: 0x%x\n",
-            blockIdx.x, threadIdx.x, __activemask(), succ);
         // RG_PRINT(
         //     "RG [%u %u] RAYGEN activemask 0x%x generated sample [%d %d] %d |
         //     " "ks: %d %d | laneid: %d\n", blockIdx.x, threadIdx.x, succ, x,

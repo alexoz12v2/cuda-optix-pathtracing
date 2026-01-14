@@ -396,13 +396,8 @@ void cornellBox(HostTriangleScene* h_scene, std::vector<Light>* h_lights,
 #endif
 
   *h_camera = DeviceCamera();
-<<<<<<< HEAD
-  h_camera->width = 256;
-  h_camera->height = 256;
-=======
   h_camera->width = 256;   // 2560;
   h_camera->height = 256;  // 1440;
->>>>>>> b2a9aa6d46400069edebd1e65cc06cb476a7cfc1
   h_camera->spp = 4;
 }
 

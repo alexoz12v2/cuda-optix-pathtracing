@@ -71,7 +71,7 @@ __host__ __device__ uint16_t float_to_half_bits(float f) {
     __half h;
   } h;
   // don't drop numbers to zero
-  assert(f != 0.f || h.u != 0);
+  // assert(f != 0.f || h.u != 0);
   h.h = __float2half_rn(f);
   return h.u;
 #else

@@ -10,12 +10,12 @@
 #include "cuda-core/light.cuh"
 #include "cuda-core/queue.cuh"
 
-// #define RG_PRINT(...) printf(__VA_ARGS__)
-// #define CH_PRINT(...) printf(__VA_ARGS__)
-// #define AH_PRINT(...) printf(__VA_ARGS__)
-// #define MS_PRINT(...) printf(__VA_ARGS__)
-// #define SH_PRINT(...) printf(__VA_ARGS__)
-// #define UTILS_PRINT(...) printf(__VA_ARGS__)
+//#define RG_PRINT(...) printf(__VA_ARGS__)
+//#define CH_PRINT(...) printf(__VA_ARGS__)
+//#define AH_PRINT(...) printf(__VA_ARGS__)
+//#define MS_PRINT(...) printf(__VA_ARGS__)
+//#define SH_PRINT(...) printf(__VA_ARGS__)
+//#define UTILS_PRINT(...) printf(__VA_ARGS__)
 
 #define RG_PRINT(...)
 #define CH_PRINT(...)

@@ -1008,8 +1008,7 @@ __host__ __device__ Vector3f sphericalDirection(float sinTheta, float cosTheta,
                                                 float phi) {
   float clampedSinTheta = glm::clamp(sinTheta, -1.f, 1.f);
   return {{
-      (clampedSinTheta * glm::cos(phi)),
-      (clampedSinTheta * glm::sin(phi)),
+      (clampedSinTheta * glm::cos(phi)), (clampedSinTheta * glm::sin(phi)),
       (glm::clamp(cosTheta, -1.f, 1.f)),  // -1 ?
   }};
 }

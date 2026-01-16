@@ -104,6 +104,14 @@ void CUDART_CB streamCallbackWriteBuffer(void* userData) {
 
 void wavefrontMain() {
   CUDA_CHECK(cudaInitDevice(0, 0, 0));
+  // input parsing
+  Config config = parseArguments(getPlatformArgs(), true);
+  if (auto const err = config.validate(); !err.empty()) {
+    std::cerr << err << std::endl;
+    Config::printHelp();
+    exit(1);
+  }
+  config.print();
 
   // set cache configuration
   CUDA_CHECK(cudaFuncSetCacheConfig(raygenKernel, cudaFuncCachePreferL1));
@@ -150,14 +158,18 @@ void wavefrontMain() {
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
   cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+  // now from config
+  h_camera.width = config.width;
+  h_camera.height = config.height;
+  h_camera.spp = config.kspp;
+  int const TOTAL_SAMPLES = config.spp;
+  bool const isVerbose = config.isLogVerbose();
 
-  static int constexpr TOTAL_SAMPLES = 2048;
   static int constexpr TILES_PER_WARP = 4;
   static int constexpr TILE_X = 8 * TILES_PER_WARP;
   static int constexpr TILE_Y = 4 * TILES_PER_WARP;
 
   // compute the number of tiles each loop iteration will run on
-  // TODO estimate queue size from tile size, spp, max depth
   int const numTilesX = ceilDiv(h_camera.width, TILE_X);
   int const numTilesY = ceilDiv(h_camera.height, TILE_Y);
   int const tileDimY = TILE_Y;  // TODO tunable with cmdline params
@@ -165,6 +177,7 @@ void wavefrontMain() {
 
   allocateDeviceConstantMemory(h_camera, tileDimX, tileDimY);
 
+  // TODO estimate queue size from tile size, spp, max depth
   auto* kinput = new WavefrontStreamInput(1, WARP_SIZE, h_scene, h_lights,
                                           h_infiniteLights, h_bsdfs, h_camera);
   kinput->sampleOffset = 0;
@@ -200,6 +213,7 @@ void wavefrontMain() {
 
   // timing
   AvgAndTotalTimer timer;
+  std::cout << "Running CUDA Kernel" << std::endl;
 
 #define KERNEL_DEBUG 0
 
@@ -207,8 +221,10 @@ void wavefrontMain() {
   for (int sOffset = 0; sOffset < TOTAL_SAMPLES; sOffset += h_camera.spp) {
     kinput->sampleOffset = sOffset;
     callbackData->sample = kinput->sampleOffset + h_camera.spp;
-    std::cout << "Launching kernel (" << kinput->sampleOffset << ")"
-              << std::endl;
+    if (isVerbose) {
+      std::cout << "Launching kernel (" << kinput->sampleOffset << ")"
+                << std::endl;
+    }
     for (int tileY = 0; tileY < numTilesY; tileY++) {
       for (int tileX = 0; tileX < numTilesX; tileX++) {
         raygenKernel<<<1, WARP_SIZE, sharedBytes, st_main>>>(
@@ -224,6 +240,8 @@ void wavefrontMain() {
 #endif
 
         *h_done = false;
+        // TODO: instead of a single zero-copy boolean, estimate number of
+        // blocks
         while (!*h_done) {
           closesthitKernel<<<blocks[0], threads[0], sharedBytes, st_main>>>(
               kinput->closesthitQueue, kinput->missQueue, kinput->anyhitQueue,
@@ -280,6 +298,7 @@ void wavefrontMain() {
                     << " tileX: " << tileX << " tileY: " << tileY << std::endl;
 #endif
 
+          // TODO With more than 100 blocks, it freezes
           // checkDoneDepth<<<blocks[4], threads[4], sharedBytes, st_main>>>(
           checkDoneDepth<<<100, WARP_SIZE, 12, st_main>>>(
               kinput->pathStateSlots, kinput->closesthitQueue,
@@ -299,6 +318,30 @@ void wavefrontMain() {
       }
     }
 
+    if (config.savePartial) {
+#if DMT_ENABLE_MSE
+      CUDA_CHECK(cudaMemcpyAsync(callbackData->h_out.m2Ptr, d_out.m2Ptr,
+                                 outputBytes, cudaMemcpyDeviceToHost, st_main));
+      CUDA_CHECK(cudaMemcpyAsync(callbackData->h_out.meanPtr, d_out.meanPtr,
+                                 outputBytes, cudaMemcpyDeviceToHost, st_main));
+#else
+      CUDA_CHECK(cudaMemcpyAsync(hostImage, kinput->d_outBuffer, outputBytes,
+                                 cudaMemcpyDeviceToHost, st_main));
+#endif
+    }
+
+    CUDA_CHECK(cudaStreamSynchronize(st_main));
+    timer.tick();
+
+    if (config.savePartial) {
+      streamCallbackWriteBuffer(callbackData.get());
+      timer.reset();
+    }
+  }
+
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  if (!config.savePartial) {
 #if DMT_ENABLE_MSE
     CUDA_CHECK(cudaMemcpyAsync(callbackData->h_out.m2Ptr, d_out.m2Ptr,
                                outputBytes, cudaMemcpyDeviceToHost, st_main));
@@ -308,15 +351,11 @@ void wavefrontMain() {
     CUDA_CHECK(cudaMemcpyAsync(hostImage, kinput->d_outBuffer, outputBytes,
                                cudaMemcpyDeviceToHost, st_main));
 #endif
-
     CUDA_CHECK(cudaStreamSynchronize(st_main));
     timer.tick();
-
     streamCallbackWriteBuffer(callbackData.get());
-    timer.reset();
   }
 
-  CUDA_CHECK(cudaDeviceSynchronize());
   std::cout << "Done! Total Execution Time(excl write file): "
             << timer.elapsedMillis()
             << " ms | Average Execution per Kernel launch (" << h_camera.spp

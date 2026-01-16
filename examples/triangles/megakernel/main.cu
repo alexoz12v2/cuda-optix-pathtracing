@@ -65,12 +65,20 @@ namespace {}  // namespace
 namespace {
 
 void megakernelMain() {
+  // input parsing
+  Config config = parseArguments(getPlatformArgs(), true);
+  if (auto const err = config.validate(); !err.empty()) {
+    std::cerr << err << std::endl;
+    Config::printHelp();
+    exit(1);
+  }
+  config.print();
+
   CUDA_CHECK(
       cudaFuncSetCacheConfig(pathTraceMegakernel, cudaFuncCachePreferL1));
-  static uint32_t constexpr OPTIMAL_SMEM_BYTES = 2048;
-#if DMT_ENABLE_MSE
-#else
-#endif
+  static uint32_t constexpr OPTIMAL_SMEM_BYTES =
+      2048;  // assumes threadblock of 64
+
   uint32_t threads = -1;
   uint32_t blocks = -2;
   uint32_t const sharedBytes = OPTIMAL_SMEM_BYTES;
@@ -90,6 +98,13 @@ void megakernelMain() {
   std::vector<BSDF> h_bsdfs;
   DeviceCamera h_camera;
   cornellBox(&h_scene, &h_lights, &h_infiniteLights, &h_bsdfs, &h_camera);
+
+  // now from config
+  h_camera.width = config.width;
+  h_camera.height = config.height;
+  h_camera.spp = config.kspp;
+  int const MAX_SPP = config.spp;
+  bool const isVerbose = config.isLogVerbose();
 
   // device side scene
   TriangleSoup d_scene = triSoupFromTriangles(h_scene, h_bsdfs.size());
@@ -122,11 +137,11 @@ void megakernelMain() {
   // timing
   AvgAndTotalTimer timer;
 
-  static int constexpr MAX_SPP = 80;  // 2048;  //
   std::cout << "Running CUDA Kernel" << std::endl;
-  // TODO stream based write back
   for (uint32_t sTot = 0; sTot < MAX_SPP; sTot += h_camera.spp) {
-    std::cout << "Running CUDA Kernel (" << sTot << ")" << std::endl;
+    if (isVerbose) {
+      std::cout << "Running CUDA Kernel (" << sTot << ")" << std::endl;
+    }
 #if DMT_ENABLE_MSE
     pathTraceMegakernel<<<blocks, threads, sharedBytes, st_main>>>(
         d_camera, d_scene, d_lights, h_lights.size(), d_infiniteLights,
@@ -139,6 +154,50 @@ void megakernelMain() {
 #endif
     CUDA_CHECK(cudaGetLastError());
 
+    if (config.savePartial) {
+#if DMT_ENABLE_MSE
+      CUDA_CHECK(cudaMemcpyAsync(h_out.m2Ptr, d_out.m2Ptr, outputBytes,
+                                 cudaMemcpyDeviceToHost, st_main));
+      CUDA_CHECK(cudaMemcpyAsync(h_out.meanPtr, d_out.meanPtr, outputBytes,
+                                 cudaMemcpyDeviceToHost, st_main));
+#else
+      CUDA_CHECK(cudaMemcpyAsync(h_outputBuffer, d_outputBuffer, outputBytes,
+                                 cudaMemcpyDeviceToHost, st_main));
+#endif
+    }
+
+    CUDA_CHECK(cudaStreamSynchronize(st_main));
+
+    if (config.savePartial) {
+#if DMT_ENABLE_MSE
+      std::string const name = "output-" + std::to_string(sTot + h_camera.spp);
+#else
+      std::string const name =
+          "output-" + std::to_string(sTot + h_camera.spp) + ".png";
+#endif
+      std::cout << "Writing to file" << std::endl;
+      timer.tick();
+
+      // copy to host and to file (reset timer to not account for write to file)
+#if DMT_ENABLE_MSE
+      writeMeanAndMSERowMajor(h_out.meanPtr, h_out.m2Ptr, h_camera.width,
+                              h_camera.height, name);
+#else
+      writeOutputBufferRowMajor(h_outputBuffer, h_camera.width, h_camera.height,
+                                name.c_str());
+#endif
+      timer.reset();
+    } else {
+      timer.tick();
+    }
+  }
+
+  if (!config.savePartial) {
+#if DMT_ENABLE_MSE
+    std::string const name = "output-" + std::to_string(MAX_SPP);
+#else
+    std::string const name = "output-" + std::to_string(MAX_SPP) + ".png";
+#endif
 #if DMT_ENABLE_MSE
     CUDA_CHECK(cudaMemcpyAsync(h_out.m2Ptr, d_out.m2Ptr, outputBytes,
                                cudaMemcpyDeviceToHost, st_main));
@@ -149,17 +208,6 @@ void megakernelMain() {
                                cudaMemcpyDeviceToHost, st_main));
 #endif
     CUDA_CHECK(cudaStreamSynchronize(st_main));
-
-#if DMT_ENABLE_MSE
-    std::string const name = "output-" + std::to_string(sTot + h_camera.spp);
-#else
-    std::string const name =
-        "output-" + std::to_string(sTot + h_camera.spp) + ".png";
-#endif
-    std::cout << "Writing to file" << std::endl;
-    timer.tick();
-
-    // copy to host and to file (reset timer to not account for write to file)
 #if DMT_ENABLE_MSE
     writeMeanAndMSERowMajor(h_out.meanPtr, h_out.m2Ptr, h_camera.width,
                             h_camera.height, name);
@@ -167,7 +215,6 @@ void megakernelMain() {
     writeOutputBufferRowMajor(h_outputBuffer, h_camera.width, h_camera.height,
                               name.c_str());
 #endif
-    timer.reset();
   }
   std::cout << "Done! Total Execution Time(excl write file): "
             << timer.elapsedMillis()

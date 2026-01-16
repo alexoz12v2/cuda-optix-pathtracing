@@ -1,0 +1,141 @@
+###############################################
+# Global Options
+###############################################
+
+# TODO: uncomment when you render a high res reference
+## Option "string msereferenceimage" "./pbrt-output-ref.png"
+## Option "string msereferenceout" "./pbrt-output-mse.png"
+
+Film "rgb"
+  "string filename" ["pbrt-output.png"]
+  "integer xresolution" [256]
+  "integer yresolution" [256]
+
+ColorSpace "srgb"
+
+Sampler "halton"
+  "string randomization" ["permutedigits"]
+  "integer pixelsamples" [2048]
+
+###############################################
+# Camera
+###############################################
+
+LookAt
+  0.0 0.0 0.0 # camera position
+  0.0 1.0 0.0 # look at
+  0.0 0.0 1.0 # up
+
+Camera "perspective"
+  "float fov" [42]
+WorldBegin
+
+############################################
+# Lights
+############################################
+AttributeBegin
+    AreaLightSource "diffuse" "rgb L" [20 20 20]
+    Translate 0 1.99 0
+    Shape "trianglemesh" 
+        "point3 P" [ -0.5 0 -0.5  0.5 0 -0.5  -0.5 0 0.5  0.5 0 0.5 ]
+        "integer indices" [0 1 2  0 2 3]
+AttributeEnd
+
+############################################
+# Materials
+############################################
+MakeNamedMaterial "white" "string type" ["diffuse"] "rgb reflectance" [.73 .73 .73]
+MakeNamedMaterial "red"   "string type" ["diffuse"] "rgb reflectance" [.63 .06 .06]
+MakeNamedMaterial "green" "string type" ["diffuse"] "rgb reflectance" [.14 .45 .09]
+
+############################################
+# Box Enclosure
+############################################
+
+# Floor
+AttributeBegin
+    NamedMaterial "white"
+    Shape "trianglemesh"
+        "point3 P" [ -1 0 -1  1 0 -1  1 0 1  -1 0 1 ]
+        "integer indices" [ 0 1 2 0 2 3 ]
+AttributeEnd
+
+# Ceiling
+AttributeBegin
+    NamedMaterial "white"
+    Shape "trianglemesh"
+        "point3 P" [ -1 2 -1  1 2 -1  1 2 1  -1 2 1 ]
+        "integer indices" [ 0 1 2 0 2 3 ]
+AttributeEnd
+
+# Back Wall
+AttributeBegin
+    NamedMaterial "white"
+    Shape "trianglemesh"
+        "point3 P" [ -1 0 -1  1 0 -1  1 2 -1  -1 2 -1 ]
+        "integer indices" [ 0 1 2 0 2 3 ]
+AttributeEnd
+
+# Left Wall (Red)
+AttributeBegin
+    NamedMaterial "red"
+    Shape "trianglemesh"
+        "point3 P" [ -1 0 -1  -1 0 1  -1 2 1  -1 2 -1 ]
+        "integer indices" [ 0 1 2 0 2 3 ]
+AttributeEnd
+
+# Right Wall (Green)
+AttributeBegin
+    NamedMaterial "green"
+    Shape "trianglemesh"
+        "point3 P" [ 1 0 -1  1 0 1  1 2 1  1 2 -1 ]
+        "integer indices" [ 0 1 2 0 2 3 ]
+AttributeEnd
+
+############################################
+# Interior Blocks (Rotated)
+############################################
+
+AttributeBegin
+    NamedMaterial "white"
+    Translate -0.33 0 -0.33  # Position in the room
+    Rotate 15 0 1 0          # Rotate around Y axis
+    Scale 0.6 1.2 0.6        # Tall and slender
+    
+    Shape "trianglemesh"
+        "point3 P" [ 
+            -0.5 0 -0.5   0.5 0 -0.5   0.5 0  0.5  -0.5 0  0.5
+            -0.5 1 -0.5   0.5 1 -0.5   0.5 1  0.5  -0.5 1  0.5 
+        ]
+        "integer indices" [
+            0 2 1  0 3 2 # Bottom
+            4 5 6  4 6 7 # Top
+            0 1 5  0 5 4 # Back
+            1 2 6  1 6 5 # Right
+            2 3 7  2 7 6 # Front
+            3 0 4  3 4 7 # Left
+        ]
+AttributeEnd
+
+# Short Block
+AttributeBegin
+    NamedMaterial "white"
+    Translate 0.33 0 0.2     # Position in the room
+    Rotate -17 0 1 0         # Standard Cornell rotation
+    Scale 0.6 0.6 0.6        # Uniform cube
+    
+    Shape "trianglemesh"
+        "point3 P" [ 
+            -0.5 0 -0.5   0.5 0 -0.5   0.5 0  0.5  -0.5 0  0.5
+            -0.5 1 -0.5   0.5 1 -0.5   0.5 1  0.5  -0.5 1  0.5 
+        ]
+        "integer indices" [
+            0 2 1  0 3 2 
+            4 5 6  4 6 7 
+            0 1 5  0 5 4 
+            1 2 6  1 6 5 
+            2 3 7  2 7 6 
+            3 0 4  3 4 7 
+        ]
+AttributeEnd
+

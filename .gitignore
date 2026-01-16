@@ -461,3 +461,6 @@ scene-ignored/
 # debug compiled kernels
 *.debug.cu
 saxpy.cu
+
+*.blend1
+

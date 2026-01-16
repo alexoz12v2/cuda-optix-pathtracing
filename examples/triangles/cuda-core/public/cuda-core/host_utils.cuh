@@ -20,6 +20,61 @@
 #include <ranges>
 
 // --------------------------------------------------------------------------
+// Command Line Parsing
+// --------------------------------------------------------------------------
+struct Config {
+  int width = 256;
+  int height = 256;
+  int spp = 2048;
+  int kspp = 4;
+  std::string logLevel = "info";
+  bool savePartial = false;
+
+  __host__ bool isLogVerbose() const { return logLevel == "verbose"; }
+
+  __host__ std::string validate() const {
+    if (width <= 0) {
+      return std::string("invalid width: should be bigger than zero. got ") +
+             std::to_string(width);
+    }
+    if (height <= 0) {
+      return std::string("invalid height: should be bigger than zero. got ") +
+             std::to_string(height);
+    }
+    if (spp <= 0) {
+      return std::string("invalid spp: should be bigger than zero. got ") +
+             std::to_string(spp);
+    }
+    if (spp < kspp) {
+      return std::string("invalid spp: should be bigger than kspp. got ") +
+             std::to_string(spp) + " and kspp" + std::to_string(kspp);
+    }
+    if (kspp <= 0) {
+      return std::string("invalid kspp: should be bigger than zero. got ") +
+             std::to_string(kspp);
+    }
+    if (logLevel != "info" && logLevel != "verbose") {
+      return std::string(
+                 "invalid logLevel value. Either info or verbose, got ") +
+             logLevel;
+    }
+    return "";
+  }
+  __host__ void print() const {
+    std::cout << "Parsed Configuration:" << std::endl;
+    std::cout << " - Width:     " << width << std::endl;
+    std::cout << " - Height:    " << height << std::endl;
+    std::cout << " - SPP:       " << spp << std::endl;
+    std::cout << " - KSPP:      " << kspp << std::endl;
+    std::cout << " - Log Level: " << logLevel << std::endl;
+  }
+  __host__ static void printHelp();
+};
+__host__ std::vector<std::string> getPlatformArgs();
+__host__ Config parseArguments(std::vector<std::string> const& args,
+                               bool skipFirst);
+
+// --------------------------------------------------------------------------
 // Timing to stdout
 // --------------------------------------------------------------------------
 class AvgAndTotalTimer {

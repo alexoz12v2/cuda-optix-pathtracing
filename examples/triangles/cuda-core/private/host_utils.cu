@@ -5,6 +5,7 @@
 
 #ifdef DMT_OS_WINDOWS
 #  include <Windows.h>
+#  include <shellapi.h>
 #elif defined(DMT_OS_LINUX)
 #  include <unistd.h>
 #  include <limits.h>
@@ -22,7 +23,73 @@ void writePixel(uint32_t const width, uint8_t* rowMajorImage,
 void pixelFromMean(uint8_t* pixel, float4 mean);
 void pixelFromDelta2(uint8_t* pixel, float4 d2);
 #endif
+#ifdef _WIN32
+std::string utf8Encode(std::wstring const& wstr) {
+  if (wstr.empty()) return std::string();
+  int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(),
+                                        NULL, 0, NULL, NULL);
+  std::string strTo(size_needed, 0);
+  WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0],
+                      size_needed, NULL, NULL);
+  return strTo;
+}
+#endif
 }  // namespace
+
+__host__ void Config::printHelp() {
+  std::cout
+      << "Input Commands:\n"
+      << "  --width <N>       -- Define Width of output image\n"
+      << "  --height <N>      -- Define Height of output image\n"
+      << "  --spp <N>         -- Define Samples per pixel\n"
+      << "  --kspp <N>        -- Define Samples per pixel processed on a "
+         "single kernel loop\n"
+      << "  --log-level <N>   -- Log Verbosity, 'info' or 'verbose'\n"
+      << "  --save-partial    -- Whether to save images every <kspp> samples"
+      << std::endl;
+}
+
+__host__ std::vector<std::string> getPlatformArgs() {
+  std::vector<std::string> args;
+#ifdef _WIN32
+  int argc;
+  wchar_t* argvw = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (argvw) {
+    for (int i = 0; i < argc; ++i) {
+      args.push_back(utf8Encode(argvw[i]));
+    }
+    LocalFree(argvw);
+  }
+#else  // linux
+  std::ifstream cmdline("/proc/self/cmdline", std::ios::binary);
+  std::string arg;
+  while (std::getline(cmdline, arg, '\0')) {
+    if (!arg.empty()) args.push_back(arg);
+  }
+#endif
+  return args;
+}
+
+__host__ Config parseArguments(std::vector<std::string> const& args,
+                               bool skipFirst) {
+  Config config;
+  for (size_t i = skipFirst ? 1 : 0; i < args.size(); ++i) {
+    if (args[i] == "--width" && i + 1 < args.size()) {
+      config.width = std::stoi(args[++i]);
+    } else if (args[i] == "--height" && i + 1 < args.size()) {
+      config.height = std::stoi(args[++i]);
+    } else if (args[i] == "--spp" && i + 1 < args.size()) {
+      config.spp = std::stoi(args[++i]);
+    } else if (args[i] == "--kspp" && i + 1 < args.size()) {
+      config.kspp = std::stoi(args[++i]);
+    } else if (args[i] == "--log-level" && i + 1 < args.size()) {
+      config.logLevel = args[++i];
+    } else if (args[i] == "--save-partial") {
+      config.savePartial = true;
+    }
+  }
+  return config;
+}
 
 DeviceHaltonOwen* copyHaltonOwenToDeviceAlloc(uint32_t blocks,
                                               uint32_t threads) {

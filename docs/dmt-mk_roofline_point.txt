@@ -1,0 +1,458 @@
+Invocations                               Metric Name                            Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1070 (0)"
+    Kernel: pathTraceMegakernel(DeviceCamera*, TriangleSoup, Light const *, unsigned int, Light const *, unsigned int, BSDF const *, unsigned int, unsigned int, DeviceHaltonOwen*, DeviceOutputBuffer)
+         20                             flop_count_sp   Floating Point Operations(Single Precision)  4657636395  4718319604  4699306874
+         20                    dram_read_transactions               Device Memory Read Transactions      930177     1285768     1149149
+         20                   dram_write_transactions              Device Memory Write Transactions      168612      390154      341311
+
+
+MK: 
+  X: 4699306874 / ((1149149 + 341311) * 32)
+  Y: 4699306874 / (15546 * 80 / 2048)
+  
+  
+  Execution time
+Tms=15546×802048=1,243,6802048≈607.1 ms
+T
+ms
+	​
+
+=
+2048
+15546×80
+	​
+
+=
+2048
+1,243,680
+	​
+
+≈607.1 ms
+
+✅ So execution time 
+T≈607.1 ms
+T≈607.1 ms
+
+2️⃣ Compute Arithmetic Intensity (FLOPs/Byte)
+
+Arithmetic intensity:
+
+AI=FLOPsBytes read + written
+AI=
+Bytes read + written
+FLOPs
+	​
+
+Step 2a: Memory traffic
+
+Read transactions: 1,149,149
+
+Write transactions: 341,311
+
+Each transaction = 32 bytes (typical DRAM transaction for CUDA device reads/writes)
+
+Bytes=(1,149,149+341,311)×32
+Bytes=(1,149,149+341,311)×32
+
+Sum transactions:
+
+1,149,149+341,311=1,490,460
+1,149,149+341,311=1,490,460
+
+Multiply by 32 bytes:
+
+1,490,460×32=47,694,720 bytes
+1,490,460×32=47,694,720 bytes
+Step 2b: Compute AI
+AI=4,699,306,87447,694,720≈98.48 FLOPs/Byte
+AI=
+47,694,720
+4,699,306,874
+	​
+
+≈98.48 FLOPs/Byte
+
+------------------------------------------------------------------------------------
+
+Device "NVIDIA GeForce GTX 1070 (0)"
+    Kernel: checkDoneDepth(DeviceArena<PathState>, SimpleDeviceQueue<ClosestHitInput>, SimpleDeviceQueue<MissInput>, SimpleDeviceQueue<AnyhitInput>, SimpleDeviceQueue<ShadeInput>, int*)
+      25238                             flop_count_sp   Floating Point Operations(Single Precision)           0           0           0
+      25238                    dram_read_transactions               Device Memory Read Transactions        4261      184930       13326
+      25238                   dram_write_transactions              Device Memory Write Transactions           0      111748         500
+    Kernel: anyhitKernel(SimpleDeviceQueue<AnyhitInput>, Light*, unsigned int, BSDF*, TriangleSoup)
+      25238                             flop_count_sp   Floating Point Operations(Single Precision)           0     4040863      671887
+      25238                    dram_read_transactions               Device Memory Read Transactions          31       29966        2786
+      25238                   dram_write_transactions              Device Memory Write Transactions           0       40832        1015
+    Kernel: missKernel(SimpleDeviceQueue<MissInput>, DeviceArena<PathState>, DeviceOutputBuffer, Light*, unsigned int)
+      25238                             flop_count_sp   Floating Point Operations(Single Precision)           0       21008        1148
+      25238                    dram_read_transactions               Device Memory Read Transactions          32        8085         485
+      25238                   dram_write_transactions              Device Memory Write Transactions           0        5024         262
+    Kernel: closesthitKernel(SimpleDeviceQueue<ClosestHitInput>, SimpleDeviceQueue<MissInput>, SimpleDeviceQueue<AnyhitInput>, SimpleDeviceQueue<ShadeInput>, TriangleSoup)
+      25239                             flop_count_sp   Floating Point Operations(Single Precision)           0     3556477      657091
+      25239                    dram_read_transactions               Device Memory Read Transactions          28       18054        1193
+      25239                   dram_write_transactions              Device Memory Write Transactions           0       22319        1351
+    Kernel: shadeKernel(SimpleDeviceQueue<ShadeInput>, SimpleDeviceQueue<ClosestHitInput>, DeviceArena<PathState>, DeviceOutputBuffer, BSDF*)
+      25238                             flop_count_sp   Floating Point Operations(Single Precision)           0      578759       84361
+      25238                    dram_read_transactions               Device Memory Read Transactions          29       19820        2399
+      25238                   dram_write_transactions              Device Memory Write Transactions           0       10444        1352
+    Kernel: raygenKernel(SimpleDeviceQueue<ClosestHitInput>, DeviceArena<PathState>, DeviceHaltonOwen*, DeviceCamera*, int, int, int, int, int)
+       1374                             flop_count_sp   Floating Point Operations(Single Precision)      217472      265216      251898
+       1374                    dram_read_transactions               Device Memory Read Transactions         564      227059       34830
+       1374                   dram_write_transactions              Device Memory Write Transactions        1624       61780        5740
+
+
+4️⃣ How to compute the single WF roofline point
+Step 1 — Total FLOPs
+
+Sum average flop_count_sp over all kernels:
+
+FLOPsWF=∑kflop_count_sp(k)
+FLOPs
+WF
+	​
+
+=
+k
+∑
+	​
+
+flop_count_sp
+(k)
+
+From your data (averages column):
+
+raygenKernel ≈ 251,898
+
+anyhitKernel ≈ 671,887
+
+closesthitKernel ≈ 657,091
+
+shadeKernel ≈ 84,361
+
+missKernel ≈ 1,148
+
+checkDoneDepth = 0
+
+FLOPsWF≈1.67×106
+FLOPs
+WF
+	​
+
+≈1.67×10
+6
+
+⚠️ This is per kernel launch, not per full render — see time below.
+
+Step 2 — Total memory traffic
+
+Sum all read + write transactions:
+
+TransactionsWF=∑k(readsk+writesk)
+Transactions
+WF
+	​
+
+=
+k
+∑
+	​
+
+(reads
+k
+	​
+
++writes
+k
+	​
+
+)
+
+Multiply by 32 bytes per transaction (Pascal DRAM):
+
+BytesWF=TransactionsWF×32
+Bytes
+WF
+	​
+
+=Transactions
+WF
+	​
+
+×32
+
+This will be large, because wavefront is queue-heavy.
+
+Step 3 — Arithmetic Intensity
+AIWF=Total FLOPsTotal Bytes
+AI
+WF
+	​
+
+=
+Total Bytes
+Total FLOPs
+	​
+
+	​
+
+
+👉 Expect this to be much lower than dmt-mk v2
+(very likely memory-bound)
+
+This is exactly the point of comparing MK vs WF.
+
+Step 4 — Performance (GFLOPS)
+
+Use wall-clock time for the full wavefront iteration:
+
+GFLOPSWF=Total FLOPsTWF
+GFLOPS
+WF
+	​
+
+=
+T
+WF
+	​
+
+Total FLOPs
+	​
+
+
+Where:
+
+TWF
+T
+WF
+	​
+
+ = total time for all wavefront kernels, including synchronization and compaction
+
+⚠️ Do not sum kernel times individually if overlap exists — prefer:
+
+Nsight Compute range
+
+or host-side timing around the wavefront loop
+
+5️⃣ How this looks on the roofline (interpretation)
+
+You will end up with:
+
+Implementation	AI	GFLOPS	Region
+dmt-mk v2	~98	~7.7 TFLOPS	Compute-bound
+dmt-wf v2	low (≈1–10)	much lower	Memory-bound
+
+This visually demonstrates:
+
+MK → high instruction density, poor flexibility
+
+WF → better divergence control, but memory traffic dominates
+
+That’s a textbook roofline comparison.
+
+2️⃣ Aggregate FLOPs (average column)
+
+From your data (average values):
+
+Kernel	FLOPs
+checkDoneDepth	0
+anyhitKernel	671,887
+missKernel	1,148
+closesthitKernel	657,091
+shadeKernel	84,361
+raygenKernel	251,898
+Total FLOPs (WF iteration)
+FLOPsWF=671,887+1,148+657,091+84,361+251,898
+FLOPs
+WF
+	​
+
+=671,887+1,148+657,091+84,361+251,898
+FLOPsWF=1,666,385
+FLOPs
+WF
+	​
+
+=1,666,385
+	​
+
+3️⃣ Aggregate DRAM transactions
+Reads + writes per kernel
+Kernel	Reads	Writes
+checkDoneDepth	13,326	500
+anyhitKernel	2,786	1,015
+missKernel	485	262
+closesthitKernel	1,193	1,351
+shadeKernel	2,399	1,352
+raygenKernel	34,830	5,740
+Sum all transactions
+
+Reads:
+
+13,326+2,786+485+1,193+2,399+34,830=55,019
+13,326+2,786+485+1,193+2,399+34,830=55,019
+
+Writes:
+
+500+1,015+262+1,351+1,352+5,740=10,220
+500+1,015+262+1,351+1,352+5,740=10,220
+Total DRAM transactions
+TransactionsWF=55,019+10,220=65,239
+Transactions
+WF
+	​
+
+=55,019+10,220=65,239
+4️⃣ Convert transactions → bytes
+
+On Pascal:
+
+1 DRAM transaction = 32 bytes
+
+BytesWF=65,239×32
+Bytes
+WF
+	​
+
+=65,239×32
+BytesWF=2,087,648 bytes
+Bytes
+WF
+	​
+
+=2,087,648 bytes
+	​
+
+5️⃣ Arithmetic Intensity (FINAL)
+AIWF=1,666,3852,087,648
+AI
+WF
+	​
+
+=
+2,087,648
+1,666,385
+	​
+
+AIWF≈0.80 FLOPs/Byte
+AI
+WF
+	​
+
+≈0.80 FLOPs/Byte
+	​
+
+✅ Final Result (Wavefront)
+Metric	Value
+Arithmetic Intensity	≈ 0.80 FLOPs/Byte
+Ridge Point (GTX 1070)	≈ 31.95 FLOPs/Byte
+Regime	Strongly Memory Bound
+6️⃣ Sanity check (important)
+
+This result makes perfect sense:
+
+Megakernel: ~98 FLOPs/Byte
+
+Wavefront: ~0.8 FLOPs/Byte
+
+That is a 2 orders of magnitude difference, explained by:
+
+queues
+
+compaction
+
+atomics
+
+global memory traffic
+
+kernel boundaries
+
+This is exactly what roofline analysis is meant to show.
+
+1️⃣ Convert execution time to 80 samples
+
+Given:
+
+Measured time: 436,328 ms for 2048 samples
+
+We want time for 80 samples
+
+Scaling is linear:
+
+T80=436,328×802048
+T
+80
+	​
+
+=436,328×
+2048
+80
+	​
+
+T80=436,328×0.0390625≈17,043 ms
+T
+80
+	​
+
+=436,328×0.0390625≈17,043 ms
+T80≈17.04 s
+T
+80
+	​
+
+≈17.04 s
+	​
+
+2️⃣ FLOPs (already computed)
+
+From the aggregated kernel data:
+
+FLOPsWF,80=1,666,385
+FLOPs
+WF,80
+	​
+
+=1,666,385
+	​
+
+
+(This is correct because your nvprof run was done at 80 samples.)
+
+3️⃣ Compute GFLOPS
+GFLOPSWF=1,666,38517.043×109
+GFLOPS
+WF
+	​
+
+=
+17.043×10
+9
+1,666,385
+	​
+
+GFLOPSWF≈0.000098
+GFLOPS
+WF
+	​
+
+≈0.000098
+	​
+
+
+Or more readably:
+
+GFLOPSWF≈9.8×10−5
+GFLOPS
+WF
+	​
+
+≈9.8×10
+−5
+	​
+
+4️⃣ Final Wavefront Roofline Point
+Metric	Value
+Arithmetic Intensity	0.80 FLOPs/Byte
+Performance	0.000098 GFLOPS
+Performance	≈ 98 MFLOPS
+Regime	Strongly Memory Bound\

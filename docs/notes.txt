@@ -1,0 +1,77 @@
+15 min
+
+ - 2.5 Alessio Teoria
+ - 2.5 Antonino Teoria
+ - 5 min Alessio CUDA
+ - 5 min Antonino CUDA
+ 
+ 
+ export CUDAHOSTCXX=/usr/bin/clang++-18
+cmake -G Ninja -S . -B cmake-build-rel-lto -DCMAKE_MAKE_PROGRAM=ninja \ 
+  -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CUDA_HOST_COMPILER=clang++-18 \
+  -DDMT_NVCC_MAXREGCOUNT=64 -DDMT_DEVICE_LINK_TIME_OPTIMIZATION=ON -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc
+
+v100,    a100,    a40
+70-real  80-real  86-real
+_sm70    _sm80    _sm86
+
+
+cmake -S . -B cmake-build-rel-gpu-v100 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CUDA_HOST_COMPILER=clang++-18 -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc -DDMT_NVCC_MAXREGCOUNT=64 -DDMT_DEVICE_LINK_TIME_OPTIMIZATION=ON -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 -DCMAKE_MAKE_PROGRAM=ninja -DDMT_NVCC_LTO_VERSION=70 -DDMT_NVCC_ARCHITECTURES=70-real
+
+cmake -S . -B cmake-build-rel-gpu-a100 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CUDA_HOST_COMPILER=clang++-18 -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc -DDMT_NVCC_MAXREGCOUNT=64 -DDMT_DEVICE_LINK_TIME_OPTIMIZATION=ON -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 -DCMAKE_MAKE_PROGRAM=ninja -DDMT_NVCC_LTO_VERSION=80 -DDMT_NVCC_ARCHITECTURES=80-real
+
+cmake -S . -B cmake-build-rel-gpu-a40 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_CUDA_HOST_COMPILER=clang++-18 -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc -DDMT_NVCC_MAXREGCOUNT=64 -DDMT_DEVICE_LINK_TIME_OPTIMIZATION=ON -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 -DCMAKE_MAKE_PROGRAM=ninja -DDMT_NVCC_LTO_VERSION=86 -DDMT_NVCC_ARCHITECTURES=86-real
+
+
+------------------------------------------------------------
+
+time blender -b -P scripts/bpy_set_samples.py -- 2048
+
+------------------------------------------------------------
+  Time                |   AVG RMSE
+------------------------------------------------------------
+dmt-wf v2
+  436328 ms           |    0.007019860760059233
+dmt-mk v2             
+   15546 ms           |    0.018148823657066993
+blender 5.0.1 (OptiX)
+   16053 ms           |    0.007945482139681239
+   ^^ costruzione e intersezione BVH, su scene grandi ci batte
+FORSE NO
+pbrt-v4 (OptiX)
+
+------------------------------------------------------------
+calcolo della roofline
+------------------------------------------------------------
+
+nvidia-smi -1 -d CLOCK
+-> cerca il Max Clock della Memory -> 4004 MHz
+-> cerca il Max Clock del SM -> 1999 MHz
+
+devicequery
+-> cerca il numero di SM -> 15
+   e il numero di cores per SM -> 128
+
+Ppeak​=Clock Rate×Number of SMs×Cores per SM×2 (for FMA (pascal does 2 FP ops per cycles))
+-> Ppeak​=20×128×1.999 GHz×2=10,234.8 GFLOPS (10.2 TFLOPS)
+ -> questo e' il valore della linea orizzontale
+
+
+Bpeak​=Bus Width (bits)​/8×Memory Clock (Hz)×2 (DDR factor)×1.25 (GDDR5 factor)
+Bpeak​=256/8​×4.004 GHz×2.5≈320.3 GB/s
+  -> valore della inclinazione della retta
+
+The X-axis (Arithmetic Intensity): The point where the two lines meet (the "Ridge Point") is:
+Ridge Point=​Ppeak​​/Bpeak=320.310,234.8​≈31.95 FLOPs/Byte
+  -> in teoria, questa e' la x ottima 
+
+    If your kernel's intensity is below 31.95, it is Memory Bound
+      (limited by the sloped line).
+
+    If your kernel's intensity is above 31.95, it is Compute Bound
+      (limited by the flat horizontal line).
+
+X = flop_count_sp​ / ( (read_trans+write_trans)×32 )
+Y= flop_count_sp​ / kernel_duration
+

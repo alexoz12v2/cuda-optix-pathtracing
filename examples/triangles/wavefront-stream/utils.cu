@@ -19,7 +19,8 @@ WavefrontStreamInput::WavefrontStreamInput(
                         h_camera.width * h_camera.height * sizeof(float4)));
 #endif
   // GMEM queues
-  static int constexpr QUEUE_CAP = 1 << 12;
+  static int constexpr QUEUE_CAP_PER_KSPP = 1 << 10;
+  int const QUEUE_CAP = QUEUE_CAP_PER_KSPP * h_camera.spp;
 #if USE_SIMPLE_QUEUE
   allocSimpleQueue(anyhitQueue, QUEUE_CAP);
   allocSimpleQueue(closesthitQueue, QUEUE_CAP);

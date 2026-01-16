@@ -53,7 +53,7 @@ __host__ std::vector<std::string> getPlatformArgs() {
   std::vector<std::string> args;
 #ifdef _WIN32
   int argc;
-  wchar_t* argvw = CommandLineToArgvW(GetCommandLineW(), &argc);
+  wchar_t** argvw = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (argvw) {
     for (int i = 0; i < argc; ++i) {
       args.push_back(utf8Encode(argvw[i]));
